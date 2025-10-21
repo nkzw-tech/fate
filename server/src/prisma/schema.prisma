@@ -1,0 +1,105 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  binaryTargets       = ["native", "linux-musl"]
+  importFileExtension = "ts"
+  output              = "./prisma-client"
+  provider            = "prisma-client"
+}
+
+generator json {
+  provider     = "prisma-json-types-generator"
+  clientOutput = "./prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @unique @default(uuid(7))
+  accounts        Account[]
+  banExpires      DateTime?
+  banned          Boolean?
+  banReason       String?
+  createdAt       DateTime  @default(now())
+  displayUsername String?
+  email           String    @unique
+  emailVerified   Boolean
+  image           String?
+  name            String
+  password        String?
+  role            String    @default("user")
+  sessions        Session[]
+  posts           Post[]
+  comments        Comment[]
+  updatedAt       DateTime
+  username        String?   @unique
+
+  @@index([id(sort: Asc)])
+  @@map("user")
+}
+
+model Session {
+  id        String   @unique @default(uuid(7))
+  expiresAt DateTime
+  token     String
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @unique @default(uuid(7))
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+
+  @@unique([providerId, accountId])
+  @@map("account")
+}
+
+model Post {
+  id        String    @id @default(uuid(7))
+  title     String
+  content   String
+  likes     Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+
+  @@index([authorId(sort: Asc)])
+}
+
+model Comment {
+  id        String   @id @default(uuid(7))
+  content   String
+  createdAt DateTime @default(now())
+  postId    String
+  authorId  String?
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([authorId(sort: Asc)])
+  @@index([postId(sort: Asc)])
+}

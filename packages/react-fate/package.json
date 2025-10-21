@@ -1,0 +1,37 @@
+{
+  "name": "react-fate",
+  "version": "0.0.0",
+  "description": "Fate",
+  "homepage": "https://github.com/nkzw-tech/fate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nkzw-tech/fate"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Christoph Nakazawa",
+    "email": "christoph.pojer@gmail.com"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsdown -d lib --target=node24 src/index.tsx"
+  },
+  "dependencies": {
+    "@nkzw/fate": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

@@ -1,0 +1,15 @@
+packages:
+  - client
+  - mix
+  - server
+  - packages/*
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@swc/core'
+  - '@tailwindcss/oxide'
+  - esbuild
+  - msgpackr-extract
+  - prisma
+  - unrs-resolver

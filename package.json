@@ -1,0 +1,54 @@
+{
+  "name": "@nkzw/fate-private",
+  "version": "0.0.1",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nkzw-tech/fate.git"
+  },
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm run -r build",
+    "dev": "npm-run-all --parallel dev:client dev:server",
+    "dev:client": "cd client && pnpm dev",
+    "dev:server": "cd server && pnpm dev",
+    "dev:setup": "(cd server && pnpm dev:setup)",
+    "format": "prettier --experimental-cli --write .",
+    "preinstall": "command -v git >/dev/null 2>&1 && git config core.hooksPath git-hooks || exit 0",
+    "lint": "eslint --cache .",
+    "lint:format": "prettier --experimental-cli --cache --check .",
+    "prisma": "cd server && pnpm prisma",
+    "test": "npm-run-all --parallel tsc:check vitest:run lint lint:format",
+    "tsc": "pnpm tsgo",
+    "tsc:check": "tsgo",
+    "vitest:run": "vitest run"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "^4.7.0",
+    "@nkzw/babel-preset-fbtee": "^1.7.0",
+    "@nkzw/eslint-config": "^3.2.0",
+    "@prettier/plugin-oxc": "^0.0.4",
+    "@swc/core": "^1.13.20",
+    "@types/node": "^24.9.1",
+    "@typescript/native-preview": "7.0.0-dev.20251024.1",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "dotenv": "^17.2.3",
+    "eslint": "^9.38.0",
+    "glob": "^11.0.3",
+    "npm-run-all2": "^8.0.4",
+    "prettier": "^3.6.2",
+    "prettier-plugin-packagejson": "^2.5.19",
+    "prettier-plugin-tailwindcss": "^0.7.1",
+    "prisma": "^6.18.0",
+    "prisma-json-types-generator": "^3.6.2",
+    "ts-node": "^10.9.2",
+    "tsdown": "^0.15.9",
+    "vite": "^7.1.12",
+    "vitest": "^4.0.2"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=10.0.0"
+  }
+}

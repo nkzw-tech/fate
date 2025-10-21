@@ -1,0 +1,39 @@
+{
+  "name": "@nkzw/fate-server",
+  "version": "0.0.1",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nkzw-tech/fate.git"
+  },
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env src/index.tsx",
+    "dev:setup": "pnpm prisma generate"
+  },
+  "nodemonConfig": {
+    "ext": "ts,tsx",
+    "watch": [
+      "src/",
+      "../mix"
+    ]
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "@hono/trpc-server": "^0.4.0",
+    "@nkzw/core": "^1.3.0",
+    "@nkzw/define-env": "^1.1.0",
+    "@prisma/client": "^6.18.0",
+    "@trpc/server": "^11.6.0",
+    "better-auth": "^1.3.29",
+    "hono": "^4.10.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.18.0",
+    "prisma-json-types-generator": "^3.6.2"
+  }
+}

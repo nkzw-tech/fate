@@ -1,0 +1,7 @@
+client/dist/
+client/src/translations/
+coverage/
+dist/
+pnpm-lock.yaml
+pnpm-lok.yaml
+server/dist
