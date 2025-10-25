@@ -1,23 +1,50 @@
-import type { Entity, Fragment, FragmentRef, Selection } from '@nkzw/fate';
-import { useCallback, useSyncExternalStore } from 'react';
+import type {
+  __FateEntityBrand,
+  __FateSelectionBrand,
+  Fragment,
+  FragmentData,
+  FragmentRef,
+  FragmentTag,
+} from '@nkzw/fate';
+import { toEntityId } from '@nkzw/fate/src/ref.ts';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFateClient } from './context.tsx';
 
-export function useFragment<T extends Entity, S extends Selection<T>>(
-  fragment: Fragment<T, S>,
-  ref: FragmentRef<string>,
-) {
-  const client = useFateClient();
-  const id = client.idOf(ref);
+type FragmentEntity<F> = F extends { readonly [__FateEntityBrand]?: infer T }
+  ? T
+  : never;
 
-  const getSnapshot = useCallback(
-    () => client.readFragmentOrThrow<T, S, Fragment<T, S>>(fragment, ref),
+type FragmentSelection<F> = F extends {
+  readonly [__FateSelectionBrand]?: infer S;
+}
+  ? S
+  : never;
+
+export function useFragment<F extends Fragment<any, any>>(
+  fragment: F,
+  ref: FragmentRef<FragmentEntity<F>['__typename']>,
+): FragmentData<FragmentEntity<F>, FragmentSelection<F>> {
+  const client = useFateClient();
+  const id = useMemo(() => toEntityId(ref.__typename, ref.id), [ref]);
+
+  const readFragment = useCallback(
+    () =>
+      client.readFragmentOrThrow<
+        FragmentEntity<F>,
+        F[FragmentTag]['select'],
+        F
+      >(fragment, ref),
     [client, fragment, ref],
   );
 
-  const subscribe = useCallback(
-    (onStoreChange: () => void) => client.store.subscribe(id, onStoreChange),
-    [client, id],
-  );
+  const [record, setRecord] = useState(readFragment);
 
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useEffect(() => {
+    const dispose = client.store.subscribe(id, () => setRecord(readFragment()));
+    return () => {
+      dispose();
+    };
+  }, [client.store, id, readFragment]);
+
+  return record;
 }

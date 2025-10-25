@@ -63,7 +63,7 @@ export function union(into: FieldMask, b: FieldMask) {
   }
 }
 
-export function fromPaths(paths: Array<string> | undefined): FieldMask {
+export function fromPaths(paths: Iterable<string> | undefined): FieldMask {
   if (!paths) {
     return markAll();
   }
@@ -98,7 +98,7 @@ export function isCovered(mask: FieldMask, path: string): boolean {
 }
 
 export function diffPaths(
-  paths: Array<string>,
+  paths: Iterable<string>,
   mask: FieldMask,
 ): Array<string> {
   const missing: Array<string> = [];

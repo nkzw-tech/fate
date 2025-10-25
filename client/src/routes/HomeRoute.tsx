@@ -1,8 +1,8 @@
-import { fragment, FragmentRef, selectFromFragment } from '@nkzw/fate';
+import { fragment, FragmentRef } from '@nkzw/fate';
 import Stack, { VStack } from '@nkzw/stack';
 import { FormEvent, Suspense, useCallback, useState } from 'react';
 import { useFragment, useQuery } from 'react-fate';
-import type { Comment, Post } from '../lib/trpc.tsx';
+import type { Comment, Post } from '../lib/fate.tsx';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import H3 from '../ui/H3.tsx';
@@ -32,8 +32,13 @@ const UserCard = ({ user }: { user: SessionUser }) => {
   );
 };
 
+const AuthorFragment = fragment<Post['author']>()({
+  id: true,
+  name: true,
+});
+
 const CommentFragment = fragment<Comment>()({
-  author: { id: true, name: true },
+  author: AuthorFragment,
   content: true,
   id: true,
 });
@@ -44,6 +49,7 @@ const Comment = ({
   comment: FragmentRef<'Comment'>;
 }) => {
   const comment = useFragment(CommentFragment, commentRef);
+  const author = useFragment(AuthorFragment, comment.author);
 
   return (
     <div
@@ -51,7 +57,7 @@ const Comment = ({
       key={comment.id}
     >
       <p className="font-medium text-gray-900 dark:text-gray-200">
-        {comment.author?.name ?? 'Anonymous'}
+        {author?.name ?? 'Anonymous'}
       </p>
       <p className="text-foreground/80">{comment.content}</p>
     </div>
@@ -59,12 +65,19 @@ const Comment = ({
 };
 
 const PostFragment = fragment<Post>()({
-  author: { id: true, name: true },
+  author: AuthorFragment,
+  comments: {
+    edges: {
+      node: CommentFragment,
+    },
+  },
   content: true,
   id: true,
   likes: true,
   title: true,
 });
+
+const noop = (test: any) => {};
 
 const Post = ({
   post: postRef,
@@ -74,12 +87,11 @@ const Post = ({
   user: SessionUser;
 }) => {
   const post = useFragment(PostFragment, postRef);
-  const comments: Array<{ id: string } & FragmentRef<'Comment'>> =
-    /*post.comments ?? */ [];
+  const author = useFragment(AuthorFragment, post.author);
+  const comments = post.comments?.edges ?? [];
 
   // @ts-expect-error `createdAt` was not selected in the fragment.
-  // eslint-disable-next-line no-console
-  console.log(post.createdAt);
+  noop(post.createdAt);
 
   const [commentText, setCommentText] = useState('');
 
@@ -113,7 +125,7 @@ const Post = ({
               {post.title}
             </h3>
             <p className="text-muted-foreground text-sm">
-              by {post.author?.name ?? 'Unknown author'} · {comments.length}{' '}
+              by {author?.name ?? 'Unknown author'} · {comments.length}{' '}
               {comments.length === 1 ? 'comment' : 'comments'}
             </p>
           </div>
@@ -149,8 +161,8 @@ const Post = ({
           <h4 className="text-foreground text-base font-semibold">Comments</h4>
           {comments.length > 0 ? (
             <VStack gap={12}>
-              {comments.map((comment) => (
-                <Comment comment={comment} key={comment.id} />
+              {comments.map((edge) => (
+                <Comment comment={edge.node} key={edge.node.id} />
               ))}
             </VStack>
           ) : null}
@@ -162,7 +174,7 @@ const Post = ({
               Add a comment
             </label>
             <textarea
-              className="bg-background text-foreground min-h-[80px] w-full rounded-md border border-gray-200 p-3 text-sm placeholder-gray-500 transition outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:border-neutral-800 dark:focus:border-gray-400 dark:focus:ring-gray-900"
+              className="bg-background text-foreground min-h-20 w-full rounded-md border border-gray-200 p-3 text-sm placeholder-gray-500 transition outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:border-neutral-800 dark:focus:border-gray-400 dark:focus:ring-gray-900"
               id={`comment-${post.id}`}
               onChange={(event) => setCommentText(event.target.value)}
               placeholder={
@@ -211,7 +223,7 @@ const PostFeed = ({
 const query = {
   'post.list': {
     args: { first: 20 },
-    fields: selectFromFragment(PostFragment),
+    root: PostFragment,
     type: 'Post',
   },
 } as const;

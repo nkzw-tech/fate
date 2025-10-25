@@ -31,6 +31,7 @@ export default [
   {
     rules: {
       '@typescript-eslint/array-type': [2, { default: 'generic' }],
+      '@typescript-eslint/no-explicit-any': 0,
       'import-x/no-extraneous-dependencies': [
         2,
         {

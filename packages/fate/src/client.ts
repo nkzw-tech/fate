@@ -1,23 +1,29 @@
-import { pathsFromSelection } from './selection.ts';
+import { getFragmentPayloads } from './fragment.ts';
+import createRef, {
+  assignFragmentTag,
+  parseEntityId,
+  toEntityId,
+} from './ref.ts';
+import { selectionFromFragment } from './selection.ts';
 import { Store } from './store.ts';
-import { createTokenRegistry, parseEntityId, toEntityId } from './tokens.ts';
 import { Transport } from './transport.ts';
-import type {
-  Entity,
-  EntityConfig,
-  EntityId,
-  Fragment,
-  FragmentData,
-  FragmentRef,
-  ListItem,
-  NodeItem,
-  Query,
-  Selection,
+import {
+  FragmentKind,
+  FragmentResult,
+  FragmentsTag,
+  isFragmentTag,
+  isNodeItem,
+  type Entity,
+  type EntityConfig,
+  type EntityId,
+  type FateRecord,
+  type Fragment,
+  type FragmentData,
+  type FragmentRef,
+  type ListItem,
+  type Query,
+  type Selection,
 } from './types.ts';
-
-export function isNodeItem(item: ListItem | NodeItem): item is NodeItem {
-  return 'ids' in item;
-}
 
 export function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -28,8 +34,7 @@ export function stableStringify(value: unknown): string {
   }
   const keys = Object.keys(value).sort();
   const entries = keys.map(
-    (k) =>
-      `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`,
+    (k) => `${JSON.stringify(k)}:${stableStringify((value as FateRecord)[k])}`,
   );
   return `{${entries.join(',')}}`;
 }
@@ -40,14 +45,12 @@ export type FateClientOptions = {
 };
 
 export class FateClient {
-  readonly store = new Store();
-  private readonly transport: Transport;
-  private readonly entities: Map<string, EntityConfig>;
-  private tokens = createTokenRegistry();
-
   private pending = new Map<string, Promise<void>>();
-  private queryInFlight = new Map<string, Promise<void>>();
   private queryDone = new Set<string>();
+  private queryInFlight = new Map<string, Promise<void>>();
+  private readonly entities: Map<string, EntityConfig>;
+  private readonly transport: Transport;
+  readonly store = new Store();
 
   constructor(opts: FateClientOptions) {
     this.transport = opts.transport;
@@ -56,41 +59,42 @@ export class FateClient {
     );
   }
 
-  ref<TName extends string>(type: TName, rawId: string | number) {
-    return this.tokens.refFor(type, rawId);
+  ref<T extends Entity>(
+    type: T['__typename'],
+    id: string | number,
+    fragment: Fragment<T, Selection<T>>,
+  ): FragmentRef<T['__typename']> {
+    return createRef<T, Selection<T>, Fragment<T, Selection<T>>>(
+      type,
+      id,
+      fragment,
+    );
   }
 
-  toRef(id: EntityId): FragmentRef<string> {
-    const { raw, type } = parseEntityId(id);
-
-    return this.ref(type, raw);
-  }
-
-  idOf(ref: FragmentRef<string>): EntityId {
-    return this.tokens.idOf(ref);
-  }
-
-  typeOf(ref: FragmentRef<string>): string {
-    return this.tokens.typeOf(ref);
+  entityRef(entityId: EntityId, fragment: Fragment<any, any>) {
+    const { id, type } = parseEntityId(entityId);
+    return createRef(type, id, fragment);
   }
 
   readFragmentOrThrow<
     T extends Entity,
     S extends Selection<T>,
     F extends Fragment<T, S>,
-  >(fragment: F, ref: FragmentRef<string>): FragmentData<T, S> {
-    const id = this.idOf(ref);
-    const { raw, type } = parseEntityId(id);
-    const selectPaths = pathsFromSelection(fragment.select);
-    const missing = this.store.missingForSelect(id, selectPaths);
+  >(fragment: F, ref: FragmentRef<T['__typename']>): FragmentData<T, S> {
+    const id = ref.id;
+    const type = ref.__typename;
+    const entityId = toEntityId(type, id);
+
+    const selectedPaths = selectionFromFragment(fragment, ref);
+    const missing = this.store.missingForSelection(entityId, selectedPaths);
 
     if (missing === '*' || (Array.isArray(missing) && missing.length > 0)) {
-      const key = this.pendingKey(type, raw, missing);
+      const key = this.pendingKey(type, id, missing);
       let promise = this.pending.get(key);
       if (!promise) {
         promise = this.fetchByIdAndNormalize(
           type,
-          [raw],
+          [id],
           Array.isArray(missing) ? missing : undefined,
         ).finally(() => this.pending.delete(key));
         this.pending.set(key, promise);
@@ -98,10 +102,7 @@ export class FateClient {
       throw promise;
     }
 
-    return this.store.denormalizeMasked(id, fragment.select) as FragmentData<
-      T,
-      S
-    >;
+    return this.readFragment<T, S>(fragment, ref, entityId);
   }
 
   ensureQuery(query: Query): Promise<void> | null {
@@ -136,14 +137,18 @@ export class FateClient {
     type GroupKey = string;
     const groups = new Map<
       GroupKey,
-      { fields?: Array<string>; ids: Array<string | number>; type: string }
+      { fields?: Iterable<string>; ids: Array<string | number>; type: string }
     >();
 
     const promises: Array<Promise<void>> = [];
     for (const [name, item] of Object.entries(query)) {
       if (isNodeItem(item)) {
-        const fields = item.fields ? [...item.fields] : undefined;
-        const fieldsSignature = fields ? fields.slice().sort().join(',') : '*';
+        const fields = item.root
+          ? selectionFromFragment(item.root, null)
+          : undefined;
+        const fieldsSignature = fields
+          ? [...fields].slice().sort().join(',')
+          : '*';
         const groupKey = `${item.type}#${fieldsSignature}`;
         let group = groups.get(groupKey);
         if (!group) {
@@ -152,8 +157,8 @@ export class FateClient {
         }
 
         for (const raw of item.ids) {
-          const eid = toEntityId(item.type, raw);
-          const missing = this.store.missingForSelect(eid, fields);
+          const entityId = toEntityId(item.type, raw);
+          const missing = this.store.missingForSelection(entityId, fields);
           if (
             missing === '*' ||
             (Array.isArray(missing) && missing.length > 0)
@@ -179,56 +184,59 @@ export class FateClient {
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
-    select?: Array<string>,
+    select?: Iterable<string>,
   ) {
     const entries = await this.transport.fetchById(type, ids, select);
     for (const entry of entries) {
-      this.normalizeEntity(type, entry as Record<string, unknown>, select);
+      this.normalizeEntity(type, entry as FateRecord, select);
     }
   }
 
-  private async fetchListAndNormalize(name: string, item: ListItem) {
+  private async fetchListAndNormalize<T extends Entity, S extends Selection<T>>(
+    name: string,
+    item: ListItem<Fragment<T, S>>,
+  ) {
     if (!this.transport.fetchList) {
       throw new Error(
-        `fate: 'transport.fetchList' is not configured but query includes a list for proc '${name}'.`,
+        `fate: 'transport.fetchList' is not configured but query includes a list for key '${name}'.`,
       );
     }
 
-    const { edges, pageInfo } = await this.transport.fetchList(
+    const selection = selectionFromFragment(item.root, null);
+    const { edges } = await this.transport.fetchList(
       name,
       item.args,
-      item.fields as Array<string> | undefined,
+      selection,
     );
     const ids: Array<EntityId> = [];
     for (const edge of edges) {
       const id = this.normalizeEntity(
         item.type,
-        edge.node as Record<string, unknown>,
-        item.fields as Array<string> | undefined,
+        edge.node as FateRecord,
+        selection,
       );
       ids.push(id);
     }
     this.store.setList(name, ids);
-    this.store.setPageInfo(name, pageInfo);
   }
 
   private normalizeEntity(
     type: string,
-    row: Record<string, unknown>,
-    select?: Array<string>,
+    entry: FateRecord,
+    select?: Iterable<string>,
   ): EntityId {
     const config = this.entities.get(type);
     if (!config) {
       throw new Error(`fate: Unknown entity type '${type}' in normalization.`);
     }
 
-    const rawId = config.key(row);
+    const rawId = config.key(entry);
     const id = toEntityId(type, rawId);
-    const result: Record<string, unknown> = {};
+    const result: FateRecord = {};
 
     if (config.fields) {
       for (const [key, relationDescriptor] of Object.entries(config.fields)) {
-        const value = row[key];
+        const value = entry[key];
         if (relationDescriptor === 'scalar') {
           result[key] = value;
         } else if (
@@ -248,19 +256,12 @@ export class FateClient {
             result[key] = childId;
 
             const childPaths = select
-              ? select
+              ? [...select]
                   .filter((part) => part.startsWith(`${key}.`))
                   .map((part) => part.slice(key.length + 1))
               : undefined;
 
-            this.store.merge(
-              childId,
-              this.stripUndeclared(
-                childConfig,
-                value as Record<string, unknown>,
-              ),
-              childPaths && childPaths.length ? childPaths : undefined,
-            );
+            this.normalizeEntity(childType, value as FateRecord, childPaths);
           } else {
             result[key] = value;
           }
@@ -280,16 +281,12 @@ export class FateClient {
             const ids = value.map((item) => {
               const childId = toEntityId(childType, childConfig.key(item)!);
               const childPaths = select
-                ? select
+                ? [...select]
                     .filter((part) => part.startsWith(`${key}.`))
                     .map((part) => part.slice(key.length + 1))
                 : undefined;
 
-              this.store.merge(
-                childId,
-                this.stripUndeclared(childConfig, item),
-                childPaths && childPaths.length ? childPaths : undefined,
-              );
+              this.normalizeEntity(childType, item as FateRecord, childPaths);
 
               return childId;
             });
@@ -303,30 +300,122 @@ export class FateClient {
       }
     }
 
-    for (const [key, value] of Object.entries(row)) {
+    for (const [key, value] of Object.entries(entry)) {
       if (!(key in (config.fields ?? {}))) {
         result[key] = value;
       }
     }
 
-    this.store.merge(
-      id,
-      result,
-      select && select.length ? (select as Array<string>) : undefined,
-    );
+    this.store.merge(id, result, select);
     return id;
   }
 
-  private stripUndeclared(config: EntityConfig, row: Record<string, unknown>) {
-    if (!config.fields) {
-      return row;
+  private readFragment<T extends Entity, S extends Selection<T>>(
+    fragmentComposition: Fragment<T, S>,
+    ref: FragmentRef<T['__typename']>,
+    entityId: EntityId,
+  ): FragmentData<T, S> {
+    const record = this.store.read(entityId) || { id: entityId };
+
+    const walk = (
+      fragmentPayload: object,
+      record: FateRecord,
+      target: FragmentResult,
+    ) => {
+      for (const [key, selectionKind] of Object.entries(fragmentPayload)) {
+        if (key === FragmentKind) {
+          continue;
+        }
+
+        if (isFragmentTag(key)) {
+          if (!target[FragmentsTag]) {
+            assignFragmentTag(target, new Set());
+          }
+          const targetObject = target as FateRecord;
+          if (!targetObject.id) {
+            targetObject.id = target.id;
+            targetObject.__typename = 'User';
+          }
+
+          target[FragmentsTag]!.add(key);
+          continue;
+        }
+
+        const selectionType = typeof selectionKind;
+        if (selectionType === 'boolean' && selectionKind) {
+          target[key] = record[key];
+        } else if (selectionKind && selectionType === 'object') {
+          if (!(key in target)) {
+            target[key] = {};
+          }
+
+          const value = record[key];
+          if (Array.isArray(value)) {
+            if (
+              selectionKind.edges &&
+              typeof selectionKind.edges === 'object'
+            ) {
+              const selection = selectionKind.edges as FateRecord;
+              const edges = value.map((entityId: string) => {
+                const record = this.store.read(entityId);
+                const { id, type } = parseEntityId(entityId);
+                const node = { __typename: type, id };
+
+                if (record) {
+                  walk(selection.node as FateRecord, record, node);
+                }
+
+                const edge: FateRecord = {
+                  node: record ? node : null,
+                };
+
+                if (selection.cursor === true) {
+                  edge.cursor = undefined;
+                }
+                return edge;
+              });
+              const connection: FateRecord = { edges };
+              if ('pageInfo' in selectionKind && selectionKind.pageInfo) {
+                connection.pageInfo = undefined;
+              }
+              target[key] = connection;
+            } else {
+              target[key] = value.map((entityId: string) => {
+                const record = this.store.read(entityId);
+                const { id, type } = parseEntityId(entityId);
+
+                if (record) {
+                  const node = { __typename: type, id };
+                  walk(selectionKind, record, node);
+                  return node;
+                }
+
+                return null;
+              });
+            }
+          } else if (typeof value === 'string') {
+            const { id, type } = parseEntityId(value);
+            (target[key] as FateRecord).id = id;
+            (target[key] as FateRecord).__typename = type;
+            walk(selectionKind, record, target[key] as FragmentResult);
+          } else {
+            walk(selectionKind, record, target[key] as FragmentResult);
+          }
+        }
+      }
+    };
+
+    const result: FragmentResult = {};
+
+    for (const fragmentPayload of getFragmentPayloads(
+      fragmentComposition,
+      ref,
+    )) {
+      const fragmentSelect = fragmentPayload.select;
+      walk(fragmentSelect, record, result);
     }
 
-    const result: Record<string, unknown> = {};
-    for (const key of Object.keys(row)) {
-      result[key] = row[key];
-    }
-    return result;
+    return result as FragmentData<T, S>;
   }
 
   private pendingKey(

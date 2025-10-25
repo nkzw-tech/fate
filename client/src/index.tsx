@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from 'react-error-boundary';
 import { FateClient } from 'react-fate';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
-import { fate } from './lib/trpc.tsx';
+import { fate } from './lib/fate.tsx';
 import HomeRoute from './routes/HomeRoute.tsx';
 import SignInRoute from './routes/SignInRoute.tsx';
 import Header from './ui/Header.tsx';

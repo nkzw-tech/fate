@@ -1,17 +1,17 @@
 import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
-import { PageInfo } from './types.ts';
+import { FateRecord, PageInfo } from './types.ts';
 
 export interface Transport {
   fetchById(
     type: string,
     ids: Array<string | number>,
-    select?: Array<string>,
+    select?: Iterable<string>,
   ): Promise<Array<unknown>>;
   fetchList?(
     proc: string,
     args: unknown,
-    select?: Array<string>,
+    select?: Iterable<string>,
   ): Promise<{
     edges: Array<{ cursor: string; node: unknown }>;
     pageInfo: PageInfo;
@@ -31,7 +31,7 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
   (client: TRPCClient<AppRouter>) => (
-    input: { select?: Array<string> } & Record<string, unknown>,
+    input: { select?: Array<string> } & FateRecord,
   ) => Promise<{
     edges: Array<{ cursor: string; node: unknown }>;
     pageInfo: PageInfo;
@@ -54,7 +54,7 @@ export function createFateTransport<AppRouter extends AnyRouter>(opts: {
         );
       }
       const query = resolver(client);
-      return await query({ ids, select });
+      return await query({ ids, select: select ? [...select] : undefined });
     },
     async fetchList(proc, args, select) {
       if (!lists) {
@@ -66,7 +66,10 @@ export function createFateTransport<AppRouter extends AnyRouter>(opts: {
       if (!resolver) {
         throw new Error(`fate(trpc): missing list resolver for proc "${proc}"`);
       }
-      return resolver(client)({ ...(args as object), select });
+      return resolver(client)({
+        ...(args as object),
+        select: select ? [...select] : undefined,
+      });
     },
   };
 }

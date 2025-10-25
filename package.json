@@ -29,12 +29,12 @@
     "@nkzw/babel-preset-fbtee": "^1.7.0",
     "@nkzw/eslint-config": "^3.2.0",
     "@prettier/plugin-oxc": "^0.0.4",
-    "@swc/core": "^1.13.20",
-    "@types/node": "^24.9.1",
-    "@typescript/native-preview": "7.0.0-dev.20251024.1",
+    "@swc/core": "^1.14.0",
+    "@types/node": "^24.9.2",
+    "@typescript/native-preview": "7.0.0-dev.20251102.1",
     "babel-plugin-react-compiler": "^1.0.0",
     "dotenv": "^17.2.3",
-    "eslint": "^9.38.0",
+    "eslint": "^9.39.0",
     "glob": "^11.0.3",
     "npm-run-all2": "^8.0.4",
     "prettier": "^3.6.2",
@@ -43,9 +43,9 @@
     "prisma": "^6.18.0",
     "prisma-json-types-generator": "^3.6.2",
     "ts-node": "^10.9.2",
-    "tsdown": "^0.15.9",
+    "tsdown": "^0.15.12",
     "vite": "^7.1.12",
-    "vitest": "^4.0.2"
+    "vitest": "^4.0.6"
   },
   "engines": {
     "node": ">=24.0.0",
