@@ -1,13 +1,19 @@
-import type {
+import {
   __FateEntityBrand,
   __FateSelectionBrand,
   Fragment,
   FragmentData,
   FragmentRef,
   FragmentTag,
+  toEntityId,
 } from '@nkzw/fate';
-import { toEntityId } from '@nkzw/fate/src/ref.ts';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  use,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { useFateClient } from './context.tsx';
 
 type FragmentEntity<F> = F extends { readonly [__FateEntityBrand]?: infer T }
@@ -27,24 +33,21 @@ export function useFragment<F extends Fragment<any, any>>(
   const client = useFateClient();
   const id = useMemo(() => toEntityId(ref.__typename, ref.id), [ref]);
 
-  const readFragment = useCallback(
+  const getSnapshot = useCallback(
     () =>
-      client.readFragmentOrThrow<
-        FragmentEntity<F>,
-        F[FragmentTag]['select'],
-        F
-      >(fragment, ref),
+      client.readFragment<FragmentEntity<F>, F[FragmentTag]['select'], F>(
+        fragment,
+        ref,
+      ),
     [client, fragment, ref],
   );
 
-  const [record, setRecord] = useState(readFragment);
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => client.store.subscribe(id, onStoreChange),
+    [client, id],
+  );
 
-  useEffect(() => {
-    const dispose = client.store.subscribe(id, () => setRecord(readFragment()));
-    return () => {
-      dispose();
-    };
-  }, [client.store, id, readFragment]);
-
-  return record;
+  return use(
+    useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot)),
+  );
 }

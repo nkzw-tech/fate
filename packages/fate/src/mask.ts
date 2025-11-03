@@ -100,11 +100,11 @@ export function isCovered(mask: FieldMask, path: string): boolean {
 export function diffPaths(
   paths: Iterable<string>,
   mask: FieldMask,
-): Array<string> {
-  const missing: Array<string> = [];
+): Set<string> {
+  const missing = new Set<string>();
   for (const path of paths) {
     if (!isCovered(mask, path)) {
-      missing.push(path);
+      missing.add(path);
     }
   }
   return missing;

@@ -5,15 +5,10 @@ import dotenv from 'dotenv';
 import { defineConfig } from 'vite';
 
 const root = process.cwd();
+const isDevelopment = process.env.NODE_ENV === 'development' || process.env.DEV;
 
 dotenv.config({
-  path: join(
-    root,
-    '../server',
-    process.env.NODE_ENV === 'development' || process.env.DEV
-      ? '.env'
-      : '.prod.env',
-  ),
+  path: join(root, '../server', isDevelopment ? '.env' : '.prod.env'),
   quiet: true,
 });
 
@@ -30,5 +25,8 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    conditions: isDevelopment ? ['development'] : undefined,
+  },
   server: { port: 6001 },
 });

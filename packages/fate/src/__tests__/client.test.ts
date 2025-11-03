@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { createClient } from '../client.ts';
 import { fragment, getFragmentNames } from '../fragment.ts';
 import { toEntityId } from '../ref.ts';
-import { Fragment, FragmentsTag, SelectionOf } from '../types.ts';
+import { FateThenable, Fragment, FragmentsTag, SelectionOf } from '../types.ts';
 
 type User = { __typename: 'User'; id: string; name: string };
 
@@ -27,7 +27,15 @@ const tagsFor = (...fragments: Array<Fragment<any, any>>) =>
     fragments.flatMap((fragment) => Array.from(getFragmentNames(fragment))),
   );
 
-test(`'readFragmentOrThrow' returns the selected fields`, () => {
+const unwrap = <T>(value: FateThenable<T>): T => {
+  if (value.status === 'fulfilled') {
+    return value.value;
+  }
+
+  throw new Error(`fate: Cannot unwrap a pending 'FateThenable'.`);
+};
+
+test(`'readFragment' returns the selected fields`, () => {
   const client = createClient({
     entities: [
       {
@@ -62,11 +70,13 @@ test(`'readFragmentOrThrow' returns the selected fields`, () => {
 
   const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
 
-  const result = client.readFragmentOrThrow<
-    Post,
-    SelectionOf<typeof PostFragment>,
-    typeof PostFragment
-  >(PostFragment, postRef);
+  const result = unwrap(
+    client.readFragment<
+      Post,
+      SelectionOf<typeof PostFragment>,
+      typeof PostFragment
+    >(PostFragment, postRef),
+  );
 
   expect(result).toEqual({
     content: 'Apple Banana',
@@ -74,7 +84,7 @@ test(`'readFragmentOrThrow' returns the selected fields`, () => {
   });
 });
 
-test(`'readFragmentOrThrow' returns fragment refs when fragments are used`, () => {
+test(`'readFragment' returns fragment refs when fragments are used`, () => {
   const client = createClient({
     entities: [
       {
@@ -142,11 +152,13 @@ test(`'readFragmentOrThrow' returns fragment refs when fragments are used`, () =
 
   const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
 
-  const result = client.readFragmentOrThrow<
-    Post,
-    SelectionOf<typeof PostFragment>,
-    typeof PostFragment
-  >(PostFragment, postRef);
+  const result = unwrap(
+    client.readFragment<
+      Post,
+      SelectionOf<typeof PostFragment>,
+      typeof PostFragment
+    >(PostFragment, postRef),
+  );
 
   expect(result.id).toBe('post-1');
   expect(result.comments?.edges).toHaveLength(2);
@@ -165,7 +177,7 @@ test(`'readFragmentOrThrow' returns fragment refs when fragments are used`, () =
   expect(commentB.node[FragmentsTag]).toEqual(tagsFor(CommentFragment));
 });
 
-test(`'readFragmentOrThrow' returns fragment refs for list selections`, () => {
+test(`'readFragment' returns fragment refs for list selections`, () => {
   const client = createClient({
     entities: [
       {
@@ -217,11 +229,13 @@ test(`'readFragmentOrThrow' returns fragment refs for list selections`, () => {
 
   const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
 
-  const result = client.readFragmentOrThrow<
-    Post,
-    SelectionOf<typeof PostFragment>,
-    typeof PostFragment
-  >(PostFragment, postRef);
+  const result = unwrap(
+    client.readFragment<
+      Post,
+      SelectionOf<typeof PostFragment>,
+      typeof PostFragment
+    >(PostFragment, postRef),
+  );
 
   expect(result.id).toBe('post-1');
   expect(result.comments).toHaveLength(1);
@@ -235,7 +249,7 @@ test(`'readFragmentOrThrow' returns fragment refs for list selections`, () => {
   expect(comment[FragmentsTag]).toEqual(tagsFor(CommentFragment));
 });
 
-test(`'readFragmentOrThrow' returns only directly selected fields when fragment spreads are used`, () => {
+test(`'readFragment' returns only directly selected fields when fragment spreads are used`, () => {
   const client = createClient({
     entities: [
       {
@@ -299,11 +313,13 @@ test(`'readFragmentOrThrow' returns only directly selected fields when fragment 
 
   const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
 
-  const result = client.readFragmentOrThrow<
-    Post,
-    SelectionOf<typeof PostFragment>,
-    typeof PostFragment
-  >(PostFragment, postRef);
+  const result = unwrap(
+    client.readFragment<
+      Post,
+      SelectionOf<typeof PostFragment>,
+      typeof PostFragment
+    >(PostFragment, postRef),
+  );
 
   expect(result.id).toBe('post-1');
   expect(result.comments?.edges).toHaveLength(1);
@@ -319,7 +335,7 @@ test(`'readFragmentOrThrow' returns only directly selected fields when fragment 
   );
 });
 
-test(`'readFragmentOrThrow' resolves object references and their fragments`, () => {
+test(`'readFragment' resolves object references and their fragments`, () => {
   const client = createClient({
     entities: [
       { key: getId, type: 'Comment' },
@@ -367,11 +383,13 @@ test(`'readFragmentOrThrow' resolves object references and their fragments`, () 
     CommentFragment,
   );
 
-  const result = client.readFragmentOrThrow<
-    Comment,
-    SelectionOf<typeof CommentFragment>,
-    typeof CommentFragment
-  >(CommentFragment, commentRef);
+  const result = unwrap(
+    client.readFragment<
+      Comment,
+      SelectionOf<typeof CommentFragment>,
+      typeof CommentFragment
+    >(CommentFragment, commentRef),
+  );
 
   expect(result.id).toBe('comment-1');
   expect(result.author).toEqual({
@@ -382,7 +400,7 @@ test(`'readFragmentOrThrow' resolves object references and their fragments`, () 
   expect(result.author[FragmentsTag]).toEqual(tagsFor(UserFragment));
 });
 
-test(`'readFragmentOrThrow' resolves fields only if the ref contains the expected fragments`, () => {
+test(`'readFragment' resolves fields only if the ref contains the expected fragments`, () => {
   const client = createClient({
     entities: [
       {
@@ -420,22 +438,24 @@ test(`'readFragmentOrThrow' resolves fields only if the ref contains the expecte
   const postRef = client.ref<Post>('Post', 'post-1', PostContentFragment);
 
   type PostContentSelection = SelectionOf<typeof PostContentFragment>;
-  const resultA = client.readFragmentOrThrow<
-    Post,
-    PostContentSelection,
-    typeof PostContentFragment
-  >(PostContentFragment, postRef);
+  const resultA = unwrap(
+    client.readFragment<Post, PostContentSelection, typeof PostContentFragment>(
+      PostContentFragment,
+      postRef,
+    ),
+  );
 
   // @ts-expect-error `id` was not selected in the fragment.
   expect(resultA.id).toBeUndefined();
   expect(resultA.content).toBe('Apple Banana');
 
   // `postRef` contains a ref to `PostContentFragment`, not `PostFragment`.
-  const resultB = client.readFragmentOrThrow<
-    Post,
-    PostContentSelection,
-    typeof PostFragment
-  >(PostFragment, postRef);
+  const resultB = unwrap(
+    client.readFragment<Post, PostContentSelection, typeof PostFragment>(
+      PostFragment,
+      postRef,
+    ),
+  );
 
   // @ts-expect-error `id` was not selected in the fragment.
   expect(resultB.id).toBeUndefined();
@@ -449,11 +469,13 @@ test(`'readFragmentOrThrow' resolves fields only if the ref contains the expecte
   type FullPostSelection = { content: true; id: true };
 
   const fullPostRef = client.ref<Post>('Post', 'post-1', FullPostFragment);
-  const resultC = client.readFragmentOrThrow<
-    Post,
-    FullPostSelection,
-    Fragment<Post, FullPostSelection>
-  >(FullPostFragment as typeof PostFragment, fullPostRef);
+  const resultC = unwrap(
+    client.readFragment<
+      Post,
+      FullPostSelection,
+      Fragment<Post, FullPostSelection>
+    >(FullPostFragment as typeof PostFragment, fullPostRef),
+  );
 
   expect(resultC.id).toBe('post-1');
   expect(resultC.content).toBe('Apple Banana');

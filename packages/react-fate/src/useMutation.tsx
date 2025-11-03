@@ -3,8 +3,8 @@ import type {
   MutationIdentifier,
   MutationInput,
   MutationResult,
+  Snapshot,
 } from '@nkzw/fate';
-import { Snapshot } from '@nkzw/fate/src/store.ts';
 import { useCallback, useState } from 'react';
 import { useFateClient } from './context.tsx';
 
@@ -93,7 +93,7 @@ export function useMutation<
       } catch (error) {
         if (snapshots.size > 0) {
           for (const [id, snapshot] of snapshots) {
-            client.store.restore(id, snapshot);
+            client.restore(id, snapshot);
           }
         }
 

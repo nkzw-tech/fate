@@ -13,6 +13,13 @@
     "email": "christoph.pojer@gmail.com"
   },
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./lib/index.js"
+    }
+  },
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "files": [

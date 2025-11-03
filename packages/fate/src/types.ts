@@ -1,3 +1,5 @@
+import { FieldMask } from './mask.ts';
+
 export type TypeName = string;
 export type EntityId = string;
 
@@ -201,6 +203,12 @@ export type AnyNodeItem = NodeItem<AnyFragment>;
 export type AnyQueryItem = AnyListItem | AnyNodeItem;
 export type AnyQuery = Record<string, AnyQueryItem>;
 
+export type QueryResult<Q extends AnyQuery> = {
+  [K in keyof Q]: Q[K] extends { type: infer NodeType extends string }
+    ? Array<FragmentRef<NodeType>>
+    : never;
+};
+
 export function isNodeItem(item: AnyQueryItem): item is AnyNodeItem {
   return 'ids' in item;
 }
@@ -240,3 +248,10 @@ export type MutationMapFromDefinitions<
     output: MutationResult<D[K]>;
   };
 };
+
+export type Snapshot = Readonly<{ mask?: FieldMask; record?: FateRecord }>;
+
+export interface FateThenable<T> extends PromiseLike<T> {
+  status: 'fulfilled';
+  value: T;
+}

@@ -14,7 +14,10 @@ export type {
   ListItem,
   Mask,
   NodeItem,
+  AnyQuery,
   Query,
+  QueryResult,
+  Snapshot,
   Selection,
   __FateEntityBrand,
   __FateSelectionBrand,
@@ -25,5 +28,6 @@ export type { Transport } from './transport.ts';
 
 export { fragment } from './fragment.ts';
 export { mutation } from './mutation.ts';
+export { toEntityId } from './ref.ts';
 export { createClient, FateClient } from './client.ts';
 export { createFateTransport } from './transport.ts';

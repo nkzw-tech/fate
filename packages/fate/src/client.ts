@@ -1,3 +1,4 @@
+import FragmentDataCache from './cache.ts';
 import { getFragmentPayloads } from './fragment.ts';
 import createRef, {
   assignFragmentTag,
@@ -5,9 +6,11 @@ import createRef, {
   toEntityId,
 } from './ref.ts';
 import { selectionFromFragment } from './selection.ts';
-import { Snapshot, Store } from './store.ts';
+import { Store } from './store.ts';
 import { Transport } from './transport.ts';
+import { QueryResult } from './types.js';
 import {
+  FateThenable,
   FragmentKind,
   FragmentResult,
   FragmentsTag,
@@ -26,21 +29,8 @@ import {
   type MutationMapFromDefinitions,
   type Query,
   type Selection,
+  type Snapshot,
 } from './types.ts';
-
-export function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
-  const keys = Object.keys(value).sort();
-  const entries = keys.map(
-    (k) => `${JSON.stringify(k)}:${stableStringify((value as FateRecord)[k])}`,
-  );
-  return `{${entries.join(',')}}`;
-}
 
 type MutationIdentifierFor<
   K extends string,
@@ -73,11 +63,14 @@ export class FateClient<
     MutationDefinition<any, any, any>
   > = EmptyMutations,
 > {
-  private pending = new Map<string, Promise<void>>();
-  private queryDone = new Set<string>();
-  private queryInFlight = new Map<string, Promise<void>>();
+  private readonly pending = new Map<
+    string,
+    PromiseLike<FragmentData<any, any>>
+  >();
+  private readonly requests = new Map<Query, Promise<QueryResult<Query>>>();
   private readonly entities: Map<string, EntityConfig>;
   private readonly transport: Transport<MutationTransport<Mutations>>;
+  private readonly fragmentDataCache = new FragmentDataCache();
   private readonly mutationConfigs = new Map<string, { entity: string }>();
   private readonly parentLists = new Map<
     string,
@@ -186,10 +179,15 @@ export class FateClient<
   write(
     type: string,
     data: FateRecord,
-    select?: Iterable<string>,
+    select?: Set<string>,
     snapshots?: Map<EntityId, Snapshot>,
   ) {
     return this.normalizeEntity(type, data, select, snapshots);
+  }
+
+  restore(id: EntityId, snapshot: Snapshot) {
+    this.fragmentDataCache.delete(id);
+    this.store.restore(id, snapshot);
   }
 
   ref<T extends Entity>(
@@ -209,68 +207,99 @@ export class FateClient<
     return createRef(type, id, fragment);
   }
 
-  readFragmentOrThrow<
+  readFragment<
     T extends Entity,
     S extends Selection<T>,
     F extends Fragment<T, S>,
-  >(fragment: F, ref: FragmentRef<T['__typename']>): FragmentData<T, S> {
+  >(
+    fragment: F,
+    ref: FragmentRef<T['__typename']>,
+  ): FateThenable<FragmentData<T, S>> {
     const id = ref.id;
     const type = ref.__typename;
+    if (id == null) {
+      throw new Error(
+        `fate: Invalid fragment reference. Expected 'id' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+      );
+    }
+
+    if (type == null) {
+      throw new Error(
+        `fate: Invalid fragment reference. Expected '__typename' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+      );
+    }
+
     const entityId = toEntityId(type, id);
+    const cached = this.fragmentDataCache.get(entityId, fragment, ref);
+    if (cached) {
+      return cached as FateThenable<FragmentData<T, S>>;
+    }
 
     const selectedPaths = selectionFromFragment(fragment, ref);
     const missing = this.store.missingForSelection(entityId, selectedPaths);
 
     if (missing === '*' || (Array.isArray(missing) && missing.length > 0)) {
       const key = this.pendingKey(type, id, missing);
-      let promise = this.pending.get(key);
-      if (!promise) {
-        promise = this.fetchByIdAndNormalize(
-          type,
-          [id],
-          Array.isArray(missing) ? missing : undefined,
-        ).finally(() => this.pending.delete(key));
-        this.pending.set(key, promise);
+      const pendingPromise = this.pending.get(key) || null;
+      if (pendingPromise) {
+        return pendingPromise as FateThenable<FragmentData<T, S>>;
       }
-      throw promise;
+
+      const promise = this.fetchByIdAndNormalize(
+        type,
+        [id],
+        Array.isArray(missing) ? missing : undefined,
+      )
+        .finally(() => this.pending.delete(key))
+        .then(() => this.readFragment<T, S, F>(fragment, ref));
+
+      this.pending.set(key, promise);
+
+      return promise as unknown as FateThenable<FragmentData<T, S>>;
     }
 
-    return this.readFragment<T, S>(fragment, ref, entityId);
+    const resolvedFragment = this.readFragmentSelection<T, S>(
+      fragment,
+      ref,
+      entityId,
+    );
+
+    const thenable = {
+      status: 'fulfilled' as const,
+      then: <TResult1 = FragmentData<T, S>, TResult2 = never>(
+        onfulfilled?: (
+          value: FragmentData<T, S>,
+        ) => TResult1 | PromiseLike<TResult1>,
+        onrejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
+      ): PromiseLike<TResult1 | TResult2> =>
+        Promise.resolve(resolvedFragment).then(onfulfilled, onrejected),
+      value: resolvedFragment,
+    } as const;
+
+    this.fragmentDataCache.set(entityId, fragment, ref, thenable);
+    return thenable;
   }
 
-  ensureQuery(query: Query): Promise<void> | null {
-    const signature = this.querySignature(query);
-    if (this.queryDone.has(signature)) {
-      return null;
+  request<Q extends Query>(query: Q): Promise<QueryResult<Q>> {
+    const existingRequest = this.requests.get(query);
+    if (existingRequest) {
+      return existingRequest as Promise<QueryResult<Q>>;
     }
 
-    const isPending = this.queryInFlight.get(signature);
-    if (isPending) {
-      return isPending;
-    }
+    const promise = this.executeQuery(query).then(() =>
+      this.getRequestResult(query),
+    );
 
-    const promise = this.executeQuery(query)
-      .then(() => {
-        this.queryDone.add(signature);
-      })
-      .finally(() => this.queryInFlight.delete(signature));
+    this.requests.set(query, promise);
 
-    this.queryInFlight.set(signature, promise);
     return promise;
-  }
-
-  async preload(query: Query): Promise<void> {
-    const promise = this.ensureQuery(query);
-    if (promise) {
-      await promise;
-    }
   }
 
   private async executeQuery(query: Query) {
     type GroupKey = string;
     const groups = new Map<
       GroupKey,
-      { fields?: Iterable<string>; ids: Array<string | number>; type: string }
+      { fields?: Set<string>; ids: Array<string | number>; type: string }
     >();
 
     const promises: Array<Promise<void>> = [];
@@ -314,10 +343,22 @@ export class FateClient<
     ]);
   }
 
+  getRequestResult<Q extends Query>(query: Q): QueryResult<Q> {
+    const result: FateRecord = {};
+    for (const [name, item] of Object.entries(query)) {
+      result[name] = isNodeItem(item)
+        ? item.ids.map((id) => this.ref(item.type, id, item.root))
+        : (this.store.getList(name) ?? []).map((id: string) =>
+            this.entityRef(id, item.root),
+          );
+    }
+    return result as QueryResult<Q>;
+  }
+
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
-    select?: Iterable<string>,
+    select?: Set<string>,
   ) {
     const records = await this.transport.fetchById(type, ids, select);
     for (const record of records) {
@@ -356,7 +397,7 @@ export class FateClient<
   private normalizeEntity(
     type: string,
     record: FateRecord,
-    select?: Iterable<string>,
+    select?: Set<string>,
     snapshots?: Map<EntityId, Snapshot>,
   ): EntityId {
     const config = this.entities.get(type);
@@ -385,16 +426,18 @@ export class FateClient<
             const childConfig = this.entities.get(childType);
             if (!childConfig) {
               throw new Error(
-                `fate: Unknown related type '${childType}' (field ${type}.${key}).`,
+                `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
               );
             }
             const childId = toEntityId(childType, childConfig.key(value)!);
             result[key] = childId;
 
             const childPaths = select
-              ? [...select]
-                  .filter((part) => part.startsWith(`${key}.`))
-                  .map((part) => part.slice(key.length + 1))
+              ? new Set(
+                  [...select]
+                    .filter((part) => part.startsWith(`${key}.`))
+                    .map((part) => part.slice(key.length + 1)),
+                )
               : undefined;
 
             this.normalizeEntity(
@@ -403,7 +446,7 @@ export class FateClient<
               childPaths,
               snapshots,
             );
-          } else {
+          } else if (value !== undefined) {
             result[key] = value;
           }
         } else if (
@@ -416,15 +459,17 @@ export class FateClient<
             const childConfig = this.entities.get(childType);
             if (!childConfig) {
               throw new Error(
-                `fate: Unknown related type '${childType}' (field ${type}.${key}).`,
+                `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
               );
             }
             const ids = value.map((item: FateRecord) => {
               const childId = toEntityId(childType, childConfig.key(item)!);
               const childPaths = select
-                ? [...select]
-                    .filter((part) => part.startsWith(`${key}.`))
-                    .map((part) => part.slice(key.length + 1))
+                ? new Set(
+                    [...select]
+                      .filter((part) => part.startsWith(`${key}.`))
+                      .map((part) => part.slice(key.length + 1)),
+                  )
                 : undefined;
 
               this.normalizeEntity(childType, item, childPaths, snapshots);
@@ -451,6 +496,7 @@ export class FateClient<
       snapshots.set(entityId, this.store.snapshot(entityId));
     }
 
+    this.fragmentDataCache.delete(entityId);
     this.store.merge(entityId, result, select);
     this.linkParentLists(type, entityId, result, snapshots);
     return entityId;
@@ -495,13 +541,14 @@ export class FateClient<
         snapshots.set(parentId, this.store.snapshot(parentId));
       }
 
+      this.fragmentDataCache.delete(parentId);
       this.store.merge(parentId, { [parent.field]: [...current, entityId] }, [
         parent.field,
       ]);
     }
   }
 
-  private readFragment<T extends Entity, S extends Selection<T>>(
+  private readFragmentSelection<T extends Entity, S extends Selection<T>>(
     fragmentComposition: Fragment<T, S>,
     ref: FragmentRef<T['__typename']>,
     entityId: EntityId,
@@ -615,10 +662,6 @@ export class FateClient<
     missingFields: '*' | Array<string>,
   ) {
     return `N|${type}|${raw}|${Array.isArray(missingFields) ? missingFields.slice().sort().join(',') : missingFields}`;
-  }
-
-  private querySignature(query: Query): string {
-    return `Q|${stableStringify(query)}`;
   }
 }
 

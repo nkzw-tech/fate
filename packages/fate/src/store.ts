@@ -7,11 +7,9 @@ import {
   markAll,
   union,
 } from './mask.ts';
-import type { EntityId, FateRecord } from './types.ts';
+import type { EntityId, FateRecord, Snapshot } from './types.ts';
 
 export type Subscriptions = Map<EntityId, Set<() => void>>;
-
-export type Snapshot = Readonly<{ mask?: FieldMask; record?: FateRecord }>;
 
 const cloneValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -62,13 +60,13 @@ export class Store {
   missingForSelection(
     id: EntityId,
     paths?: Iterable<string>,
-  ): Array<string> | '*' {
+  ): Set<string> | '*' {
     if (!this.records.has(id)) {
       return '*';
     }
     const mask = this.coverage.get(id) ?? emptyMask();
     if (!paths) {
-      return mask.all ? [] : '*';
+      return mask.all ? new Set() : '*';
     }
     return diffPaths(paths, mask);
   }
