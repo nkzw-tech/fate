@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 import { createClient } from '../client.ts';
-import { fragment, getFragmentNames } from '../fragment.ts';
 import { toEntityId } from '../ref.ts';
-import { FateThenable, Fragment, FragmentsTag, SelectionOf } from '../types.ts';
+import { FateThenable, SelectionOf, View, ViewsTag } from '../types.ts';
+import { getViewNames, view } from '../view.ts';
 
 type User = { __typename: 'User'; id: string; name: string };
 
@@ -22,10 +22,8 @@ type Post = {
 
 const getId = (record: unknown) => (record as { id: string }).id;
 
-const tagsFor = (...fragments: Array<Fragment<any, any>>) =>
-  new Set(
-    fragments.flatMap((fragment) => Array.from(getFragmentNames(fragment))),
-  );
+const tagsFor = (...views: Array<View<any, any>>) =>
+  new Set(views.flatMap((view) => Array.from(getViewNames(view))));
 
 const unwrap = <T>(value: FateThenable<T>): T => {
   if (value.status === 'fulfilled') {
@@ -35,7 +33,7 @@ const unwrap = <T>(value: FateThenable<T>): T => {
   throw new Error(`fate: Cannot unwrap a pending 'FateThenable'.`);
 };
 
-test(`'readFragment' returns the selected fields`, () => {
+test(`'readView' returns the selected fields`, () => {
   const client = createClient({
     entities: [
       {
@@ -63,19 +61,18 @@ test(`'readFragment' returns the selected fields`, () => {
     '*',
   );
 
-  const PostFragment = fragment<Post>()({
+  const PostView = view<Post>()({
     content: true,
     id: true,
   });
 
-  const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
 
   const result = unwrap(
-    client.readFragment<
-      Post,
-      SelectionOf<typeof PostFragment>,
-      typeof PostFragment
-    >(PostFragment, postRef),
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
   );
 
   expect(result).toEqual({
@@ -84,7 +81,7 @@ test(`'readFragment' returns the selected fields`, () => {
   });
 });
 
-test(`'readFragment' returns fragment refs when fragments are used`, () => {
+test(`'readView' returns view refs when views are used`, () => {
   const client = createClient({
     entities: [
       {
@@ -136,28 +133,27 @@ test(`'readFragment' returns fragment refs when fragments are used`, () => {
     '*',
   );
 
-  const CommentFragment = fragment<Comment>()({
+  const CommentView = view<Comment>()({
     content: true,
     id: true,
   });
 
-  const PostFragment = fragment<Post>()({
+  const PostView = view<Post>()({
     comments: {
       edges: {
-        node: CommentFragment,
+        node: CommentView,
       },
     },
     id: true,
   });
 
-  const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
 
   const result = unwrap(
-    client.readFragment<
-      Post,
-      SelectionOf<typeof PostFragment>,
-      typeof PostFragment
-    >(PostFragment, postRef),
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
   );
 
   expect(result.id).toBe('post-1');
@@ -168,16 +164,16 @@ test(`'readFragment' returns fragment refs when fragments are used`, () => {
     __typename: 'Comment',
     id: 'comment-1',
   });
-  expect(commentA.node[FragmentsTag]).toEqual(tagsFor(CommentFragment));
+  expect(commentA.node[ViewsTag]).toEqual(tagsFor(CommentView));
 
   expect(commentB.node).toEqual({
     __typename: 'Comment',
     id: 'comment-2',
   });
-  expect(commentB.node[FragmentsTag]).toEqual(tagsFor(CommentFragment));
+  expect(commentB.node[ViewsTag]).toEqual(tagsFor(CommentView));
 });
 
-test(`'readFragment' returns fragment refs for list selections`, () => {
+test(`'readView' returns view refs for list selections`, () => {
   const client = createClient({
     entities: [
       {
@@ -217,24 +213,23 @@ test(`'readFragment' returns fragment refs for list selections`, () => {
     '*',
   );
 
-  const CommentFragment = fragment<Comment>()({
+  const CommentView = view<Comment>()({
     content: true,
     id: true,
   });
 
-  const PostFragment = fragment<Post>()({
-    comments: CommentFragment,
+  const PostView = view<Post>()({
+    comments: CommentView,
     id: true,
   });
 
-  const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
 
   const result = unwrap(
-    client.readFragment<
-      Post,
-      SelectionOf<typeof PostFragment>,
-      typeof PostFragment
-    >(PostFragment, postRef),
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
   );
 
   expect(result.id).toBe('post-1');
@@ -246,10 +241,10 @@ test(`'readFragment' returns fragment refs for list selections`, () => {
     id: 'comment-1',
   });
 
-  expect(comment[FragmentsTag]).toEqual(tagsFor(CommentFragment));
+  expect(comment[ViewsTag]).toEqual(tagsFor(CommentView));
 });
 
-test(`'readFragment' returns only directly selected fields when fragment spreads are used`, () => {
+test(`'readView' returns only directly selected fields when view spreads are used`, () => {
   const client = createClient({
     entities: [
       {
@@ -289,20 +284,20 @@ test(`'readFragment' returns only directly selected fields when fragment spreads
     '*',
   );
 
-  const CommentMetaFragment = fragment<Comment>()({
+  const CommentMetaView = view<Comment>()({
     id: true,
   });
 
-  const CommentContentFragment = fragment<Comment>()({
+  const CommentContentView = view<Comment>()({
     content: true,
   });
 
-  const PostFragment = fragment<Post>()({
+  const PostView = view<Post>()({
     comments: {
       edges: {
         node: {
-          ...CommentMetaFragment,
-          ...CommentContentFragment,
+          ...CommentMetaView,
+          ...CommentContentView,
 
           content: true,
         },
@@ -311,14 +306,13 @@ test(`'readFragment' returns only directly selected fields when fragment spreads
     id: true,
   });
 
-  const postRef = client.ref<Post>('Post', 'post-1', PostFragment);
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
 
   const result = unwrap(
-    client.readFragment<
-      Post,
-      SelectionOf<typeof PostFragment>,
-      typeof PostFragment
-    >(PostFragment, postRef),
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
   );
 
   expect(result.id).toBe('post-1');
@@ -330,12 +324,12 @@ test(`'readFragment' returns only directly selected fields when fragment spreads
     id: 'comment-1',
   });
 
-  expect(comment[FragmentsTag]).toEqual(
-    tagsFor(CommentMetaFragment, CommentContentFragment),
+  expect(comment[ViewsTag]).toEqual(
+    tagsFor(CommentMetaView, CommentContentView),
   );
 });
 
-test(`'readFragment' resolves object references and their fragments`, () => {
+test(`'readView' resolves object references and their views`, () => {
   const client = createClient({
     entities: [
       { key: getId, type: 'Comment' },
@@ -367,28 +361,24 @@ test(`'readFragment' resolves object references and their fragments`, () => {
     '*',
   );
 
-  const UserFragment = fragment<User>()({
+  const UserView = view<User>()({
     name: true,
   });
 
-  const CommentFragment = fragment<Comment>()({
-    author: UserFragment,
+  const CommentView = view<Comment>()({
+    author: UserView,
     content: true,
     id: true,
   });
 
-  const commentRef = client.ref<Comment>(
-    'Comment',
-    'comment-1',
-    CommentFragment,
-  );
+  const commentRef = client.ref<Comment>('Comment', 'comment-1', CommentView);
 
   const result = unwrap(
-    client.readFragment<
+    client.readView<
       Comment,
-      SelectionOf<typeof CommentFragment>,
-      typeof CommentFragment
-    >(CommentFragment, commentRef),
+      SelectionOf<typeof CommentView>,
+      typeof CommentView
+    >(CommentView, commentRef),
   );
 
   expect(result.id).toBe('comment-1');
@@ -397,10 +387,10 @@ test(`'readFragment' resolves object references and their fragments`, () => {
     id: 'user-1',
   });
 
-  expect(result.author[FragmentsTag]).toEqual(tagsFor(UserFragment));
+  expect(result.author[ViewsTag]).toEqual(tagsFor(UserView));
 });
 
-test(`'readFragment' resolves fields only if the ref contains the expected fragments`, () => {
+test(`'readView' resolves fields only if the ref contains the expected views`, () => {
   const client = createClient({
     entities: [
       {
@@ -426,55 +416,54 @@ test(`'readFragment' resolves fields only if the ref contains the expected fragm
     '*',
   );
 
-  const PostContentFragment = fragment<Post>()({
+  const PostContentView = view<Post>()({
     content: true,
   });
 
-  const PostFragment = fragment<Post>()({
+  const PostView = view<Post>()({
     content: true,
     id: true,
   });
 
-  const postRef = client.ref<Post>('Post', 'post-1', PostContentFragment);
+  const postRef = client.ref<Post>('Post', 'post-1', PostContentView);
 
-  type PostContentSelection = SelectionOf<typeof PostContentFragment>;
+  type PostContentSelection = SelectionOf<typeof PostContentView>;
   const resultA = unwrap(
-    client.readFragment<Post, PostContentSelection, typeof PostContentFragment>(
-      PostContentFragment,
+    client.readView<Post, PostContentSelection, typeof PostContentView>(
+      PostContentView,
       postRef,
     ),
   );
 
-  // @ts-expect-error `id` was not selected in the fragment.
+  // @ts-expect-error `id` was not selected in the view.
   expect(resultA.id).toBeUndefined();
   expect(resultA.content).toBe('Apple Banana');
 
-  // `postRef` contains a ref to `PostContentFragment`, not `PostFragment`.
+  // `postRef` contains a ref to `PostContentView`, not `PostView`.
   const resultB = unwrap(
-    client.readFragment<Post, PostContentSelection, typeof PostFragment>(
-      PostFragment,
+    client.readView<Post, PostContentSelection, typeof PostView>(
+      PostView,
       postRef,
     ),
   );
 
-  // @ts-expect-error `id` was not selected in the fragment.
+  // @ts-expect-error `id` was not selected in the view.
   expect(resultB.id).toBeUndefined();
   expect(resultB.content).toBeUndefined();
 
-  const FullPostFragment = {
-    ...PostFragment,
-    ...PostContentFragment,
+  const FullPostView = {
+    ...PostView,
+    ...PostContentView,
   };
 
   type FullPostSelection = { content: true; id: true };
 
-  const fullPostRef = client.ref<Post>('Post', 'post-1', FullPostFragment);
+  const fullPostRef = client.ref<Post>('Post', 'post-1', FullPostView);
   const resultC = unwrap(
-    client.readFragment<
-      Post,
-      FullPostSelection,
-      Fragment<Post, FullPostSelection>
-    >(FullPostFragment as typeof PostFragment, fullPostRef),
+    client.readView<Post, FullPostSelection, View<Post, FullPostSelection>>(
+      FullPostView as typeof PostView,
+      fullPostRef,
+    ),
   );
 
   expect(resultC.id).toBe('post-1');

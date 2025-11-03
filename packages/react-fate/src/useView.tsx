@@ -1,11 +1,11 @@
 import {
   __FateEntityBrand,
   __FateSelectionBrand,
-  Fragment,
-  FragmentData,
-  FragmentRef,
-  FragmentTag,
   toEntityId,
+  View,
+  ViewData,
+  ViewRef,
+  ViewTag,
 } from '@nkzw/fate';
 import {
   use,
@@ -16,30 +16,26 @@ import {
 } from 'react';
 import { useFateClient } from './context.tsx';
 
-type FragmentEntity<F> = F extends { readonly [__FateEntityBrand]?: infer T }
+type ViewEntity<V> = V extends { readonly [__FateEntityBrand]?: infer T }
   ? T
   : never;
 
-type FragmentSelection<F> = F extends {
+type ViewSelection<V> = V extends {
   readonly [__FateSelectionBrand]?: infer S;
 }
   ? S
   : never;
 
-export function useFragment<F extends Fragment<any, any>>(
-  fragment: F,
-  ref: FragmentRef<FragmentEntity<F>['__typename']>,
-): FragmentData<FragmentEntity<F>, FragmentSelection<F>> {
+export function useView<V extends View<any, any>>(
+  view: V,
+  ref: ViewRef<ViewEntity<V>['__typename']>,
+): ViewData<ViewEntity<V>, ViewSelection<V>> {
   const client = useFateClient();
   const id = useMemo(() => toEntityId(ref.__typename, ref.id), [ref]);
 
   const getSnapshot = useCallback(
-    () =>
-      client.readFragment<FragmentEntity<F>, F[FragmentTag]['select'], F>(
-        fragment,
-        ref,
-      ),
-    [client, fragment, ref],
+    () => client.readView<ViewEntity<V>, V[ViewTag]['select'], V>(view, ref),
+    [client, view, ref],
   );
 
   const subscribe = useCallback(

@@ -1,4 +1,13 @@
+export {
+  createClient,
+  createFateTransport,
+  mutation,
+  type EntityConfig,
+  type ViewRef,
+  view,
+} from '@nkzw/fate';
+
 export { FateClient, useFateClient } from './context.tsx';
-export { useFragment } from './useFragment.tsx';
-export { useQuery } from './useQuery.tsx';
+export { useView } from './useView.tsx';
+export { useRequest } from './useRequest.tsx';
 export { useMutation } from './useMutation.tsx';

@@ -1,36 +1,32 @@
-import FragmentDataCache from './cache.ts';
-import { getFragmentPayloads } from './fragment.ts';
-import createRef, {
-  assignFragmentTag,
-  parseEntityId,
-  toEntityId,
-} from './ref.ts';
-import { selectionFromFragment } from './selection.ts';
+import ViewDataCache from './cache.ts';
+import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
+import { selectionFromView } from './selection.ts';
 import { Store } from './store.ts';
 import { Transport } from './transport.ts';
-import { QueryResult } from './types.js';
+import { RequestResult } from './types.js';
 import {
   FateThenable,
-  FragmentKind,
-  FragmentResult,
-  FragmentsTag,
-  isFragmentTag,
   isNodeItem,
+  isViewTag,
+  ViewKind,
+  ViewResult,
+  ViewsTag,
   type Entity,
   type EntityConfig,
   type EntityId,
   type FateRecord,
-  type Fragment,
-  type FragmentData,
-  type FragmentRef,
   type ListItem,
   type MutationDefinition,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
-  type Query,
+  type Request,
   type Selection,
   type Snapshot,
+  type View,
+  type ViewData,
+  type ViewRef,
 } from './types.ts';
+import { getViewPayloads } from './view.ts';
 
 type MutationIdentifierFor<
   K extends string,
@@ -63,14 +59,14 @@ export class FateClient<
     MutationDefinition<any, any, any>
   > = EmptyMutations,
 > {
-  private readonly pending = new Map<
-    string,
-    PromiseLike<FragmentData<any, any>>
+  private readonly pending = new Map<string, PromiseLike<ViewData<any, any>>>();
+  private readonly requests = new Map<
+    Request,
+    Promise<RequestResult<Request>>
   >();
-  private readonly requests = new Map<Query, Promise<QueryResult<Query>>>();
   private readonly entities: Map<string, EntityConfig>;
   private readonly transport: Transport<MutationTransport<Mutations>>;
-  private readonly fragmentDataCache = new FragmentDataCache();
+  private readonly viewDataCache = new ViewDataCache();
   private readonly mutationConfigs = new Map<string, { entity: string }>();
   private readonly parentLists = new Map<
     string,
@@ -186,63 +182,55 @@ export class FateClient<
   }
 
   restore(id: EntityId, snapshot: Snapshot) {
-    this.fragmentDataCache.delete(id);
+    this.viewDataCache.delete(id);
     this.store.restore(id, snapshot);
   }
 
   ref<T extends Entity>(
     type: T['__typename'],
     id: string | number,
-    fragment: Fragment<T, Selection<T>>,
-  ): FragmentRef<T['__typename']> {
-    return createRef<T, Selection<T>, Fragment<T, Selection<T>>>(
-      type,
-      id,
-      fragment,
-    );
+    view: View<T, Selection<T>>,
+  ): ViewRef<T['__typename']> {
+    return createRef<T, Selection<T>, View<T, Selection<T>>>(type, id, view);
   }
 
-  entityRef(entityId: EntityId, fragment: Fragment<any, any>) {
+  rootListRef(entityId: EntityId, rootView: View<any, any>) {
     const { id, type } = parseEntityId(entityId);
-    return createRef(type, id, fragment);
+    return createRef(type, id, rootView, { root: true });
   }
 
-  readFragment<
-    T extends Entity,
-    S extends Selection<T>,
-    F extends Fragment<T, S>,
-  >(
-    fragment: F,
-    ref: FragmentRef<T['__typename']>,
-  ): FateThenable<FragmentData<T, S>> {
+  readView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): FateThenable<ViewData<T, S>> {
     const id = ref.id;
     const type = ref.__typename;
     if (id == null) {
       throw new Error(
-        `fate: Invalid fragment reference. Expected 'id' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+        `fate: Invalid view reference. Expected 'id' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
       );
     }
 
     if (type == null) {
       throw new Error(
-        `fate: Invalid fragment reference. Expected '__typename' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+        `fate: Invalid view reference. Expected '__typename' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
       );
     }
 
     const entityId = toEntityId(type, id);
-    const cached = this.fragmentDataCache.get(entityId, fragment, ref);
+    const cached = this.viewDataCache.get(entityId, view, ref);
     if (cached) {
-      return cached as FateThenable<FragmentData<T, S>>;
+      return cached as FateThenable<ViewData<T, S>>;
     }
 
-    const selectedPaths = selectionFromFragment(fragment, ref);
+    const selectedPaths = selectionFromView(view, ref);
     const missing = this.store.missingForSelection(entityId, selectedPaths);
 
     if (missing === '*' || (Array.isArray(missing) && missing.length > 0)) {
       const key = this.pendingKey(type, id, missing);
       const pendingPromise = this.pending.get(key) || null;
       if (pendingPromise) {
-        return pendingPromise as FateThenable<FragmentData<T, S>>;
+        return pendingPromise as FateThenable<ViewData<T, S>>;
       }
 
       const promise = this.fetchByIdAndNormalize(
@@ -251,51 +239,47 @@ export class FateClient<
         Array.isArray(missing) ? missing : undefined,
       )
         .finally(() => this.pending.delete(key))
-        .then(() => this.readFragment<T, S, F>(fragment, ref));
+        .then(() => this.readView<T, S, V>(view, ref));
 
       this.pending.set(key, promise);
 
-      return promise as unknown as FateThenable<FragmentData<T, S>>;
+      return promise as unknown as FateThenable<ViewData<T, S>>;
     }
 
-    const resolvedFragment = this.readFragmentSelection<T, S>(
-      fragment,
-      ref,
-      entityId,
-    );
+    const resolvedView = this.readViewSelection<T, S>(view, ref, entityId);
 
     const thenable = {
       status: 'fulfilled' as const,
-      then: <TResult1 = FragmentData<T, S>, TResult2 = never>(
+      then: <TResult1 = ViewData<T, S>, TResult2 = never>(
         onfulfilled?: (
-          value: FragmentData<T, S>,
+          value: ViewData<T, S>,
         ) => TResult1 | PromiseLike<TResult1>,
         onrejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
       ): PromiseLike<TResult1 | TResult2> =>
-        Promise.resolve(resolvedFragment).then(onfulfilled, onrejected),
-      value: resolvedFragment,
+        Promise.resolve(resolvedView).then(onfulfilled, onrejected),
+      value: resolvedView,
     } as const;
 
-    this.fragmentDataCache.set(entityId, fragment, ref, thenable);
+    this.viewDataCache.set(entityId, view, ref, thenable);
     return thenable;
   }
 
-  request<Q extends Query>(query: Q): Promise<QueryResult<Q>> {
-    const existingRequest = this.requests.get(query);
+  request<R extends Request>(request: R): Promise<RequestResult<R>> {
+    const existingRequest = this.requests.get(request);
     if (existingRequest) {
-      return existingRequest as Promise<QueryResult<Q>>;
+      return existingRequest as Promise<RequestResult<R>>;
     }
 
-    const promise = this.executeQuery(query).then(() =>
-      this.getRequestResult(query),
+    const promise = this.executeRequest(request).then(() =>
+      this.getRequestResult(request),
     );
 
-    this.requests.set(query, promise);
+    this.requests.set(request, promise);
 
     return promise;
   }
 
-  private async executeQuery(query: Query) {
+  private async executeRequest(request: Request) {
     type GroupKey = string;
     const groups = new Map<
       GroupKey,
@@ -303,10 +287,10 @@ export class FateClient<
     >();
 
     const promises: Array<Promise<void>> = [];
-    for (const [name, item] of Object.entries(query)) {
+    for (const [name, item] of Object.entries(request)) {
       if (isNodeItem(item)) {
         const fields = item.root
-          ? selectionFromFragment(item.root, null)
+          ? selectionFromView(item.root, null)
           : undefined;
         const fieldsSignature = fields
           ? [...fields].slice().sort().join(',')
@@ -343,16 +327,16 @@ export class FateClient<
     ]);
   }
 
-  getRequestResult<Q extends Query>(query: Q): QueryResult<Q> {
+  getRequestResult<R extends Request>(request: R): RequestResult<R> {
     const result: FateRecord = {};
-    for (const [name, item] of Object.entries(query)) {
+    for (const [name, item] of Object.entries(request)) {
       result[name] = isNodeItem(item)
         ? item.ids.map((id) => this.ref(item.type, id, item.root))
         : (this.store.getList(name) ?? []).map((id: string) =>
-            this.entityRef(id, item.root),
+            this.rootListRef(id, item.root),
           );
     }
-    return result as QueryResult<Q>;
+    return result as RequestResult<R>;
   }
 
   private async fetchByIdAndNormalize(
@@ -368,15 +352,15 @@ export class FateClient<
 
   private async fetchListAndNormalize<T extends Entity, S extends Selection<T>>(
     name: string,
-    item: ListItem<Fragment<T, S>>,
+    item: ListItem<View<T, S>>,
   ) {
     if (!this.transport.fetchList) {
       throw new Error(
-        `fate: 'transport.fetchList' is not configured but query includes a list for key '${name}'.`,
+        `fate: 'transport.fetchList' is not configured but request includes a list for key '${name}'.`,
       );
     }
 
-    const selection = selectionFromFragment(item.root, null);
+    const selection = selectionFromView(item.root, null);
     const { edges } = await this.transport.fetchList(
       name,
       item.args,
@@ -496,7 +480,7 @@ export class FateClient<
       snapshots.set(entityId, this.store.snapshot(entityId));
     }
 
-    this.fragmentDataCache.delete(entityId);
+    this.viewDataCache.delete(entityId);
     this.store.merge(entityId, result, select);
     this.linkParentLists(type, entityId, result, snapshots);
     return entityId;
@@ -541,33 +525,33 @@ export class FateClient<
         snapshots.set(parentId, this.store.snapshot(parentId));
       }
 
-      this.fragmentDataCache.delete(parentId);
+      this.viewDataCache.delete(parentId);
       this.store.merge(parentId, { [parent.field]: [...current, entityId] }, [
         parent.field,
       ]);
     }
   }
 
-  private readFragmentSelection<T extends Entity, S extends Selection<T>>(
-    fragmentComposition: Fragment<T, S>,
-    ref: FragmentRef<T['__typename']>,
+  private readViewSelection<T extends Entity, S extends Selection<T>>(
+    viewComposition: View<T, S>,
+    ref: ViewRef<T['__typename']>,
     entityId: EntityId,
-  ): FragmentData<T, S> {
+  ): ViewData<T, S> {
     const record = this.store.read(entityId) || { id: entityId };
 
     const walk = (
-      fragmentPayload: object,
+      viewPayload: object,
       record: FateRecord,
-      target: FragmentResult,
+      target: ViewResult,
     ) => {
-      for (const [key, selectionKind] of Object.entries(fragmentPayload)) {
-        if (key === FragmentKind) {
+      for (const [key, selectionKind] of Object.entries(viewPayload)) {
+        if (key === ViewKind) {
           continue;
         }
 
-        if (isFragmentTag(key)) {
-          if (!target[FragmentsTag]) {
-            assignFragmentTag(target, new Set());
+        if (isViewTag(key)) {
+          if (!target[ViewsTag]) {
+            assignViewTag(target, new Set());
           }
           const targetObject = target as FateRecord;
           if (!targetObject.id) {
@@ -575,7 +559,7 @@ export class FateClient<
             targetObject.__typename = 'User';
           }
 
-          target[FragmentsTag]!.add(key);
+          target[ViewsTag]!.add(key);
           continue;
         }
 
@@ -635,25 +619,21 @@ export class FateClient<
             const { id, type } = parseEntityId(value);
             (target[key] as FateRecord).id = id;
             (target[key] as FateRecord).__typename = type;
-            walk(selectionKind, record, target[key] as FragmentResult);
+            walk(selectionKind, record, target[key] as ViewResult);
           } else {
-            walk(selectionKind, record, target[key] as FragmentResult);
+            walk(selectionKind, record, target[key] as ViewResult);
           }
         }
       }
     };
 
-    const result: FragmentResult = {};
+    const result: ViewResult = {};
 
-    for (const fragmentPayload of getFragmentPayloads(
-      fragmentComposition,
-      ref,
-    )) {
-      const fragmentSelect = fragmentPayload.select;
-      walk(fragmentSelect, record, result);
+    for (const viewPayload of getViewPayloads(viewComposition, ref)) {
+      walk(viewPayload.select, record, result);
     }
 
-    return result as FragmentData<T, S>;
+    return result as ViewData<T, S>;
   }
 
   private pendingKey(

@@ -2,8 +2,8 @@
 
 A modern data client for tRPC and React, inspired by Relay.
 
-- **Fragments:** Colocate data requirements with your components.
-- **Optimized:** Fragments are aggregated to minimize network requests.
+- **Views:** Colocate data requirements with your components.
+- **Optimized:** Views are aggregated to minimize network requests.
 - **Optimistic:** Automatic optimistic updates and rollbacks.
 - **Modern:** Uses modern async React features.
 
@@ -22,4 +22,4 @@ ALTER DATABASE fate OWNER TO fate;
 ```
 
 - `pnpm prisma migrate dev` to create the database and run the migrations.
-- Run `pnpm dev:client`, `pnpm dev:server` to start the server.
+- Run `pnpm dev` to run the example.

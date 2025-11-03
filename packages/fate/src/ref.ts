@@ -1,14 +1,18 @@
-import { getFragmentNames } from './fragment.ts';
 import {
   Entity,
   EntityId,
   FateRecord,
-  Fragment,
-  FragmentRef,
-  FragmentsTag,
   Selection,
   TypeName,
+  View,
+  ViewRef,
+  ViewsTag,
 } from './types.ts';
+import {
+  getSelectionViewNames,
+  getViewNames,
+  getViewPayloads,
+} from './view.ts';
 
 export const toEntityId = (type: TypeName, rawId: string | number): EntityId =>
   `${type}:${String(rawId)}`;
@@ -20,11 +24,8 @@ export function parseEntityId(id: EntityId) {
     : ({ id: id.slice(idx + 1), type: id.slice(0, idx) } as const);
 }
 
-export function assignFragmentTag(
-  target: FateRecord,
-  value: ReadonlySet<string>,
-) {
-  Object.defineProperty(target, FragmentsTag, {
+export function assignViewTag(target: FateRecord, value: ReadonlySet<string>) {
+  Object.defineProperty(target, ViewsTag, {
     configurable: false,
     enumerable: false,
     value,
@@ -32,18 +33,31 @@ export function assignFragmentTag(
   });
 }
 
+const getRootViewNames = (view: View<any, any>) => {
+  const names = new Set<string>(getViewNames(view));
+  const payloads = getViewPayloads(view, null);
+  for (const payload of payloads) {
+    for (const name of getSelectionViewNames(payload.select)) {
+      names.add(name);
+    }
+  }
+  return names;
+};
+
 export default function createRef<
   T extends Entity,
   S extends Selection<T>,
-  F extends Fragment<T, S>,
+  V extends View<T, S>,
 >(
   __typename: string,
   id: string | number,
-  fragment: F,
-): FragmentRef<T['__typename']> {
+  view: V,
+  options?: { root?: boolean },
+): ViewRef<T['__typename']> {
   const ref = { __typename, id };
 
-  assignFragmentTag(ref, getFragmentNames(fragment));
+  const names = options?.root ? getRootViewNames(view) : getViewNames(view);
+  assignViewTag(ref, names);
 
-  return ref as FragmentRef<T['__typename']>;
+  return ref as ViewRef<T['__typename']>;
 }

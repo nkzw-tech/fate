@@ -1,23 +1,23 @@
-import { getFragmentPayloads } from './fragment.ts';
 import {
-  FragmentKind,
-  FragmentRef,
-  FragmentsTag,
-  isFragmentTag,
+  isViewTag,
+  ViewKind,
+  ViewRef,
+  ViewsTag,
   type Entity,
-  type Fragment,
   type Selection,
+  type View,
 } from './types.ts';
+import { getViewPayloads } from './view.ts';
 
-export function selectionFromFragment<T extends Entity, S extends Selection<T>>(
-  fragmentComposition: Fragment<T, S>,
-  ref: FragmentRef<T['__typename']> | null,
+export function selectionFromView<T extends Entity, S extends Selection<T>>(
+  viewComposition: View<T, S>,
+  ref: ViewRef<T['__typename']> | null,
 ): Set<string> {
   const paths: Array<string> = [];
 
-  const walk = (fragmentPayload: object, prefix: string | null) => {
-    for (const [key, value] of Object.entries(fragmentPayload)) {
-      if (key === FragmentKind) {
+  const walk = (viewPayload: object, prefix: string | null) => {
+    for (const [key, value] of Object.entries(viewPayload)) {
+      if (key === ViewKind) {
         continue;
       }
 
@@ -41,8 +41,8 @@ export function selectionFromFragment<T extends Entity, S extends Selection<T>>(
 
       if (valueType === 'boolean' && value) {
         paths.push(path);
-      } else if (isFragmentTag(key)) {
-        if (!ref || ref[FragmentsTag]?.has(key)) {
+      } else if (isViewTag(key)) {
+        if (!ref || ref[ViewsTag]?.has(key)) {
           walk(value.select, prefix);
         }
       } else if (value && valueType === 'object') {
@@ -51,8 +51,8 @@ export function selectionFromFragment<T extends Entity, S extends Selection<T>>(
     }
   };
 
-  for (const fragmentPayload of getFragmentPayloads(fragmentComposition, ref)) {
-    walk(fragmentPayload.select, null);
+  for (const viewPayload of getViewPayloads(viewComposition, ref)) {
+    walk(viewPayload.select, null);
   }
 
   return new Set(paths);

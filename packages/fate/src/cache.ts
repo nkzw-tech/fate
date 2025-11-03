@@ -2,34 +2,34 @@ import {
   FateThenable,
   type Entity,
   type EntityId,
-  type Fragment,
-  type FragmentData,
-  type FragmentRef,
   type Selection,
+  type View,
+  type ViewData,
+  type ViewRef,
 } from './types.ts';
 
-export default class FragmentDataCache {
+export default class ViewDataCache {
   private cache = new Map<
     string,
     WeakMap<
-      Fragment<any, any>,
-      WeakMap<FragmentRef<string>, FateThenable<FragmentData<any, any>>>
+      View<any, any>,
+      WeakMap<ViewRef<string>, FateThenable<ViewData<any, any>>>
     >
   >();
 
-  get<T extends Entity, S extends Selection<T>, F extends Fragment<T, S>>(
+  get<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     entityId: EntityId,
-    fragment: F,
-    ref: FragmentRef<T['__typename']>,
-  ): FateThenable<FragmentData<T, S>> | null {
-    return this.cache.get(entityId)?.get(fragment)?.get(ref) ?? null;
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): FateThenable<ViewData<T, S>> | null {
+    return this.cache.get(entityId)?.get(view)?.get(ref) ?? null;
   }
 
-  set<T extends Entity, S extends Selection<T>, F extends Fragment<T, S>>(
+  set<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     entityId: EntityId,
-    fragment: F,
-    ref: FragmentRef<T['__typename']>,
-    data: FateThenable<FragmentData<T, S>>,
+    view: V,
+    ref: ViewRef<T['__typename']>,
+    data: FateThenable<ViewData<T, S>>,
   ) {
     let entityMap = this.cache.get(entityId);
     if (!entityMap) {
@@ -37,13 +37,13 @@ export default class FragmentDataCache {
       this.cache.set(entityId, entityMap);
     }
 
-    let fragmentMap = entityMap.get(fragment);
-    if (!fragmentMap) {
-      fragmentMap = new WeakMap();
-      entityMap.set(fragment, fragmentMap);
+    let viewMap = entityMap.get(view);
+    if (!viewMap) {
+      viewMap = new WeakMap();
+      entityMap.set(view, viewMap);
     }
 
-    fragmentMap.set(ref, data);
+    viewMap.set(ref, data);
   }
 
   delete(entityId: EntityId) {

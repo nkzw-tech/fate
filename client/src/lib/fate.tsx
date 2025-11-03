@@ -1,8 +1,8 @@
-import { createClient, createFateTransport, mutation } from '@nkzw/fate';
-import type { EntityConfig } from '@nkzw/fate';
 import type { AppRouter } from '@nkzw/fate-server/src/trpc/root.ts';
 import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
+import { createClient, createFateTransport, mutation } from 'react-fate';
+import type { EntityConfig } from 'react-fate';
 import env from './env.tsx';
 
 export type RouterInputs = inferRouterInputs<AppRouter>;

@@ -1,7 +1,6 @@
-import { fragment, FragmentRef } from '@nkzw/fate';
 import Stack, { VStack } from '@nkzw/stack';
 import { FormEvent, Suspense, useCallback, useState } from 'react';
-import { useFragment, useMutation, useQuery } from 'react-fate';
+import { useMutation, useRequest, useView, view, ViewRef } from 'react-fate';
 import type { Comment, Post } from '../lib/fate.tsx';
 import { fate } from '../lib/fate.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -33,24 +32,20 @@ const UserCard = ({ user }: { user: SessionUser }) => {
   );
 };
 
-const AuthorFragment = fragment<Post['author']>()({
+const AuthorView = view<Post['author']>()({
   id: true,
   name: true,
 });
 
-const CommentFragment = fragment<Comment>()({
-  author: AuthorFragment,
+const CommentView = view<Comment>()({
+  author: AuthorView,
   content: true,
   id: true,
 });
 
-const Comment = ({
-  comment: commentRef,
-}: {
-  comment: FragmentRef<'Comment'>;
-}) => {
-  const comment = useFragment(CommentFragment, commentRef);
-  const author = useFragment(AuthorFragment, comment.author);
+const Comment = ({ comment: commentRef }: { comment: ViewRef<'Comment'> }) => {
+  const comment = useView(CommentView, commentRef);
+  const author = useView(AuthorView, comment.author);
 
   return (
     <div
@@ -65,11 +60,11 @@ const Comment = ({
   );
 };
 
-const PostFragment = fragment<Post>()({
-  author: AuthorFragment,
+const PostView = view<Post>()({
+  author: AuthorView,
   comments: {
     edges: {
-      node: CommentFragment,
+      node: CommentView,
     },
   },
   content: true,
@@ -82,11 +77,11 @@ const Post = ({
   post: postRef,
   user,
 }: {
-  post: FragmentRef<'Post'>;
+  post: ViewRef<'Post'>;
   user: SessionUser;
 }) => {
-  const post = useFragment(PostFragment, postRef);
-  const author = useFragment(AuthorFragment, post.author);
+  const post = useView(PostView, postRef);
+  const author = useView(AuthorView, post.author);
   const comments = post.comments?.edges ?? [];
 
   const [commentText, setCommentText] = useState('');
@@ -223,7 +218,7 @@ const PostFeed = ({
   posts,
   user,
 }: {
-  posts: Array<FragmentRef<'Post'>>;
+  posts: Array<ViewRef<'Post'>>;
   user: SessionUser | null;
 }) => (
   <VStack gap>
@@ -233,10 +228,30 @@ const PostFeed = ({
   </VStack>
 );
 
-const query = {
+const Likes = ({ posts }: { posts: Array<ViewRef<'Post'>> }) => {
+  const post = useView(LikesView, posts[0]);
+
+  return (
+    <span className="text-foreground/80 text-sm">
+      <span>Latest Post:</span> {post.title} - {post.likes} likes
+    </span>
+  );
+};
+
+const LikesView = view<Post>()({
+  likes: true,
+  title: true,
+});
+
+const RootView = view<Post>()({
+  ...LikesView,
+  ...PostView,
+});
+
+const request = {
   posts: {
     args: { first: 20 },
-    root: PostFragment,
+    root: RootView,
     type: 'Post',
   },
 } as const;
@@ -244,13 +259,16 @@ const query = {
 const Home = () => {
   const { data: session } = AuthClient.useSession();
   const user = session?.user;
-  const { posts } = useQuery(query);
+  const { posts } = useRequest(request);
 
   return (
     <VStack gap={32}>
       <UserCard user={user ?? null} />
       <VStack gap={16}>
-        <H3>Latest posts</H3>
+        <Stack alignCenter between gap={16}>
+          <H3>Latest posts</H3>
+          <Likes posts={posts} />
+        </Stack>
         <PostFeed posts={posts} user={user ?? null} />
       </VStack>
     </VStack>

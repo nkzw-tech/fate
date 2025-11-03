@@ -1,10 +1,10 @@
 export type {
   Entity,
   EntityConfig,
-  Fragment,
-  FragmentData,
-  FragmentTag,
-  FragmentRef,
+  View,
+  ViewData,
+  ViewTag,
+  ViewRef,
   FateRecord,
   MutationDefinition,
   MutationIdentifier,
@@ -14,9 +14,9 @@ export type {
   ListItem,
   Mask,
   NodeItem,
-  AnyQuery,
-  Query,
-  QueryResult,
+  AnyRequest,
+  Request,
+  RequestResult,
   Snapshot,
   Selection,
   __FateEntityBrand,
@@ -26,7 +26,7 @@ export { isNodeItem } from './types.ts';
 
 export type { Transport } from './transport.ts';
 
-export { fragment } from './fragment.ts';
+export { view } from './view.ts';
 export { mutation } from './mutation.ts';
 export { toEntityId } from './ref.ts';
 export { createClient, FateClient } from './client.ts';

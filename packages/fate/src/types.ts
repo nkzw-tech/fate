@@ -3,8 +3,8 @@ import { FieldMask } from './mask.ts';
 export type TypeName = string;
 export type EntityId = string;
 
-export const FragmentKind = '__fate__$fragment';
-export const FragmentsTag = Symbol('__fate__$fragments');
+export const ViewKind = '__fate__view';
+export const ViewsTag = Symbol('__fate__views');
 
 export declare const __FateEntityBrand: unique symbol;
 export declare const __FateSelectionBrand: unique symbol;
@@ -12,10 +12,10 @@ export declare const __FateMutationEntityBrand: unique symbol;
 export declare const __FateMutationInputBrand: unique symbol;
 export declare const __FateMutationResultBrand: unique symbol;
 
-type __FragmentEntityAnchor<T extends Entity> = {
+type __ViewEntityAnchor<T extends Entity> = {
   readonly [__FateEntityBrand]?: T;
 };
-type __FragmentSelectionAnchor<S> = {
+type __ViewSelectionAnchor<S> = {
   readonly [__FateSelectionBrand]?: S;
 };
 
@@ -29,27 +29,27 @@ type __MutationResultAnchor<R> = {
   readonly [__FateMutationResultBrand]?: R;
 };
 
-export type FragmentTag = `__fate$fragment__$${number}`;
+export type ViewTag = `__fate-view__${number}`;
 
-const fragmentTag = '__fate$fragment__$' as const;
+const viewTag = '__fate-view__' as const;
 
-export function getFragmentTag(id: number): FragmentTag {
-  return `${fragmentTag}${id}`;
+export function getViewTag(id: number): ViewTag {
+  return `${viewTag}${id}`;
 }
 
-export function isFragmentTag(key: string): key is FragmentTag {
-  return key.startsWith(fragmentTag);
+export function isViewTag(key: string): key is ViewTag {
+  return key.startsWith(viewTag);
 }
 
 export type FateRecord = Record<string, unknown>;
-export type FragmentResult = FateRecord & {
-  readonly [FragmentsTag]?: Set<string>;
+export type ViewResult = FateRecord & {
+  readonly [ViewsTag]?: Set<string>;
 };
 
-export type FragmentRef<TName extends string> = Readonly<{
+export type ViewRef<TName extends string> = Readonly<{
   __typename: TName;
-  [FragmentsTag]: Set<string>;
   id: string | number;
+  [ViewsTag]: Set<string>;
 }>;
 
 export type RelationDescriptor =
@@ -70,7 +70,7 @@ export type Entity = { __typename: string };
 export type ConnectionSelection<T extends Entity> = {
   readonly edges: {
     readonly cursor?: true;
-    readonly node: Selection<T> | Fragment<T, Selection<T>>;
+    readonly node: Selection<T> | View<T, Selection<T>>;
   };
   readonly pageInfo?: {
     readonly endCursor?: true;
@@ -78,51 +78,67 @@ export type ConnectionSelection<T extends Entity> = {
   };
 };
 
-export type Selection<T extends Entity> = {
-  [K in keyof T]?: T[K] extends Array<infer U extends Entity>
-    ? true | Selection<U> | ConnectionSelection<U> | Fragment<U, Selection<U>>
+type SelectionFieldValue<T extends Entity, K extends keyof T> =
+  T[K] extends Array<infer U extends Entity>
+    ? true | Selection<U> | ConnectionSelection<U> | View<U, Selection<U>>
     : T[K] extends Entity | null
       ?
           | true
           | Selection<NonNullable<T[K]>>
-          | Fragment<NonNullable<T[K]>, Selection<NonNullable<T[K]>>>
+          | View<NonNullable<T[K]>, Selection<NonNullable<T[K]>>>
       : true;
+
+type SelectionShape<T extends Entity> = {
+  [K in keyof T as K extends '__typename' ? never : K]?: SelectionFieldValue<
+    T,
+    K
+  >;
+} & { __typename?: true };
+
+type SelectionViewSpread<T extends Entity> = {
+  readonly [K in ViewTag]?: Readonly<{
+    select: Selection<T>;
+    [ViewKind]: true;
+  }>;
 };
 
-export type SelectionOf<F> = F extends {
+export type Selection<T extends Entity> = SelectionShape<T> &
+  SelectionViewSpread<T>;
+
+export type SelectionOf<V> = V extends {
   readonly [__FateSelectionBrand]?: infer S;
 }
   ? S
   : never;
 
-export type FragmentPayload<
+export type ViewPayload<
   T extends Entity,
   S extends Selection<T> = Selection<T>,
 > = Readonly<{
-  [FragmentKind]: true;
   select: S;
+  [ViewKind]: true;
 }>;
 
-export type Fragment<
+export type View<
   T extends Entity,
   S extends Selection<T> = Selection<T>,
 > = Readonly<{
-  [fragmentTag: FragmentTag]: FragmentPayload<T, S>;
+  [viewTag: ViewTag]: ViewPayload<T, S>;
 }> &
-  __FragmentEntityAnchor<T> &
-  __FragmentSelectionAnchor<S>;
+  __ViewEntityAnchor<T> &
+  __ViewSelectionAnchor<S>;
 
-type HasFragmentTag<S> = S extends { [K in FragmentTag]?: infer P }
-  ? P extends { [FragmentKind]: true }
+type HasViewTag<S> = S extends { [K in ViewTag]?: infer P }
+  ? P extends { [ViewKind]: true }
     ? true
     : false
   : false;
 
-export type FragmentData<
+export type ViewData<
   T extends Entity,
   S extends Selection<T>,
 > = (S extends Selection<T> ? Mask<T, S> : T) & {
-  readonly [FragmentsTag]: Set<string>;
+  readonly [ViewsTag]: Set<string>;
 };
 
 type ConnectionMask<T extends Entity, S> = S extends {
@@ -138,10 +154,10 @@ type ConnectionMask<T extends Entity, S> = S extends {
             (CursorSelection extends true
               ? { cursor: string }
               : Record<string, never>) & {
-              node: FragmentRef<T['__typename']>;
+              node: ViewRef<T['__typename']>;
             }
           >
-        : Array<{ node: FragmentRef<T['__typename']> }>;
+        : Array<{ node: ViewRef<T['__typename']> }>;
     } & (PageInfoSelection extends object
       ? {
           pageInfo: {
@@ -161,14 +177,14 @@ export type Mask<T, S> =
       ? Array<U>
       : S extends ConnectionSelection<U>
         ? ConnectionMask<U, S>
-        : HasFragmentTag<S> extends true
-          ? Array<FragmentRef<U['__typename']>>
+        : HasViewTag<S> extends true
+          ? Array<ViewRef<U['__typename']>>
           : Array<Mask<U, S>>
     : S extends true
       ? T
       : S extends object
-        ? HasFragmentTag<S> extends true
-          ? FragmentRef<EntityName<NonNullable<T>>>
+        ? HasViewTag<S> extends true
+          ? ViewRef<EntityName<NonNullable<T>>>
           : {
               [K in keyof S]: S[K] extends true
                 ? NonNullable<T>[Extract<K, keyof T>]
@@ -179,37 +195,37 @@ export type Mask<T, S> =
             }
         : T;
 
-type FragmentEntity<F> = F extends Fragment<infer T, any> ? T : never;
-type FragmentEntityName<F> = FragmentEntity<F>['__typename'] & string;
+type ViewEntity<V> = V extends View<infer T, any> ? T : never;
+type ViewEntityName<V> = ViewEntity<V>['__typename'] & string;
 
-export type ListItem<F extends Fragment<any, any>> = Readonly<{
+export type ListItem<V extends View<any, any>> = Readonly<{
   args: unknown;
-  root: F; // carries T, S
-  type: FragmentEntityName<F>; // must match the fragment's entity name
+  root: V;
+  type: ViewEntityName<V>;
 }>;
 
-export type NodeItem<F extends Fragment<any, any>> = Readonly<{
+export type NodeItem<V extends View<any, any>> = Readonly<{
   ids: ReadonlyArray<string | number>;
-  root: F;
-  type: FragmentEntityName<F>;
+  root: V;
+  type: ViewEntityName<V>;
 }>;
 
-type QueryItem = ListItem<Fragment<any, any>> | NodeItem<Fragment<any, any>>;
-export type Query = Record<string, QueryItem>;
+type RequestItem = ListItem<View<any, any>> | NodeItem<View<any, any>>;
+export type Request = Record<string, RequestItem>;
 
-export type AnyFragment = Fragment<any, any>;
-export type AnyListItem = ListItem<AnyFragment>;
-export type AnyNodeItem = NodeItem<AnyFragment>;
-export type AnyQueryItem = AnyListItem | AnyNodeItem;
-export type AnyQuery = Record<string, AnyQueryItem>;
+export type AnyView = View<any, any>;
+export type AnyListItem = ListItem<AnyView>;
+export type AnyNodeItem = NodeItem<AnyView>;
+export type AnyRequestItem = AnyListItem | AnyNodeItem;
+export type AnyRequest = Record<string, AnyRequestItem>;
 
-export type QueryResult<Q extends AnyQuery> = {
+export type RequestResult<Q extends AnyRequest> = {
   [K in keyof Q]: Q[K] extends { type: infer NodeType extends string }
-    ? Array<FragmentRef<NodeType>>
+    ? Array<ViewRef<NodeType>>
     : never;
 };
 
-export function isNodeItem(item: AnyQueryItem): item is AnyNodeItem {
+export function isNodeItem(item: AnyRequestItem): item is AnyNodeItem {
   return 'ids' in item;
 }
 

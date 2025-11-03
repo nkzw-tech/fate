@@ -93,8 +93,10 @@ export function createFateTransport<
           `fate(trpc): No 'byId' resolver configured for entity type '${type}'.`,
         );
       }
-      const query = resolver(client);
-      return await query({ ids, select: select ? [...select] : undefined });
+      return await resolver(client)({
+        ids,
+        select: select ? [...select] : undefined,
+      });
     },
     async fetchList(procedure, args, select) {
       if (!lists) {
