@@ -16,6 +16,7 @@ export default [
       './server/scripts/**/*.tsx',
       './server/src/index.tsx',
       './server/src/prisma/seed.tsx',
+      '**/__tests__/**',
     ],
     rules: {
       'no-console': 0,

@@ -16,9 +16,7 @@ export function FateClient({
 export function useFateClient(): FateClientT {
   const context = use(FateContext);
   if (!context) {
-    throw new Error(
-      'react-fate: <FateClient client={...}> is missing in the tree.',
-    );
+    throw new Error(`react-fate: '<FateContext value={client}>' is missing.`);
   }
   return context;
 }
