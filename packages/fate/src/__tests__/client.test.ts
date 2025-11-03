@@ -1,7 +1,13 @@
 import { expect, test } from 'vitest';
 import { createClient } from '../client.ts';
 import { toEntityId } from '../ref.ts';
-import { FateThenable, SelectionOf, View, ViewsTag } from '../types.ts';
+import {
+  FateThenable,
+  SelectionOf,
+  Snapshot,
+  View,
+  ViewsTag,
+} from '../types.ts';
 import { getViewNames, view } from '../view.ts';
 
 type User = { __typename: 'User'; id: string; name: string };
@@ -20,8 +26,6 @@ type Post = {
   id: string;
 };
 
-const getId = (record: unknown) => (record as { id: string }).id;
-
 const tagsFor = (...views: Array<View<any, any>>) =>
   new Set(views.flatMap((view) => Array.from(getViewNames(view))));
 
@@ -35,19 +39,18 @@ const unwrap = <T>(value: FateThenable<T>): T => {
 
 test(`'readView' returns the selected fields`, () => {
   const client = createClient({
-    entities: [
-      {
-        fields: { comments: { listOf: 'Comment' } },
-        key: getId,
-        type: 'Post',
-      },
-      { key: getId, type: 'Comment' },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
   });
 
   const postId = toEntityId('Post', 'post-1');
@@ -83,19 +86,18 @@ test(`'readView' returns the selected fields`, () => {
 
 test(`'readView' returns view refs when views are used`, () => {
   const client = createClient({
-    entities: [
-      {
-        fields: { comments: { listOf: 'Comment' } },
-        key: getId,
-        type: 'Post',
-      },
-      { key: getId, type: 'Comment' },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
   });
 
   const commentAId = toEntityId('Comment', 'comment-1');
@@ -175,19 +177,18 @@ test(`'readView' returns view refs when views are used`, () => {
 
 test(`'readView' returns view refs for list selections`, () => {
   const client = createClient({
-    entities: [
-      {
-        fields: { comments: { listOf: 'Comment' } },
-        key: getId,
-        type: 'Post',
-      },
-      { key: getId, type: 'Comment' },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
   });
 
   const commentId = toEntityId('Comment', 'comment-1');
@@ -246,19 +247,18 @@ test(`'readView' returns view refs for list selections`, () => {
 
 test(`'readView' returns only directly selected fields when view spreads are used`, () => {
   const client = createClient({
-    entities: [
-      {
-        fields: { comments: { listOf: 'Comment' } },
-        key: getId,
-        type: 'Post',
-      },
-      { key: getId, type: 'Comment' },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
   });
 
   const commentId = toEntityId('Comment', 'comment-1');
@@ -331,15 +331,12 @@ test(`'readView' returns only directly selected fields when view spreads are use
 
 test(`'readView' resolves object references and their views`, () => {
   const client = createClient({
-    entities: [
-      { key: getId, type: 'Comment' },
-      { key: getId, type: 'User' },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [{ type: 'Comment' }, { type: 'User' }],
   });
 
   const authorId = toEntityId('User', 'user-1');
@@ -392,17 +389,16 @@ test(`'readView' resolves object references and their views`, () => {
 
 test(`'readView' resolves fields only if the ref contains the expected views`, () => {
   const client = createClient({
-    entities: [
-      {
-        key: getId,
-        type: 'Post',
-      },
-    ],
     transport: {
       async fetchById() {
         return [];
       },
     },
+    types: [
+      {
+        type: 'Post',
+      },
+    ],
   });
 
   const postId = toEntityId('Post', 'post-1');
@@ -468,4 +464,73 @@ test(`'readView' resolves fields only if the ref contains the expected views`, (
 
   expect(resultC.id).toBe('post-1');
   expect(resultC.content).toBe('Apple Banana');
+});
+
+test(`'deleteRecord' removes an entity and cleans references`, () => {
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
+  });
+
+  const commentId = toEntityId('Comment', 'comment-1');
+  client.store.merge(
+    commentId,
+    {
+      __typename: 'Comment',
+      author: null,
+      content: 'Hello world',
+      id: 'comment-1',
+    },
+    '*',
+  );
+
+  const postId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      comments: [commentId],
+      content: 'Post content',
+      id: 'post-1',
+    },
+    '*',
+  );
+
+  client.store.setList('comments', [commentId]);
+
+  const snapshots = new Map<string, Snapshot>();
+  const listSnapshots = new Map<string, Array<string>>();
+
+  client.deleteRecord('Comment', 'comment-1', snapshots, listSnapshots);
+
+  expect(client.store.read(commentId)).toBeUndefined();
+
+  const updatedPost = client.store.read(postId);
+  expect(updatedPost?.comments).toEqual([]);
+  expect(client.store.getList('comments')).toEqual([]);
+
+  for (const [id, snapshot] of snapshots) {
+    client.restore(id, snapshot);
+  }
+
+  for (const [name, ids] of listSnapshots) {
+    client.restoreList(name, ids);
+  }
+
+  const restoredComment = client.store.read(commentId);
+  expect(restoredComment).toMatchObject({ id: 'comment-1' });
+
+  const restoredPost = client.store.read(postId);
+  expect(restoredPost?.comments).toEqual([commentId]);
+  expect(client.store.getList('comments')).toEqual([commentId]);
 });

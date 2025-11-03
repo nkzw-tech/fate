@@ -57,9 +57,9 @@ export type RelationDescriptor =
   | { type: string }
   | { listOf: string };
 
-export type EntityConfig = {
+export type TypeConfig = {
   fields?: Record<string, RelationDescriptor>;
-  key: (record: unknown) => string | number;
+  getId: (record: unknown) => string | number;
   type: string;
 };
 

@@ -48,6 +48,7 @@ export const postRouter = router({
     .input(
       z.object({
         id: z.string().min(1, 'Post id is required.'),
+        select: z.array(z.string()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -64,16 +65,26 @@ export const postRouter = router({
         });
       }
 
+      const select = prismaSelect(input.select);
+      const data = {
+        likes: {
+          increment: 1,
+        },
+      } as const;
+      const where = { id: input.id };
+
+      if (select) {
+        return ctx.prisma.post.update({
+          data,
+          select,
+          where,
+        });
+      }
+
       return ctx.prisma.post.update({
-        data: {
-          likes: {
-            increment: 1,
-          },
-        },
+        data,
         include: postInclude,
-        where: {
-          id: input.id,
-        },
+        where,
       });
     }),
   list: procedure
@@ -112,6 +123,7 @@ export const postRouter = router({
     .input(
       z.object({
         id: z.string().min(1, 'Post id is required.'),
+        select: z.array(z.string()).optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -132,25 +144,41 @@ export const postRouter = router({
           });
         }
 
+        const select = prismaSelect(input.select);
+        const where = { id: input.id };
+
         if (existing.likes <= 0) {
+          if (select) {
+            return tx.post.findUniqueOrThrow({
+              select,
+              where,
+            });
+          }
+
           return tx.post.findUniqueOrThrow({
             include: postInclude,
-            where: {
-              id: input.id,
-            },
+            where,
+          });
+        }
+
+        const data = {
+          likes: {
+            decrement: 1,
+          },
+        } as const;
+
+        if (select) {
+          return tx.post.update({
+            data,
+            select,
+            where,
           });
         }
 
         return tx.post.update({
-          data: {
-            likes: {
-              decrement: 1,
-            },
-          },
+          data,
           include: postInclude,
-          where: {
-            id: input.id,
-          },
+          where,
         });
       }),
     ),

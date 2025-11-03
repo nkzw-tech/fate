@@ -1,3 +1,4 @@
+import ViewDataCache from './cache.ts';
 import {
   cloneMask,
   diffPaths,
@@ -57,6 +58,11 @@ export class Store {
     this.notify(id);
   }
 
+  deleteRecord(id: EntityId) {
+    this.records.delete(id);
+    this.coverage.delete(id);
+  }
+
   missingForSelection(
     id: EntityId,
     paths?: Iterable<string>,
@@ -114,6 +120,81 @@ export class Store {
 
   setList(key: string, ids: Array<EntityId>) {
     this.lists.set(key, ids);
+  }
+
+  restoreList(key: string, ids?: Array<EntityId>) {
+    if (ids === undefined) {
+      this.lists.delete(key);
+      return;
+    }
+
+    this.lists.set(key, ids);
+  }
+
+  removeReferencesTo(
+    targetId: EntityId,
+    viewDataCache: ViewDataCache,
+    snapshots?: Map<EntityId, Snapshot>,
+    listSnapshots?: Map<string, Array<EntityId>>,
+  ) {
+    const affected = new Set<EntityId>();
+
+    for (const [key, ids] of this.lists.entries()) {
+      if (!ids.includes(targetId)) {
+        continue;
+      }
+
+      if (listSnapshots && !listSnapshots.has(key)) {
+        listSnapshots.set(key, ids.slice());
+      }
+
+      const filtered = ids.filter((id) => id !== targetId);
+      this.lists.set(key, filtered);
+    }
+
+    for (const [id, record] of this.records.entries()) {
+      let updated = false;
+      const next: FateRecord = {};
+      const paths = new Set<string>();
+
+      for (const [key, value] of Object.entries(record)) {
+        if (Array.isArray(value)) {
+          const filtered = value.filter(
+            (item) => !(typeof item === 'string' && item === targetId),
+          );
+
+          if (filtered.length !== value.length) {
+            updated = true;
+            paths.add(key);
+            next[key] = filtered;
+          }
+        } else if (typeof value === 'string' && value === targetId) {
+          updated = true;
+          paths.add(key);
+          next[key] = null;
+        }
+      }
+
+      if (!updated) {
+        continue;
+      }
+
+      if (snapshots && !snapshots.has(id)) {
+        snapshots.set(id, this.snapshot(id));
+      }
+
+      this.merge(id, next, paths);
+      affected.add(id);
+    }
+
+    const ids = [...affected];
+    for (const id of ids) {
+      viewDataCache.delete(id);
+    }
+
+    for (const id of ids) {
+      this.notify(id);
+    }
   }
 
   snapshot(id: EntityId): Snapshot {

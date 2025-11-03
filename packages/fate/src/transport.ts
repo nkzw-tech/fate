@@ -24,6 +24,7 @@ export interface Transport<
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],
+    select?: Set<string>,
   ): Promise<Mutations[K]['output']>;
 }
 
@@ -121,6 +122,7 @@ export function createFateTransport<
     transport.mutate = async <K extends Extract<keyof Mutations, string>>(
       procedure: K,
       input: MutationMapFromResolvers<Mutations>[K]['input'],
+      select?: Set<string>,
     ) => {
       const resolver = mutations[procedure];
       if (!resolver) {
@@ -128,7 +130,10 @@ export function createFateTransport<
           `fate(trpc): Missing mutation resolver for procedure '${procedure}'.`,
         );
       }
-      return await resolver(client)(input);
+      return await resolver(client)({
+        ...(input as FateRecord),
+        select: select ? [...select] : undefined,
+      });
     };
   }
 

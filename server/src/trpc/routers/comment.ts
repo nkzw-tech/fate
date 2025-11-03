@@ -30,6 +30,7 @@ export const commentRouter = router({
       z.object({
         content: z.string().min(1, 'Content is required'),
         postId: z.string().min(1, 'Post id is required'),
+        select: z.array(z.string()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -53,12 +54,25 @@ export const commentRouter = router({
         });
       }
 
+      const select = prismaSelect(input.select);
+      const data = {
+        authorId: ctx.sessionUser.id,
+        content: input.content,
+        postId: input.postId,
+      };
+
+      if (select) {
+        return ctx.prisma.comment.create({
+          data,
+          select: {
+            ...select,
+            post: { ...postSelection, ...(select.post || null) },
+          },
+        });
+      }
+
       return ctx.prisma.comment.create({
-        data: {
-          authorId: ctx.sessionUser.id,
-          content: input.content,
-          postId: input.postId,
-        },
+        data,
         include: defaultCommentInclude,
       });
     }),
@@ -78,5 +92,30 @@ export const commentRouter = router({
 
       const map = new Map(comments.map((comment) => [comment.id, comment]));
       return input.ids.map((id) => map.get(id)).filter(Boolean);
+    }),
+  delete: procedure
+    .input(
+      z.object({
+        id: z.string().min(1, 'Comment id is required'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const comment = await ctx.prisma.comment.findUnique({
+        select: { authorId: true },
+        where: { id: input.id },
+      });
+
+      if (!comment) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+
+      await ctx.prisma.comment.delete({
+        where: { id: input.id },
+      });
+
+      return { success: true };
     }),
 });

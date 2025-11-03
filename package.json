@@ -28,6 +28,7 @@
     "@ianvs/prettier-plugin-sort-imports": "^4.7.0",
     "@nkzw/babel-preset-fbtee": "^1.7.0",
     "@nkzw/eslint-config": "^3.2.0",
+    "@nkzw/find-workspaces": "^1.0.0",
     "@prettier/plugin-oxc": "^0.0.4",
     "@swc/core": "^1.14.0",
     "@types/node": "^24.9.2",

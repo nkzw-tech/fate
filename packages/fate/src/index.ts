@@ -1,6 +1,6 @@
 export type {
   Entity,
-  EntityConfig,
+  TypeConfig,
   View,
   ViewData,
   ViewTag,
@@ -10,6 +10,7 @@ export type {
   MutationIdentifier,
   MutationInput,
   MutationResult,
+  MutationEntity,
   MutationEntityName,
   ListItem,
   Mask,

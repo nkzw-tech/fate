@@ -36,7 +36,7 @@ export default function Header() {
                 <ChevronLeft className="h-6 w-6 text-gray-500" />
               )}
             </div>
-            <span className="bg-linear-to-r from-gray-500 to-gray-900 bg-clip-text text-xl font-bold text-transparent">
+            <span className="bg-linear-to-r from-gray-500 to-gray-900 bg-clip-text text-xl font-bold text-transparent dark:to-gray-200">
               Fate Demo
             </span>
           </div>

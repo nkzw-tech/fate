@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import nkzw from '@nkzw/eslint-config';
+import findWorkspaces from '@nkzw/find-workspaces';
 
 export default [
   ...nkzw,
@@ -44,20 +43,7 @@ export default [
             '**/tsdown.config.js',
             'vitest.config.ts',
           ],
-          packageDir: [import.meta.dirname].concat(
-            readFileSync('./pnpm-workspace.yaml', 'utf8')
-              .split('\n')
-              .slice(1)
-              .map((n) =>
-                join(
-                  import.meta.dirname,
-                  n
-                    .replaceAll(/\s*-\s+/g, '')
-                    .replaceAll("'", '')
-                    .replaceAll('\r', ''),
-                ),
-              ),
-          ),
+          packageDir: findWorkspaces(import.meta.dirname),
         },
       ],
     },

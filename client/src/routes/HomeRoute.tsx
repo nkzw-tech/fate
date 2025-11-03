@@ -1,6 +1,13 @@
 import Stack, { VStack } from '@nkzw/stack';
-import { FormEvent, Suspense, useCallback, useState } from 'react';
-import { useMutation, useRequest, useView, view, ViewRef } from 'react-fate';
+import { X } from 'lucide-react';
+import {
+  FormEvent,
+  Suspense,
+  useCallback,
+  useState,
+  useTransition,
+} from 'react';
+import { useRequest, useView, view, ViewRef } from 'react-fate';
 import type { Comment, Post } from '../lib/fate.tsx';
 import { fate } from '../lib/fate.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -52,9 +59,23 @@ const Comment = ({ comment: commentRef }: { comment: ViewRef<'Comment'> }) => {
       className="rounded-md border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40"
       key={comment.id}
     >
-      <p className="font-medium text-gray-900 dark:text-gray-200">
-        {author?.name ?? 'Anonymous'}
-      </p>
+      <Stack between gap={16}>
+        <p className="font-medium text-gray-900 dark:text-gray-200">
+          {author?.name ?? 'Anonymous'}
+        </p>
+        <Button
+          onClick={async () => {
+            await fate.mutations.deleteComment({
+              input: { id: comment.id },
+              view: 'deleteRecord',
+            });
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          <X size={14} />
+        </Button>
+      </Stack>
       <p className="text-foreground/80">{comment.content}</p>
     </div>
   );
@@ -86,26 +107,32 @@ const Post = ({
 
   const [commentText, setCommentText] = useState('');
 
-  const [likePost, likeIsPending] = useMutation(fate.mutations.likePost);
-  const [unlikePost, unlikeIsPending] = useMutation(fate.mutations.unlikePost);
-  const [addCommentMutation, addCommentIsPending, addCommentError] =
-    useMutation(fate.mutations.addComment);
+  const [likeIsPending, startLikeTransition] = useTransition();
+  const [unlikeIsPending, startUnlikeTransition] = useTransition();
+  const [addCommentIsPending, startAddCommentTransition] = useTransition();
+  const [addCommentError, setAddCommentError] = useState<unknown>(null);
 
   const handleLike = useCallback(async () => {
-    await likePost({
-      input: { id: post.id },
-      optimisticUpdate: { likes: post.likes + 1 },
+    startLikeTransition(async () => {
+      await fate.mutations.likePost({
+        input: { id: post.id },
+        optimisticUpdate: { likes: post.likes + 1 },
+        view: PostView,
+      });
     });
-  }, [likePost, post.id, post.likes]);
+  }, [post.id, post.likes]);
 
   const handleUnlike = useCallback(async () => {
-    await unlikePost({
-      input: { id: post.id },
-      optimisticUpdate: {
-        likes: Math.max(post.likes - 1, 0),
-      },
+    startUnlikeTransition(async () => {
+      await fate.mutations.unlikePost({
+        input: { id: post.id },
+        optimisticUpdate: {
+          likes: Math.max(post.likes - 1, 0),
+        },
+        view: PostView,
+      });
     });
-  }, [post.id, post.likes, unlikePost]);
+  }, [post.id, post.likes]);
 
   const handleAddComment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -116,11 +143,20 @@ const Post = ({
       return;
     }
 
-    await addCommentMutation({
-      input: { content, postId: post.id },
-    });
+    setAddCommentError(null);
+    startAddCommentTransition(async () => {
+      try {
+        await fate.mutations.addComment({
+          input: { content, postId: post.id },
+          view: CommentView,
+        });
+      } catch (error) {
+        setAddCommentError(error);
+        return;
+      }
 
-    setCommentText('');
+      setCommentText('');
+    });
   };
 
   const isCommentDisabled =
@@ -140,7 +176,12 @@ const Post = ({
             </p>
           </div>
           <Stack alignCenter gap>
-            <Button disabled={likeIsPending} onClick={handleLike} size="sm">
+            <Button
+              disabled={likeIsPending}
+              onClick={handleLike}
+              size="sm"
+              variant="outline"
+            >
               Like
             </Button>
             <Button

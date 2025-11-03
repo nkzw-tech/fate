@@ -2,7 +2,6 @@ import type { AppRouter } from '@nkzw/fate-server/src/trpc/root.ts';
 import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
 import { createClient, createFateTransport, mutation } from 'react-fate';
-import type { EntityConfig } from 'react-fate';
 import env from './env.tsx';
 
 export type RouterInputs = inferRouterInputs<AppRouter>;
@@ -29,21 +28,6 @@ export type Post = PostBase & {
   comments: Array<Comment>;
 };
 
-const getId: EntityConfig['key'] = (record: unknown) => {
-  if (!record || typeof record !== 'object' || !('id' in record)) {
-    throw new Error(`fate: Missing 'id' on entity record.`);
-  }
-
-  const value = (record as { id: string | number }).id;
-  const valueType = typeof value;
-  if (valueType !== 'string' && valueType !== 'number') {
-    throw new Error(
-      `fate: Entity id must be a string or number, received '${valueType}'.`,
-    );
-  }
-  return value;
-};
-
 const trpcClient = createTRPCProxyClient<AppRouter>({
   links: [
     httpBatchLink({
@@ -59,35 +43,24 @@ const trpcClient = createTRPCProxyClient<AppRouter>({
 
 type TRPCClientType = typeof trpcClient;
 
-const listResolvers = {
-  posts: (client: TRPCClientType) => client.post.list.query,
-} as const;
-
 const mutations = {
   addComment: (client: TRPCClientType) => client.comment.add.mutate,
+  deleteComment: (client: TRPCClientType) => client.comment.delete.mutate,
   likePost: (client: TRPCClientType) => client.post.like.mutate,
   unlikePost: (client: TRPCClientType) => client.post.unlike.mutate,
 } as const;
 
 export const fate = createClient({
-  entities: [
-    { key: getId, type: 'User' },
-    {
-      fields: { author: { type: 'User' }, comments: { listOf: 'Comment' } },
-      key: getId,
-      type: 'Post',
-    },
-    {
-      fields: { author: { type: 'User' }, post: { type: 'Post' } },
-      key: getId,
-      type: 'Comment',
-    },
-  ],
   mutations: {
     addComment: mutation<
       Comment,
       RouterInputs['comment']['add'],
       RouterOutputs['comment']['add']
+    >('Comment'),
+    deleteComment: mutation<
+      Comment,
+      RouterInputs['comment']['delete'],
+      RouterOutputs['comment']['delete']
     >('Comment'),
     likePost: mutation<
       Post,
@@ -124,7 +97,20 @@ export const fate = createClient({
           client.post.byId.query({ ids: ids.map(String), select }),
     },
     client: trpcClient,
-    lists: listResolvers,
+    lists: {
+      posts: (client: TRPCClientType) => client.post.list.query,
+    },
     mutations,
   }),
+  types: [
+    { type: 'User' },
+    {
+      fields: { author: { type: 'User' }, comments: { listOf: 'Comment' } },
+      type: 'Post',
+    },
+    {
+      fields: { author: { type: 'User' }, post: { type: 'Post' } },
+      type: 'Comment',
+    },
+  ],
 });
