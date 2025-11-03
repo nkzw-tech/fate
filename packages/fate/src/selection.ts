@@ -13,7 +13,7 @@ export function selectionFromView<T extends Entity, S extends Selection<T>>(
   viewComposition: View<T, S>,
   ref: ViewRef<T['__typename']> | null,
 ): Set<string> {
-  const paths: Array<string> = [];
+  const paths = new Set<string>();
 
   const walk = (viewPayload: object, prefix: string | null) => {
     for (const [key, value] of Object.entries(viewPayload)) {
@@ -40,7 +40,7 @@ export function selectionFromView<T extends Entity, S extends Selection<T>>(
       }
 
       if (valueType === 'boolean' && value) {
-        paths.push(path);
+        paths.add(path);
       } else if (isViewTag(key)) {
         if (!ref || ref[ViewsTag]?.has(key)) {
           walk(value.select, prefix);
@@ -55,5 +55,5 @@ export function selectionFromView<T extends Entity, S extends Selection<T>>(
     walk(viewPayload.select, null);
   }
 
-  return new Set(paths);
+  return paths;
 }

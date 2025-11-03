@@ -39,6 +39,15 @@ export class Store {
   }
 
   merge(id: EntityId, partial: FateRecord, paths?: Iterable<string> | '*') {
+    this.mergeInternal(id, partial, paths);
+    this.notify(id);
+  }
+
+  private mergeInternal(
+    id: EntityId,
+    partial: FateRecord,
+    paths?: Iterable<string> | '*',
+  ) {
     const previous = this.records.get(id) ?? {};
     const next = { ...previous, ...partial };
     this.records.set(id, next);
@@ -55,7 +64,6 @@ export class Store {
     } else {
       union(mask, fromPaths(paths));
     }
-    this.notify(id);
   }
 
   deleteRecord(id: EntityId) {
@@ -137,7 +145,7 @@ export class Store {
     snapshots?: Map<EntityId, Snapshot>,
     listSnapshots?: Map<string, Array<EntityId>>,
   ) {
-    const affected = new Set<EntityId>();
+    const ids = new Set<EntityId>();
 
     for (const [key, ids] of this.lists.entries()) {
       if (!ids.includes(targetId)) {
@@ -183,13 +191,9 @@ export class Store {
         snapshots.set(id, this.snapshot(id));
       }
 
-      this.merge(id, next, paths);
-      affected.add(id);
-    }
-
-    const ids = [...affected];
-    for (const id of ids) {
       viewDataCache.delete(id);
+      this.mergeInternal(id, next, paths);
+      ids.add(id);
     }
 
     for (const id of ids) {

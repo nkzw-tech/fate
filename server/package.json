@@ -31,7 +31,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@types/node": "^24.9.2",
+    "@types/node": "^24.10.0",
     "nodemon": "^3.1.10",
     "prisma": "^6.18.0",
     "prisma-json-types-generator": "^3.6.2"

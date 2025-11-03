@@ -53,11 +53,6 @@ export const getSelectionViewNames = <T extends Entity, S extends Selection<T>>(
   return result;
 };
 
-export function hasViewTag(value: unknown): boolean {
-  return !!getViewPayloads(value as View<Entity, Selection<Entity>>, null)
-    ?.length;
-}
-
 let id = 0;
 
 export function view<T extends Entity>() {

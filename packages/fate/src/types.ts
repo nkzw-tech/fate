@@ -213,11 +213,11 @@ export type NodeItem<V extends View<any, any>> = Readonly<{
 type RequestItem = ListItem<View<any, any>> | NodeItem<View<any, any>>;
 export type Request = Record<string, RequestItem>;
 
-export type AnyView = View<any, any>;
-export type AnyListItem = ListItem<AnyView>;
-export type AnyNodeItem = NodeItem<AnyView>;
-export type AnyRequestItem = AnyListItem | AnyNodeItem;
-export type AnyRequest = Record<string, AnyRequestItem>;
+type AnyView = View<any, any>;
+type AnyListItem = ListItem<AnyView>;
+type AnyNodeItem = NodeItem<AnyView>;
+type AnyRequestItem = AnyListItem | AnyNodeItem;
+type AnyRequest = Record<string, AnyRequestItem>;
 
 export type RequestResult<Q extends AnyRequest> = {
   [K in keyof Q]: Q[K] extends { type: infer NodeType extends string }
@@ -252,7 +252,6 @@ export type MutationResult<M> =
   M extends __MutationResultAnchor<infer R> ? R : never;
 export type MutationEntity<M> =
   M extends __MutationEntityAnchor<infer E> ? E : never;
-export type MutationEntityName<M> = MutationEntity<M>['__typename'] & string;
 
 export type MutationShape = { input: unknown; output: unknown };
 

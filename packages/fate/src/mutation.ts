@@ -85,14 +85,22 @@ export function wrapMutation<
     const viewSelection =
       view && !isDelete ? selectionFromView(view, null) : undefined;
 
+    const optimisticRecord: FateRecord | undefined = optimisticUpdate
+      ? ((id != null
+          ? { id, ...optimisticUpdate }
+          : optimisticUpdate) as FateRecord)
+      : undefined;
+    const optimisticRecordId =
+      optimisticRecord !== undefined
+        ? maybeGetId(config.getId, optimisticRecord)
+        : null;
+
     const snapshots = new Map<string, Snapshot>();
     const listSnapshots = isDelete
       ? new Map<string, Array<string>>()
       : undefined;
-    const optimisticSelection = optimisticUpdate
-      ? collectImplicitSelectedPaths(
-          id ? { id, ...optimisticUpdate } : optimisticUpdate,
-        )
+    const optimisticSelection = optimisticRecord
+      ? collectImplicitSelectedPaths(optimisticRecord)
       : undefined;
 
     const selection =
@@ -111,10 +119,10 @@ export function wrapMutation<
       }
 
       client.deleteRecord(identifier.entity, id, snapshots, listSnapshots);
-    } else if (optimisticUpdate) {
+    } else if (optimisticRecord && (id != null || optimisticRecordId != null)) {
       client.write(
         identifier.entity,
-        id ? { id, ...optimisticUpdate } : optimisticUpdate,
+        optimisticRecord,
         optimisticSelection,
         snapshots,
       );

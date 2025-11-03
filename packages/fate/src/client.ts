@@ -271,7 +271,7 @@ export class FateClient<
     const selectedPaths = selectionFromView(view, ref);
     const missing = this.store.missingForSelection(entityId, selectedPaths);
 
-    if (missing === '*' || (Array.isArray(missing) && missing.length > 0)) {
+    if (missing === '*' || missing.size > 0) {
       const key = this.pendingKey(type, id, missing);
       const pendingPromise = this.pending.get(key) || null;
       if (pendingPromise) {
@@ -281,7 +281,7 @@ export class FateClient<
       const promise = this.fetchByIdAndNormalize(
         type,
         [id],
-        Array.isArray(missing) ? missing : undefined,
+        missing === '*' ? undefined : missing,
       )
         .finally(() => this.pending.delete(key))
         .then(() => this.readView<T, S, V>(view, ref));
@@ -350,10 +350,7 @@ export class FateClient<
         for (const raw of item.ids) {
           const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
-          if (
-            missing === '*' ||
-            (Array.isArray(missing) && missing.length > 0)
-          ) {
+          if (missing === '*' || missing.size > 0) {
             group.ids.push(raw);
           }
         }
@@ -598,11 +595,6 @@ export class FateClient<
           if (!target[ViewsTag]) {
             assignViewTag(target, new Set());
           }
-          const targetObject = target as FateRecord;
-          if (!targetObject.id) {
-            targetObject.id = target.id;
-            targetObject.__typename = 'User';
-          }
 
           target[ViewsTag]!.add(key);
           continue;
@@ -661,10 +653,16 @@ export class FateClient<
               });
             }
           } else if (typeof value === 'string') {
+            const relatedRecord = this.store.read(value);
             const { id, type } = parseEntityId(value);
-            (target[key] as FateRecord).id = id;
-            (target[key] as FateRecord).__typename = type;
-            walk(selectionKind, record, target[key] as ViewResult);
+            const targetRecord = target[key] as FateRecord;
+
+            targetRecord.id = id;
+            targetRecord.__typename = type;
+
+            if (relatedRecord) {
+              walk(selectionKind, relatedRecord, targetRecord as ViewResult);
+            }
           } else {
             walk(selectionKind, record, target[key] as ViewResult);
           }
@@ -684,9 +682,9 @@ export class FateClient<
   private pendingKey(
     type: string,
     raw: string | number,
-    missingFields: '*' | Array<string>,
+    missingFields: '*' | Set<string>,
   ) {
-    return `N|${type}|${raw}|${Array.isArray(missingFields) ? missingFields.slice().sort().join(',') : missingFields}`;
+    return `N|${type}|${raw}|${missingFields === '*' ? missingFields : [...missingFields].sort().join(',')}`;
   }
 }
 

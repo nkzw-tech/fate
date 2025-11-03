@@ -1,5 +1,6 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { createClient } from '../client.ts';
+import { mutation } from '../mutation.ts';
 import { toEntityId } from '../ref.ts';
 import {
   FateThenable,
@@ -533,4 +534,295 @@ test(`'deleteRecord' removes an entity and cleans references`, () => {
   const restoredPost = client.store.read(postId);
   expect(restoredPost?.comments).toEqual([commentId]);
   expect(client.store.getList('comments')).toEqual([commentId]);
+});
+
+test(`'readView' resolves nested selections without view spreads`, () => {
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ type: 'Comment' }, { type: 'User' }],
+  });
+
+  const authorId = toEntityId('User', 'user-1');
+  client.store.merge(authorId, {
+    __typename: 'User',
+    id: 'user-1',
+    name: 'Banana Appleseed',
+  });
+
+  const commentId = toEntityId('Comment', 'comment-1');
+  client.store.merge(
+    commentId,
+    {
+      __typename: 'Comment',
+      author: authorId,
+      content: 'Apple',
+      id: 'comment-1',
+    },
+    '*',
+  );
+
+  const CommentView = view<Comment>()({
+    author: {
+      id: true,
+      name: true,
+    },
+    content: true,
+    id: true,
+  });
+
+  const commentRef = client.ref<Comment>('Comment', 'comment-1', CommentView);
+
+  const result = unwrap(
+    client.readView<
+      Comment,
+      SelectionOf<typeof CommentView>,
+      typeof CommentView
+    >(CommentView, commentRef),
+  );
+
+  expect(result.id).toBe('comment-1');
+  expect(result.content).toBe('Apple');
+  expect(result.author).toEqual({
+    __typename: 'User',
+    id: 'user-1',
+    name: 'Banana Appleseed',
+  });
+});
+
+test(`optimistic updates without identifiers are ignored`, async () => {
+  type CreatePostInput = { content: string };
+  type CreatePostResult = { content: string; id: string };
+
+  const mutate = vi
+    .fn()
+    .mockResolvedValue({ content: 'Published', id: 'post-1' });
+
+  const client = createClient({
+    mutations: {
+      createPost: mutation<Post, CreatePostInput, CreatePostResult>('Post'),
+    },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const writeSpy = vi.spyOn(client as any, 'write');
+
+  const result = await client.mutations.createPost({
+    input: { content: 'Draft' },
+    optimisticUpdate: { content: 'Draft' },
+  });
+
+  expect(result).toEqual({ content: 'Published', id: 'post-1' });
+  expect(mutate).toHaveBeenCalledTimes(1);
+  expect(writeSpy).toHaveBeenCalledTimes(1);
+  expect(writeSpy.mock.calls[0][1]).toEqual({
+    content: 'Published',
+    id: 'post-1',
+  });
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({
+    content: 'Published',
+    id: 'post-1',
+  });
+});
+
+test(`'readView' fetches missing fields using the selection`, async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  type Post = {
+    __typename: 'Post';
+    author: User;
+    content: string;
+    id: string;
+  };
+
+  const fetchById = vi.fn(async () => [
+    {
+      __typename: 'Post',
+      author: { __typename: 'User', id: 'user-1', name: 'Alice' },
+      content: 'Kiwi',
+      id: 'post-1',
+    },
+  ]);
+
+  const client = createClient({
+    transport: {
+      fetchById,
+    },
+    types: [
+      { fields: { author: { type: 'User' } }, type: 'Post' },
+      { type: 'User' },
+    ],
+  });
+
+  const postEntityId = toEntityId('Post', 'post-1');
+  client.store.merge(postEntityId, { __typename: 'Post', id: 'post-1' }, [
+    'id',
+  ]);
+
+  const PostView = view<Post>()({
+    author: {
+      id: true,
+      name: true,
+    },
+    content: true,
+    id: true,
+  });
+
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+
+  const thenable = client.readView<
+    Post,
+    SelectionOf<typeof PostView>,
+    typeof PostView
+  >(PostView, postRef);
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['author.id', 'author.name', 'content']),
+  );
+
+  const post = await thenable;
+  expect(post.content).toBe('Kiwi');
+});
+
+test(`'request' groups ids by selection before fetching`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi.fn(async () => [
+    {
+      __typename: 'Post',
+      content: 'Hello',
+      id: 'post-1',
+    },
+  ]);
+
+  const client = createClient({
+    transport: {
+      fetchById,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postEntityId = toEntityId('Post', 'post-1');
+  client.store.merge(postEntityId, { __typename: 'Post', id: 'post-1' }, [
+    'id',
+  ]);
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  await client.request({
+    post: {
+      ids: ['post-1'],
+      root: PostView,
+      type: 'Post',
+    },
+  });
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['content', 'id']),
+  );
+});
+
+test(`'request' fetches view selections via the transport`, async () => {
+  const fetchById = vi
+    .fn()
+    .mockResolvedValue([
+      { __typename: 'Post', content: 'Apple Banana', id: 'post-1' },
+    ]);
+
+  const client = createClient({
+    transport: {
+      fetchById,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      id: 'post-1',
+    },
+    ['id'],
+  );
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  await client.request({
+    post: {
+      ids: ['post-1'],
+      root: PostView,
+      type: 'Post',
+    },
+  });
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['content', 'id']),
+  );
+});
+
+test(`'request' fetches list selections via the transport`, async () => {
+  const fetchList = vi.fn().mockResolvedValue({
+    edges: [
+      {
+        cursor: 'cursor-1',
+        node: { __typename: 'Comment', content: 'First', id: 'comment-1' },
+      },
+    ],
+    pageInfo: { hasNextPage: false },
+  });
+
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ type: 'Comment' }],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+
+  await client.request({
+    comments: {
+      args: { first: 1 },
+      root: CommentView,
+      type: 'Comment',
+    },
+  });
+
+  expect(fetchList).toHaveBeenCalledTimes(1);
+  expect(fetchList).toHaveBeenCalledWith(
+    'comments',
+    { first: 1 },
+    new Set(['content', 'id']),
+  );
 });
