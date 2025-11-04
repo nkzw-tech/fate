@@ -8,6 +8,7 @@ import {
   markAll,
   union,
 } from './mask.ts';
+import { getNodeRefId, isNodeRef } from './node-ref.ts';
 import type { EntityId, FateRecord, Snapshot } from './types.ts';
 
 export type Subscriptions = Map<EntityId, Set<() => void>>;
@@ -15,6 +16,10 @@ export type Subscriptions = Map<EntityId, Set<() => void>>;
 const cloneValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(cloneValue);
+  }
+
+  if (isNodeRef(value)) {
+    return value;
   }
 
   if (value != null && typeof value === 'object') {
@@ -168,7 +173,7 @@ export class Store {
       for (const [key, value] of Object.entries(record)) {
         if (Array.isArray(value)) {
           const filtered = value.filter(
-            (item) => !(typeof item === 'string' && item === targetId),
+            (item) => !(isNodeRef(item) && getNodeRefId(item) === targetId),
           );
 
           if (filtered.length !== value.length) {
@@ -176,7 +181,7 @@ export class Store {
             paths.add(key);
             next[key] = filtered;
           }
-        } else if (typeof value === 'string' && value === targetId) {
+        } else if (isNodeRef(value) && getNodeRefId(value) === targetId) {
           updated = true;
           paths.add(key);
           next[key] = null;

@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
+import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
 import { toEntityId } from '../ref.ts';
 import {
   FateThenable,
@@ -37,6 +38,17 @@ const unwrap = <T>(value: FateThenable<T>): T => {
 
   throw new Error(`fate: Cannot unwrap a pending 'FateThenable'.`);
 };
+
+const nodeRefsToIds = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => (isNodeRef(item) ? getNodeRefId(item) : item));
+};
+
+const createNodeRefs = (ids: Array<string>) =>
+  ids.map((id) => createNodeRef(id));
 
 test(`'readView' returns the selected fields`, () => {
   const client = createClient({
@@ -130,7 +142,7 @@ test(`'readView' returns view refs when views are used`, () => {
     postId,
     {
       __typename: 'Post',
-      comments: [commentAId, commentBId],
+      comments: createNodeRefs([commentAId, commentBId]),
       id: 'post-1',
     },
     '*',
@@ -209,7 +221,7 @@ test(`'readView' returns view refs for list selections`, () => {
     postId,
     {
       __typename: 'Post',
-      comments: [commentId],
+      comments: createNodeRefs([commentId]),
       id: 'post-1',
     },
     '*',
@@ -279,7 +291,7 @@ test(`'readView' returns only directly selected fields when view spreads are use
     postId,
     {
       __typename: 'Post',
-      comments: [commentId],
+      comments: createNodeRefs([commentId]),
       id: 'post-1',
     },
     '*',
@@ -352,7 +364,7 @@ test(`'readView' resolves object references and their views`, () => {
     commentAId,
     {
       __typename: 'Comment',
-      author: authorId,
+      author: createNodeRef(authorId),
       content: 'Apple',
       id: 'comment-1',
     },
@@ -500,7 +512,7 @@ test(`'deleteRecord' removes an entity and cleans references`, () => {
     postId,
     {
       __typename: 'Post',
-      comments: [commentId],
+      comments: createNodeRefs([commentId]),
       content: 'Post content',
       id: 'post-1',
     },
@@ -532,7 +544,7 @@ test(`'deleteRecord' removes an entity and cleans references`, () => {
   expect(restoredComment).toMatchObject({ id: 'comment-1' });
 
   const restoredPost = client.store.read(postId);
-  expect(restoredPost?.comments).toEqual([commentId]);
+  expect(nodeRefsToIds(restoredPost?.comments)).toEqual([commentId]);
   expect(client.store.getList('comments')).toEqual([commentId]);
 });
 
@@ -558,7 +570,7 @@ test(`'readView' resolves nested selections without view spreads`, () => {
     commentId,
     {
       __typename: 'Comment',
-      author: authorId,
+      author: createNodeRef(authorId),
       content: 'Apple',
       id: 'comment-1',
     },

@@ -5,6 +5,7 @@ export type EntityId = string;
 
 export const ViewKind = '__fate__view';
 export const ViewsTag = Symbol('__fate__views');
+export const NodeRefTag = Symbol('__fate__node-ref');
 
 export declare const __FateEntityBrand: unique symbol;
 export declare const __FateSelectionBrand: unique symbol;

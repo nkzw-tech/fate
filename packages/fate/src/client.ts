@@ -1,5 +1,6 @@
 import ViewDataCache from './cache.ts';
 import { MutationFunction, wrapMutation } from './mutation.ts';
+import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { selectionFromView } from './selection.ts';
 import { Store } from './store.ts';
@@ -447,7 +448,7 @@ export class FateClient<
           typeof relationDescriptor === 'object' &&
           'type' in relationDescriptor
         ) {
-          if (value && typeof value === 'object') {
+          if (value && typeof value === 'object' && !isNodeRef(value)) {
             const childType = relationDescriptor.type;
             const childConfig = this.types.get(childType);
             if (!childConfig) {
@@ -456,7 +457,7 @@ export class FateClient<
               );
             }
             const childId = toEntityId(childType, childConfig.getId(value));
-            result[key] = childId;
+            result[key] = createNodeRef(childId);
 
             const childPaths = select
               ? new Set(
@@ -488,21 +489,37 @@ export class FateClient<
                 `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
               );
             }
-            const ids = value.map((item: FateRecord) => {
-              const childId = toEntityId(childType, childConfig.getId(item));
-              const childPaths = select
-                ? new Set(
-                    [...select]
-                      .filter((part) => part.startsWith(`${key}.`))
-                      .map((part) => part.slice(key.length + 1)),
-                  )
-                : undefined;
+            const refs = value.map((item) => {
+              if (isNodeRef(item)) {
+                return item;
+              }
 
-              this.normalizeEntity(childType, item, childPaths, snapshots);
+              if (item && typeof item === 'object') {
+                const childId = toEntityId(
+                  childType,
+                  childConfig.getId(item as FateRecord),
+                );
+                const childPaths = select
+                  ? new Set(
+                      [...select]
+                        .filter((part) => part.startsWith(`${key}.`))
+                        .map((part) => part.slice(key.length + 1)),
+                    )
+                  : undefined;
 
-              return childId;
+                this.normalizeEntity(
+                  childType,
+                  item as FateRecord,
+                  childPaths,
+                  snapshots,
+                );
+
+                return createNodeRef(childId);
+              }
+
+              return item;
             });
-            result[key] = ids;
+            result[key] = refs;
           } else if (value !== undefined) {
             result[key] = value;
           }
@@ -545,21 +562,24 @@ export class FateClient<
       }
 
       const parentRef = record[parent.via];
-      if (typeof parentRef !== 'string') {
+      const parentId = isNodeRef(parentRef) ? getNodeRefId(parentRef) : null;
+      if (!parentId) {
         continue;
       }
-
-      const parentId = parentRef;
       const existing = this.store.read(parentId);
       if (!existing) {
         continue;
       }
 
       const current = Array.isArray(existing[parent.field])
-        ? (existing[parent.field] as Array<EntityId>)
+        ? (existing[parent.field] as Array<unknown>)
         : [];
 
-      if (current.includes(entityId)) {
+      if (
+        current.some(
+          (item) => isNodeRef(item) && getNodeRefId(item) === entityId,
+        )
+      ) {
         continue;
       }
 
@@ -568,9 +588,12 @@ export class FateClient<
       }
 
       this.viewDataCache.delete(parentId);
-      this.store.merge(parentId, { [parent.field]: [...current, entityId] }, [
-        parent.field,
-      ]);
+
+      this.store.merge(
+        parentId,
+        { [parent.field]: [...current, createNodeRef(entityId)] },
+        [parent.field],
+      );
     }
   }
 
@@ -615,7 +638,17 @@ export class FateClient<
               typeof selectionKind.edges === 'object'
             ) {
               const selection = selectionKind.edges as FateRecord;
-              const edges = value.map((entityId: string) => {
+              const edges = value.map((item) => {
+                const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
+
+                if (!entityId) {
+                  const edge: FateRecord = { node: null };
+                  if (selection.cursor === true) {
+                    edge.cursor = undefined;
+                  }
+                  return edge;
+                }
+
                 const record = this.store.read(entityId);
                 const { id, type } = parseEntityId(entityId);
                 const node = { __typename: type, id };
@@ -639,7 +672,13 @@ export class FateClient<
               }
               target[key] = connection;
             } else {
-              target[key] = value.map((entityId: string) => {
+              target[key] = value.map((item) => {
+                const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
+
+                if (!entityId) {
+                  return item;
+                }
+
                 const record = this.store.read(entityId);
                 const { id, type } = parseEntityId(entityId);
 
@@ -652,9 +691,10 @@ export class FateClient<
                 return null;
               });
             }
-          } else if (typeof value === 'string') {
-            const relatedRecord = this.store.read(value);
-            const { id, type } = parseEntityId(value);
+          } else if (isNodeRef(value)) {
+            const entityId = getNodeRefId(value);
+            const relatedRecord = this.store.read(entityId);
+            const { id, type } = parseEntityId(entityId);
             const targetRecord = target[key] as FateRecord;
 
             targetRecord.id = id;
