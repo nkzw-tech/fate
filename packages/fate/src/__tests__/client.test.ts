@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { expect, expectTypeOf, test, vi } from 'vitest';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
@@ -90,6 +90,14 @@ test(`'readView' returns the selected fields`, () => {
       postRef,
     ),
   );
+
+  expectTypeOf(result).toEqualTypeOf<
+    Readonly<{
+      content: string;
+      id: string;
+      [ViewsTag]: Set<string>;
+    }>
+  >();
 
   expect(result).toEqual({
     content: 'Apple Banana',

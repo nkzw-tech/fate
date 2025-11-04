@@ -135,12 +135,11 @@ type HasViewTag<S> = S extends { [K in ViewTag]?: infer P }
     : false
   : false;
 
-export type ViewData<
-  T extends Entity,
-  S extends Selection<T>,
-> = (S extends Selection<T> ? Mask<T, S> : T) & {
-  readonly [ViewsTag]: Set<string>;
-};
+export type ViewData<T extends Entity, S extends Selection<T>> = Readonly<
+  (S extends Selection<T> ? Mask<T, S> : T) & {
+    [ViewsTag]: Set<string>;
+  }
+>;
 
 type ConnectionMask<T extends Entity, S> = S extends {
   edges: infer EdgeSelection;
