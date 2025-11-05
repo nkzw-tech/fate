@@ -850,3 +850,97 @@ test(`'request' fetches list selections via the transport`, async () => {
     new Set(['content', 'id']),
   );
 });
+
+test(`'readView' returns list metadata when available`, () => {
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [
+      {
+        fields: { comments: { listOf: 'Comment' } },
+        type: 'Post',
+      },
+      { type: 'Comment' },
+    ],
+  });
+
+  const commentAId = toEntityId('Comment', 'comment-1');
+  client.store.merge(
+    commentAId,
+    {
+      __typename: 'Comment',
+      author: null,
+      content: 'Apple',
+      id: 'comment-1',
+    },
+    '*',
+  );
+
+  const commentBId = toEntityId('Comment', 'comment-2');
+  client.store.merge(
+    commentBId,
+    {
+      __typename: 'Comment',
+      author: null,
+      content: 'Banana',
+      id: 'comment-2',
+    },
+    '*',
+  );
+
+  const commentIds = [commentAId, commentBId];
+  client.store.setList('Post:post-1:comments', commentIds, {
+    cursors: ['cursor-a', 'cursor-b'],
+    pageInfo: { endCursor: 'cursor-b', hasNextPage: true },
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      comments: commentIds,
+      id: 'post-1',
+    },
+    '*',
+  );
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+
+  const PostView = view<Post>()({
+    comments: {
+      edges: {
+        cursor: true,
+        node: CommentView,
+      },
+      pageInfo: {
+        endCursor: true,
+        hasNextPage: true,
+      },
+    },
+    id: true,
+  });
+
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+
+  const result = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
+  );
+
+  expect(result.comments?.edges).toHaveLength(2);
+  expect(result.comments?.edges?.[0]?.cursor).toBe('cursor-a');
+  expect(result.comments?.edges?.[1]?.cursor).toBe('cursor-b');
+  expect(result.comments?.pageInfo).toEqual({
+    endCursor: 'cursor-b',
+    hasNextPage: true,
+  });
+});

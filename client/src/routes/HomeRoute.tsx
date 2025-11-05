@@ -8,7 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import {
-  FormEvent,
+  KeyboardEvent,
   Suspense,
   useCallback,
   useState,
@@ -172,7 +172,7 @@ const Post = ({
     });
   }, [post.id, post.likes]);
 
-  const handleAddComment = async (event: FormEvent<HTMLFormElement>) => {
+  const handleAddComment = async (event: { preventDefault: () => void }) => {
     event.preventDefault();
 
     const content = commentText.trim();
@@ -195,6 +195,12 @@ const Post = ({
 
       setCommentText('');
     });
+  };
+
+  const maybeSubmitComment = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      handleAddComment(event);
+    }
   };
 
   const isCommentDisabled =
@@ -276,6 +282,7 @@ const Post = ({
               className="bg-background text-foreground min-h-20 w-full rounded-md border border-gray-200 p-3 text-sm placeholder-gray-500 transition outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:border-neutral-800 dark:focus:border-gray-400 dark:focus:ring-gray-900"
               id={`comment-${post.id}`}
               onChange={(event) => setCommentText(event.target.value)}
+              onKeyDown={maybeSubmitComment}
               placeholder={
                 user?.name
                   ? `Share your thoughts, ${user.name}!`

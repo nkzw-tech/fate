@@ -9,7 +9,16 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
-import type { EntityId, FateRecord, Snapshot } from './types.ts';
+import type { EntityId, FateRecord, PageInfo, Snapshot } from './types.ts';
+
+type ListConnectionState = {
+  cursors?: Array<string | undefined>;
+  pageInfo?: PageInfo;
+};
+
+type StoredList = {
+  ids: Array<EntityId>;
+} & ListConnectionState;
 
 export type Subscriptions = Map<EntityId, Set<() => void>>;
 
@@ -35,7 +44,11 @@ const cloneValue = (value: unknown): unknown => {
 
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
-  private lists = new Map<string, Array<EntityId>>();
+  private lists = new Map<string, StoredList>();
+  private listStateByArray = new WeakMap<
+    Array<EntityId>,
+    ListConnectionState
+  >();
   private records = new Map<EntityId, FateRecord>();
   private subscriptions: Subscriptions = new Map();
 
@@ -128,20 +141,62 @@ export class Store {
   }
 
   getList(key: string): Array<EntityId> | undefined {
-    return this.lists.get(key);
+    return this.lists.get(key)?.ids;
   }
 
-  setList(key: string, ids: Array<EntityId>) {
-    this.lists.set(key, ids);
+  getListStateFor(ids: Array<EntityId>): ListConnectionState | undefined {
+    const state = this.listStateByArray.get(ids);
+    if (!state) {
+      return undefined;
+    }
+
+    return {
+      cursors: state.cursors ? state.cursors.slice() : undefined,
+      pageInfo: state.pageInfo ? { ...state.pageInfo } : undefined,
+    };
   }
 
-  restoreList(key: string, ids?: Array<EntityId>) {
-    if (ids === undefined) {
+  setList(key: string, ids: Array<EntityId>, state?: ListConnectionState) {
+    const previous = this.lists.get(key);
+    if (previous) {
+      this.listStateByArray.delete(previous.ids);
+    }
+
+    const stored: StoredList = {
+      cursors: state?.cursors ? state.cursors.slice() : undefined,
+      ids,
+      pageInfo: state?.pageInfo ? { ...state.pageInfo } : undefined,
+    };
+
+    this.lists.set(key, stored);
+
+    if (stored.cursors || stored.pageInfo) {
+      this.listStateByArray.set(ids, {
+        cursors: stored.cursors ? stored.cursors.slice() : undefined,
+        pageInfo: stored.pageInfo ? { ...stored.pageInfo } : undefined,
+      });
+    }
+  }
+
+  restoreList(key: string, list?: Array<EntityId> | StoredList) {
+    if (list === undefined) {
+      const existing = this.lists.get(key);
+      if (existing) {
+        this.listStateByArray.delete(existing.ids);
+      }
       this.lists.delete(key);
       return;
     }
 
-    this.lists.set(key, ids);
+    if (Array.isArray(list)) {
+      this.setList(key, list);
+      return;
+    }
+
+    this.setList(key, list.ids.slice(), {
+      cursors: list.cursors ? list.cursors.slice() : undefined,
+      pageInfo: list.pageInfo ? { ...list.pageInfo } : undefined,
+    });
   }
 
   removeReferencesTo(
@@ -152,7 +207,8 @@ export class Store {
   ) {
     const ids = new Set<EntityId>();
 
-    for (const [key, ids] of this.lists.entries()) {
+    for (const [key, list] of this.lists.entries()) {
+      const { ids } = list;
       if (!ids.includes(targetId)) {
         continue;
       }
@@ -161,8 +217,30 @@ export class Store {
         listSnapshots.set(key, ids.slice());
       }
 
-      const filtered = ids.filter((id) => id !== targetId);
-      this.lists.set(key, filtered);
+      const entityIds: Array<EntityId> = [];
+      const cursors = list.cursors
+        ? ([] as Array<string | undefined>)
+        : undefined;
+
+      for (let index = 0; index < ids.length; index++) {
+        const id = ids[index];
+        if (id === targetId) {
+          continue;
+        }
+
+        entityIds.push(id);
+        if (cursors) {
+          const cursor = list.cursors?.[index];
+          if (cursor) {
+            cursors.push(cursor);
+          }
+        }
+      }
+
+      this.setList(key, entityIds, {
+        cursors,
+        pageInfo: list.pageInfo,
+      });
     }
 
     for (const [id, record] of this.records.entries()) {

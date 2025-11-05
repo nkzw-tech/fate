@@ -1,5 +1,6 @@
 #!/usr/bin/env NODE_ENV=development node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env
 import { styleText } from 'node:util';
+import randomEntry from '@nkzw/core/randomEntry.js';
 import { auth } from '../lib/auth.tsx';
 import { PrismaClient } from './prisma-client/client.ts';
 
@@ -8,237 +9,407 @@ const prisma = new PrismaClient();
 const users = new Set([
   {
     data: {
-      username: 'admin',
+      username: 'christoph',
     },
-    email: 'admin@nakazawa.dev',
-    name: 'Admin',
-    password: 'not-a-secure-password',
+    email: 'christoph@nakazawa.dev',
+    name: 'Christoph',
+    password: 'launch-day-password',
     role: 'admin',
   },
   {
     data: {
-      username: 'first-user',
+      username: 'maya-lopez',
     },
-    email: 'first-user@nakazawa.dev',
-    name: 'First User',
-    password: 'not-a-secure-password-either',
+    email: 'maya@nakazawa.dev',
+    name: 'Maya Lopez',
+    password: 'password-maya',
+  },
+  {
+    data: {
+      username: 'sam-hanlon',
+    },
+    email: 'sam@nakazawa.dev',
+    name: 'Sam Hanlon',
+    password: 'password-sam',
+  },
+  {
+    data: {
+      username: 'mateo-silva',
+    },
+    email: 'mateo@nakazawa.dev',
+    name: 'Mateo Silva',
+    password: 'password-mateo',
+  },
+  {
+    data: {
+      username: 'max-parker',
+    },
+    email: 'max@nakazawa.dev',
+    name: 'Max Parker',
+    password: 'password-max',
+  },
+  {
+    data: {
+      username: 'riku-yamamoto',
+    },
+    email: 'riku@nakazawa.dev',
+    name: 'Riku Yamamoto',
+    password: 'password-riku',
+  },
+  {
+    data: {
+      username: 'amina-farah',
+    },
+    email: 'amina@nakazawa.dev',
+    name: 'Amina Farah',
+    password: 'password-amina',
+  },
+  {
+    data: {
+      username: 'jonas-becker',
+    },
+    email: 'jonas@nakazawa.dev',
+    name: 'Jonas Becker',
+    password: 'password-jonas',
+  },
+  {
+    data: {
+      username: 'evelyn-chen',
+    },
+    email: 'evelyn@nakazawa.dev',
+    name: 'Evelyn Chen',
+    password: 'password-evelyn',
+  },
+  {
+    data: {
+      username: 'diego-morales',
+    },
+    email: 'diego@nakazawa.dev',
+    name: 'Diego Morales',
+    password: 'password-diego',
+  },
+  {
+    data: {
+      username: 'harriet-osei',
+    },
+    email: 'harriet@nakazawa.dev',
+    name: 'Harriet Osei',
+    password: 'password-harriet',
   },
 ] as const);
 
 const categories = [
   {
-    description:
-      'Research notes and reflections that influenced the shape of Fate.',
-    name: 'Product Insights',
+    description: 'Day-to-day notes from shipping Fate across web and server.',
+    name: 'Build Diaries',
   },
   {
     description:
-      'Implementation stories from the engineering team building Fate.',
-    name: 'Engineering Logs',
-  },
-  {
-    description: 'Community highlights, experiments, and ways to participate.',
-    name: 'Community Spotlight',
+      'Deep dives into the normalized store, coverage masks, and cache math.',
+    name: 'Cache Mechanics',
   },
   {
     description:
-      'Deep dives into architecture decisions and technical trade-offs.',
-    name: 'Architecture Field Notes',
+      'Guides for the React hooks, request planner, and transport adapters.',
+    name: 'API Surface',
+  },
+  {
+    description:
+      'Stories and feedback from early design partners running Fate in anger.',
+    name: 'Community Dispatches',
   },
 ] as const;
 
 const tags = [
   {
-    description: 'Prisma schema design tips and patterns.',
-    name: 'prisma',
+    description: 'Coverage masks, merge strategies, and cache ergonomics.',
+    name: 'normalized-cache',
   },
   {
-    description: 'Working with tRPC routers and advanced usage.',
-    name: 'trpc',
+    description: 'Tips for composing Fate views and request plans.',
+    name: 'view-dsl',
   },
   {
-    description: 'Progress updates about the Fate data layer.',
-    name: 'fate',
+    description: 'React Suspense patterns, server preloading, and streaming.',
+    name: 'suspense',
   },
   {
-    description: 'Stories from the community adopting the stack.',
+    description: 'Optimistic responses, rollback flows, and mutation queues.',
+    name: 'optimistic',
+  },
+  {
+    description: 'Cursor math, pagination helpers, and list management.',
+    name: 'pagination',
+  },
+  {
+    description: 'Compiler artifacts, generated types, and DX automation.',
+    name: 'codegen',
+  },
+  {
+    description: 'Dispatches from design partners integrating Fate.',
     name: 'community',
-  },
-  {
-    description: 'Designing delightful developer experiences.',
-    name: 'dx',
-  },
-  {
-    description: 'Observability, tracing, and debugging learnings.',
-    name: 'observability',
   },
 ] as const;
 
 const posts = [
   {
-    authorEmail: 'admin@nakazawa.dev',
-    category: 'Product Insights',
+    authorEmail: 'christoph@nakazawa.dev',
+    category: 'Cache Mechanics',
     content:
-      'Exploring how composable data fetching primitives can simplify complex product architectures and speed up UI development.',
+      'A quick walk through the new store.merge snapshots and why coverage masks keep subviews honest. Includes an example of diffPaths when React refetches nested views.',
+    likes: 48,
+    tags: ['normalized-cache', 'suspense'],
+    title: 'Tracing normalized cache merges',
+  },
+  {
+    authorEmail: 'sam@nakazawa.dev',
+    category: 'Build Diaries',
+    content:
+      'Documenting how we compose comment fragments with view() and share selection payloads across modules. The post includes screenshots from the generated request artifacts.',
+    likes: 31,
+    tags: ['view-dsl', 'codegen'],
+    title: 'View DSL for nested comment threads',
+  },
+  {
+    authorEmail: 'mateo@nakazawa.dev',
+    category: 'API Surface',
+    content:
+      'Notes from wiring useRequest into the dashboard and why we rely on throw-based suspense for hydration. I also cover the unexpected benefits of keeping httpBatchLink enabled.',
+    likes: 36,
+    tags: ['suspense', 'normalized-cache'],
+    title: 'Suspense-first request API in practice',
+  },
+  {
+    authorEmail: 'max@nakazawa.dev',
+    category: 'Build Diaries',
+    content:
+      'A field report on wiring optimisticResponse helpers and the rollback snapshots in store.removeReferencesTo. Includes failure cases we hit while testing deletions.',
+    likes: 29,
+    tags: ['optimistic', 'normalized-cache'],
+    title: 'Optimistic mutations without flinching',
+  },
+  {
+    authorEmail: 'riku@nakazawa.dev',
+    category: 'API Surface',
+    content:
+      'We tried preloading request plans inside the RSC boundary to slash TTFB. Here are the serialization tricks and the hydrate() checklist that actually worked.',
+    likes: 22,
+    tags: ['suspense', 'view-dsl'],
+    title: 'Server preloading experiments',
+  },
+  {
+    authorEmail: 'amina@nakazawa.dev',
+    category: 'Community Dispatches',
+    content:
+      'Highlights from our office hours with teams leaving query-key land. The transcript covers how Fate handles invalidation math and what still lives on the roadmap.',
+    likes: 41,
+    tags: ['community', 'normalized-cache'],
+    title: 'Community Q&A: migrating from TanStack Query',
+  },
+  {
+    authorEmail: 'jonas@nakazawa.dev',
+    category: 'Cache Mechanics',
+    content:
+      'Sketching the connection helper we are prototyping atop the list APIs. Expect cursor math, temp ids, and a candid look at what still feels clumsy.',
     likes: 18,
-    tags: ['fate', 'prisma', 'dx'],
-    title: 'Introducing Fate: typed data fetching experiments',
+    tags: ['pagination', 'view-dsl'],
+    title: 'Pagination helper sketch',
   },
   {
-    authorEmail: 'first-user@nakazawa.dev',
-    category: 'Community Spotlight',
+    authorEmail: 'evelyn@nakazawa.dev',
+    category: 'Build Diaries',
     content:
-      'Sharing impressions from the first Fate community build sprint, including tooling we shipped together and open threads to join next.',
-    likes: 11,
-    tags: ['community', 'fate'],
-    title: 'Community build sprint recap',
+      'Celebrating the first end-to-end run of the codegen pipeline that emits view tags and route plans. Also sharing how we annotate mutations to keep optimistic types strict.',
+    likes: 25,
+    tags: ['codegen', 'optimistic'],
+    title: 'Codegen milestones for launch',
   },
   {
-    authorEmail: 'admin@nakazawa.dev',
-    category: 'Architecture Field Notes',
+    authorEmail: 'maya@nakazawa.dev',
+    category: 'Community Dispatches',
     content:
-      'A quick peek at how TRPC and Prisma are working together behind the scenes. Includes debugging tricks that saved us hours this week.',
-    likes: 9,
-    tags: ['trpc', 'prisma'],
-    title: 'Under the hood of our TRPC setup',
+      'A short checklist we send to new teams trying Fate for the first time. It links to example views, transport configs, and the metrics we watch during their first week.',
+    likes: 33,
+    tags: ['community', 'view-dsl'],
+    title: 'Design partner onboarding checklist',
   },
   {
-    authorEmail: 'first-user@nakazawa.dev',
-    category: 'Engineering Logs',
+    authorEmail: 'diego@nakazawa.dev',
+    category: 'API Surface',
     content:
-      'Documenting the edge cases we hit when testing optimistic UI updates for reactions and threaded conversations and how we resolved them.',
-    likes: 7,
-    tags: ['dx', 'fate'],
-    title: 'Taming optimistic updates',
+      'How we instrumented the fallback transport to keep Suspense boundaries happy during error bursts. Includes notes on retry semantics from the transport.ts implementation.',
+    likes: 19,
+    tags: ['suspense', 'codegen'],
+    title: 'Transport adapters and fallbacks',
   },
   {
-    authorEmail: 'admin@nakazawa.dev',
-    category: 'Product Insights',
+    authorEmail: 'harriet@nakazawa.dev',
+    category: 'Community Dispatches',
     content:
-      'Sketching a roadmap for where the Fate data layer should go next and which integrations look most valuable for design partners.',
-    likes: 21,
-    tags: ['fate', 'community'],
-    title: 'What’s next for the Fate data layer',
-  },
-  {
-    authorEmail: 'admin@nakazawa.dev',
-    category: 'Architecture Field Notes',
-    content:
-      'Instrumenting the stack for richer visibility: what we log, trace, and measure before every launch.',
-    likes: 5,
-    tags: ['observability', 'trpc'],
-    title: 'Debug diaries: logging Fate in production',
+      'Summarizing the dashboards we rely on during launch events and how optimistic mutations feed those counters. Closing with a template the community can fork.',
+    likes: 17,
+    tags: ['community', 'optimistic'],
+    title: 'Event telemetry for live launches',
   },
 ] as const;
 
 const comments = [
-  'Love this direction',
-  'Curious how this scales',
-  'Would enjoy a deep dive',
-  'This sparked new ideas',
-  'Following along with excitement',
-  'Appreciate the transparency',
-  'Already trying this out',
-  'The examples are super helpful',
-  'Keen to see performance numbers',
-  'Thanks for sharing the learnings',
-  'This could be a game-changer',
-  'Looking forward to more updates',
-  'How does this compare to alternatives?',
-  'The community will benefit from this',
-  'Great to see innovation here',
-  'This aligns with my experiences',
-  'Eager to test this in production',
-  'The caching strategy is intriguing',
-  'Can you share more code samples?',
-  'This post made my day',
-  'Valuable insights as always',
-  'Helpful for my current project',
-  'The architecture looks solid',
-  'Impressed by the simplicity',
-  'This clarifies a lot of doubts',
+  'The coverage masks explanation finally clicked for me',
+  'Please share the diffPaths tracing script',
+  'Loving the minimal suspense API example',
+  'The optimistic rollback notes saved our build',
+  'Appreciate the hydrate() checklist',
+  'Our team related to the query-key migration pain',
+  'Cursor math section is exactly what I needed',
+  'Thanks for outlining the codegen milestones',
+  'Excited to try the onboarding checklist with my squad',
+  'Transport retry notes answered a long standing question',
+  'Telemetry template will ship in our control room',
+  'Coverage snapshots sound battle tested now',
+  'The generated artifacts screenshot was clutch',
+  'Suspense batching notes pair nicely with React 19 Actions',
+  'Rollback edge cases were wild to read',
+  'Streaming preloads are on my TODO after this',
+  'Love seeing community quotes in the recap',
+  'Connection helper sketch reminded me of Relay days',
+  'Cannot wait for proper pagination helpers to land',
+  'Generated types for mutations look sharp',
+  'Sharing this checklist with our design partners',
+  'Fallback transport design is a gem',
+  'Telemetry dashboards screenshot gave me ideas',
+  'DiffPaths deep dive deserves its own talk',
+  'Hoisted views reducing chatter is huge',
+  'Optimistic cues lining up with suspense is elegant',
+  'Pagination temp ids strategy makes sense',
+  'Appreciate the candid note about roadmap gaps',
+  'Will your codegen emit zod validators next?',
+  'Preloading experiments inspire confidence for SSR',
 ] as const;
 
 console.log(styleText('bold', '› Seeding database...'));
 
 const projects = [
   {
-    focusAreas: ['Latency', 'DX polish', 'Offline-first flows'],
+    focusAreas: ['Suspense hygiene', 'Server streaming', 'DX testing'],
     metrics: {
-      activeDesignPartners: 8,
-      averageLatencyMs: 112,
-      weeklyFeedbackScore: 4.6,
+      hydrationPassRate: 0.94,
+      syntheticRequestsPerMinute: 420,
     },
-    name: 'Realtime collaboration layer',
-    ownerEmail: 'admin@nakazawa.dev',
-    progress: 62,
-    startDate: new Date('2024-02-12T00:00:00.000Z'),
+    name: 'Suspense hydration harness',
+    ownerEmail: 'christoph@nakazawa.dev',
+    progress: 68,
+    startDate: new Date('2024-02-19T00:00:00.000Z'),
     status: 'IN_PROGRESS',
     summary:
-      'A conflict-friendly transport that keeps optimistic updates in sync across tabs and devices.',
-    targetDate: new Date('2024-09-30T00:00:00.000Z'),
+      'Test rig for verifying request preloads and throw-based suspense boundaries before shipping new views.',
+    targetDate: new Date('2024-10-15T00:00:00.000Z'),
     updates: [
       {
-        authorEmail: 'admin@nakazawa.dev',
+        authorEmail: 'christoph@nakazawa.dev',
         confidence: 4,
         content:
-          'Shipped the offline mutation queue and validated recovery flows with design partners.',
-        mood: 'Energized',
+          'Extended the harness to simulate streaming partial payloads and caught a regression in store.merge coverage.',
+        mood: 'Confident',
       },
       {
-        authorEmail: 'first-user@nakazawa.dev',
-        confidence: 5,
-        content:
-          'Cross-tab awareness API shipped to experiments. Observed 37% faster resolution of merge conflicts.',
-        mood: 'Optimistic',
-      },
-    ],
-  },
-  {
-    focusAreas: ['Schema ergonomics', 'Migration safety', 'Type generation'],
-    metrics: {
-      breakingChangeIncidents: 0,
-      generatorRuntimeMs: 380,
-    },
-    name: 'Prisma schema toolkit',
-    ownerEmail: 'admin@nakazawa.dev',
-    progress: 48,
-    startDate: new Date('2024-03-04T00:00:00.000Z'),
-    status: 'IN_PROGRESS',
-    summary:
-      'Opinionated helpers for modeling complex content graphs without losing flexibility.',
-    targetDate: new Date('2024-08-16T00:00:00.000Z'),
-    updates: [
-      {
-        authorEmail: 'admin@nakazawa.dev',
+        authorEmail: 'mateo@nakazawa.dev',
         confidence: 3,
         content:
-          'Validator library now generates `prismaSelect` paths automatically for nested relations.',
+          'Hooked the harness into the React 19 canary build and confirmed the new scheduler still flushes our batched requests.',
         mood: 'Curious',
       },
     ],
   },
   {
-    focusAreas: ['Observability', 'Alerting', 'Developer education'],
+    focusAreas: ['Type safety', 'Cache introspection', 'Tooling'],
     metrics: {
-      dashboardsPublished: 5,
-      meanTimeToResolutionMinutes: 24,
+      generatedArtifacts: 18,
+      maskDiffBugs: 1,
     },
-    name: 'Experience observability toolkit',
-    ownerEmail: 'first-user@nakazawa.dev',
-    progress: 74,
-    startDate: new Date('2024-01-22T00:00:00.000Z'),
-    status: 'ON_HOLD',
+    name: 'Normalized cache validator',
+    ownerEmail: 'sam@nakazawa.dev',
+    progress: 54,
+    startDate: new Date('2024-03-11T00:00:00.000Z'),
+    status: 'IN_PROGRESS',
     summary:
-      'Playbooks, dashboards, and alert rules that make it painless to support Fate-powered apps.',
-    targetDate: new Date('2024-07-05T00:00:00.000Z'),
+      'CLI to audit coverage masks, diffPaths output, and list snapshots across releases.',
+    targetDate: new Date('2024-09-06T00:00:00.000Z'),
     updates: [
       {
-        authorEmail: 'first-user@nakazawa.dev',
+        authorEmail: 'sam@nakazawa.dev',
+        confidence: 4,
+        content:
+          'Prototype reads store.snapshots and highlights missing fields before runtime fetches fire.',
+        mood: 'Energized',
+      },
+      {
+        authorEmail: 'jonas@nakazawa.dev',
+        confidence: 3,
+        content:
+          'Working on pagination fixtures so the validator understands cursor mutations.',
+        mood: 'Heads-down',
+      },
+    ],
+  },
+  {
+    focusAreas: ['Community onboarding', 'Documentation', 'Instrumentation'],
+    metrics: {
+      averageNps: 4.8,
+      partnersActive: 12,
+    },
+    name: 'Community adoption pilot',
+    ownerEmail: 'amina@nakazawa.dev',
+    progress: 73,
+    startDate: new Date('2024-01-29T00:00:00.000Z'),
+    status: 'IN_PROGRESS',
+    summary:
+      'Support program guiding design partners through view DSL adoption and telemetry setup.',
+    targetDate: new Date('2024-07-26T00:00:00.000Z'),
+    updates: [
+      {
+        authorEmail: 'amina@nakazawa.dev',
+        confidence: 5,
+        content:
+          'Hosted the first migration clinic and documented common TanStack Query exits.',
+        mood: 'Upbeat',
+      },
+      {
+        authorEmail: 'maya@nakazawa.dev',
+        confidence: 4,
+        content:
+          'Published the onboarding checklist plus the new metrics dashboard template.',
+        mood: 'Proud',
+      },
+    ],
+  },
+  {
+    focusAreas: ['Mutation flows', 'Error recovery', 'Action queues'],
+    metrics: {
+      queueLatencyMs: 38,
+      rollbackBugsOpen: 2,
+    },
+    name: 'Optimistic mutation queue',
+    ownerEmail: 'max@nakazawa.dev',
+    progress: 46,
+    startDate: new Date('2024-04-08T00:00:00.000Z'),
+    status: 'IN_PROGRESS',
+    summary:
+      'Queue manager exploring incremental rollbacks versus last-wins semantics for Actions.',
+    targetDate: new Date('2024-11-01T00:00:00.000Z'),
+    updates: [
+      {
+        authorEmail: 'max@nakazawa.dev',
         confidence: 2,
         content:
-          'Paused launch to align on telemetry budget. Drafted new budgets with the infra team.',
-        mood: 'Measured',
+          'Spiked an approach storing snapshots per mutation to compare last-wins and incremental merges.',
+        mood: 'Investigating',
+      },
+      {
+        authorEmail: 'christoph@nakazawa.dev',
+        confidence: 3,
+        content:
+          'Reviewing queue instrumentation results to ensure store.removeReferencesTo stays deterministic.',
+        mood: 'Focused',
       },
     ],
   },
@@ -248,80 +419,92 @@ const events = [
   {
     attendees: [
       {
-        notes:
-          'Wants to share learnings from migrating an analytics dashboard.',
+        notes: "Wants to demo their team's Suspense debugging checklist.",
         status: 'GOING',
-        userEmail: 'first-user@nakazawa.dev',
+        userEmail: 'maya@nakazawa.dev',
+      },
+      {
+        notes: 'Collecting feedback on coverage tooling.',
+        status: 'GOING',
+        userEmail: 'sam@nakazawa.dev',
       },
     ],
-    capacity: 500,
+    capacity: 400,
     description:
-      'A live session with the Fate core team walking through the roadmap, recent experiments, and Q&A from the community.',
-    endAt: new Date('2024-07-18T18:00:00.000Z'),
-    hostEmail: 'admin@nakazawa.dev',
-    livestreamUrl: 'https://community.nakazawa.dev/events/fate-ama',
+      'Launch day AMA with Christoph walking through request planner internals and normalized cache strategies.',
+    endAt: new Date('2024-07-25T18:30:00.000Z'),
+    hostEmail: 'christoph@nakazawa.dev',
+    livestreamUrl: 'https://fate.nakazawa.dev/launch-ama',
     location: 'Discord Stage',
-    name: 'Fate roadmap AMA',
+    name: 'Fate launch AMA',
     resources: {
-      agenda: 'https://community.nakazawa.dev/resources/fate-ama-agenda.pdf',
+      outline: 'https://fate.nakazawa.dev/assets/launch-ama-outline.pdf',
     },
-    startAt: new Date('2024-07-18T17:00:00.000Z'),
-    topics: ['Roadmap', 'Q&A', 'Community'],
+    startAt: new Date('2024-07-25T17:30:00.000Z'),
+    topics: ['Launch', 'Roadmap', 'Community'],
     type: 'AMA',
   },
   {
     attendees: [
       {
-        notes: 'Pairing with teams experimenting with offline-first UX.',
-        status: 'INTERESTED',
-        userEmail: 'admin@nakazawa.dev',
+        notes: 'Sharing pagination prototypes with the group.',
+        status: 'GOING',
+        userEmail: 'jonas@nakazawa.dev',
       },
       {
-        notes: 'Hosting a breakout on schema modeling trade-offs.',
-        status: 'GOING',
-        userEmail: 'first-user@nakazawa.dev',
+        notes: 'Interested in Suspense hydration metrics.',
+        status: 'INTERESTED',
+        userEmail: 'evelyn@nakazawa.dev',
       },
     ],
-    capacity: 120,
+    capacity: 150,
     description:
-      'Hands-on working session to build real-time collaboration flows with Fate and share debugging techniques.',
-    endAt: new Date('2024-08-02T19:00:00.000Z'),
-    hostEmail: 'first-user@nakazawa.dev',
-    livestreamUrl: 'https://community.nakazawa.dev/events/fate-ama',
-    location: 'Hybrid – Brooklyn studio & Zoom',
-    name: 'Community build sprint',
+      'Hands-on workshop building view() fragments, pagination helpers, and optimistic flows in a demo app.',
+    endAt: new Date('2024-08-09T20:00:00.000Z'),
+    hostEmail: 'sam@nakazawa.dev',
+    livestreamUrl: 'https://fate.nakazawa.dev/view-dsl-workshop',
+    location: 'Hybrid — Brooklyn studio & Zoom',
+    name: 'View DSL workshop',
     resources: {
-      checklist:
-        'https://community.nakazawa.dev/resources/build-sprint-checklist',
-      starterRepo: 'https://github.com/nkzw/fate-sprint-starter',
+      checklist: 'https://fate.nakazawa.dev/assets/view-dsl-checklist.md',
+      repo: 'https://github.com/nkzw/fate-workshop',
     },
-    startAt: new Date('2024-08-02T15:00:00.000Z'),
-    topics: ['Workshops', 'Pairing', 'Debugging'],
+    startAt: new Date('2024-08-09T16:00:00.000Z'),
+    topics: ['Views', 'Pagination', 'Codegen'],
     type: 'WORKSHOP',
   },
   {
     attendees: [
       {
-        notes: 'Evaluating integrations for a launch partner.',
+        notes: 'Moderating the data panel for partners.',
         status: 'GOING',
-        userEmail: 'admin@nakazawa.dev',
+        userEmail: 'amina@nakazawa.dev',
+      },
+      {
+        notes: 'Collecting telemetry requirements from adopters.',
+        status: 'GOING',
+        userEmail: 'harriet@nakazawa.dev',
+      },
+      {
+        notes: 'Curious about transport fallbacks for edge environments.',
+        status: 'INTERESTED',
+        userEmail: 'diego@nakazawa.dev',
       },
     ],
-    capacity: 60,
+    capacity: 250,
     description:
-      'A smaller discussion group focused on integrations and extensibility opportunities for Fate.',
-    endAt: new Date('2024-09-12T17:30:00.000Z'),
-    hostEmail: 'admin@nakazawa.dev',
-    livestreamUrl: 'https://community.nakazawa.dev/events/fate-ama',
-    location: 'Virtual – Gather.town',
-    name: 'Integration council meetup',
+      'Monthly community call covering migration stories, telemetry dashboards, and transport hardening tips.',
+    endAt: new Date('2024-09-04T18:30:00.000Z'),
+    hostEmail: 'harriet@nakazawa.dev',
+    livestreamUrl: 'https://fate.nakazawa.dev/community-call',
+    location: 'Virtual — Gather.town',
+    name: 'Community adoption call',
     resources: {
-      discussionGuide:
-        'https://community.nakazawa.dev/resources/integration-council.pdf',
+      notes: 'https://fate.nakazawa.dev/assets/community-call-notes',
     },
-    startAt: new Date('2024-09-12T16:30:00.000Z'),
-    topics: ['Integrations', 'Strategy'],
-    type: 'MEETUP',
+    startAt: new Date('2024-09-04T17:30:00.000Z'),
+    topics: ['Community', 'Telemetry', 'Transport'],
+    type: 'COMMUNITY_CALL',
   },
 ] as const;
 
@@ -407,7 +590,7 @@ try {
   let index = 0;
   for (const comment of comments) {
     const post = createdPosts[index % createdPosts.length];
-    const author = seededUsers[index % seededUsers.length];
+    const author = randomEntry(seededUsers);
 
     await prisma.comment.create({
       data: {

@@ -407,25 +407,26 @@ export class FateClient<
     }
 
     const selection = selectionFromView(item.root, null);
-
-    const result = await this.transport.fetchList(name, item.args, selection);
-    try {
-      const ids: Array<EntityId> = [];
-
-      for (const edge of result.edges) {
-        const id = this.normalizeEntity(
-          item.type,
-          edge.node as FateRecord,
-          selection,
-        );
-        ids.push(id);
-      }
-      this.store.setList(name, ids);
-    } catch (error) {
-      throw new Error(`fate: Error fetching list for key '${name}': ${error}`, {
-        cause: error,
-      });
+    const { edges, pageInfo } = await this.transport.fetchList(
+      name,
+      item.args,
+      selection,
+    );
+    const ids: Array<EntityId> = [];
+    const cursors: Array<string | undefined> = [];
+    for (const edge of edges) {
+      const id = this.normalizeEntity(
+        item.type,
+        edge.node as FateRecord,
+        selection,
+      );
+      ids.push(id);
+      cursors.push(edge.cursor);
     }
+    this.store.setList(name, ids, {
+      cursors,
+      pageInfo,
+    });
   }
 
   private normalizeEntity(
@@ -647,14 +648,16 @@ export class FateClient<
               typeof selectionKind.edges === 'object'
             ) {
               const selection = selectionKind.edges as FateRecord;
-              const edges = value.map((item) => {
+              const listState = this.store.getListStateFor(
+                value as Array<EntityId>,
+              );
+              const edges = value.map((item, index) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
 
                 if (!entityId) {
                   const edge: FateRecord = { node: null };
-                  if (selection.cursor === true) {
-                    edge.cursor = undefined;
-                  }
+                  const cursor = listState?.cursors?.[index];
+                  edge.cursor = cursor !== undefined ? cursor : undefined;
                   return edge;
                 }
 
@@ -678,7 +681,24 @@ export class FateClient<
               });
               const connection: FateRecord = { edges };
               if ('pageInfo' in selectionKind && selectionKind.pageInfo) {
-                connection.pageInfo = undefined;
+                const pageInfoSelection = selectionKind.pageInfo as FateRecord;
+                const storedPageInfo = listState?.pageInfo;
+                if (storedPageInfo) {
+                  const pageInfo: FateRecord = {};
+                  if (pageInfoSelection.endCursor === true) {
+                    if (storedPageInfo.endCursor !== undefined) {
+                      pageInfo.endCursor = storedPageInfo.endCursor;
+                    }
+                  }
+                  if (pageInfoSelection.hasNextPage === true) {
+                    pageInfo.hasNextPage = storedPageInfo.hasNextPage;
+                  }
+                  if (Object.keys(pageInfo).length > 0) {
+                    connection.pageInfo = pageInfo;
+                  }
+                } else {
+                  connection.pageInfo = undefined;
+                }
               }
               target[key] = connection;
             } else {
