@@ -152,3 +152,32 @@ test('infer view refs for list selections', () => {
     ViewRef<'Comment'>
   >();
 });
+
+test('rejects selecting fields not defined on the entity', () => {
+  type Fruit = {
+    __typename: 'Fruit';
+    id: string;
+    name: string;
+  };
+
+  const FruitSummaryView = view<Fruit>()({
+    id: true,
+    name: true,
+  });
+
+  expectTypeOf(FruitSummaryView).toEqualTypeOf<
+    View<
+      Fruit,
+      {
+        id: true;
+        name: true;
+      }
+    >
+  >();
+
+  // @ts-expect-error color is not a field on Fruit.
+  view<Fruit>()({
+    color: true,
+    id: true,
+  });
+});

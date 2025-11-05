@@ -6,9 +6,18 @@ const projectSelect = {
   focusAreas: true,
   id: true,
   metrics: true,
+  name: true,
+  progress: true,
+  startDate: true,
+  status: true,
+  summary: true,
+  targetDate: true,
   updates: {
     select: {
       confidence: true,
+      content: true,
+      createdAt: true,
+      id: true,
       mood: true,
     },
   },

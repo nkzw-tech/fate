@@ -149,20 +149,15 @@ const UserCard = ({ user }: { user: SessionUser | null }) =>
     </Card>
   ) : null;
 
-const AuthorView = view<User>()({
-  id: true,
-  name: true,
-});
-
 const CommentView = view<Comment>()({
-  author: AuthorView,
+  author: UserView,
   content: true,
   id: true,
 });
 
 const Comment = ({ comment: commentRef }: { comment: ViewRef<'Comment'> }) => {
   const comment = useView(CommentView, commentRef);
-  const author = useView(AuthorView, comment.author);
+  const author = useView(UserView, comment.author);
 
   return (
     <div
@@ -203,7 +198,7 @@ const CategorySummaryView = view<Category>()({
 });
 
 const PostView = view<Post>()({
-  author: AuthorView,
+  author: UserView,
   category: CategorySummaryView,
   comments: {
     items: {
@@ -229,7 +224,7 @@ const Post = ({
   user: SessionUser | null;
 }) => {
   const post = useView(PostView, postRef);
-  const author = useView(AuthorView, post.author);
+  const author = useView(UserView, post.author);
   const category = useView(CategorySummaryView, post.category);
   const comments = post.comments?.items ?? [];
   const tags = post.tags?.items ?? [];
@@ -441,7 +436,7 @@ const TagBadge = ({ tag: tagRef }: { tag: ViewRef<'Tag'> }) => {
 };
 
 const CategoryPostView = view<Post>()({
-  author: AuthorView,
+  author: UserView,
   id: true,
   likes: true,
   tags: {
@@ -466,7 +461,7 @@ const CategoryView = view<Category>()({
 
 const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
   const post = useView(CategoryPostView, postRef);
-  const author = useView(AuthorView, post.author);
+  const author = useView(UserView, post.author);
   const tags = post.tags?.items ?? [];
 
   return (
@@ -549,7 +544,7 @@ const CategoryShowcase = ({
 };
 
 const ProjectUpdateView = view<ProjectUpdate>()({
-  author: AuthorView,
+  author: UserView,
   confidence: true,
   content: true,
   createdAt: true,
@@ -562,7 +557,7 @@ const ProjectView = view<Project>()({
   id: true,
   metrics: true,
   name: true,
-  owner: AuthorView,
+  owner: UserView,
   progress: true,
   startDate: true,
   status: true,
@@ -587,7 +582,7 @@ const ProjectUpdateItem = ({
   update: ViewRef<'ProjectUpdate'>;
 }) => {
   const update = useView(ProjectUpdateView, updateRef);
-  const author = useView(AuthorView, update.author);
+  const author = useView(UserView, update.author);
 
   return (
     <VStack gap={4} key={update.id}>
@@ -627,7 +622,7 @@ const ProjectCard = ({
   project: ViewRef<'Project'>;
 }) => {
   const project = useView(ProjectView, projectRef);
-  const owner = useView(AuthorView, project.owner);
+  const owner = useView(UserView, project.owner);
   const updates = project.updates?.items ?? [];
   const focusAreas = project.focusAreas ?? [];
   const metrics = project.metrics;
@@ -749,7 +744,7 @@ const EventAttendeeView = view<EventAttendee>()({
   id: true,
   notes: true,
   status: true,
-  user: AuthorView,
+  user: UserView,
 });
 
 const EventView = view<Event>()({
@@ -762,7 +757,7 @@ const EventView = view<Event>()({
   capacity: true,
   description: true,
   endAt: true,
-  host: AuthorView,
+  host: UserView,
   id: true,
   livestreamUrl: true,
   location: true,
@@ -779,7 +774,7 @@ const EventAttendeeChip = ({
   attendee: ViewRef<'EventAttendee'>;
 }) => {
   const attendee = useView(EventAttendeeView, attendeeRef);
-  const user = useView(AuthorView, attendee.user);
+  const user = useView(UserView, attendee.user);
 
   return (
     <Badge key={attendee.id} variant="outline">
@@ -809,7 +804,7 @@ const formatDateTime = (date: string) =>
 
 const EventCard = ({ event: eventRef }: { event: ViewRef<'Event'> }) => {
   const event = useView(EventView, eventRef);
-  const host = useView(AuthorView, event.host);
+  const host = useView(UserView, event.host);
   const attendees = event.attendees?.items ?? [];
   const topics = event.topics ?? [];
 

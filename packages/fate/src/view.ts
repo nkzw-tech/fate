@@ -1,4 +1,6 @@
 import type {
+  __FateEntityBrand,
+  __FateSelectionBrand,
   Entity,
   Selection,
   View,
@@ -55,14 +57,24 @@ export const getSelectionViewNames = <T extends Entity, S extends Selection<T>>(
 
 let id = 0;
 
+type SelectionInput<T extends Entity, S> =
+  S extends Selection<T>
+    ? Exclude<
+        keyof Omit<S, typeof __FateEntityBrand | typeof __FateSelectionBrand>,
+        keyof Selection<T>
+      > extends never
+      ? S
+      : never
+    : never;
+
 export function view<T extends Entity>() {
   const viewId = id++;
 
-  return <S extends Selection<T>>(select: S): View<T, S> => {
+  return <S>(select: SelectionInput<T, S>): View<T, SelectionInput<T, S>> => {
     const payload = Object.freeze({
-      select,
+      select: select as SelectionInput<T, S>,
       [ViewKind]: true,
-    }) as ViewPayload<T, S>;
+    }) as ViewPayload<T, SelectionInput<T, S>>;
 
     const viewComposition = Object.defineProperty({}, getViewTag(viewId), {
       configurable: false,
@@ -71,6 +83,6 @@ export function view<T extends Entity>() {
       writable: false,
     });
 
-    return Object.freeze(viewComposition) as View<T, S>;
+    return Object.freeze(viewComposition) as View<T, SelectionInput<T, S>>;
   };
 }

@@ -481,8 +481,6 @@ export class FateClient<
               childPaths,
               snapshots,
             );
-          } else if (value !== undefined) {
-            result[key] = value;
           }
         } else if (
           relationDescriptor &&
@@ -528,8 +526,6 @@ export class FateClient<
               return item;
             });
             result[key] = refs;
-          } else if (value !== undefined) {
-            result[key] = value;
           }
         } else {
           result[key] = value;

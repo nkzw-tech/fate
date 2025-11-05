@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { EventFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { prismaSelect } from '../../prisma/prismaSelect.tsx';
 import { procedure, router } from '../init.ts';
 
@@ -11,7 +10,25 @@ const eventSelect = {
       },
     },
   },
+  attendees: {
+    select: {
+      id: true,
+      notes: true,
+      status: true,
+      user: { select: { id: true } },
+    },
+  },
+  capacity: true,
+  description: true,
+  endAt: true,
   id: true,
+  livestreamUrl: true,
+  location: true,
+  name: true,
+  resources: true,
+  startAt: true,
+  topics: true,
+  type: true,
 } as const;
 
 export const eventRouter = router({
@@ -25,9 +42,9 @@ export const eventRouter = router({
     .query(async ({ ctx, input }) => {
       const select = prismaSelect(input.select);
       const events = await ctx.prisma.event.findMany({
-        select,
+        select: { ...select, ...eventSelect },
         where: { id: { in: input.ids } },
-      } as EventFindManyArgs);
+      });
 
       const map = new Map(events.map((category) => [category.id, category]));
       return input.ids.map((id) => map.get(id)).filter(Boolean);

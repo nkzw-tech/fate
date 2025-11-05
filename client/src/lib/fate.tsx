@@ -43,7 +43,7 @@ export type Project = ProjectBase & {
   updates: Array<ProjectUpdate>;
 };
 
-export type EventAttendee = EventBase & {
+export type EventAttendee = EventBase['attendees'][0] & {
   __typename: 'EventAttendee';
   user: User;
 };
@@ -51,6 +51,7 @@ export type EventAttendee = EventBase & {
 export type Event = EventBase & {
   __typename: 'Event';
   attendees: Array<EventAttendee>;
+  attendingCount: number;
   host: User;
 };
 
@@ -64,6 +65,7 @@ export type Post = PostBase & {
 
 export type Category = CategoryBase & {
   __typename: 'Category';
+  postCount: number;
   posts: Array<Post>;
 };
 
