@@ -231,7 +231,7 @@ export class Store {
         entityIds.push(id);
         if (cursors) {
           const cursor = list.cursors?.[index];
-          if (cursor) {
+          if (cursor != null) {
             cursors.push(cursor);
           }
         }

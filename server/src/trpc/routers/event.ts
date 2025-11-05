@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { prismaSelect } from '../../prisma/prismaSelect.tsx';
+import { createConnectionProcedure } from '../../fate-server/connection.ts';
+import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
+import { Event } from '../../prisma/prisma-client/client.ts';
 import { procedure, router } from '../init.ts';
 
 const eventSelect = {
@@ -49,41 +51,30 @@ export const eventRouter = router({
       const map = new Map(events.map((category) => [category.id, category]));
       return input.ids.map((id) => map.get(id)).filter(Boolean);
     }),
-  list: procedure
-    .input(
-      z.object({
-        after: z.string().optional(),
-        first: z.number().int().positive().optional(),
-        select: z.array(z.string()).optional(),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const take = (input.first ?? 3) + 1;
+  list: createConnectionProcedure({
+    defaultSize: 3,
+    map: ({ rows }) =>
+      (rows as Array<Event & { _count: { attendees: number } }>).map(
+        ({ _count, ...event }) => ({
+          ...event,
+          attendingCount: _count.attendees,
+        }),
+      ),
+    query: async ({ ctx, cursor, input, skip, take }) => {
       const select = prismaSelect(input?.select);
-
       delete select?.attendingCount;
 
-      const events = await ctx.prisma.event.findMany({
+      return ctx.prisma.event.findMany({
         orderBy: { startAt: 'asc' },
         select: { ...select, ...eventSelect },
         take,
+        ...(cursor
+          ? ({
+              cursor: { id: cursor },
+              skip,
+            } as const)
+          : null),
       });
-
-      const rows = events.map(({ _count, ...event }) => ({
-        ...event,
-        attendingCount: _count.attendees,
-      }));
-
-      const hasNext = rows.length > (input.first ?? 20);
-      const limited = rows.slice(0, input.first ?? 20);
-      return {
-        items: limited.map((node) => ({ cursor: node.id, node })),
-        pagination: {
-          hasNext,
-          hasPrevious: Boolean(input.after),
-          nextCursor: limited.length ? limited.at(-1)!.id : undefined,
-          previousCursor: input.after,
-        },
-      };
-    }),
+    },
+  }),
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { prismaSelect } from '../../prisma/prismaSelect.tsx';
+import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
 import { procedure, router } from '../init.ts';
 
 export const tagRouter = router({

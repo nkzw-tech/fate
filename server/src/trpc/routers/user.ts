@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
 import { auth } from '../../lib/auth.tsx';
-import { prismaSelect } from '../../prisma/prismaSelect.tsx';
 import { procedure, router } from '../init.ts';
 
 const defaultSelection = {

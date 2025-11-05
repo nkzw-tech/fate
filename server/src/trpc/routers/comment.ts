@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
 import type { CommentFindManyArgs } from '../../prisma/prisma-client/models.ts';
-import { prismaSelect } from '../../prisma/prismaSelect.tsx';
 import { procedure, router } from '../init.ts';
 
 const authorSelection = {

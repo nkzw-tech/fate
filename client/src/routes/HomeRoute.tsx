@@ -161,7 +161,7 @@ const Comment = ({ comment: commentRef }: { comment: ViewRef<'Comment'> }) => {
 
   return (
     <div
-      className="rounded-md border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40"
+      className="group rounded-md border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40"
       key={comment.id}
     >
       <Stack between gap={16}>
@@ -169,6 +169,7 @@ const Comment = ({ comment: commentRef }: { comment: ViewRef<'Comment'> }) => {
           {author?.name ?? 'Anonymous'}
         </p>
         <Button
+          className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
           onClick={async () => {
             await fate.mutations.deleteComment({
               input: { id: comment.id },
@@ -898,12 +899,12 @@ const Events = ({ events }: { events: Array<ViewRef<'Event'>> }) => {
 
 const request = {
   categories: {
-    args: { take: 4 },
+    args: { first: 4 },
     root: CategoryView,
     type: 'Category',
   },
   events: {
-    args: { limit: 3 },
+    args: { first: 3 },
     root: EventView,
     type: 'Event',
   },
@@ -913,7 +914,7 @@ const request = {
     type: 'Post',
   },
   projects: {
-    args: { take: 3 },
+    args: { first: 3 },
     root: ProjectView,
     type: 'Project',
   },

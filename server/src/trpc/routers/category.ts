@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { createConnectionProcedure } from '../../fate-server/connection.ts';
+import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
+import { Category } from '../../prisma/prisma-client/client.ts';
 import { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
-import { prismaSelect } from '../../prisma/prismaSelect.tsx';
 import { procedure, router } from '../init.ts';
 
 const categorySelect = {
@@ -30,41 +32,30 @@ export const categoryRouter = router({
       );
       return input.ids.map((id) => map.get(id)).filter(Boolean);
     }),
-  list: procedure
-    .input(
-      z.object({
-        after: z.string().optional(),
-        first: z.number().int().positive().optional(),
-        select: z.array(z.string()).optional(),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const take = (input.first ?? 20) + 1;
+  list: createConnectionProcedure({
+    map: ({ rows }) =>
+      (rows as Array<Category & { _count: { posts: number } }>).map(
+        ({ _count, ...category }) => ({
+          ...category,
+          postCount: _count.posts,
+        }),
+      ),
+    query: async ({ ctx, cursor, input, skip, take }) => {
       const select = prismaSelect(input?.select);
-
       delete select?.postCount;
 
-      const categories = await ctx.prisma.category.findMany({
+      const findOptions: CategoryFindManyArgs = {
         orderBy: { createdAt: 'asc' },
         select: { ...select, ...categorySelect },
         take,
-      });
-
-      const rows = categories.map(({ _count, ...category }) => ({
-        ...category,
-        postCount: _count.posts,
-      }));
-
-      const hasNext = rows.length > (input.first ?? 20);
-      const limited = rows.slice(0, input.first ?? 20);
-      return {
-        items: limited.map((node) => ({ cursor: node.id, node })),
-        pagination: {
-          hasNext,
-          hasPrevious: Boolean(input.after),
-          nextCursor: limited.length ? limited.at(-1)!.id : undefined,
-          previousCursor: input.after,
-        },
       };
-    }),
+
+      if (cursor) {
+        findOptions.cursor = { id: cursor };
+        findOptions.skip = skip;
+      }
+
+      return await ctx.prisma.category.findMany(findOptions);
+    },
+  }),
 });
