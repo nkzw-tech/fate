@@ -11,7 +11,7 @@ export default function Section({
 }) {
   return (
     <section className="px-4 py-8">
-      <VStack className={cx('container mx-auto max-w-4xl', className)} gap>
+      <VStack className={cx('max-w-8xl container mx-auto', className)} gap>
         {children}
       </VStack>
     </section>

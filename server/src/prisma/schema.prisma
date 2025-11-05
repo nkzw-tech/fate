@@ -19,24 +19,28 @@ datasource db {
 }
 
 model User {
-  id              String    @id @unique @default(uuid(7))
+  id              String          @id @unique @default(uuid(7))
   accounts        Account[]
   banExpires      DateTime?
   banned          Boolean?
   banReason       String?
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime        @default(now())
   displayUsername String?
-  email           String    @unique
+  email           String          @unique
   emailVerified   Boolean
   image           String?
   name            String
   password        String?
-  role            String    @default("user")
+  role            String          @default("user")
   sessions        Session[]
   posts           Post[]
   comments        Comment[]
+  ownedProjects   Project[]       @relation("ProjectOwner")
+  projectUpdates  ProjectUpdate[]
+  hostedEvents    Event[]         @relation("EventHost")
+  eventAttendance EventAttendee[]
   updatedAt       DateTime
-  username        String?   @unique
+  username        String?         @unique
 
   @@index([id(sort: Asc)])
   @@map("user")
@@ -78,15 +82,18 @@ model Account {
 }
 
 model Post {
-  id        String    @id @default(uuid(7))
-  title     String
-  content   String
-  likes     Int       @default(0)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  authorId  String
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  comments  Comment[]
+  id         String    @id @default(uuid(7))
+  title      String
+  content    String
+  likes      Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  authorId   String
+  author     User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments   Comment[]
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags       Tag[]     @relation("PostTags")
 
   @@index([authorId(sort: Asc)])
 }
@@ -102,4 +109,108 @@ model Comment {
 
   @@index([authorId(sort: Asc)])
   @@index([postId(sort: Asc)])
+}
+
+model Category {
+  id          String   @id @default(uuid(7))
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  posts       Post[]
+}
+
+model Tag {
+  id          String   @id @default(uuid(7))
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  posts       Post[]   @relation("PostTags")
+}
+
+enum ProjectStatus {
+  PLANNING
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+}
+
+model Project {
+  id         String          @id @default(uuid(7))
+  name       String
+  summary    String
+  status     ProjectStatus   @default(PLANNING)
+  ownerId    String
+  owner      User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  startDate  DateTime
+  targetDate DateTime?
+  progress   Int             @default(0)
+  focusAreas String[]        @default([])
+  metrics    Json?
+  updates    ProjectUpdate[]
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([ownerId(sort: Asc)])
+}
+
+model ProjectUpdate {
+  id         String   @id @default(uuid(7))
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content    String
+  mood       String?
+  confidence Int?
+  createdAt  DateTime @default(now())
+}
+
+enum RSVPStatus {
+  INVITED
+  GOING
+  INTERESTED
+  DECLINED
+}
+
+enum EventType {
+  WORKSHOP
+  MEETUP
+  AMA
+  LAUNCH
+  COMMUNITY_CALL
+}
+
+model Event {
+  id            String          @id @default(uuid(7))
+  name          String
+  description   String
+  type          EventType       @default(MEETUP)
+  hostId        String
+  host          User            @relation("EventHost", fields: [hostId], references: [id], onDelete: Cascade)
+  location      String
+  startAt       DateTime
+  endAt         DateTime
+  capacity      Int
+  topics        String[]        @default([])
+  livestreamUrl String?
+  resources     Json?
+  attendees     EventAttendee[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([hostId(sort: Asc)])
+}
+
+model EventAttendee {
+  id        String     @id @default(uuid(7))
+  eventId   String
+  userId    String
+  status    RSVPStatus @default(INVITED)
+  notes     String?
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([eventId, userId])
+  @@index([userId(sort: Asc)])
 }

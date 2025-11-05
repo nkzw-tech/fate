@@ -16,14 +16,32 @@ const commentInclude = {
   author: authorSelection,
 } as const;
 
+const categorySelection = {
+  select: {
+    description: true,
+    id: true,
+    name: true,
+  },
+} as const;
+
+const tagSelection = {
+  select: {
+    description: true,
+    id: true,
+    name: true,
+  },
+} as const;
+
 const postInclude = {
   author: authorSelection,
+  category: categorySelection,
   comments: {
     include: commentInclude,
     orderBy: {
       createdAt: 'asc',
     },
   },
+  tags: tagSelection,
 } as const;
 
 export const postRouter = router({

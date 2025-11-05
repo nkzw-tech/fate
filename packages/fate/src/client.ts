@@ -404,21 +404,25 @@ export class FateClient<
     }
 
     const selection = selectionFromView(item.root, null);
-    const { edges } = await this.transport.fetchList(
-      name,
-      item.args,
-      selection,
-    );
-    const ids: Array<EntityId> = [];
-    for (const edge of edges) {
-      const id = this.normalizeEntity(
-        item.type,
-        edge.node as FateRecord,
-        selection,
-      );
-      ids.push(id);
+
+    const result = await this.transport.fetchList(name, item.args, selection);
+    try {
+      const ids: Array<EntityId> = [];
+
+      for (const edge of result.edges) {
+        const id = this.normalizeEntity(
+          item.type,
+          edge.node as FateRecord,
+          selection,
+        );
+        ids.push(id);
+      }
+      this.store.setList(name, ids);
+    } catch (error) {
+      throw new Error(`fate: Error fetching list for key '${name}': ${error}`, {
+        cause: error,
+      });
     }
-    this.store.setList(name, ids);
   }
 
   private normalizeEntity(

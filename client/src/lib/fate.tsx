@@ -9,12 +9,22 @@ type RouterOutputs = inferRouterOutputs<AppRouter>;
 
 type PostBase = NonNullable<RouterOutputs['post']['byId'][number]>;
 type CommentBase = NonNullable<RouterOutputs['comment']['byId'][number]>;
+type CategoryBase = NonNullable<RouterOutputs['category']['byId'][number]>;
+type ProjectBase = NonNullable<
+  RouterOutputs['project']['list']['edges'][number]['node']
+>;
+type EventBase = NonNullable<RouterOutputs['event']['byId'][number]>;
+type TagBase = NonNullable<RouterOutputs['tags']['byId'][number]>;
 
-type User = {
+export type User = {
   __typename: 'User';
   id: string;
   name: string | null;
   username?: string | null;
+};
+
+export type Tag = TagBase & {
+  __typename: 'Tag';
 };
 
 export type Comment = CommentBase & {
@@ -22,10 +32,39 @@ export type Comment = CommentBase & {
   author: User;
 };
 
+export type ProjectUpdate = ProjectBase['updates'][0] & {
+  __typename: 'ProjectUpdate';
+  author: User;
+};
+
+export type Project = ProjectBase & {
+  __typename: 'Project';
+  owner: User;
+  updates: Array<ProjectUpdate>;
+};
+
+export type EventAttendee = EventBase & {
+  __typename: 'EventAttendee';
+  user: User;
+};
+
+export type Event = EventBase & {
+  __typename: 'Event';
+  attendees: Array<EventAttendee>;
+  host: User;
+};
+
 export type Post = PostBase & {
   __typename: 'Post';
   author: User;
+  category: Category | null;
   comments: Array<Comment>;
+  tags: Array<Tag>;
+};
+
+export type Category = CategoryBase & {
+  __typename: 'Category';
+  posts: Array<Post>;
 };
 
 const trpcClient = createTRPCProxyClient<AppRouter>({
@@ -98,19 +137,57 @@ export const fate = createClient({
     },
     client: trpcClient,
     lists: {
+      categories: (client: TRPCClientType) => client.category.list.query,
+      events: (client: TRPCClientType) => client.event.list.query,
       posts: (client: TRPCClientType) => client.post.list.query,
+      projects: (client: TRPCClientType) => client.project.list.query,
     },
     mutations,
   }),
   types: [
     { type: 'User' },
     {
-      fields: { author: { type: 'User' }, comments: { listOf: 'Comment' } },
+      fields: {
+        author: { type: 'User' },
+        category: { type: 'Category' },
+        comments: { listOf: 'Comment' },
+        tags: { listOf: 'Tag' },
+      },
       type: 'Post',
     },
     {
       fields: { author: { type: 'User' }, post: { type: 'Post' } },
       type: 'Comment',
+    },
+    {
+      fields: { posts: { listOf: 'Post' } },
+      type: 'Tag',
+    },
+    {
+      fields: { posts: { listOf: 'Post' } },
+      type: 'Category',
+    },
+    {
+      fields: {
+        author: { type: 'User' },
+        project: { type: 'Project' },
+      },
+      type: 'ProjectUpdate',
+    },
+    {
+      fields: { owner: { type: 'User' }, updates: { listOf: 'ProjectUpdate' } },
+      type: 'Project',
+    },
+    {
+      fields: { event: { type: 'Event' }, user: { type: 'User' } },
+      type: 'EventAttendee',
+    },
+    {
+      fields: {
+        attendees: { listOf: 'EventAttendee' },
+        host: { type: 'User' },
+      },
+      type: 'Event',
     },
   ],
 });

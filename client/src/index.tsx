@@ -1,7 +1,6 @@
 import './App.css';
 import { StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ErrorBoundary } from 'react-error-boundary';
 import { FateClient } from 'react-fate';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
 import { fate } from './lib/fate.tsx';
@@ -21,18 +20,16 @@ const Layout = () => {
 const App = () => {
   return (
     <div className="bg-background min-h-screen">
-      <ErrorBoundary fallbackRender={() => null}>
-        <div className="min-h-[calc(100vh-206px)]">
-          <Suspense>
-            <Routes>
-              <Route element={<Layout />}>
-                <Route element={<HomeRoute />} path="/" />
-                <Route element={<SignInRoute />} path="/login" />
-              </Route>
-            </Routes>
-          </Suspense>
-        </div>
-      </ErrorBoundary>
+      <div className="min-h-[calc(100vh-206px)]">
+        <Suspense>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route element={<HomeRoute />} path="/" />
+              <Route element={<SignInRoute />} path="/login" />
+            </Route>
+          </Routes>
+        </Suspense>
+      </div>
     </div>
   );
 };
