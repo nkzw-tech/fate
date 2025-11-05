@@ -9,11 +9,11 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
-import type { EntityId, FateRecord, PageInfo, Snapshot } from './types.ts';
+import type { EntityId, FateRecord, Pagination, Snapshot } from './types.ts';
 
 type ListConnectionState = {
   cursors?: Array<string | undefined>;
-  pageInfo?: PageInfo;
+  pagination?: Pagination;
 };
 
 type StoredList = {
@@ -152,7 +152,7 @@ export class Store {
 
     return {
       cursors: state.cursors ? state.cursors.slice() : undefined,
-      pageInfo: state.pageInfo ? { ...state.pageInfo } : undefined,
+      pagination: state.pagination ? { ...state.pagination } : undefined,
     };
   }
 
@@ -165,15 +165,15 @@ export class Store {
     const stored: StoredList = {
       cursors: state?.cursors ? state.cursors.slice() : undefined,
       ids,
-      pageInfo: state?.pageInfo ? { ...state.pageInfo } : undefined,
+      pagination: state?.pagination ? { ...state.pagination } : undefined,
     };
 
     this.lists.set(key, stored);
 
-    if (stored.cursors || stored.pageInfo) {
+    if (stored.cursors || stored.pagination) {
       this.listStateByArray.set(ids, {
         cursors: stored.cursors ? stored.cursors.slice() : undefined,
-        pageInfo: stored.pageInfo ? { ...stored.pageInfo } : undefined,
+        pagination: stored.pagination ? { ...stored.pagination } : undefined,
       });
     }
   }
@@ -195,7 +195,7 @@ export class Store {
 
     this.setList(key, list.ids.slice(), {
       cursors: list.cursors ? list.cursors.slice() : undefined,
-      pageInfo: list.pageInfo ? { ...list.pageInfo } : undefined,
+      pagination: list.pagination ? { ...list.pagination } : undefined,
     });
   }
 
@@ -239,7 +239,7 @@ export class Store {
 
       this.setList(key, entityIds, {
         cursors,
-        pageInfo: list.pageInfo,
+        pagination: list.pagination,
       });
     }
 

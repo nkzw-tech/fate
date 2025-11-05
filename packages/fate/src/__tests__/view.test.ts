@@ -100,7 +100,7 @@ test('supports nested views and connection selections', () => {
 
   const PostView = view<PostWithComments>()({
     comments: {
-      edges: {
+      items: {
         node: CommentView,
       },
     },
@@ -109,7 +109,7 @@ test('supports nested views and connection selections', () => {
 
   type PostData = ViewData<PostWithComments, SelectionOf<typeof PostView>>;
 
-  expectTypeOf<PostData['comments']['edges'][number]['node']>().toEqualTypeOf<
+  expectTypeOf<PostData['comments']['items'][number]['node']>().toEqualTypeOf<
     ViewRef<'Comment'>
   >();
 });

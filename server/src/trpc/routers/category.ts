@@ -58,10 +58,12 @@ export const categoryRouter = router({
       const hasNext = rows.length > (input.first ?? 20);
       const limited = rows.slice(0, input.first ?? 20);
       return {
-        edges: limited.map((node) => ({ cursor: node.id, node })),
-        pageInfo: {
-          endCursor: limited.length ? limited.at(-1)!.id : undefined,
-          hasNextPage: hasNext,
+        items: limited.map((node) => ({ cursor: node.id, node })),
+        pagination: {
+          hasNext,
+          hasPrevious: Boolean(input.after),
+          nextCursor: limited.length ? limited.at(-1)!.id : undefined,
+          previousCursor: input.after,
         },
       };
     }),

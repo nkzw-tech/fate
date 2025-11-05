@@ -1,6 +1,6 @@
 import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
-import { FateRecord, PageInfo, type MutationShape } from './types.ts';
+import { FateRecord, Pagination, type MutationShape } from './types.ts';
 
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
@@ -18,8 +18,8 @@ export interface Transport<
     args: unknown,
     select?: Iterable<string>,
   ): Promise<{
-    edges: Array<{ cursor: string; node: unknown }>;
-    pageInfo: PageInfo;
+    items: Array<{ cursor: string | undefined; node: unknown }>;
+    pagination: Pagination;
   }>;
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
@@ -43,8 +43,8 @@ export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   (client: TRPCClient<AppRouter>) => (
     input: { select?: Array<string> } & FateRecord,
   ) => Promise<{
-    edges: Array<{ cursor: string; node: unknown }>;
-    pageInfo: PageInfo;
+    items: Array<{ cursor: string | undefined; node: unknown }>;
+    pagination: Pagination;
   }>
 >;
 

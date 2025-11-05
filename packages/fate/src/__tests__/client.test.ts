@@ -166,7 +166,7 @@ test(`'readView' returns view refs when views are used`, () => {
 
   const PostView = view<Post>()({
     comments: {
-      edges: {
+      items: {
         node: CommentView,
       },
     },
@@ -183,9 +183,9 @@ test(`'readView' returns view refs when views are used`, () => {
   );
 
   expect(result.id).toBe('post-1');
-  expect(result.comments?.edges).toHaveLength(2);
+  expect(result.comments?.items).toHaveLength(2);
 
-  const [commentA, commentB] = result.comments.edges;
+  const [commentA, commentB] = result.comments.items;
   expect(commentA.node).toEqual({
     __typename: 'Comment',
     id: 'comment-1',
@@ -318,7 +318,7 @@ test(`'readView' returns only directly selected fields when view spreads are use
 
   const PostView = view<Post>()({
     comments: {
-      edges: {
+      items: {
         node: {
           ...CommentMetaView,
           ...CommentContentView,
@@ -340,8 +340,8 @@ test(`'readView' returns only directly selected fields when view spreads are use
   );
 
   expect(result.id).toBe('post-1');
-  expect(result.comments?.edges).toHaveLength(1);
-  const comment = result.comments?.edges?.[0]?.node;
+  expect(result.comments?.items).toHaveLength(1);
+  const comment = result.comments?.items?.[0]?.node;
   expect(comment).toEqual({
     __typename: 'Comment',
     content: 'Hello world',
@@ -811,13 +811,13 @@ test(`'request' fetches view selections via the transport`, async () => {
 
 test(`'request' fetches list selections via the transport`, async () => {
   const fetchList = vi.fn().mockResolvedValue({
-    edges: [
+    items: [
       {
         cursor: 'cursor-1',
         node: { __typename: 'Comment', content: 'First', id: 'comment-1' },
       },
     ],
-    pageInfo: { hasNextPage: false },
+    pagination: { hasNext: false, hasPrevious: false },
   });
 
   const client = createClient({
@@ -894,7 +894,11 @@ test(`'readView' returns list metadata when available`, () => {
   const commentIds = [commentAId, commentBId];
   client.store.setList('Post:post-1:comments', commentIds, {
     cursors: ['cursor-a', 'cursor-b'],
-    pageInfo: { endCursor: 'cursor-b', hasNextPage: true },
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'cursor-b',
+    },
   });
 
   const postId = toEntityId('Post', 'post-1');
@@ -915,13 +919,13 @@ test(`'readView' returns list metadata when available`, () => {
 
   const PostView = view<Post>()({
     comments: {
-      edges: {
+      items: {
         cursor: true,
         node: CommentView,
       },
-      pageInfo: {
-        endCursor: true,
-        hasNextPage: true,
+      pagination: {
+        hasNext: true,
+        nextCursor: true,
       },
     },
     id: true,
@@ -936,11 +940,11 @@ test(`'readView' returns list metadata when available`, () => {
     ),
   );
 
-  expect(result.comments?.edges).toHaveLength(2);
-  expect(result.comments?.edges?.[0]?.cursor).toBe('cursor-a');
-  expect(result.comments?.edges?.[1]?.cursor).toBe('cursor-b');
-  expect(result.comments?.pageInfo).toEqual({
-    endCursor: 'cursor-b',
-    hasNextPage: true,
+  expect(result.comments?.items).toHaveLength(2);
+  expect(result.comments?.items?.[0]?.cursor).toBe('cursor-a');
+  expect(result.comments?.items?.[1]?.cursor).toBe('cursor-b');
+  expect(result.comments?.pagination).toEqual({
+    hasNext: true,
+    nextCursor: 'cursor-b',
   });
 });

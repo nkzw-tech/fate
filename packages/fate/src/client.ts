@@ -407,25 +407,25 @@ export class FateClient<
     }
 
     const selection = selectionFromView(item.root, null);
-    const { edges, pageInfo } = await this.transport.fetchList(
+    const { items, pagination } = await this.transport.fetchList(
       name,
       item.args,
       selection,
     );
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
-    for (const edge of edges) {
+    for (const entry of items) {
       const id = this.normalizeEntity(
         item.type,
-        edge.node as FateRecord,
+        entry.node as FateRecord,
         selection,
       );
       ids.push(id);
-      cursors.push(edge.cursor);
+      cursors.push(entry.cursor);
     }
     this.store.setList(name, ids, {
       cursors,
-      pageInfo,
+      pagination,
     });
   }
 
@@ -644,21 +644,21 @@ export class FateClient<
           const value = record[key];
           if (Array.isArray(value)) {
             if (
-              selectionKind.edges &&
-              typeof selectionKind.edges === 'object'
+              selectionKind.items &&
+              typeof selectionKind.items === 'object'
             ) {
-              const selection = selectionKind.edges as FateRecord;
+              const selection = selectionKind.items as FateRecord;
               const listState = this.store.getListStateFor(
                 value as Array<EntityId>,
               );
-              const edges = value.map((item, index) => {
+              const items = value.map((item, index) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
 
                 if (!entityId) {
-                  const edge: FateRecord = { node: null };
+                  const entry: FateRecord = { node: null };
                   const cursor = listState?.cursors?.[index];
-                  edge.cursor = cursor !== undefined ? cursor : undefined;
-                  return edge;
+                  entry.cursor = cursor !== undefined ? cursor : undefined;
+                  return entry;
                 }
 
                 ids.add(entityId);
@@ -670,34 +670,45 @@ export class FateClient<
                   walk(selection.node as FateRecord, record, node);
                 }
 
-                const edge: FateRecord = {
+                const entry: FateRecord = {
                   node: record ? node : null,
                 };
 
                 if (selection.cursor === true) {
-                  edge.cursor = undefined;
+                  const cursor = listState?.cursors?.[index];
+                  entry.cursor = cursor !== undefined ? cursor : undefined;
                 }
-                return edge;
+                return entry;
               });
-              const connection: FateRecord = { edges };
-              if ('pageInfo' in selectionKind && selectionKind.pageInfo) {
-                const pageInfoSelection = selectionKind.pageInfo as FateRecord;
-                const storedPageInfo = listState?.pageInfo;
-                if (storedPageInfo) {
-                  const pageInfo: FateRecord = {};
-                  if (pageInfoSelection.endCursor === true) {
-                    if (storedPageInfo.endCursor !== undefined) {
-                      pageInfo.endCursor = storedPageInfo.endCursor;
+              const connection: FateRecord = { items };
+              if ('pagination' in selectionKind && selectionKind.pagination) {
+                const paginationSelection =
+                  selectionKind.pagination as FateRecord;
+                const storedPagination = listState?.pagination;
+                if (storedPagination) {
+                  const pagination: FateRecord = {};
+                  if (paginationSelection.nextCursor === true) {
+                    if (storedPagination.nextCursor !== undefined) {
+                      pagination.nextCursor = storedPagination.nextCursor;
                     }
                   }
-                  if (pageInfoSelection.hasNextPage === true) {
-                    pageInfo.hasNextPage = storedPageInfo.hasNextPage;
+                  if (paginationSelection.previousCursor === true) {
+                    if (storedPagination.previousCursor !== undefined) {
+                      pagination.previousCursor =
+                        storedPagination.previousCursor;
+                    }
                   }
-                  if (Object.keys(pageInfo).length > 0) {
-                    connection.pageInfo = pageInfo;
+                  if (paginationSelection.hasNext === true) {
+                    pagination.hasNext = storedPagination.hasNext;
+                  }
+                  if (paginationSelection.hasPrevious === true) {
+                    pagination.hasPrevious = storedPagination.hasPrevious;
+                  }
+                  if (Object.keys(pagination).length > 0) {
+                    connection.pagination = pagination;
                   }
                 } else {
-                  connection.pageInfo = undefined;
+                  connection.pagination = undefined;
                 }
               }
               target[key] = connection;

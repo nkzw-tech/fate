@@ -11,7 +11,7 @@ type PostBase = NonNullable<RouterOutputs['post']['byId'][number]>;
 type CommentBase = NonNullable<RouterOutputs['comment']['byId'][number]>;
 type CategoryBase = NonNullable<RouterOutputs['category']['byId'][number]>;
 type ProjectBase = NonNullable<
-  RouterOutputs['project']['list']['edges'][number]['node']
+  RouterOutputs['project']['list']['items'][number]['node']
 >;
 type EventBase = NonNullable<RouterOutputs['event']['byId'][number]>;
 type TagBase = NonNullable<RouterOutputs['tags']['byId'][number]>;

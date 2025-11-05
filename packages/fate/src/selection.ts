@@ -24,10 +24,10 @@ export function selectionFromView<T extends Entity, S extends Selection<T>>(
       const valueType = typeof value;
       const path = prefix ? `${prefix}.${key}` : key;
 
-      if (key === 'edges' && value && valueType === 'object') {
-        const edges = value;
-        if (edges.node && typeof edges.node === 'object') {
-          walk(edges.node, prefix);
+      if (key === 'items' && value && valueType === 'object') {
+        const items = value;
+        if (items.node && typeof items.node === 'object') {
+          walk(items.node, prefix);
         }
         continue;
       } else if (key === 'node') {
@@ -35,7 +35,7 @@ export function selectionFromView<T extends Entity, S extends Selection<T>>(
           walk(value, path);
         }
         continue;
-      } else if (key === 'pageInfo') {
+      } else if (key === 'pagination') {
         continue;
       }
 

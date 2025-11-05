@@ -206,7 +206,7 @@ const PostView = view<Post>()({
   author: AuthorView,
   category: CategorySummaryView,
   comments: {
-    edges: {
+    items: {
       node: CommentView,
     },
   },
@@ -214,7 +214,7 @@ const PostView = view<Post>()({
   id: true,
   likes: true,
   tags: {
-    edges: {
+    items: {
       node: TagView,
     },
   },
@@ -231,8 +231,8 @@ const Post = ({
   const post = useView(PostView, postRef);
   const author = useView(AuthorView, post.author);
   const category = useView(CategorySummaryView, post.category);
-  const comments = post.comments?.edges ?? [];
-  const tags = post.tags?.edges ?? [];
+  const comments = post.comments?.items ?? [];
+  const tags = post.tags?.items ?? [];
 
   const [commentText, setCommentText] = useState('');
 
@@ -445,7 +445,7 @@ const CategoryPostView = view<Post>()({
   id: true,
   likes: true,
   tags: {
-    edges: {
+    items: {
       node: TagView,
     },
   },
@@ -458,7 +458,7 @@ const CategoryView = view<Category>()({
   name: true,
   postCount: true,
   posts: {
-    edges: {
+    items: {
       node: CategoryPostView,
     },
   },
@@ -467,7 +467,7 @@ const CategoryView = view<Category>()({
 const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
   const post = useView(CategoryPostView, postRef);
   const author = useView(AuthorView, post.author);
-  const tags = post.tags?.edges ?? [];
+  const tags = post.tags?.items ?? [];
 
   return (
     <VStack gap key={post.id}>
@@ -483,8 +483,8 @@ const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
         </span>
         {tags.length ? (
           <Stack gap wrap>
-            {tags.map((edge) => (
-              <TagBadge key={edge.node.id} tag={edge.node} />
+            {tags.map(({ node }) => (
+              <TagBadge key={node.id} tag={node} />
             ))}
           </Stack>
         ) : null}
@@ -499,7 +499,7 @@ const CategoryCard = ({
   category: ViewRef<'Category'>;
 }) => {
   const category = useView(CategoryView, categoryRef);
-  const posts = category.posts?.edges ?? [];
+  const posts = category.posts?.items ?? [];
 
   return (
     <Card key={category.id}>
@@ -518,8 +518,8 @@ const CategoryCard = ({
           </Badge>
         </Stack>
         <VStack gap={12}>
-          {posts.map((edge) => (
-            <CategoryPost key={edge.node.id} post={edge.node} />
+          {posts.map(({ node }) => (
+            <CategoryPost key={node.id} post={node} />
           ))}
         </VStack>
       </VStack>
@@ -569,7 +569,7 @@ const ProjectView = view<Project>()({
   summary: true,
   targetDate: true,
   updates: {
-    edges: {
+    items: {
       node: ProjectUpdateView,
     },
   },
@@ -628,7 +628,7 @@ const ProjectCard = ({
 }) => {
   const project = useView(ProjectView, projectRef);
   const owner = useView(AuthorView, project.owner);
-  const updates = project.updates?.edges ?? [];
+  const updates = project.updates?.items ?? [];
   const focusAreas = project.focusAreas ?? [];
   const metrics = project.metrics;
   const progress = Math.min(Math.max(project.progress ?? 0, 0), 100);
@@ -713,8 +713,8 @@ const ProjectCard = ({
               Latest updates
             </span>
             <VStack gap={12}>
-              {updates.map((edge) => (
-                <ProjectUpdateItem key={edge.node.id} update={edge.node} />
+              {updates.map(({ node }) => (
+                <ProjectUpdateItem key={node.id} update={node} />
               ))}
             </VStack>
           </VStack>
@@ -754,7 +754,7 @@ const EventAttendeeView = view<EventAttendee>()({
 
 const EventView = view<Event>()({
   attendees: {
-    edges: {
+    items: {
       node: EventAttendeeView,
     },
   },
@@ -810,7 +810,7 @@ const formatDateTime = (date: string) =>
 const EventCard = ({ event: eventRef }: { event: ViewRef<'Event'> }) => {
   const event = useView(EventView, eventRef);
   const host = useView(AuthorView, event.host);
-  const attendees = event.attendees?.edges ?? [];
+  const attendees = event.attendees?.items ?? [];
   const topics = event.topics ?? [];
 
   return (
@@ -863,8 +863,8 @@ const EventCard = ({ event: eventRef }: { event: ViewRef<'Event'> }) => {
               Community RSVPs
             </span>
             <Stack gap={8} wrap>
-              {attendees.slice(0, 4).map((edge) => (
-                <EventAttendeeChip attendee={edge.node} key={edge.node.id} />
+              {attendees.slice(0, 4).map(({ node }) => (
+                <EventAttendeeChip attendee={node} key={node.id} />
               ))}
             </Stack>
           </VStack>

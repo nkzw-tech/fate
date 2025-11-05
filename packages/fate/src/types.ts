@@ -64,18 +64,25 @@ export type TypeConfig = {
   type: string;
 };
 
-export type PageInfo = { endCursor?: string; hasNextPage: boolean };
+export type Pagination = {
+  hasNext: boolean;
+  hasPrevious: boolean;
+  nextCursor?: string;
+  previousCursor?: string;
+};
 
 export type Entity = { __typename: string };
 
 export type ConnectionSelection<T extends Entity> = {
-  readonly edges: {
+  readonly items: {
     readonly cursor?: true;
     readonly node: Selection<T> | View<T, Selection<T>>;
   };
-  readonly pageInfo?: {
-    readonly endCursor?: true;
-    readonly hasNextPage?: true;
+  readonly pagination?: {
+    readonly hasNext?: true;
+    readonly hasPrevious?: true;
+    readonly nextCursor?: true;
+    readonly previousCursor?: true;
   };
 };
 
@@ -147,11 +154,11 @@ export type ViewSnapshot<T extends Entity, S extends Selection<T>> = Readonly<{
 }>;
 
 type ConnectionMask<T extends Entity, S> = S extends {
-  edges: infer EdgeSelection;
-  pageInfo?: infer PageInfoSelection;
+  items: infer ItemSelection;
+  pagination?: infer PaginationSelection;
 }
   ? {
-      edges: EdgeSelection extends {
+      items: ItemSelection extends {
         cursor?: infer CursorSelection;
         node: unknown;
       }
@@ -163,10 +170,10 @@ type ConnectionMask<T extends Entity, S> = S extends {
             }
           >
         : Array<{ node: ViewRef<T['__typename']> }>;
-    } & (PageInfoSelection extends object
+    } & (PaginationSelection extends object
       ? {
-          pageInfo: {
-            [K in keyof PageInfoSelection]: PageInfo[K & keyof PageInfo];
+          pagination: {
+            [K in keyof PaginationSelection]: Pagination[K & keyof Pagination];
           };
         }
       : Record<string, never>)

@@ -29,8 +29,8 @@ test('passes selection when fetching by id', async () => {
 
 test('passes selection when fetching lists', async () => {
   const call = vi.fn(async () => ({
-    edges: [],
-    pageInfo: { hasNextPage: false },
+    items: [],
+    pagination: { hasNext: false, hasPrevious: false },
   }));
   const listResolver = vi.fn(() => call);
   const client = {} as any;
