@@ -1,5 +1,6 @@
 import nkzw from '@nkzw/eslint-config';
 import findWorkspaces from '@nkzw/find-workspaces';
+import workspaces from 'eslint-plugin-workspaces';
 
 export default [
   ...nkzw,
@@ -29,6 +30,7 @@ export default [
     },
   },
   {
+    plugins: { workspaces },
     rules: {
       '@typescript-eslint/array-type': [2, { default: 'generic' }],
       '@typescript-eslint/no-explicit-any': 0,
@@ -47,6 +49,8 @@ export default [
           packageDir: findWorkspaces(import.meta.dirname),
         },
       ],
+      'workspaces/no-absolute-imports': 2,
+      'workspaces/no-relative-imports': 2,
     },
   },
 ];
