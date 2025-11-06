@@ -1,7 +1,7 @@
 {
   "name": "react-fate",
   "version": "0.0.0",
-  "description": "Fate",
+  "description": "Fate is a modern data client for tRPC and React.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "repository": {
     "type": "git",

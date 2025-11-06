@@ -2,6 +2,7 @@
   "name": "@nkzw/fate-private",
   "version": "0.0.1",
   "private": true,
+  "description": "Fate is a modern data client for tRPC and React.",
   "repository": {
     "type": "git",
     "url": "git://github.com/nkzw-tech/fate.git"
