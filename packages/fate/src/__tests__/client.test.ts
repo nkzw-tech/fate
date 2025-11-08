@@ -1,8 +1,10 @@
 import { expect, expectTypeOf, test, vi } from 'vitest';
+import { args, v } from '../args.ts';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
 import { toEntityId } from '../ref.ts';
+import { selectionFromView } from '../selection.ts';
 import { getListKey, List } from '../store.ts';
 import {
   FateThenable,
@@ -995,6 +997,67 @@ test(`'readView' returns list metadata when available`, () => {
     hasNext: true,
     nextCursor: 'cursor-b',
   });
+});
+
+test('normalizeEntity stores connection lists using argument hashes', () => {
+  type Comment = { __typename: 'Comment'; id: string };
+  type Post = {
+    __typename: 'Post';
+    comments: Array<Comment>;
+    id: string;
+  };
+
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [
+      { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
+      { type: 'Comment' },
+    ],
+  });
+
+  const CommentView = view<Comment>()({ id: true });
+  const PostView = view<Post>()({
+    comments: {
+      args: args({ after: v('after'), first: v('first', 1) }),
+      items: { node: CommentView },
+    },
+  });
+
+  const plan = selectionFromView(PostView, null, {
+    after: 'cursor-10',
+    first: 3,
+  });
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          { node: { __typename: 'Comment', id: 'comment-1' } },
+          { node: { __typename: 'Comment', id: 'comment-2' } },
+        ],
+      },
+      id: 'post-1',
+    },
+    undefined,
+    undefined,
+    plan,
+  );
+
+  const postId = toEntityId('Post', 'post-1');
+  expect(
+    client.store.getList(
+      getListKey(postId, 'comments', plan.args.get('comments')?.hash),
+    ),
+  ).toEqual([
+    toEntityId('Comment', 'comment-1'),
+    toEntityId('Comment', 'comment-2'),
+  ]);
 });
 
 test(`mutation results with arrays mark nested fields as fetched`, async () => {

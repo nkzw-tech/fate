@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { args, v } from '../args.ts';
 import { selectionFromView } from '../selection.ts';
 import { ViewsTag } from '../types.ts';
 import { view } from '../view.ts';
@@ -27,7 +28,7 @@ test('collects scalar and nested selections', () => {
 
   const selection = selectionFromView(PostView, null);
 
-  expect(selection).toMatchInlineSnapshot(`
+  expect(selection.paths).toMatchInlineSnapshot(`
     Set {
       "author.email",
       "author.id",
@@ -50,9 +51,7 @@ test('collects fields from nested views', () => {
     id: true,
   });
 
-  const selection = selectionFromView(PostView, null);
-
-  expect(selection).toMatchInlineSnapshot(`
+  expect(selectionFromView(PostView, null).paths).toMatchInlineSnapshot(`
     Set {
       "author.email",
       "author.id",
@@ -87,16 +86,57 @@ test('filters nested view selections based on ref tags', () => {
     [ViewsTag]: new Set([postViewTag, authorViewTag]),
   } as const;
 
-  expect(selectionFromView(PostView, refWithoutAuthor)).toMatchInlineSnapshot(`
+  expect(selectionFromView(PostView, refWithoutAuthor).paths)
+    .toMatchInlineSnapshot(`
     Set {
       "content",
     }
   `);
-  expect(selectionFromView(PostView, refWithAuthor)).toMatchInlineSnapshot(`
+  expect(selectionFromView(PostView, refWithAuthor).paths)
+    .toMatchInlineSnapshot(`
     Set {
       "author.email",
       "author.id",
       "content",
     }
   `);
+});
+
+test('selection plan resolves arguments and hashes connection args', () => {
+  type Comment = { __typename: 'Comment'; id: string };
+  type Post = {
+    __typename: 'Post';
+    comments: Array<Comment>;
+    content: string;
+    id: string;
+  };
+
+  const CommentView = view<Comment>()({
+    id: true,
+  });
+
+  const PostView = view<Post>()({
+    comments: {
+      args: args({ after: v('commentsAfter'), first: v('commentsFirst', 1) }),
+      items: { node: CommentView },
+    },
+    content: args({ format: v('format', 'md') }),
+  });
+
+  const plan = selectionFromView(PostView, null, {
+    commentsAfter: 'cursor-1',
+    commentsFirst: 5,
+    format: 'html',
+  });
+
+  expect(plan.paths).toContain('content');
+  expect(plan.paths).toContain('comments.id');
+  expect(plan.args.get('content')).toEqual({
+    hash: 'object:{"format":string:"html"}',
+    value: { format: 'html' },
+  });
+  expect(plan.args.get('comments')).toEqual({
+    hash: 'object:{"first":number:5}',
+    value: { after: 'cursor-1', first: 5 },
+  });
 });

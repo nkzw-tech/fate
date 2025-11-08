@@ -2,8 +2,8 @@ import type { FateClient } from './client.js';
 import { selectionFromView } from './selection.ts';
 import { List } from './store.ts';
 import type {
+  AnyRecord,
   Entity,
-  FateRecord,
   MutationDefinition,
   MutationEntity,
   MutationIdentifier,
@@ -26,6 +26,7 @@ export function mutation<T extends Entity, I, R>(
 }
 
 type MutationOptions<Identifier extends MutationIdentifier<any, any, any>> = {
+  args?: Record<string, unknown>;
   input: MutationInput<Identifier>;
   optimisticUpdate?: Partial<MutationResult<Identifier>>;
   view?:
@@ -37,7 +38,7 @@ export type MutationFunction<I extends MutationIdentifier<any, any, any>> = (
   options: MutationOptions<I>,
 ) => Promise<MutationResult<I>>;
 
-const collectImplicitSelectedPaths = (value: FateRecord): Set<string> => {
+const collectImplicitSelectedPaths = (value: AnyRecord): Set<string> => {
   const paths = new Set<string>();
 
   const walk = (current: unknown, prefix: string | null) => {
@@ -59,7 +60,7 @@ const collectImplicitSelectedPaths = (value: FateRecord): Set<string> => {
       return;
     }
 
-    for (const [key, child] of Object.entries(current as FateRecord)) {
+    for (const [key, child] of Object.entries(current as AnyRecord)) {
       const next = prefix ? `${prefix}.${key}` : key;
       paths.add(next);
       walk(child, next);
@@ -70,7 +71,7 @@ const collectImplicitSelectedPaths = (value: FateRecord): Set<string> => {
   return paths;
 };
 
-const maybeGetId = (getId: TypeConfig['getId'], input: FateRecord) => {
+const maybeGetId = (getId: TypeConfig['getId'], input: AnyRecord) => {
   try {
     return getId(input);
   } catch {
@@ -84,16 +85,22 @@ export function wrapMutation<
 >(client: FateClient<M>, identifier: I): MutationFunction<I> {
   const config = client.getTypeConfig(identifier.entity);
 
-  return async ({ input, optimisticUpdate, view }: MutationOptions<I>) => {
+  return async ({
+    args,
+    input,
+    optimisticUpdate,
+    view,
+  }: MutationOptions<I>) => {
     const id = maybeGetId(config.getId, input);
     const isDelete = view === 'deleteRecord';
-    const viewSelection =
-      view && !isDelete ? selectionFromView(view, null) : undefined;
+    const plan =
+      view && !isDelete ? selectionFromView(view, null, args ?? {}) : undefined;
+    const viewSelection = plan?.paths;
 
-    const optimisticRecord: FateRecord | undefined = optimisticUpdate
+    const optimisticRecord: AnyRecord | undefined = optimisticUpdate
       ? ((id != null
           ? { id, ...optimisticUpdate }
-          : optimisticUpdate) as FateRecord)
+          : optimisticUpdate) as AnyRecord)
       : undefined;
     const optimisticRecordId =
       optimisticRecord !== undefined
@@ -128,6 +135,7 @@ export function wrapMutation<
         optimisticRecord,
         optimisticSelection,
         snapshots,
+        plan,
       );
     }
 
@@ -144,6 +152,8 @@ export function wrapMutation<
           identifier.entity,
           result,
           select.size > 0 ? select : undefined,
+          undefined,
+          plan,
         );
       }
 

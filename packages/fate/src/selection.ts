@@ -1,4 +1,6 @@
+import { hashArgs, isArgs, resolveArgs } from './args.ts';
 import {
+  AnyRecord,
   isViewTag,
   ViewKind,
   ViewRef,
@@ -9,51 +11,101 @@ import {
 } from './types.ts';
 import { getViewPayloads } from './view.ts';
 
-export function selectionFromView<T extends Entity, S extends Selection<T>>(
-  viewComposition: View<T, S>,
+const paginationKeys = new Set(['after', 'before', 'cursor']);
+
+export type SelectionPlan = {
+  readonly args: Map<string, { hash: string; value: AnyRecord }>;
+  readonly paths: Set<string>;
+};
+
+const isPlainObject = (value: unknown): value is AnyRecord =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+export const selectionFromView = <
+  T extends Entity,
+  S extends Selection<T>,
+  V extends View<T, S>,
+>(
+  viewComposition: V,
   ref: ViewRef<T['__typename']> | null,
-): Set<string> {
+  rootArgs: AnyRecord = {},
+): SelectionPlan => {
+  const args = new Map<string, { hash: string; value: AnyRecord }>();
   const paths = new Set<string>();
 
-  const walk = (viewPayload: object, prefix: string | null) => {
-    for (const [key, value] of Object.entries(viewPayload)) {
-      if (key === ViewKind) {
+  const assignArgs = (
+    path: string,
+    marker: ReturnType<typeof resolveArgs>,
+    ignoreKeys?: ReadonlySet<string>,
+  ) => {
+    const hash = hashArgs(marker, { ignoreKeys });
+    args.set(path, { hash, value: marker });
+  };
+
+  const walk = (selection: AnyRecord, prefix: string | null) => {
+    for (const [key, value] of Object.entries(selection)) {
+      if (key === ViewKind || key === 'args') {
         continue;
       }
 
       const valueType = typeof value;
       const path = prefix ? `${prefix}.${key}` : key;
 
-      if (key === 'items' && value && valueType === 'object') {
-        const items = value;
-        if (items.node && typeof items.node === 'object') {
-          walk(items.node, prefix);
+      if (key === 'items' && isPlainObject(value)) {
+        if (isPlainObject(value.node)) {
+          walk(value.node, prefix);
         }
-        continue;
-      } else if (key === 'node') {
-        if (value && valueType === 'object') {
-          walk(value, path);
-        }
-        continue;
-      } else if (key === 'pagination') {
         continue;
       }
 
-      if (valueType === 'boolean' && value) {
-        paths.add(path);
-      } else if (isViewTag(key)) {
-        if (!ref || ref[ViewsTag]?.has(key)) {
-          walk(value.select, prefix);
+      if (key === 'node' && isPlainObject(value)) {
+        walk(value, path);
+        continue;
+      }
+
+      if (key === 'pagination') {
+        continue;
+      }
+
+      if (valueType === 'boolean') {
+        if (value) {
+          paths.add(path);
         }
-      } else if (value && valueType === 'object') {
+        continue;
+      }
+
+      if (isViewTag(key)) {
+        if (!ref || (ref[ViewsTag] && ref[ViewsTag].has(key))) {
+          walk((value as { select: AnyRecord }).select, prefix);
+        }
+        continue;
+      }
+
+      if (isArgs(value)) {
+        assignArgs(path, resolveArgs(value, { args: rootArgs, path }));
+        paths.add(path);
+        continue;
+      }
+
+      if (isPlainObject(value)) {
+        if (isArgs(value.args)) {
+          assignArgs(
+            path,
+            resolveArgs(value.args, { args: rootArgs, path }),
+            isPlainObject(value.items) && isPlainObject(value.items.node)
+              ? paginationKeys
+              : undefined,
+          );
+        }
+
         walk(value, path);
       }
     }
   };
 
-  for (const viewPayload of getViewPayloads(viewComposition, ref)) {
-    walk(viewPayload.select, null);
+  for (const payload of getViewPayloads(viewComposition, ref)) {
+    walk(payload.select, null);
   }
 
-  return paths;
-}
+  return { args, paths };
+};

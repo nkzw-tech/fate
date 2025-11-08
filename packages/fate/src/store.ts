@@ -9,7 +9,7 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
-import type { EntityId, FateRecord, Pagination, Snapshot } from './types.ts';
+import type { AnyRecord, EntityId, Pagination, Snapshot } from './types.ts';
 
 export type List = Readonly<{
   cursors?: ReadonlyArray<string | undefined>;
@@ -19,8 +19,11 @@ export type List = Readonly<{
 
 export type Subscriptions = Map<EntityId, Set<() => void>>;
 
-export const getListKey = (ownerId: EntityId, field: string): string =>
-  `${ownerId} __fate__ ${field}`;
+export const getListKey = (
+  ownerId: EntityId,
+  field: string,
+  hash = 'default',
+): string => `${ownerId} __fate__ ${field} __fate__ ${hash}`;
 
 const cloneValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -32,7 +35,7 @@ const cloneValue = (value: unknown): unknown => {
   }
 
   if (value != null && typeof value === 'object') {
-    const result: FateRecord = {};
+    const result: AnyRecord = {};
     for (const [key, record] of Object.entries(value)) {
       result[key] = cloneValue(record);
     }
@@ -45,21 +48,21 @@ const cloneValue = (value: unknown): unknown => {
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
   private lists = new Map<string, List>();
-  private records = new Map<EntityId, FateRecord>();
+  private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
 
   read(id: EntityId) {
     return this.records.get(id);
   }
 
-  merge(id: EntityId, partial: FateRecord, paths?: Iterable<string> | '*') {
+  merge(id: EntityId, partial: AnyRecord, paths?: Iterable<string> | '*') {
     this.mergeInternal(id, partial, paths);
     this.notify(id);
   }
 
   private mergeInternal(
     id: EntityId,
-    partial: FateRecord,
+    partial: AnyRecord,
     paths?: Iterable<string> | '*',
   ) {
     const previous = this.records.get(id) ?? {};
@@ -200,7 +203,7 @@ export class Store {
 
     for (const [id, record] of this.records.entries()) {
       let updated = false;
-      const next: FateRecord = {};
+      const next: AnyRecord = {};
       const paths = new Set<string>();
 
       for (const [key, value] of Object.entries(record)) {
@@ -244,7 +247,7 @@ export class Store {
     const mask = this.coverage.get(id);
     return {
       mask: mask ? cloneMask(mask) : undefined,
-      record: record ? (cloneValue(record) as FateRecord) : undefined,
+      record: record ? (cloneValue(record) as AnyRecord) : undefined,
     };
   }
 

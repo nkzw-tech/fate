@@ -72,7 +72,7 @@ export function view<T extends Entity>() {
 
   return <S>(select: SelectionInput<T, S>): View<T, SelectionInput<T, S>> => {
     const payload = Object.freeze({
-      select: select as SelectionInput<T, S>,
+      select,
       [ViewKind]: true,
     }) as ViewPayload<T, SelectionInput<T, S>>;
 

@@ -12,6 +12,8 @@ export declare const __FateSelectionBrand: unique symbol;
 export declare const __FateMutationEntityBrand: unique symbol;
 export declare const __FateMutationInputBrand: unique symbol;
 export declare const __FateMutationResultBrand: unique symbol;
+export const __FateArgsBrand = Symbol('fate.args');
+export const __FateVarBrand = Symbol('fate.var');
 
 type __ViewEntityAnchor<T extends Entity> = {
   readonly [__FateEntityBrand]?: T;
@@ -42,10 +44,23 @@ export function isViewTag(key: string): key is ViewTag {
   return key.startsWith(viewTag);
 }
 
-export type FateRecord = Record<string, unknown>;
-export type ViewResult = FateRecord & {
+export type AnyRecord = Record<string, unknown>;
+
+export type ViewResult = AnyRecord & {
   readonly [ViewsTag]?: Set<string>;
 };
+
+export type VarReference<K extends string, T> = Readonly<{
+  [__FateVarBrand]: true;
+  defaultValue?: T;
+  key: K;
+}>;
+
+export type Args<A extends Record<string, unknown>> = Readonly<A> & {
+  readonly [__FateArgsBrand]: true;
+};
+
+type AnyArgsMarker = Args<Record<string, unknown>>;
 
 export type ViewRef<TName extends string> = Readonly<{
   __typename: TName;
@@ -73,7 +88,9 @@ export type Pagination = {
 
 export type Entity = { __typename: string };
 
-export type ConnectionSelection<T extends Entity> = {
+type SelectionArgs = { readonly args?: AnyArgsMarker };
+
+export type ConnectionSelection<T extends Entity> = SelectionArgs & {
   readonly items: {
     readonly cursor?: true;
     readonly node: Selection<T> | View<T, Selection<T>>;
@@ -88,13 +105,19 @@ export type ConnectionSelection<T extends Entity> = {
 
 type SelectionFieldValue<T extends Entity, K extends keyof T> =
   T[K] extends Array<infer U extends Entity>
-    ? true | Selection<U> | ConnectionSelection<U> | View<U, Selection<U>>
+    ?
+        | true
+        | Selection<U>
+        | ConnectionSelection<U>
+        | View<U, Selection<U>>
+        | AnyArgsMarker
     : T[K] extends Entity | null
       ?
           | true
           | Selection<NonNullable<T[K]>>
           | View<NonNullable<T[K]>, Selection<NonNullable<T[K]>>>
-      : true;
+          | AnyArgsMarker
+      : true | AnyArgsMarker;
 
 type SelectionShape<T extends Entity> = {
   [K in keyof T as K extends '__typename' ? never : K]?: SelectionFieldValue<
@@ -111,7 +134,8 @@ type SelectionViewSpread<T extends Entity> = {
 };
 
 export type Selection<T extends Entity> = SelectionShape<T> &
-  SelectionViewSpread<T>;
+  SelectionViewSpread<T> &
+  SelectionArgs;
 
 export type SelectionOf<V> = V extends {
   readonly [__FateSelectionBrand]?: infer S;
@@ -198,7 +222,7 @@ export type Mask<T, S> =
         ? HasViewTag<S> extends true
           ? ViewRef<EntityName<NonNullable<T>>>
           : {
-              [K in keyof S]: S[K] extends true
+              [K in keyof S as K extends 'args' ? never : K]: S[K] extends true
                 ? NonNullable<T>[Extract<K, keyof T>]
                 : Mask<
                     NonNullable<T>[Extract<K, keyof T>],
@@ -211,7 +235,7 @@ type ViewEntity<V> = V extends View<infer T, any> ? T : never;
 type ViewEntityName<V> = ViewEntity<V>['__typename'] & string;
 
 export type ListItem<V extends View<any, any>> = Readonly<{
-  args: unknown;
+  args?: Record<string, unknown>;
   root: V;
   type: ViewEntityName<V>;
 }>;
@@ -276,7 +300,7 @@ export type MutationMapFromDefinitions<
   };
 };
 
-export type Snapshot = Readonly<{ mask?: FieldMask; record?: FateRecord }>;
+export type Snapshot = Readonly<{ mask?: FieldMask; record?: AnyRecord }>;
 
 export interface FateThenable<T> extends PromiseLike<T> {
   status: 'fulfilled';

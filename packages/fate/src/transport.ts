@@ -1,6 +1,6 @@
 import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
-import { FateRecord, Pagination, type MutationShape } from './types.ts';
+import { AnyRecord, Pagination, type MutationShape } from './types.ts';
 
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
@@ -41,7 +41,7 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
   (client: TRPCClient<AppRouter>) => (
-    input: { select?: Array<string> } & FateRecord,
+    input: { select?: Array<string> } & AnyRecord,
   ) => Promise<{
     items: Array<{ cursor: string | undefined; node: unknown }>;
     pagination: Pagination;
@@ -131,7 +131,7 @@ export function createFateTransport<
         );
       }
       return await resolver(client)({
-        ...(input as FateRecord),
+        ...(input as AnyRecord),
         select: select ? [...select] : undefined,
       });
     };

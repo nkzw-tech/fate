@@ -1,7 +1,7 @@
 import {
+  AnyRecord,
   Entity,
   EntityId,
-  FateRecord,
   Selection,
   TypeName,
   View,
@@ -24,7 +24,7 @@ export function parseEntityId(id: EntityId) {
     : ({ id: id.slice(idx + 1), type: id.slice(0, idx) } as const);
 }
 
-export function assignViewTag(target: FateRecord, value: ReadonlySet<string>) {
+export function assignViewTag(target: AnyRecord, value: ReadonlySet<string>) {
   Object.defineProperty(target, ViewsTag, {
     configurable: false,
     enumerable: false,

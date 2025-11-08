@@ -3,7 +3,7 @@ export type {
   __FateSelectionBrand,
   Entity,
   EntityId,
-  FateRecord,
+  AnyRecord as FateRecord,
   ListItem,
   Mask,
   MutationDefinition,
@@ -32,3 +32,4 @@ export { mutation } from './mutation.ts';
 export { toEntityId } from './ref.ts';
 export { createClient, FateClient } from './client.ts';
 export { createFateTransport } from './transport.ts';
+export { args, isArgs, v } from './args.ts';

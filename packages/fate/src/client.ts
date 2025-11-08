@@ -1,8 +1,9 @@
+import { isArgs } from './args.ts';
 import ViewDataCache from './cache.ts';
 import { MutationFunction, wrapMutation } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
-import { selectionFromView } from './selection.ts';
+import { selectionFromView, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
 import { Transport } from './transport.ts';
 import { RequestResult, ViewSnapshot } from './types.js';
@@ -13,9 +14,9 @@ import {
   ViewKind,
   ViewResult,
   ViewsTag,
+  type AnyRecord,
   type Entity,
   type EntityId,
-  type FateRecord,
   type ListItem,
   type MutationDefinition,
   type MutationIdentifier,
@@ -197,11 +198,20 @@ export class FateClient<
 
   write(
     type: string,
-    data: FateRecord,
+    data: AnyRecord,
     select?: Set<string>,
     snapshots?: Map<EntityId, Snapshot>,
+    plan?: SelectionPlan,
+    pathPrefix: string | null = null,
   ) {
-    return this.normalizeEntity(type, data, select, snapshots);
+    return this.normalizeEntity(
+      type,
+      data,
+      select,
+      snapshots,
+      plan,
+      pathPrefix,
+    );
   }
 
   deleteRecord(
@@ -272,7 +282,8 @@ export class FateClient<
       return cached as FateThenable<ViewSnapshot<T, S>>;
     }
 
-    const selectedPaths = selectionFromView(view, ref);
+    const plan = selectionFromView(view, ref);
+    const selectedPaths = plan.paths;
     const missing = this.store.missingForSelection(entityId, selectedPaths);
 
     if (missing === '*' || missing.size > 0) {
@@ -286,6 +297,7 @@ export class FateClient<
         type,
         [id],
         missing === '*' ? undefined : missing,
+        plan,
       )
         .finally(() => this.pending.delete(key))
         .then(() => this.readView<T, S, V>(view, ref));
@@ -295,7 +307,12 @@ export class FateClient<
       return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
     }
 
-    const resolvedView = this.readViewSelection<T, S>(view, ref, entityId);
+    const resolvedView = this.readViewSelection<T, S>(
+      view,
+      ref,
+      entityId,
+      plan,
+    );
 
     const thenable = {
       status: 'fulfilled' as const,
@@ -332,22 +349,32 @@ export class FateClient<
     type GroupKey = string;
     const groups = new Map<
       GroupKey,
-      { fields?: Set<string>; ids: Array<string | number>; type: string }
+      {
+        fields?: Set<string>;
+        ids: Array<string | number>;
+        plan?: SelectionPlan;
+        type: string;
+      }
     >();
 
     const promises: Array<Promise<void>> = [];
     for (const [name, item] of Object.entries(request)) {
       if (isNodeItem(item)) {
-        const fields = item.root
-          ? selectionFromView(item.root, null)
-          : undefined;
+        const plan = item.root ? selectionFromView(item.root, null) : undefined;
+        const fields = plan?.paths;
         const fieldsSignature = fields
           ? [...fields].slice().sort().join(',')
           : '*';
-        const groupKey = `${item.type}#${fieldsSignature}`;
+        const argsSignature = plan
+          ? [...plan.args.entries()]
+              .map(([path, entry]) => `${path}:${entry.hash}`)
+              .sort()
+              .join(',')
+          : '';
+        const groupKey = `${item.type}#${fieldsSignature}|${argsSignature}`;
         let group = groups.get(groupKey);
         if (!group) {
-          group = { fields, ids: [], type: item.type };
+          group = { fields, ids: [], plan, type: item.type };
           groups.set(groupKey, group);
         }
 
@@ -367,14 +394,19 @@ export class FateClient<
       ...promises,
       ...Array.from(groups.values()).map((group) =>
         group.ids.length
-          ? this.fetchByIdAndNormalize(group.type, group.ids, group.fields)
+          ? this.fetchByIdAndNormalize(
+              group.type,
+              group.ids,
+              group.fields,
+              group.plan,
+            )
           : Promise.resolve(),
       ),
     ]);
   }
 
   getRequestResult<R extends Request>(request: R): RequestResult<R> {
-    const result: FateRecord = {};
+    const result: AnyRecord = {};
     for (const [name, item] of Object.entries(request)) {
       result[name] = isNodeItem(item)
         ? item.ids.map((id) => this.ref(item.type, id, item.root))
@@ -389,10 +421,19 @@ export class FateClient<
     type: string,
     ids: Array<string | number>,
     select?: Set<string>,
+    plan?: SelectionPlan,
+    prefix: string | null = null,
   ) {
     const records = await this.transport.fetchById(type, ids, select);
     for (const record of records) {
-      this.normalizeEntity(type, record as FateRecord, select);
+      this.normalizeEntity(
+        type,
+        record as AnyRecord,
+        select,
+        undefined,
+        plan,
+        prefix,
+      );
     }
   }
 
@@ -406,7 +447,8 @@ export class FateClient<
       );
     }
 
-    const selection = selectionFromView(item.root, null);
+    const plan = selectionFromView(item.root, null, item.args ?? {});
+    const selection = plan.paths;
     const { items, pagination } = await this.transport.fetchList(
       name,
       item.args,
@@ -417,8 +459,10 @@ export class FateClient<
     for (const entry of items) {
       const id = this.normalizeEntity(
         item.type,
-        entry.node as FateRecord,
+        entry.node as AnyRecord,
         selection,
+        undefined,
+        plan,
       );
       ids.push(id);
       cursors.push(entry.cursor);
@@ -432,9 +476,11 @@ export class FateClient<
 
   private normalizeEntity(
     type: string,
-    record: FateRecord,
+    record: AnyRecord,
     select?: Set<string>,
     snapshots?: Map<EntityId, Snapshot>,
+    plan?: SelectionPlan,
+    pathPrefix: string | null = null,
   ): EntityId {
     const config = this.types.get(type);
     if (!config) {
@@ -445,11 +491,13 @@ export class FateClient<
 
     const id = config.getId(record);
     const entityId = toEntityId(type, id);
-    const result: FateRecord = {};
+    const result: AnyRecord = {};
 
     if (config.fields) {
       for (const [key, relationDescriptor] of Object.entries(config.fields)) {
         const value = record[key];
+        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+        const fieldArgs = plan?.args.get(fieldPath);
         if (relationDescriptor === 'scalar') {
           result[key] = value;
         } else if (
@@ -478,9 +526,11 @@ export class FateClient<
 
             this.normalizeEntity(
               childType,
-              value as FateRecord,
+              value as AnyRecord,
               childPaths,
               snapshots,
+              plan,
+              fieldPath,
             );
           }
         } else if (
@@ -512,12 +562,12 @@ export class FateClient<
             }
 
             if (value && typeof value === 'object') {
-              const record = value as FateRecord;
+              const record = value as AnyRecord;
               if (Array.isArray(record.items)) {
                 return {
                   items: record.items.map((node) => {
                     if (node && typeof node === 'object' && 'node' in node) {
-                      const itemRecord = node as FateRecord;
+                      const itemRecord = node as AnyRecord;
                       return {
                         cursor: itemRecord.cursor,
                         node: itemRecord.node,
@@ -557,14 +607,16 @@ export class FateClient<
               if (node && typeof node === 'object') {
                 const childId = toEntityId(
                   childType,
-                  childConfig.getId(node as FateRecord),
+                  childConfig.getId(node as AnyRecord),
                 );
 
                 this.normalizeEntity(
                   childType,
-                  node as FateRecord,
+                  node as AnyRecord,
                   childPaths,
                   snapshots,
+                  plan,
+                  fieldPath,
                 );
 
                 refs.push(createNodeRef(childId));
@@ -577,7 +629,7 @@ export class FateClient<
 
             result[key] = refs;
 
-            this.store.setList(getListKey(entityId, key), {
+            this.store.setList(getListKey(entityId, key, fieldArgs?.hash), {
               cursors: hasCursor ? cursors : undefined,
               ids,
               pagination: connection.pagination as List['pagination'],
@@ -608,7 +660,7 @@ export class FateClient<
   private linkParentLists(
     type: string,
     entityId: EntityId,
-    record: FateRecord,
+    record: AnyRecord,
     snapshots?: Map<EntityId, Snapshot>,
   ) {
     const parents = this.parentLists.get(type);
@@ -671,6 +723,8 @@ export class FateClient<
     viewComposition: View<T, S>,
     ref: ViewRef<T['__typename']>,
     entityId: EntityId,
+    plan: SelectionPlan,
+    pathPrefix: string | null = null,
   ): ViewSnapshot<T, S> {
     const record = this.store.read(entityId) || { id: entityId };
     const ids = new Set<EntityId>();
@@ -678,12 +732,17 @@ export class FateClient<
 
     const walk = (
       viewPayload: object,
-      record: FateRecord,
+      record: AnyRecord,
       target: ViewResult,
       parentId: EntityId,
+      prefix: string | null,
     ) => {
       for (const [key, selectionKind] of Object.entries(viewPayload)) {
         if (key === ViewKind) {
+          continue;
+        }
+
+        if (key === 'args') {
           continue;
         }
 
@@ -696,8 +755,11 @@ export class FateClient<
           continue;
         }
 
+        const fieldPath = prefix ? `${prefix}.${key}` : key;
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
+          target[key] = record[key];
+        } else if (selectionKind && isArgs(selectionKind)) {
           target[key] = record[key];
         } else if (selectionKind && selectionType === 'object') {
           if (!(key in target)) {
@@ -710,15 +772,15 @@ export class FateClient<
               selectionKind.items &&
               typeof selectionKind.items === 'object'
             ) {
-              const selection = selectionKind.items as FateRecord;
+              const selection = selectionKind.items as AnyRecord;
               const listState = this.store.getListState(
-                getListKey(parentId, key),
+                getListKey(parentId, key, plan.args.get(fieldPath)?.hash),
               );
               const items = value.map((item, index) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
 
                 if (!entityId) {
-                  const entry: FateRecord = {
+                  const entry: AnyRecord = {
                     cursor: listState?.cursors?.[index],
                     node: null,
                   };
@@ -731,10 +793,16 @@ export class FateClient<
                 const node = { __typename: type, id };
 
                 if (record) {
-                  walk(selection.node as FateRecord, record, node, entityId);
+                  walk(
+                    selection.node as AnyRecord,
+                    record,
+                    node,
+                    entityId,
+                    fieldPath,
+                  );
                 }
 
-                const entry: FateRecord = {
+                const entry: AnyRecord = {
                   node: record ? node : null,
                 };
 
@@ -743,13 +811,13 @@ export class FateClient<
                 }
                 return entry;
               });
-              const connection: FateRecord = { items };
+              const connection: AnyRecord = { items };
               if ('pagination' in selectionKind && selectionKind.pagination) {
                 const paginationSelection =
-                  selectionKind.pagination as FateRecord;
+                  selectionKind.pagination as AnyRecord;
                 const storedPagination = listState?.pagination;
                 if (storedPagination) {
-                  const pagination: FateRecord = {};
+                  const pagination: AnyRecord = {};
                   if (paginationSelection.nextCursor === true) {
                     if (storedPagination.nextCursor !== undefined) {
                       pagination.nextCursor = storedPagination.nextCursor;
@@ -789,7 +857,7 @@ export class FateClient<
 
                 if (record) {
                   const node = { __typename: type, id };
-                  walk(selectionKind, record, node, entityId);
+                  walk(selectionKind, record, node, entityId, fieldPath);
                   return node;
                 }
 
@@ -801,7 +869,7 @@ export class FateClient<
             ids.add(entityId);
             const relatedRecord = this.store.read(entityId);
             const { id, type } = parseEntityId(entityId);
-            const targetRecord = target[key] as FateRecord;
+            const targetRecord = target[key] as AnyRecord;
 
             targetRecord.id = id;
             targetRecord.__typename = type;
@@ -812,10 +880,17 @@ export class FateClient<
                 relatedRecord,
                 targetRecord as ViewResult,
                 entityId,
+                fieldPath,
               );
             }
           } else {
-            walk(selectionKind, record, target[key] as ViewResult, entityId);
+            walk(
+              selectionKind,
+              record,
+              target[key] as ViewResult,
+              entityId,
+              fieldPath,
+            );
           }
         }
       }
@@ -824,7 +899,7 @@ export class FateClient<
     const data: ViewResult = {};
 
     for (const viewPayload of getViewPayloads(viewComposition, ref)) {
-      walk(viewPayload.select, record, data, entityId);
+      walk(viewPayload.select, record, data, entityId, pathPrefix);
     }
 
     return { data: data as ViewData<T, S>, ids };
