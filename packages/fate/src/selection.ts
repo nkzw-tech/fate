@@ -35,16 +35,16 @@ export const selectionFromView = <
 
   const assignArgs = (
     path: string,
-    marker: ReturnType<typeof resolveArgs>,
+    value: ReturnType<typeof resolveArgs>,
     ignoreKeys?: ReadonlySet<string>,
   ) => {
-    const hash = hashArgs(marker, { ignoreKeys });
-    args.set(path, { hash, value: marker });
+    const hash = hashArgs(value, { ignoreKeys });
+    args.set(path, { hash, value });
   };
 
   const walk = (selection: AnyRecord, prefix: string | null) => {
     for (const [key, value] of Object.entries(selection)) {
-      if (key === ViewKind || key === 'args') {
+      if (key === ViewKind) {
         continue;
       }
 

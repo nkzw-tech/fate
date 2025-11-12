@@ -22,26 +22,33 @@ type Post = {
 };
 
 test('loads additional items when loadNext is invoked', async () => {
-  const fetchList = vi.fn().mockResolvedValue({
-    items: [
-      {
-        cursor: 'cursor-2',
-        node: { __typename: 'Comment', content: 'Banana', id: 'comment-2' },
+  const fetchById = vi.fn().mockResolvedValue([
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          {
+            cursor: 'cursor-2',
+            node: {
+              __typename: 'Comment',
+              content: 'Banana',
+              id: 'comment-2',
+            },
+          },
+        ],
+        pagination: {
+          hasNext: false,
+          hasPrevious: true,
+          previousCursor: 'cursor-1',
+        },
       },
-    ],
-    pagination: {
-      hasNext: false,
-      hasPrevious: true,
-      previousCursor: 'cursor-1',
+      id: 'post-1',
     },
-  });
+  ]);
 
   const client = createClient({
     transport: {
-      async fetchById() {
-        return [];
-      },
-      fetchList,
+      fetchById,
     },
     types: [
       { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
@@ -158,10 +165,10 @@ test('loads additional items when loadNext is invoked', async () => {
     await loadNextRef?.();
   });
 
-  expect(fetchList).toHaveBeenCalledWith(
-    'Post.comments',
-    { after: 'cursor-1', first: 1, id: 'post-1' },
-    new Set(['content', 'id']),
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['comments', 'comments.content', 'comments.id']),
   );
 
   expect(loadNextRef).toBeNull();
@@ -169,26 +176,33 @@ test('loads additional items when loadNext is invoked', async () => {
 });
 
 test('loads previous items when loadPrevious is invoked', async () => {
-  const fetchList = vi.fn().mockResolvedValue({
-    items: [
-      {
-        cursor: 'cursor-0',
-        node: { __typename: 'Comment', content: 'Apple', id: 'comment-0' },
+  const fetchById = vi.fn().mockResolvedValue([
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          {
+            cursor: 'cursor-0',
+            node: {
+              __typename: 'Comment',
+              content: 'Apple',
+              id: 'comment-0',
+            },
+          },
+        ],
+        pagination: {
+          hasNext: true,
+          hasPrevious: false,
+          nextCursor: 'cursor-1',
+        },
       },
-    ],
-    pagination: {
-      hasNext: true,
-      hasPrevious: false,
-      nextCursor: 'cursor-1',
+      id: 'post-1',
     },
-  });
+  ]);
 
   const client = createClient({
     transport: {
-      async fetchById() {
-        return [];
-      },
-      fetchList,
+      fetchById,
     },
     types: [
       { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
@@ -296,10 +310,10 @@ test('loads previous items when loadPrevious is invoked', async () => {
     await loadPreviousRef?.();
   });
 
-  expect(fetchList).toHaveBeenCalledWith(
-    'Post.comments',
-    { before: 'cursor-1', first: 1, id: 'post-1' },
-    new Set(['content', 'id']),
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['comments', 'comments.content', 'comments.id']),
   );
 
   expect(loadPreviousRef).toBeNull();

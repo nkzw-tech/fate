@@ -6,7 +6,7 @@ import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { selectionFromView, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
 import { Transport } from './transport.ts';
-import { RequestResult, ViewSnapshot } from './types.js';
+import { Pagination, RequestResult, ViewSnapshot } from './types.js';
 import {
   ConnectionMetadata,
   ConnectionTag,
@@ -333,49 +333,67 @@ export class FateClient<
     args: Record<string, unknown>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
-    if (!this.transport.fetchList) {
-      throw new Error(
-        `fate: 'transport.fetchList' is not configured but connection '${connection.procedure}' was requested.`,
-      );
-    }
-
     const direction = options.direction ?? 'forward';
     const owner = parseEntityId(connection.owner);
-    const requestArgs: AnyRecord = { ...connection.args, ...args };
+    const requestArgs = { ...connection.args, ...args };
     if (requestArgs.id === undefined && owner.id) {
       requestArgs.id = owner.id;
     }
 
     const plan = selectionFromView(view, null, requestArgs);
-    const selection = plan.paths;
+    const nodeSelection = plan.paths;
 
-    const { items, pagination } = await this.transport.fetchList(
-      connection.procedure,
-      requestArgs,
-      selection,
+    const parentSelection = new Set<string>();
+    for (const path of nodeSelection) {
+      parentSelection.add(`${connection.field}.${path}`);
+    }
+
+    parentSelection.add(connection.field);
+
+    const [parentRecord] = await this.transport.fetchById(
+      owner.type,
+      [owner.id],
+      parentSelection,
     );
+
+    if (!parentRecord || typeof parentRecord !== 'object') {
+      return this.store.getListState(connection.key);
+    }
+
+    const list = (parentRecord as AnyRecord)[connection.field] as {
+      items: Array<{ cursor: string | undefined; node: unknown }>;
+      pagination: Pagination;
+    };
+    const connectionPayload = Array.isArray(list)
+      ? {
+          items: list.map((item) => ({ cursor: undefined, node: item })),
+          pagination: undefined,
+        }
+      : list;
+
+    if (!connectionPayload) {
+      return this.store.getListState(connection.key);
+    }
 
     const incomingIds: Array<EntityId> = [];
     const incomingCursors: Array<string | undefined> = [];
 
-    for (const entry of items) {
-      const nodeRecord = entry.node as AnyRecord;
-      const nodeType =
-        nodeRecord && typeof nodeRecord.__typename === 'string'
-          ? (nodeRecord.__typename as string)
-          : null;
+    for (const entry of connectionPayload.items) {
+      const { node } = entry;
+      const nodeType = node.__typename;
       if (!nodeType) {
         throw new Error(
           `fate: Connection '${connection.procedure}' returned an item without '__typename'.`,
         );
       }
-      const id = this.write(nodeType, nodeRecord, selection, undefined, plan);
+
+      const id = this.write(nodeType, node, nodeSelection, undefined, plan);
       incomingIds.push(id);
       incomingCursors.push(entry.cursor);
     }
 
-    const existing = this.store.getListState(connection.key);
-    const existingIds = existing?.ids ?? [];
+    const previous = this.store.getListState(connection.key);
+    const existingIds = previous?.ids ?? [];
     const existingSet = new Set(existingIds);
     const newIds: Array<EntityId> = [];
     const newCursors: Array<string | undefined> = [];
@@ -395,37 +413,41 @@ export class FateClient<
 
     let nextCursors: Array<string | undefined> | undefined;
     if (
-      existing?.cursors ||
+      previous?.cursors ||
       newCursors.some((cursor) => cursor !== undefined)
     ) {
-      const baseCursors = existing?.cursors ?? existingIds.map(() => undefined);
+      const baseCursors =
+        previous?.cursors ?? Array(existingIds.length).fill(undefined);
       nextCursors =
         direction === 'forward'
           ? [...baseCursors, ...newCursors]
           : [...newCursors, ...baseCursors];
     }
 
-    const existingPagination = existing?.pagination;
-    const nextPagination = existingPagination
+    const previousPagination = previous?.pagination;
+    const newPagination = connectionPayload.pagination;
+
+    const nextPagination = previousPagination
       ? {
           hasNext:
             direction === 'forward'
-              ? pagination.hasNext
-              : existingPagination.hasNext,
+              ? (newPagination?.hasNext ?? previousPagination.hasNext)
+              : previousPagination.hasNext,
           hasPrevious:
             direction === 'backward'
-              ? pagination.hasPrevious
-              : existingPagination.hasPrevious,
+              ? (newPagination?.hasPrevious ?? previousPagination.hasPrevious)
+              : previousPagination.hasPrevious,
           nextCursor:
             direction === 'forward'
-              ? pagination.nextCursor
-              : existingPagination.nextCursor,
+              ? (newPagination?.nextCursor ?? previousPagination.nextCursor)
+              : previousPagination.nextCursor,
           previousCursor:
             direction === 'backward'
-              ? pagination.previousCursor
-              : existingPagination.previousCursor,
+              ? (newPagination?.previousCursor ??
+                previousPagination.previousCursor)
+              : previousPagination.previousCursor,
         }
-      : pagination;
+      : newPagination;
 
     this.store.setList(connection.key, {
       cursors: nextCursors,
@@ -435,9 +457,7 @@ export class FateClient<
 
     const current = this.store.read(connection.owner);
     const existingField = Array.isArray(current?.[connection.field])
-      ? ([
-          ...((current?.[connection.field] as Array<unknown>) ?? []),
-        ] as Array<unknown>)
+      ? (current?.[connection.field] as Array<unknown>) || []
       : [];
     const nodeRefs = newIds.map((id) => createNodeRef(id));
     const nextField =
@@ -854,10 +874,6 @@ export class FateClient<
     ) => {
       for (const [key, selectionKind] of Object.entries(viewPayload)) {
         if (key === ViewKind) {
-          continue;
-        }
-
-        if (key === 'args') {
           continue;
         }
 
