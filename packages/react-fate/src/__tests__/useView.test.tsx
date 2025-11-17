@@ -243,13 +243,7 @@ test('re-renders when a mutation updates the record', async () => {
   });
 
   expect(container.textContent).toBe('Published');
-  expect(renders).toEqual([
-    'Draft',
-    'Draft',
-    'Optimistic',
-    'Optimistic',
-    'Published',
-  ]);
+  expect(renders).toEqual(['Draft', 'Optimistic', 'Published']);
   expect(mutate).toHaveBeenCalledTimes(1);
 });
 
@@ -369,12 +363,6 @@ test('rolls back optimistic updates when a mutation fails', async () => {
   });
 
   expect(container.textContent).toBe('Draft');
-  expect(renders).toEqual([
-    'Draft',
-    'Draft',
-    'Optimistic',
-    'Optimistic',
-    'Draft',
-  ]);
+  expect(renders).toEqual(['Draft', 'Optimistic', 'Draft']);
   expect(mutate).toHaveBeenCalledTimes(1);
 });
