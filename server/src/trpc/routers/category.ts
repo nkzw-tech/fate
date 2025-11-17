@@ -4,28 +4,14 @@ import {
   connectionArgs,
   createConnectionProcedure,
 } from '../../fate-server/connection.ts';
-import {
-  prismaSelect,
-  scopedArgsForPath,
-} from '../../fate-server/prismaSelect.tsx';
-import { Category, Post } from '../../prisma/prisma-client/client.ts';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
+import { scopedArgsForPath } from '../../fate-server/prismaSelect.tsx';
 import { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
-
-const categorySelect = {
-  _count: {
-    select: { posts: true },
-  },
-  id: true,
-} as const;
-
-type CategoryRow = Category & {
-  _count?: { posts: number };
-  posts?: Array<Post>;
-} & Category;
+import { categoryDataView, CategoryItem } from '../views.ts';
 
 const transformCategory = (
-  { _count, posts, ...category }: CategoryRow,
+  { _count, posts, ...category }: CategoryItem,
   args?: Record<string, unknown>,
 ) => ({
   ...category,
@@ -45,34 +31,43 @@ export const categoryRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const select = prismaSelect(input.select, input.args);
-      delete select.postCount;
-
+      const selection = createDataViewSelection<CategoryItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: categoryDataView,
+      });
       const categories = await ctx.prisma.category.findMany({
-        select: { ...select, ...categorySelect },
+        select: selection.select,
         where: { id: { in: input.ids } },
       } as CategoryFindManyArgs);
-
+      const resolved = await selection.resolveMany(
+        categories as Array<CategoryItem>,
+      );
       const map = new Map(
-        categories.map((category) => {
-          const result = transformCategory(category as CategoryRow, input.args);
+        resolved.map((category) => {
+          const result = transformCategory(category, input.args);
           return [result.id, result];
         }),
       );
       return input.ids.map((id) => map.get(id)).filter(Boolean);
     }),
   list: createConnectionProcedure({
-    map: ({ input, rows }) =>
-      (rows as Array<CategoryRow & { _count: { posts: number } }>).map(
-        (category) => transformCategory(category, input.args),
+    map: ({ input, items }) =>
+      (items as Array<CategoryItem>).map((category) =>
+        transformCategory(category, input.args),
       ),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const select = prismaSelect(input.select, input.args);
-      delete select.postCount;
+      const selection = createDataViewSelection<CategoryItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: categoryDataView,
+      });
 
       const findOptions: CategoryFindManyArgs = {
         orderBy: { createdAt: 'asc' },
-        select: { ...select, ...categorySelect },
+        select: selection.select,
         take: direction === 'forward' ? take : -take,
       };
 
@@ -81,8 +76,10 @@ export const categoryRouter = router({
         findOptions.skip = skip;
       }
 
-      const rows = await ctx.prisma.category.findMany(findOptions);
-      return direction === 'forward' ? rows : rows.reverse();
+      const items = await ctx.prisma.category.findMany(findOptions);
+      return selection.resolveMany(
+        direction === 'forward' ? items : items.reverse(),
+      );
     },
   }),
 });

@@ -1,4 +1,5 @@
 import type { AppRouter } from '@nkzw/fate-server/src/trpc/root.ts';
+import type { Comment, Post, User } from '@nkzw/fate-server/src/trpc/views.ts';
 import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
 import { createClient, createFateTransport, mutation } from 'react-fate';
@@ -6,72 +7,6 @@ import env from './env.tsx';
 
 export type RouterInputs = inferRouterInputs<AppRouter>;
 export type RouterOutputs = inferRouterOutputs<AppRouter>;
-
-type PostBase = NonNullable<RouterOutputs['post']['byId'][number]>;
-type CommentBase = NonNullable<RouterOutputs['comment']['byId'][number]>;
-type CategoryBase = NonNullable<RouterOutputs['category']['byId'][number]>;
-type ProjectBase = NonNullable<
-  RouterOutputs['project']['list']['items'][number]['node']
->;
-type EventBase = NonNullable<RouterOutputs['event']['byId'][number]>;
-type TagBase = NonNullable<RouterOutputs['tags']['byId'][number]>;
-
-export type User = {
-  __typename: 'User';
-  id: string;
-  name: string | null;
-  username?: string | null;
-};
-
-export type Tag = TagBase & {
-  __typename: 'Tag';
-};
-
-export type Comment = CommentBase & {
-  __typename: 'Comment';
-  author: User;
-};
-
-export type ProjectUpdate = NonNullable<
-  ProjectBase['updates']
->['items'][0]['node'] & {
-  __typename: 'ProjectUpdate';
-  author: User;
-};
-
-export type Project = ProjectBase & {
-  __typename: 'Project';
-  owner: User;
-  updates: Array<ProjectUpdate>;
-};
-
-export type EventAttendee = NonNullable<
-  EventBase['attendees']
->['items'][0]['node'] & {
-  __typename: 'EventAttendee';
-  user: User;
-};
-
-export type Event = EventBase & {
-  __typename: 'Event';
-  attendees: Array<EventAttendee>;
-  attendingCount: number;
-  host: User;
-};
-
-export type Post = PostBase & {
-  __typename: 'Post';
-  author: User;
-  category: Category | null;
-  comments: Array<Comment>;
-  tags: Array<Tag>;
-};
-
-export type Category = CategoryBase & {
-  __typename: 'Category';
-  postCount: number;
-  posts: Array<Post>;
-};
 
 const trpcClient = createTRPCProxyClient<AppRouter>({
   links: [

@@ -1,15 +1,18 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { connectionArgs } from '../../fate-server/connection.ts';
-import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
-import type { CommentFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
+import type {
+  CommentFindManyArgs,
+  CommentSelect,
+} from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
+import { commentDataView } from '../views.ts';
+import type { CommentItem } from '../views.ts';
 
 const postSelection = {
-  select: {
-    id: true,
-    title: true,
-  },
+  id: true,
+  title: true,
 } as const;
 
 export const commentRouter = router({
@@ -43,34 +46,33 @@ export const commentRouter = router({
         });
       }
 
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<CommentItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: commentDataView,
+      });
+
       const data = {
         authorId: ctx.sessionUser.id,
         content: input.content,
         postId: input.postId,
       };
 
-      const prismaPostSelection = select.post;
-      const mergedPostSelection =
-        prismaPostSelection && typeof prismaPostSelection === 'object'
-          ? {
-              ...(prismaPostSelection as Record<string, unknown>),
-              select: {
-                ...postSelection.select,
-                ...((
-                  prismaPostSelection as { select?: Record<string, unknown> }
-                ).select ?? {}),
-              },
-            }
-          : postSelection;
-
-      return ctx.prisma.comment.create({
+      const result = await ctx.prisma.comment.create({
         data,
         select: {
-          ...select,
-          post: mergedPostSelection,
-        },
+          ...selection.select,
+          post: {
+            select: {
+              ...postSelection,
+              ...(selection.select.post as { select?: Record<string, unknown> })
+                ?.select,
+            },
+          },
+        } as CommentSelect,
       });
+      return selection.resolve(result);
     }),
   byId: procedure
     .input(
@@ -81,13 +83,21 @@ export const commentRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<CommentItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: commentDataView,
+      });
       const comments = await ctx.prisma.comment.findMany({
-        select,
+        select: selection.select,
         where: { id: { in: input.ids } },
       } as CommentFindManyArgs);
 
-      const map = new Map(comments.map((comment) => [comment.id, comment]));
+      const resolved = await selection.resolveMany(
+        comments as Array<CommentItem>,
+      );
+      const map = new Map(resolved.map((comment) => [comment.id, comment]));
       return input.ids.map((id) => map.get(id)).filter(Boolean);
     }),
   delete: procedure

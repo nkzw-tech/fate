@@ -2,44 +2,18 @@ import {
   arrayToConnection,
   createConnectionProcedure,
 } from '../../fate-server/connection.ts';
-import {
-  prismaSelect,
-  scopedArgsForPath,
-} from '../../fate-server/prismaSelect.tsx';
-import { Project, ProjectUpdate } from '../../prisma/prisma-client/client.ts';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
+import { scopedArgsForPath } from '../../fate-server/prismaSelect.tsx';
+import { ProjectSelect } from '../../prisma/prisma-client/models.ts';
 import { router } from '../init.ts';
-
-const projectSelect = {
-  focusAreas: true,
-  id: true,
-  metrics: true,
-  name: true,
-  progress: true,
-  startDate: true,
-  status: true,
-  summary: true,
-  targetDate: true,
-  updates: {
-    select: {
-      confidence: true,
-      content: true,
-      createdAt: true,
-      id: true,
-      mood: true,
-    },
-  },
-} as const;
-
-type ProjectRow = Project & {
-  updates?: Array<ProjectUpdate>;
-};
+import { projectDataView, ProjectItem } from '../views.ts';
 
 export const projectRouter = router({
   list: createConnectionProcedure({
     defaultSize: 3,
-    map: ({ input, rows }) =>
-      (rows as Array<ProjectRow>).map(
-        ({ updates, ...project }: ProjectRow) => ({
+    map: ({ input, items }) =>
+      (items as Array<ProjectItem>).map(
+        ({ updates, ...project }: ProjectItem) => ({
           ...project,
           updates: arrayToConnection(updates, {
             args: scopedArgsForPath(input.args, 'updates'),
@@ -47,14 +21,16 @@ export const projectRouter = router({
         }),
       ),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<ProjectItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: projectDataView,
+      });
 
-      const rows = await ctx.prisma.project.findMany({
+      const items = await ctx.prisma.project.findMany({
         orderBy: { createdAt: 'desc' },
-        select: {
-          ...projectSelect,
-          ...select,
-        },
+        select: selection.select as ProjectSelect,
         take: direction === 'forward' ? take : -take,
         ...(cursor
           ? {
@@ -63,7 +39,9 @@ export const projectRouter = router({
             }
           : {}),
       });
-      return direction === 'forward' ? rows : rows.reverse();
+      return selection.resolveMany(
+        direction === 'forward' ? items : items.reverse(),
+      );
     },
   }),
 });

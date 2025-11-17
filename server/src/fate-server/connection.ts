@@ -139,30 +139,30 @@ export function arrayToConnection<TNode extends { id: string | number }>(
   } satisfies ConnectionResult<TNode>;
 }
 
-type QueryFn<TRow> = (options: {
+type QueryFn<TItem> = (options: {
   ctx: AppContext;
   cursor?: ConnectionCursor;
   direction: 'forward' | 'backward';
   input: ConnectionInput;
   skip?: number;
   take: number;
-}) => Promise<Array<TRow>>;
+}) => Promise<Array<TItem>>;
 
-type MapFn<TRow, TNode> = (options: {
+type MapFn<TItem, TNode> = (options: {
   ctx: AppContext;
   input: ConnectionInput;
-  rows: Array<TRow>;
+  items: Array<TItem>;
 }) => Promise<Array<TNode>> | Array<TNode>;
 
-type CreateConnectionProcedureOptions<TRow, TNode> = {
+type CreateConnectionProcedureOptions<TItem, TNode> = {
   defaultSize?: number;
   getCursor?: (node: TNode) => ConnectionCursor;
-  map?: MapFn<TRow, TNode>;
-  query: QueryFn<TRow>;
+  map?: MapFn<TItem, TNode>;
+  query: QueryFn<TItem>;
 };
 
-export const createConnectionProcedure = <TRow, TNode = TRow>(
-  options: CreateConnectionProcedureOptions<TRow, TNode>,
+export const createConnectionProcedure = <TItem, TNode = TItem>(
+  options: CreateConnectionProcedureOptions<TItem, TNode>,
 ) => {
   const {
     defaultSize = 20,
@@ -180,7 +180,7 @@ export const createConnectionProcedure = <TRow, TNode = TRow>(
     const cursor = isBackward ? paginationArgs.before : paginationArgs.after;
     const direction = isBackward ? 'backward' : 'forward';
     const pageSize = paginationArgs.first ?? paginationArgs.last ?? defaultSize;
-    const rows = await query({
+    const rawItems = await query({
       ctx,
       cursor,
       direction,
@@ -189,13 +189,13 @@ export const createConnectionProcedure = <TRow, TNode = TRow>(
       take: pageSize + 1,
     });
 
-    const hasMore = rows.length > pageSize;
-    const limitedRows = isBackward
-      ? rows.slice(Math.max(0, rows.length - pageSize))
-      : rows.slice(0, pageSize);
+    const hasMore = rawItems.length > pageSize;
+    const limitedItems = isBackward
+      ? rawItems.slice(Math.max(0, rawItems.length - pageSize))
+      : rawItems.slice(0, pageSize);
     const nodes = map
-      ? await map({ ctx, input, rows: limitedRows })
-      : (limitedRows as unknown as Array<TNode>);
+      ? await map({ ctx, input, items: limitedItems })
+      : (limitedItems as unknown as Array<TNode>);
 
     const items = nodes.map((node) => ({
       cursor: getCursor(node),

@@ -5,26 +5,14 @@ import {
   connectionArgs,
   createConnectionProcedure,
 } from '../../fate-server/connection.ts';
-import {
-  prismaSelect,
-  scopedArgsForPath,
-} from '../../fate-server/prismaSelect.tsx';
-import { Post } from '../../prisma/prisma-client/client.ts';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
+import { scopedArgsForPath } from '../../fate-server/prismaSelect.tsx';
 import { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
-
-type CommentRow = { id: string | number } & Record<string, unknown>;
-
-type TagRow = { id: string | number } & Record<string, unknown>;
-
-type PostRow = {
-  comments?: Array<CommentRow>;
-  id: string;
-  tags?: Array<TagRow>;
-} & Post;
+import { postDataView, PostItem } from '../views.ts';
 
 const transformPost = (
-  { comments, tags, ...post }: PostRow,
+  { comments, tags, ...post }: PostItem,
   args?: Record<string, unknown>,
 ) => ({
   ...post,
@@ -46,15 +34,20 @@ export const postRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<PostItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: postDataView,
+      });
       const posts = await ctx.prisma.post.findMany({
-        select,
+        select: selection.select,
         where: { id: { in: input.ids } },
       } as PostFindManyArgs);
-
+      const resolved = await selection.resolveMany(posts as Array<PostItem>);
       const map = new Map(
-        posts.map((post) => {
-          const result = transformPost(post as PostRow, input.args);
+        resolved.map((post) => {
+          const result = transformPost(post, input.args);
           return [result.id, result];
         }),
       );
@@ -82,7 +75,12 @@ export const postRouter = router({
         });
       }
 
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<PostItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: postDataView,
+      });
       const data = {
         likes: {
           increment: 1,
@@ -92,19 +90,25 @@ export const postRouter = router({
 
       const updated = await ctx.prisma.post.update({
         data,
-        select,
+        select: selection.select,
         where,
       });
-      return transformPost(updated as unknown as PostRow, input.args);
+      const resolved = await selection.resolve(updated as unknown as PostItem);
+      return transformPost(resolved, input.args);
     }),
   list: createConnectionProcedure({
-    map: ({ input, rows }) =>
-      (rows as Array<PostRow>).map((post) => transformPost(post, input.args)),
+    map: ({ input, items }) =>
+      (items as Array<PostItem>).map((post) => transformPost(post, input.args)),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<PostItem>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: postDataView,
+      });
       const findOptions: PostFindManyArgs = {
         orderBy: { createdAt: 'desc' },
-        select,
+        select: selection.select,
         take: direction === 'forward' ? take : -take,
       };
 
@@ -113,8 +117,10 @@ export const postRouter = router({
         findOptions.skip = skip;
       }
 
-      const rows = await ctx.prisma.post.findMany(findOptions);
-      return direction === 'forward' ? rows : rows.reverse();
+      const items = await ctx.prisma.post.findMany(findOptions);
+      return selection.resolveMany(
+        direction === 'forward' ? items : items.reverse(),
+      );
     },
   }),
   unlike: procedure
@@ -127,6 +133,12 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
+        const selection = createDataViewSelection<PostItem>({
+          args: input.args,
+          context: ctx,
+          paths: input.select,
+          view: postDataView,
+        });
         const existing = await tx.post.findUnique({
           select: {
             likes: true,
@@ -143,15 +155,17 @@ export const postRouter = router({
           });
         }
 
-        const select = prismaSelect(input.select, input.args);
         const where = { id: input.id };
 
         if (existing.likes <= 0) {
           const result = await tx.post.findUniqueOrThrow({
-            select,
+            select: selection.select,
             where,
           });
-          return transformPost(result as unknown as PostRow, input.args);
+          const resolved = await selection.resolve(
+            result as unknown as PostItem,
+          );
+          return transformPost(resolved, input.args);
         }
 
         const data = {
@@ -162,10 +176,13 @@ export const postRouter = router({
 
         const updated = await tx.post.update({
           data,
-          select,
+          select: selection.select,
           where,
         });
-        return transformPost(updated as unknown as PostRow, input.args);
+        const resolved = await selection.resolve(
+          updated as unknown as PostItem,
+        );
+        return transformPost(resolved, input.args);
       }),
     ),
 });

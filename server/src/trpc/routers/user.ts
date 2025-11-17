@@ -1,10 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { connectionArgs } from '../../fate-server/connection.ts';
-import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
 import { auth } from '../../lib/auth.tsx';
+import type { User } from '../../prisma/prisma-client/client.ts';
 import { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
+import { userDataView } from '../views.ts';
 
 export const userRouter = router({
   update: procedure
@@ -27,16 +29,22 @@ export const userRouter = router({
         });
       }
 
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<User>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: userDataView,
+      });
 
       await auth.api.updateUser({
         body: { name: input.name },
         headers: ctx.headers,
       });
 
-      return await ctx.prisma.user.findUniqueOrThrow({
-        select,
+      const result = await ctx.prisma.user.findUniqueOrThrow({
+        select: selection.select,
         where: { id: ctx.sessionUser.id },
       } as UserFindUniqueArgs);
+      return selection.resolve(result as User);
     }),
 });

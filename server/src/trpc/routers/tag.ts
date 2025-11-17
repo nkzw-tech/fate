@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { connectionArgs } from '../../fate-server/connection.ts';
-import { prismaSelect } from '../../fate-server/prismaSelect.tsx';
+import { createDataViewSelection } from '../../fate-server/dataView.ts';
+import type { Tag } from '../../prisma/prisma-client/client.ts';
 import { TagFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
+import { tagDataView } from '../views.ts';
 
 export const tagRouter = router({
   byId: procedure
@@ -14,16 +16,22 @@ export const tagRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const select = prismaSelect(input.select, input.args);
+      const selection = createDataViewSelection<Tag>({
+        args: input.args,
+        context: ctx,
+        paths: input.select,
+        view: tagDataView,
+      });
 
       const tags = await ctx.prisma.tag.findMany({
-        select,
+        select: selection.select,
         where: { id: { in: input.ids } },
       } as TagFindManyArgs);
 
-      const map = new Map(tags.map((tag) => [tag.id, tag] as const));
+      const resolved = await selection.resolveMany(tags as Array<Tag>);
+      const map = new Map(resolved.map((tag) => [tag.id, tag] as const));
       return input.ids
         .map((id) => map.get(id))
-        .filter((tag): tag is (typeof tags)[number] => tag != null);
+        .filter((tag): tag is (typeof resolved)[number] => tag != null);
     }),
 });

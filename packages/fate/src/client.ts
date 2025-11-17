@@ -795,7 +795,6 @@ export class FateClient<
           })();
 
           if (connection) {
-            const refs: Array<unknown> = [];
             const ids: Array<EntityId> = [];
             const cursors: Array<string | undefined> = [];
             let hasCursor = false;
@@ -832,7 +831,6 @@ export class FateClient<
                 hasCursor = true;
               }
               if (isNodeRef(node)) {
-                refs.push(node);
                 ids.push(getNodeRefId(node));
                 continue;
               }
@@ -852,20 +850,96 @@ export class FateClient<
                   fieldPath,
                 );
 
-                refs.push(createNodeRef(childId));
                 ids.push(childId);
                 continue;
               }
 
-              refs.push(node);
+              continue;
             }
 
-            result[key] = refs;
+            const listKey = getListKey(entityId, key, fieldArgs?.hash);
+            const previousList = this.store.getListState(listKey);
+            const existingIds = previousList?.ids ?? [];
+            const argsValue = fieldArgs?.value as AnyRecord | undefined;
+            const hasCursorArg = Boolean(
+              argsValue &&
+                ('after' in argsValue ||
+                  'before' in argsValue ||
+                  'cursor' in argsValue),
+            );
+            const isBackward = Boolean(
+              argsValue &&
+                (argsValue.before !== undefined ||
+                  argsValue.last !== undefined),
+            );
 
-            this.store.setList(getListKey(entityId, key, fieldArgs?.hash), {
-              cursors: hasCursor ? cursors : undefined,
-              ids,
-              pagination: connection.pagination as List['pagination'],
+            const mergeIds = () => {
+              if (!previousList) {
+                return [...ids];
+              }
+
+              if (!hasCursorArg) {
+                const incomingSet = new Set(ids);
+                const remaining = existingIds.filter(
+                  (id) => !incomingSet.has(id),
+                );
+                return isBackward
+                  ? [...remaining, ...ids]
+                  : [...ids, ...remaining];
+              }
+
+              const existingSet = new Set(existingIds);
+              const newIds = ids.filter((id) => !existingSet.has(id));
+              return isBackward
+                ? [...newIds, ...existingIds]
+                : [...existingIds, ...newIds];
+            };
+
+            const nextIds = mergeIds();
+            const cursorMap = new Map<EntityId, string | undefined>();
+            if (previousList?.cursors) {
+              previousList.cursors.forEach((cursor, index) => {
+                cursorMap.set(existingIds[index], cursor);
+              });
+            }
+            cursors.forEach((cursor, index) => {
+              if (cursor !== undefined) {
+                cursorMap.set(ids[index], cursor);
+              }
+            });
+
+            const shouldStoreCursors =
+              hasCursor || Boolean(previousList?.cursors);
+            const nextCursors = shouldStoreCursors
+              ? nextIds.map((id) => cursorMap.get(id))
+              : undefined;
+            const previousPagination = previousList?.pagination;
+            const newPagination = connection.pagination as List['pagination'];
+            const nextPagination =
+              previousPagination || newPagination
+                ? {
+                    hasNext: !!(
+                      newPagination?.hasNext ?? previousPagination?.hasNext
+                    ),
+                    hasPrevious: !!(
+                      newPagination?.hasPrevious ??
+                      previousPagination?.hasPrevious
+                    ),
+                    nextCursor:
+                      newPagination?.nextCursor ??
+                      previousPagination?.nextCursor,
+                    previousCursor:
+                      newPagination?.previousCursor ??
+                      previousPagination?.previousCursor,
+                  }
+                : undefined;
+
+            result[key] = nextIds.map((id) => createNodeRef(id));
+
+            this.store.setList(listKey, {
+              cursors: nextCursors,
+              ids: nextIds,
+              pagination: nextPagination,
             });
           }
         } else {
@@ -936,12 +1010,50 @@ export class FateClient<
 
       const nextList = [...current, createNodeRef(entityId)];
 
-      const listKey = getListKey(parentId, parent.field);
       const ids = nextList
         .map((item) => (isNodeRef(item) ? getNodeRefId(item) : null))
         .filter((id): id is EntityId => id != null);
 
-      this.store.setList(listKey, { ids });
+      const defaultListKey = getListKey(parentId, parent.field);
+      const defaultListState = this.store.getListState(defaultListKey);
+      const nextDefaultCursors =
+        defaultListState?.cursors &&
+        ids.length > defaultListState.cursors.length
+          ? [
+              ...defaultListState.cursors,
+              ...new Array<string | undefined>(
+                ids.length - defaultListState.cursors.length,
+              ).fill(undefined),
+            ]
+          : defaultListState?.cursors;
+
+      this.store.setList(defaultListKey, {
+        cursors: nextDefaultCursors,
+        ids,
+        pagination: defaultListState?.pagination,
+      });
+
+      const registeredLists = this.store
+        .getListsForField(parentId, parent.field)
+        .filter(([key]) => key !== defaultListKey);
+
+      for (const [listKey, listState] of registeredLists) {
+        if (listState.ids.includes(entityId)) {
+          continue;
+        }
+
+        const listIds = [...listState.ids, entityId];
+        const listCursors = listState.cursors
+          ? [...listState.cursors, undefined]
+          : undefined;
+
+        this.store.setList(listKey, {
+          cursors: listCursors,
+          ids: listIds,
+          pagination: listState.pagination,
+        });
+      }
+
       this.store.merge(parentId, { [parent.field]: nextList }, [parent.field]);
     }
   }

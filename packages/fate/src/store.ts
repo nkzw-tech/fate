@@ -173,6 +173,20 @@ export class Store {
     return this.lists.get(key);
   }
 
+  getListsForField(
+    ownerId: EntityId,
+    field: string,
+  ): Array<readonly [string, List]> {
+    const entries: Array<readonly [string, List]> = [];
+    const prefix = getListKey(ownerId, field, '');
+    for (const entry of this.lists.entries()) {
+      if (entry[0].startsWith(prefix)) {
+        entries.push(entry);
+      }
+    }
+    return entries;
+  }
+
   setList(key: string, state: List) {
     this.lists.set(key, state);
     this.notifyListSubscribers(key);

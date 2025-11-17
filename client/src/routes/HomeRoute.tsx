@@ -1,4 +1,15 @@
 import safeParse from '@nkzw/core/safeParse.js';
+import type {
+  Category,
+  Comment,
+  Event,
+  EventAttendee,
+  Post,
+  Project,
+  ProjectUpdate,
+  Tag,
+  User,
+} from '@nkzw/fate-server/src/trpc/views.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import {
   ArrowUpRight,
@@ -19,17 +30,6 @@ import {
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useListView, useRequest, useView, view, ViewRef } from 'react-fate';
-import type {
-  Category,
-  Comment,
-  Event,
-  EventAttendee,
-  Post,
-  Project,
-  ProjectUpdate,
-  Tag,
-  User,
-} from '../lib/fate.tsx';
 import { fate } from '../lib/fate.tsx';
 import { Badge } from '../ui/Badge.tsx';
 import { Button } from '../ui/Button.tsx';
