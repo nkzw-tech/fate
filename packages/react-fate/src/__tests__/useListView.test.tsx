@@ -169,7 +169,7 @@ test('loads additional items when loadNext is invoked', async () => {
     'Post',
     ['post-1'],
     new Set(['comments.content', 'comments.id']),
-    { after: 'cursor-1', first: 1, id: 'post-1' },
+    { comments: { after: 'cursor-1', first: 1, id: 'post-1' } },
   );
 
   expect(loadNextRef).toBeNull();
@@ -309,7 +309,7 @@ test('uses pagination from list state when not selected', async () => {
     'Post',
     ['post-1'],
     new Set(['comments.content', 'comments.id']),
-    { after: 'cursor-1', first: 1, id: 'post-1' },
+    { comments: { after: 'cursor-1', first: 1, id: 'post-1' } },
   );
 
   expect(loadNextRef).toBeNull();
@@ -455,7 +455,7 @@ test('loads previous items when loadPrevious is invoked', async () => {
     'Post',
     ['post-1'],
     new Set(['comments.content', 'comments.id']),
-    { before: 'cursor-1', first: 1, id: 'post-1' },
+    { comments: { before: 'cursor-1', first: 1, id: 'post-1' } },
   );
 
   expect(loadPreviousRef).toBeNull();

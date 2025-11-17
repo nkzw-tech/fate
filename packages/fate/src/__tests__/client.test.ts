@@ -7,6 +7,7 @@ import { toEntityId } from '../ref.ts';
 import { selectionFromView } from '../selection.ts';
 import { getListKey, List } from '../store.ts';
 import {
+  ConnectionMetadata,
   FateThenable,
   SelectionOf,
   Snapshot,
@@ -1159,6 +1160,74 @@ test('normalizeEntity stores connection lists using argument hashes', () => {
     toEntityId('Comment', 'comment-1'),
     toEntityId('Comment', 'comment-2'),
   ]);
+});
+
+test(`'loadConnection' scopes args to the connection field`, async () => {
+  const fetchById = vi.fn(async () => [
+    {
+      comments: {
+        items: [
+          {
+            cursor: 'cursor-2',
+            node: {
+              __typename: 'Comment',
+              content: 'Second comment',
+              id: 'comment-2',
+            },
+          },
+        ],
+        pagination: {
+          hasNext: false,
+          hasPrevious: true,
+        },
+      },
+    },
+  ]);
+
+  const client = createClient({
+    transport: {
+      fetchById,
+    },
+    types: [
+      { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
+      { type: 'Comment' },
+    ],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      comments: [],
+      id: 'post-1',
+    },
+    new Set(['__typename', 'comments', 'id']),
+  );
+
+  const metadata: ConnectionMetadata = {
+    args: { first: 2 },
+    field: 'comments',
+    hash: 'hash',
+    key: getListKey(postId, 'comments', 'hash'),
+    owner: postId,
+    procedure: 'Post.comments',
+  };
+
+  await client.loadConnection(CommentView, metadata, { after: 'cursor-1' });
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(fetchById).toHaveBeenCalledWith(
+    'Post',
+    ['post-1'],
+    new Set(['comments.content', 'comments.id']),
+    { comments: { after: 'cursor-1', first: 2, id: 'post-1' } },
+  );
 });
 
 test(`mutation results with arrays mark nested fields as fetched`, async () => {

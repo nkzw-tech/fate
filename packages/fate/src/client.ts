@@ -155,6 +155,36 @@ const combineArgsPayload = (
   return result;
 };
 
+const scopeArgsPayload = (
+  args: ResolvedArgsPayload | undefined,
+  scope?: string | null,
+): ResolvedArgsPayload | undefined => {
+  if (!scope) {
+    return hasEntries(args) ? args : undefined;
+  }
+
+  if (!hasEntries(args)) {
+    return undefined;
+  }
+
+  const segments = scope.split('.');
+  const result: AnyRecord = {};
+  let current = result;
+
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      current[segment] = args;
+      return;
+    }
+
+    const next: AnyRecord = {};
+    current[segment] = next;
+    current = next;
+  });
+
+  return result;
+};
+
 const emptySet = new Set<string>();
 
 const groupSelectionByPrefix = (
@@ -479,6 +509,7 @@ export class FateClient<
       plan,
       selection: nodeSelection,
     } = this.resolveListSelection(view, requestArgs);
+    const scopedArgsPayload = scopeArgsPayload(argsPayload, connection.field);
 
     const parentSelection = new Set<string>();
     for (const path of nodeSelection) {
@@ -489,7 +520,7 @@ export class FateClient<
       owner.type,
       [owner.id],
       parentSelection,
-      argsPayload,
+      scopedArgsPayload,
     );
 
     if (!parentRecord || typeof parentRecord !== 'object') {
