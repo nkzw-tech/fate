@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 
-import { args, createClient, selectionFromView, v, view } from '@nkzw/fate';
+import { createClient, selectionFromView, view } from '@nkzw/fate';
 import { act, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vitest';
@@ -63,7 +63,7 @@ test('loads additional items when loadNext is invoked', async () => {
 
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: v('first', 1) }),
+      args: { first: 1 },
       items: {
         cursor: true,
         node: CommentView,
@@ -78,7 +78,7 @@ test('loads additional items when loadNext is invoked', async () => {
     id: true,
   });
 
-  const plan = selectionFromView(PostView, null, { first: 1 });
+  const plan = selectionFromView(PostView, null);
 
   client.write(
     'Comment',
@@ -218,7 +218,7 @@ test('uses pagination from list state when not selected', async () => {
 
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: v('first', 1) }),
+      args: { first: 1 },
       items: {
         node: CommentView,
       },
@@ -226,7 +226,7 @@ test('uses pagination from list state when not selected', async () => {
     id: true,
   });
 
-  const plan = selectionFromView(PostView, null, { first: 1 });
+  const plan = selectionFromView(PostView, null);
 
   client.write(
     'Comment',
@@ -358,7 +358,7 @@ test('loads previous items when loadPrevious is invoked', async () => {
 
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: v('first', 1) }),
+      args: { first: 1 },
       items: {
         cursor: true,
         node: CommentView,
@@ -373,7 +373,7 @@ test('loads previous items when loadPrevious is invoked', async () => {
     id: true,
   });
 
-  const plan = selectionFromView(PostView, null, { first: 1 });
+  const plan = selectionFromView(PostView, null);
 
   client.write(
     'Comment',

@@ -21,6 +21,13 @@ type ViewEntity<V> = V extends { readonly [__FateEntityBrand]?: infer T }
   ? T
   : never;
 
+type ViewEntityName<V> =
+  ViewEntity<V> extends { __typename: infer N }
+    ? N extends string
+      ? N
+      : never
+    : never;
+
 type ViewSelection<V> = V extends {
   readonly [__FateSelectionBrand]?: infer S;
 }
@@ -29,7 +36,7 @@ type ViewSelection<V> = V extends {
 
 export function useView<V extends View<any, any>>(
   view: V,
-  ref: ViewRef<ViewEntity<V>['__typename']>,
+  ref: ViewRef<ViewEntityName<V>>,
 ): ViewData<ViewEntity<V>, ViewSelection<V>> {
   const client = useFateClient();
 

@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 
-import { createClient, mutation, view } from '@nkzw/fate';
+import { createClient, mutation, view, type Transport } from '@nkzw/fate';
 import { act, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vitest';
@@ -121,9 +121,14 @@ test('updates when nested entities change', () => {
 
 test('re-renders when a mutation updates the record', async () => {
   type UpdatePostInput = { content: string; id: string };
+  type UpdateMutations = {
+    updatePost: { input: UpdatePostInput; output: Post };
+  };
 
   const { promise, resolve } = Promise.withResolvers<Post>();
-  const mutate = vi.fn(() => promise);
+  const mutate: NonNullable<Transport<UpdateMutations>['mutate']> = vi.fn(
+    () => promise,
+  );
 
   const client = createClient({
     mutations: {
@@ -133,7 +138,6 @@ test('re-renders when a mutation updates the record', async () => {
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
       mutate,
     },
     types: [
@@ -252,9 +256,14 @@ test('re-renders when a mutation updates the record', async () => {
 test('rolls back optimistic updates when a mutation fails', async () => {
   type UpdatePostInput = { content: string; id: string };
   type UpdatePostResult = Post;
+  type FailedUpdateMutations = {
+    updatePost: { input: UpdatePostInput; output: UpdatePostResult };
+  };
 
   const { promise, reject } = Promise.withResolvers<UpdatePostResult>();
-  const mutate = vi.fn(() => promise);
+  const mutate: NonNullable<Transport<FailedUpdateMutations>['mutate']> = vi.fn(
+    () => promise,
+  );
 
   const client = createClient({
     mutations: {
@@ -264,7 +273,6 @@ test('rolls back optimistic updates when a mutation fails', async () => {
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
       mutate,
     },
     types: [

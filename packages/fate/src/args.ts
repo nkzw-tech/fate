@@ -1,48 +1,6 @@
-import {
-  __FateArgsBrand,
-  __FateVarBrand,
-  AnyRecord,
-  Args,
-  VarReference,
-} from './types.ts';
-
-export const args = <A extends AnyRecord>(args: A): Args<A> => {
-  const result: AnyRecord = {};
-  for (const [key, value] of Object.entries(args)) {
-    result[key] = value;
-  }
-
-  Object.defineProperty(result, __FateArgsBrand, {
-    configurable: false,
-    enumerable: false,
-    value: true,
-    writable: false,
-  });
-
-  return Object.freeze(result) as Args<A>;
-};
-
-export const isArgs = (value: unknown): value is Args<AnyRecord> =>
-  Boolean(value) &&
-  typeof value === 'object' &&
-  (value as Args<any>)[__FateArgsBrand] === true;
-
-export const v = <K extends string, T>(
-  key: K,
-  defaultValue?: T,
-): VarReference<K, T> =>
-  Object.freeze({
-    [__FateVarBrand]: true,
-    defaultValue,
-    key,
-  });
-
-export const isVarReference = (
-  value: unknown,
-): value is VarReference<string, unknown> =>
-  Boolean(value) &&
-  typeof value === 'object' &&
-  (value as VarReference<any, any>)[__FateVarBrand] === true;
+import { isPlainObject, SelectionPlan } from './selection.ts';
+import { ResolvedArgsPayload } from './transport.ts';
+import { AnyRecord } from './types.ts';
 
 const ensureSerializable = (value: unknown, path: string) => {
   const type = typeof value;
@@ -53,88 +11,27 @@ const ensureSerializable = (value: unknown, path: string) => {
   }
 };
 
-type ResolveArgsOptions = {
-  args?: Record<string, unknown> | undefined;
-  path?: string;
-};
-
-const isPlainObject = (value: unknown): value is AnyRecord => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};
-
-export const resolveArgs = (
-  marker: Args<AnyRecord>,
-  options: ResolveArgsOptions = {},
-): AnyRecord => {
-  const rootArgs = options.args ?? {};
-  const basePath = options.path ?? '__root';
-  const cloneValue = (value: unknown, path: string): unknown => {
-    if (Array.isArray(value)) {
-      return value.map((entry, index) =>
-        cloneValue(entry, `${path}[${index}]`),
+export const cloneArgs = (value: AnyRecord, path: string): AnyRecord => {
+  const cloneValue = (entry: unknown, currentPath: string): unknown => {
+    if (Array.isArray(entry)) {
+      return entry.map((item, index) =>
+        cloneValue(item, `${currentPath}[${index}]`),
       );
     }
 
-    if (isPlainObject(value)) {
+    if (isPlainObject(entry)) {
       const result: AnyRecord = {};
-      for (const [key, entry] of Object.entries(value)) {
-        result[key] = cloneValue(entry, `${path}.${key}`);
+      for (const [key, child] of Object.entries(entry)) {
+        result[key] = cloneValue(child, `${currentPath}.${key}`);
       }
       return result;
     }
 
-    ensureSerializable(value, path);
-    return value;
+    ensureSerializable(entry, currentPath);
+    return entry;
   };
 
-  const resolveValue = (value: unknown, path: string): unknown => {
-    if (isVarReference(value)) {
-      const variable = value.key;
-      if (variable in rootArgs) {
-        const resolved = rootArgs[variable];
-        ensureSerializable(resolved, path);
-        return cloneValue(resolved, path);
-      }
-
-      if (value.defaultValue !== undefined) {
-        ensureSerializable(value.defaultValue, path);
-        return cloneValue(value.defaultValue, path);
-      }
-
-      throw new Error(`fate: Missing value for ${variable}.`);
-    }
-
-    if (Array.isArray(value)) {
-      return value.map((entry, index) =>
-        resolveValue(entry, `${path}[${index}]`),
-      );
-    }
-
-    if (isPlainObject(value)) {
-      const result: AnyRecord = {};
-      for (const [key, entry] of Object.entries(value)) {
-        result[key] = resolveValue(entry, `${path}.${key}`);
-      }
-      return result;
-    }
-
-    ensureSerializable(value, path);
-    return value;
-  };
-
-  const result: AnyRecord = {};
-
-  for (const [key, value] of Object.entries(marker)) {
-    const argPath = `${basePath}.${key}`;
-    result[key] = resolveValue(value, argPath);
-  }
-
-  return result;
+  return cloneValue(value, path) as AnyRecord;
 };
 
 const stableSerialize = (value: unknown): string => {
@@ -165,7 +62,7 @@ const stableSerialize = (value: unknown): string => {
       .map(([key, entry]) => [key, entry] as const)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(
-        ([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`,
+        ([_key, entry]) => `${JSON.stringify(_key)}:${stableSerialize(entry)}`,
       );
 
     return `object:{${entries.join(',')}}`;
@@ -176,13 +73,11 @@ const stableSerialize = (value: unknown): string => {
   );
 };
 
-type HashArgsOptions = {
-  ignoreKeys?: ReadonlySet<string>;
-};
-
 export const hashArgs = (
   argsValue: Record<string, unknown>,
-  options: HashArgsOptions = {},
+  options: {
+    ignoreKeys?: ReadonlySet<string>;
+  } = {},
 ): string => {
   const keys: AnyRecord = {};
   for (const [key, value] of Object.entries(argsValue)) {
@@ -192,4 +87,157 @@ export const hashArgs = (
     keys[key] = value;
   }
   return stableSerialize(keys);
+};
+
+const isRecord = (value: unknown): value is AnyRecord =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
+  for (const [key, value] of Object.entries(source)) {
+    if (isRecord(value)) {
+      const existing = target[key];
+      if (isRecord(existing)) {
+        mergeArgs(existing, value);
+      } else {
+        target[key] = { ...value };
+      }
+      continue;
+    }
+
+    target[key] = value;
+  }
+};
+
+export const resolvedArgsFromPlan = (
+  plan?: SelectionPlan,
+): ResolvedArgsPayload | undefined => {
+  if (!plan || plan.args.size === 0) {
+    return undefined;
+  }
+
+  const result: AnyRecord = {};
+
+  for (const [path, entry] of plan.args.entries()) {
+    const segments = path.split('.');
+    let current = result;
+
+    segments.forEach((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+
+      if (isLeaf) {
+        const existing = current[segment];
+        if (isRecord(existing)) {
+          mergeArgs(existing, entry.value);
+        } else {
+          current[segment] = { ...entry.value };
+        }
+        return;
+      }
+
+      const existing = current[segment];
+      if (isRecord(existing)) {
+        current = existing;
+        return;
+      }
+
+      const next: AnyRecord = {};
+      current[segment] = next;
+      current = next;
+    });
+  }
+
+  return result;
+};
+
+const hasEntries = (value?: AnyRecord): value is AnyRecord =>
+  Boolean(value && Object.keys(value).length > 0);
+
+export const combineArgsPayload = (
+  base?: AnyRecord,
+  scoped?: ResolvedArgsPayload,
+): ResolvedArgsPayload | undefined => {
+  if (!hasEntries(base) && !hasEntries(scoped)) {
+    return undefined;
+  }
+
+  const result: AnyRecord = hasEntries(base) ? { ...base } : {};
+
+  if (hasEntries(scoped)) {
+    mergeArgs(result, scoped);
+  }
+
+  return result;
+};
+
+export const getArgsAtPath = (
+  payload: ResolvedArgsPayload | undefined,
+  path: string,
+): AnyRecord | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+
+  const segments = path.split('.');
+  let current: unknown = payload;
+
+  for (const segment of segments) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+    if (current === undefined) {
+      return undefined;
+    }
+  }
+
+  return isRecord(current) ? (current as AnyRecord) : undefined;
+};
+
+export const applyArgsPayloadToPlan = (
+  plan: SelectionPlan,
+  payload: ResolvedArgsPayload | undefined,
+) => {
+  if (!payload) {
+    return;
+  }
+
+  for (const [path, entry] of plan.args.entries()) {
+    const actual = getArgsAtPath(payload, path);
+    if (!actual) {
+      continue;
+    }
+    const cloned = cloneArgs(actual, path);
+    const hash = hashArgs(cloned, { ignoreKeys: entry.ignoreKeys });
+    plan.args.set(path, { hash, ignoreKeys: entry.ignoreKeys, value: cloned });
+  }
+};
+
+export const scopeArgsPayload = (
+  args: ResolvedArgsPayload | undefined,
+  scope?: string | null,
+): ResolvedArgsPayload | undefined => {
+  if (!scope) {
+    return hasEntries(args) ? args : undefined;
+  }
+
+  if (!hasEntries(args)) {
+    return undefined;
+  }
+
+  const segments = scope.split('.');
+  const result: AnyRecord = {};
+  let current = result;
+
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      current[segment] = args;
+      return;
+    }
+
+    const next: AnyRecord = {};
+    current[segment] = next;
+    current = next;
+  });
+
+  return result;
 };

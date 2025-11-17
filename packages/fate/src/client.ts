@@ -1,11 +1,16 @@
-import { isArgs } from './args.ts';
+import {
+  applyArgsPayloadToPlan,
+  combineArgsPayload,
+  resolvedArgsFromPlan,
+  scopeArgsPayload,
+} from './args.ts';
 import ViewDataCache from './cache.ts';
 import { MutationFunction, wrapMutation } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { selectionFromView, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
-import { ResolvedArgsPayload, Transport } from './transport.ts';
+import { Transport } from './transport.ts';
 import { Pagination, RequestResult, ViewSnapshot } from './types.js';
 import {
   ConnectionMetadata,
@@ -73,116 +78,6 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
     );
   }
   return value;
-};
-
-const isRecord = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
-  for (const [key, value] of Object.entries(source)) {
-    if (isRecord(value)) {
-      const existing = target[key];
-      if (isRecord(existing)) {
-        mergeArgs(existing, value);
-      } else {
-        target[key] = { ...value };
-      }
-      continue;
-    }
-
-    target[key] = value;
-  }
-};
-
-const resolvedArgsFromPlan = (
-  plan?: SelectionPlan,
-): ResolvedArgsPayload | undefined => {
-  if (!plan || plan.args.size === 0) {
-    return undefined;
-  }
-
-  const result: AnyRecord = {};
-
-  for (const [path, entry] of plan.args.entries()) {
-    const segments = path.split('.');
-    let current = result;
-
-    segments.forEach((segment, index) => {
-      const isLeaf = index === segments.length - 1;
-
-      if (isLeaf) {
-        const existing = current[segment];
-        if (isRecord(existing)) {
-          mergeArgs(existing, entry.value);
-        } else {
-          current[segment] = { ...entry.value };
-        }
-        return;
-      }
-
-      const existing = current[segment];
-      if (isRecord(existing)) {
-        current = existing;
-        return;
-      }
-
-      const next: AnyRecord = {};
-      current[segment] = next;
-      current = next;
-    });
-  }
-
-  return result;
-};
-
-const hasEntries = (value?: AnyRecord): value is AnyRecord =>
-  Boolean(value && Object.keys(value).length > 0);
-
-const combineArgsPayload = (
-  base?: AnyRecord,
-  scoped?: ResolvedArgsPayload,
-): ResolvedArgsPayload | undefined => {
-  if (!hasEntries(base) && !hasEntries(scoped)) {
-    return undefined;
-  }
-
-  const result: AnyRecord = hasEntries(base) ? { ...base } : {};
-
-  if (hasEntries(scoped)) {
-    mergeArgs(result, scoped);
-  }
-
-  return result;
-};
-
-const scopeArgsPayload = (
-  args: ResolvedArgsPayload | undefined,
-  scope?: string | null,
-): ResolvedArgsPayload | undefined => {
-  if (!scope) {
-    return hasEntries(args) ? args : undefined;
-  }
-
-  if (!hasEntries(args)) {
-    return undefined;
-  }
-
-  const segments = scope.split('.');
-  const result: AnyRecord = {};
-  let current = result;
-
-  segments.forEach((segment, index) => {
-    if (index === segments.length - 1) {
-      current[segment] = args;
-      return;
-    }
-
-    const next: AnyRecord = {};
-    current[segment] = next;
-    current = next;
-  });
-
-  return result;
 };
 
 const emptySet = new Set<string>();
@@ -796,11 +691,11 @@ export class FateClient<
     view: View<any, any>,
     args: AnyRecord | undefined,
   ) {
-    const rootArgs = args ?? {};
-    const plan = selectionFromView(view, null, rootArgs);
+    const plan = selectionFromView(view, null);
     const selection = plan.paths;
-    const resolvedArgs = resolvedArgsFromPlan(plan);
-    const argsPayload = combineArgsPayload(rootArgs, resolvedArgs);
+    const defaultArgs = resolvedArgsFromPlan(plan);
+    const argsPayload = combineArgsPayload(defaultArgs, args);
+    applyArgsPayloadToPlan(plan, argsPayload);
 
     return { argsPayload, plan, selection };
   }
@@ -1090,20 +985,35 @@ export class FateClient<
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
           target[key] = record[key];
-        } else if (selectionKind && isArgs(selectionKind)) {
-          target[key] = record[key];
         } else if (selectionKind && selectionType === 'object') {
+          const selectionValue = selectionKind as AnyRecord;
+          const { args: selectionArgs, ...selectionWithoutArgs } =
+            selectionValue;
+          const hasArgsOnly =
+            Boolean(selectionArgs) &&
+            typeof selectionArgs === 'object' &&
+            Object.keys(selectionWithoutArgs).length === 0;
+
+          if (hasArgsOnly) {
+            target[key] = record[key];
+            continue;
+          }
+
           if (!(key in target)) {
             target[key] = {};
           }
 
+          const nextSelection = Object.keys(selectionWithoutArgs).length
+            ? selectionWithoutArgs
+            : selectionValue;
+
           const value = record[key];
           if (Array.isArray(value)) {
             if (
-              selectionKind.items &&
-              typeof selectionKind.items === 'object'
+              nextSelection.items &&
+              typeof nextSelection.items === 'object'
             ) {
-              const selection = selectionKind.items as AnyRecord;
+              const selection = nextSelection.items as AnyRecord;
               const fieldArgs = plan.args.get(fieldPath);
               const listKey = getListKey(parentId, key, fieldArgs?.hash);
               const listState = this.store.getListState(listKey);
@@ -1143,9 +1053,9 @@ export class FateClient<
                 return entry;
               });
               const connection: AnyRecord = { items };
-              if ('pagination' in selectionKind && selectionKind.pagination) {
+              if ('pagination' in nextSelection && nextSelection.pagination) {
                 const paginationSelection =
-                  selectionKind.pagination as AnyRecord;
+                  nextSelection.pagination as AnyRecord;
                 const storedPagination = listState?.pagination;
                 if (storedPagination) {
                   const pagination: AnyRecord = {};
@@ -1173,10 +1083,23 @@ export class FateClient<
                   connection.pagination = undefined;
                 }
               }
-              const { type: parentType } = parseEntityId(parentId);
+              const { id: ownerRawId, type: parentType } =
+                parseEntityId(parentId);
               if (parentType) {
+                const metadataArgs = (() => {
+                  if (!fieldArgs?.value && ownerRawId === undefined) {
+                    return undefined;
+                  }
+                  const value = fieldArgs?.value
+                    ? { ...fieldArgs.value }
+                    : ({} as AnyRecord);
+                  if (ownerRawId !== undefined) {
+                    value.id = ownerRawId;
+                  }
+                  return value;
+                })();
                 const metadata: ConnectionMetadata = {
-                  args: fieldArgs?.value,
+                  args: metadataArgs,
                   field: key,
                   hash: fieldArgs?.hash,
                   key: listKey,
@@ -1205,7 +1128,7 @@ export class FateClient<
 
                 if (record) {
                   const node = { __typename: type, id };
-                  walk(selectionKind, record, node, entityId, fieldPath);
+                  walk(nextSelection, record, node, entityId, fieldPath);
                   return node;
                 }
 
@@ -1224,7 +1147,7 @@ export class FateClient<
 
             if (relatedRecord) {
               walk(
-                selectionKind,
+                nextSelection,
                 relatedRecord,
                 targetRecord as ViewResult,
                 entityId,
@@ -1233,7 +1156,7 @@ export class FateClient<
             }
           } else {
             walk(
-              selectionKind,
+              nextSelection,
               record,
               target[key] as ViewResult,
               entityId,

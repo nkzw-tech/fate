@@ -1,43 +1,50 @@
-import { expect, test } from 'vitest';
-import { args, resolveArgs, v } from '../args.ts';
-import { AnyRecord } from '../types.ts';
+import { describe, expect, test } from 'vitest';
+import { cloneArgs, hashArgs } from '../args.ts';
+import type { AnyRecord } from '../types.ts';
 
-const createMarker = () =>
-  args({
-    filter: {
-      range: { end: v('end', 100), start: v('start') },
-      status: ['published', v('status')],
-      tags: [{ label: 'important', value: v('tag') }],
-    },
-    limit: 10,
+describe('cloneArgs', () => {
+  test('clones nested arrays and objects', () => {
+    const source = {
+      filter: {
+        range: { end: 100, start: 1 },
+        tags: [{ label: 'important', value: 't-1' }],
+      },
+      limit: 10,
+    };
+
+    const cloned = cloneArgs(source, '__root');
+
+    expect(cloned).toEqual(source);
+    expect(cloned).not.toBe(source);
+    const clonedFilter = cloned.filter as AnyRecord;
+    const clonedTags = clonedFilter.tags as Array<AnyRecord>;
+
+    expect(clonedFilter).not.toBe(source.filter);
+    expect(clonedFilter.range).not.toBe(source.filter.range);
+    expect(clonedTags).not.toBe(source.filter.tags);
+    expect(clonedTags[0]).not.toBe(source.filter.tags[0]);
   });
 
-test('resolveArgs resolves nested VarReferences inside plain objects', () => {
-  const marker = createMarker();
-
-  const resolved = resolveArgs(marker, {
-    args: { start: 1, status: 'draft', tag: 't-1' },
-  });
-
-  expect(resolved).toEqual({
-    filter: {
-      range: { end: 100, start: 1 },
-      status: ['published', 'draft'],
-      tags: [{ label: 'important', value: 't-1' }],
-    },
-    limit: 10,
+  test('throws when encountering non-serializable values', () => {
+    expect(() =>
+      cloneArgs(
+        {
+          handler: () => undefined,
+        },
+        '__root',
+      ),
+    ).toThrow(/must be serializable/);
   });
 });
 
-test('resolveArgs clones plain object arguments when resolving', () => {
-  const marker = createMarker();
-  const resolved = resolveArgs(marker, {
-    args: { start: 1, status: 'draft', tag: 't-1' },
-  });
+describe('hashArgs', () => {
+  test('produces stable hashes and supports ignoring keys', () => {
+    const args = { after: 'cursor-1', first: 2, id: 'post-1' };
+    const sameArgs = { after: 'cursor-1', first: 2, id: 'post-1' };
 
-  const filter = resolved.filter as AnyRecord;
-  expect(filter).not.toBe(marker.filter);
-  expect(filter.range).not.toBe(marker.filter.range);
-  expect(filter.tags).not.toBe(marker.filter.tags);
-  expect((filter.tags as Array<unknown>)[0]).not.toBe(marker.filter.tags[0]);
+    expect(hashArgs(args)).toEqual(hashArgs(sameArgs));
+
+    const ignored = hashArgs(args, { ignoreKeys: new Set(['after']) });
+    expect(ignored).not.toEqual(hashArgs(args));
+  });
 });

@@ -93,8 +93,7 @@ export function wrapMutation<
   }: MutationOptions<I>) => {
     const id = maybeGetId(config.getId, input);
     const isDelete = view === 'deleteRecord';
-    const plan =
-      view && !isDelete ? selectionFromView(view, null, args ?? {}) : undefined;
+    const plan = view && !isDelete ? selectionFromView(view, null) : undefined;
     const viewSelection = plan?.paths;
 
     const optimisticRecord: AnyRecord | undefined = optimisticUpdate

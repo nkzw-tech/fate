@@ -1,5 +1,4 @@
 import { expect, test } from 'vitest';
-import { args, v } from '../args.ts';
 import { selectionFromView } from '../selection.ts';
 import { ViewsTag } from '../types.ts';
 import { view } from '../view.ts';
@@ -117,26 +116,24 @@ test('selection plan resolves arguments and hashes connection args', () => {
 
   const PostView = view<Post>()({
     comments: {
-      args: args({ after: v('commentsAfter'), first: v('commentsFirst', 1) }),
+      args: { after: 'cursor-1', first: 5 },
       items: { node: CommentView },
     },
-    content: args({ format: v('format', 'md') }),
+    content: { args: { format: 'md' } },
   });
 
-  const plan = selectionFromView(PostView, null, {
-    commentsAfter: 'cursor-1',
-    commentsFirst: 5,
-    format: 'html',
-  });
+  const plan = selectionFromView(PostView, null);
 
   expect(plan.paths).toContain('content');
   expect(plan.paths).toContain('comments.id');
   expect(plan.args.get('content')).toEqual({
-    hash: 'object:{"format":string:"html"}',
-    value: { format: 'html' },
+    hash: 'object:{"format":string:"md"}',
+    ignoreKeys: undefined,
+    value: { format: 'md' },
   });
   expect(plan.args.get('comments')).toEqual({
     hash: 'object:{"first":number:5}',
+    ignoreKeys: new Set(['after', 'before', 'cursor']),
     value: { after: 'cursor-1', first: 5 },
   });
 });

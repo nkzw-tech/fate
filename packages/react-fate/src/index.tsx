@@ -1,10 +1,8 @@
 export {
-  args,
   createClient,
   createFateTransport,
   mutation,
   type ViewRef,
-  v,
   view,
 } from '@nkzw/fate';
 

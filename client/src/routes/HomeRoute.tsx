@@ -18,15 +18,7 @@ import {
   useTransition,
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import {
-  args,
-  useListView,
-  useRequest,
-  useView,
-  v,
-  view,
-  ViewRef,
-} from 'react-fate';
+import { useListView, useRequest, useView, view, ViewRef } from 'react-fate';
 import type {
   Category,
   Comment,
@@ -217,7 +209,7 @@ const PostView = view<Post>()({
   author: UserView,
   category: CategorySummaryView,
   comments: {
-    args: args({ first: v('comments.first', 1) }),
+    args: { first: 1 },
     items: {
       node: CommentView,
     },
@@ -325,8 +317,8 @@ const Post = ({
               ) : null}
               {tags.length ? (
                 <Stack gap wrap>
-                  {tags.map((edge) => (
-                    <TagBadge key={edge.node.id} tag={edge.node} />
+                  {tags.map(({ node }) => (
+                    <TagBadge key={node.id} tag={node} />
                   ))}
                 </Stack>
               ) : null}
@@ -369,8 +361,8 @@ const Post = ({
           <h4 className="text-foreground text-base font-semibold">Comments</h4>
           {comments.length > 0 ? (
             <VStack gap={12}>
-              {comments.map((edge) => (
-                <Comment comment={edge.node} key={edge.node.id} />
+              {comments.map(({ node }) => (
+                <Comment comment={node} key={node.id} />
               ))}
               {loadNext ? (
                 <Button onClick={loadNext} variant="ghost">

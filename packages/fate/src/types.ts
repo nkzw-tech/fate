@@ -13,8 +13,6 @@ export declare const __FateSelectionBrand: unique symbol;
 export declare const __FateMutationEntityBrand: unique symbol;
 export declare const __FateMutationInputBrand: unique symbol;
 export declare const __FateMutationResultBrand: unique symbol;
-export const __FateArgsBrand = Symbol('fate.args');
-export const __FateVarBrand = Symbol('fate.var');
 
 type __ViewEntityAnchor<T extends Entity> = {
   readonly [__FateEntityBrand]?: T;
@@ -47,6 +45,8 @@ export function isViewTag(key: string): key is ViewTag {
 
 export type AnyRecord = Record<string, unknown>;
 
+type SelectionArgs = Readonly<{ args: AnyRecord }>;
+
 export type ConnectionMetadata = Readonly<{
   args?: AnyRecord;
   field: string;
@@ -59,18 +59,6 @@ export type ConnectionMetadata = Readonly<{
 export type ViewResult = AnyRecord & {
   readonly [ViewsTag]?: Set<string>;
 };
-
-export type VarReference<K extends string, T> = Readonly<{
-  [__FateVarBrand]: true;
-  defaultValue?: T;
-  key: K;
-}>;
-
-export type Args<A extends Record<string, unknown>> = Readonly<A> & {
-  readonly [__FateArgsBrand]: true;
-};
-
-type AnyArgsMarker = Args<Record<string, unknown>>;
 
 export type ViewRef<TName extends string> = Readonly<{
   __typename: TName;
@@ -98,8 +86,6 @@ export type Pagination = {
 
 export type Entity = { __typename: string };
 
-type SelectionArgs = { readonly args?: AnyArgsMarker };
-
 type PlainObjectSelectionField<V> =
   V extends Array<infer U>
     ? PlainObjectSelectionField<U> | true
@@ -111,7 +97,7 @@ type PlainObjectSelection<T> = {
   [K in keyof T]?: PlainObjectSelectionField<T[K]>;
 };
 
-export type ConnectionSelection<T extends Entity> = SelectionArgs & {
+type ConnectionSelectionBase<T extends Entity> = {
   readonly items: {
     readonly cursor?: true;
     readonly node: Selection<T> | View<T, Selection<T>>;
@@ -124,23 +110,26 @@ export type ConnectionSelection<T extends Entity> = SelectionArgs & {
   };
 };
 
-type SelectionFieldValue<T extends Entity, K extends keyof T> =
+export type ConnectionSelection<T extends Entity> =
+  | ConnectionSelectionBase<T>
+  | (SelectionArgs & ConnectionSelectionBase<T>);
+
+type BaseSelectionFieldValue<T extends Entity, K extends keyof T> =
   T[K] extends Array<infer U extends Entity>
-    ?
-        | true
-        | Selection<U>
-        | ConnectionSelection<U>
-        | View<U, Selection<U>>
-        | AnyArgsMarker
+    ? true | Selection<U> | ConnectionSelection<U> | View<U, Selection<U>>
     : T[K] extends Entity | null
       ?
           | true
           | Selection<NonNullable<T[K]>>
           | View<NonNullable<T[K]>, Selection<NonNullable<T[K]>>>
-          | AnyArgsMarker
       : T[K] extends AnyRecord
-        ? PlainObjectSelection<T[K]> | AnyArgsMarker
-        : true | AnyArgsMarker;
+        ? PlainObjectSelection<T[K]>
+        : true;
+
+type SelectionFieldValue<T extends Entity, K extends keyof T> =
+  | BaseSelectionFieldValue<T, K>
+  | SelectionArgs
+  | (SelectionArgs & Extract<BaseSelectionFieldValue<T, K>, object>);
 
 type SelectionShape<T extends Entity> = {
   [K in keyof T as K extends '__typename' ? never : K]?: SelectionFieldValue<

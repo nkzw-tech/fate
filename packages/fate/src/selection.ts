@@ -1,4 +1,4 @@
-import { hashArgs, isArgs, resolveArgs } from './args.ts';
+import { cloneArgs, hashArgs } from './args.ts';
 import {
   AnyRecord,
   isViewTag,
@@ -13,18 +13,21 @@ import { getViewPayloads } from './view.ts';
 
 const paginationKeys = new Set(['after', 'before', 'cursor']);
 
-const isConnectionSelection = (value: AnyRecord): boolean =>
-  isPlainObject(value.items) && 'node' in value.items;
-
 type WalkContext = 'default' | 'connection';
 
 export type SelectionPlan = {
-  readonly args: Map<string, { hash: string; value: AnyRecord }>;
+  readonly args: Map<
+    string,
+    { hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }
+  >;
   readonly paths: Set<string>;
 };
 
-const isPlainObject = (value: unknown): value is AnyRecord =>
+export const isPlainObject = (value: unknown): value is AnyRecord =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const isConnectionSelection = (value: AnyRecord): boolean =>
+  isPlainObject(value.items) && 'node' in value.items;
 
 export const selectionFromView = <
   T extends Entity,
@@ -33,18 +36,20 @@ export const selectionFromView = <
 >(
   viewComposition: V,
   ref: ViewRef<T['__typename']> | null,
-  rootArgs: AnyRecord = {},
 ): SelectionPlan => {
-  const args = new Map<string, { hash: string; value: AnyRecord }>();
+  const args = new Map<
+    string,
+    { hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }
+  >();
   const paths = new Set<string>();
 
   const assignArgs = (
     path: string,
-    value: ReturnType<typeof resolveArgs>,
+    value: AnyRecord,
     ignoreKeys?: ReadonlySet<string>,
   ) => {
     const hash = hashArgs(value, { ignoreKeys });
-    args.set(path, { hash, value });
+    args.set(path, { hash, ignoreKeys, value });
   };
 
   const walk = (
@@ -97,39 +102,46 @@ export const selectionFromView = <
         continue;
       }
 
-      if (isArgs(value)) {
-        assignArgs(path, resolveArgs(value, { args: rootArgs, path }));
-        paths.add(path);
-        continue;
-      }
-
       if (isPlainObject(value)) {
-        if (isConnectionSelection(value)) {
-          if (isArgs(value.args)) {
-            assignArgs(
-              path,
-              resolveArgs(value.args, { args: rootArgs, path }),
-              isPlainObject(value.items) && isPlainObject(value.items.node)
+        const selectionObject = value;
+
+        if (isConnectionSelection(selectionObject)) {
+          if (selectionObject.args && isPlainObject(selectionObject.args)) {
+            const clonedArgs = cloneArgs(selectionObject.args, path);
+            const ignoreKeys =
+              isPlainObject(selectionObject.items) &&
+              isPlainObject(selectionObject.items.node)
                 ? paginationKeys
-                : undefined,
-            );
+                : undefined;
+            assignArgs(path, clonedArgs, ignoreKeys);
           }
 
-          walk(value, path, 'connection');
+          const { args: _ignored, ...withoutArgs } = selectionObject;
+          walk(withoutArgs, path, 'connection');
           continue;
         }
 
-        if (isArgs(value.args)) {
-          assignArgs(
-            path,
-            resolveArgs(value.args, { args: rootArgs, path }),
-            isPlainObject(value.items) && isPlainObject(value.items.node)
+        const hasArgs =
+          selectionObject.args && isPlainObject(selectionObject.args);
+        let selectionWithoutArgs = selectionObject;
+        if (hasArgs) {
+          const clonedArgs = cloneArgs(selectionObject.args as AnyRecord, path);
+          const ignoreKeys =
+            isPlainObject(selectionObject.items) &&
+            isPlainObject(selectionObject.items?.node)
               ? paginationKeys
-              : undefined,
-          );
+              : undefined;
+          assignArgs(path, clonedArgs, ignoreKeys);
+          const { args, ...rest } = selectionObject;
+          selectionWithoutArgs = rest;
         }
 
-        walk(value, path);
+        const hasEntries = Object.keys(selectionWithoutArgs).length > 0;
+        if (hasEntries) {
+          walk(selectionWithoutArgs, path);
+        } else if (hasArgs) {
+          paths.add(path);
+        }
       }
     }
   };

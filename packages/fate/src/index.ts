@@ -34,5 +34,4 @@ export { mutation } from './mutation.ts';
 export { toEntityId } from './ref.ts';
 export { createClient, FateClient } from './client.ts';
 export { createFateTransport } from './transport.ts';
-export { args, isArgs, v } from './args.ts';
 export { selectionFromView } from './selection.ts';

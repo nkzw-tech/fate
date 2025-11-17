@@ -1,5 +1,4 @@
 import { expect, expectTypeOf, test, vi } from 'vitest';
-import { args, v } from '../args.ts';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
@@ -1004,7 +1003,7 @@ test(`'request' forwards nested selection args to by-id transports`, async () =>
   const CommentView = view<Comment>()({ id: true });
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: v('first', 1) }),
+      args: { first: 1 },
       items: { node: CommentView },
     },
     id: true,
@@ -1136,7 +1135,7 @@ test(`'request' forwards nested selection args to list transports`, async () => 
   const CommentView = view<Comment>()({ id: true });
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: v('first', 1) }),
+      args: { first: 1 },
       items: { node: CommentView },
     },
     id: true,
@@ -1286,15 +1285,12 @@ test('normalizeEntity stores connection lists using argument hashes', () => {
   const CommentView = view<Comment>()({ id: true });
   const PostView = view<Post>()({
     comments: {
-      args: args({ after: v('after'), first: v('first', 1) }),
+      args: { after: 'cursor-10', first: 3 },
       items: { node: CommentView },
     },
   });
 
-  const plan = selectionFromView(PostView, null, {
-    after: 'cursor-10',
-    first: 3,
-  });
+  const plan = selectionFromView(PostView, null);
 
   client.write(
     'Post',
@@ -1532,7 +1528,7 @@ test(`mutation results with connections reuse view args and hydrate nodes`, asyn
   });
   const PostView = view<Post>()({
     comments: {
-      args: args({ first: 1 }),
+      args: { first: 1 },
       items: { node: CommentView },
     },
     id: true,
@@ -1581,7 +1577,7 @@ test(`mutation results with connections reuse view args and hydrate nodes`, asyn
     name: 'Alice',
   });
 
-  const postPlan = selectionFromView(PostView, null, {});
+  const postPlan = selectionFromView(PostView, null);
   const listKey = getListKey(
     toEntityId('Post', 'post-1'),
     'comments',
