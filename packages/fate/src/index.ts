@@ -33,5 +33,6 @@ export { view } from './view.ts';
 export { mutation } from './mutation.ts';
 export { toEntityId } from './ref.ts';
 export { createClient, FateClient } from './client.ts';
+export type { RequestMode, RequestOptions } from './client.ts';
 export { createFateTransport } from './transport.ts';
 export { selectionFromView } from './selection.ts';

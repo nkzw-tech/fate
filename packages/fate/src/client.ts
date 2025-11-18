@@ -38,6 +38,10 @@ import {
 } from './types.ts';
 import { getViewPayloads } from './view.ts';
 
+export type RequestMode = 'store-or-network' | 'store-and-network' | 'network';
+
+export type RequestOptions = Readonly<{ mode?: RequestMode }>;
+
 type MutationIdentifierFor<
   K extends string,
   Def extends MutationDefinition<any, any, any>,
@@ -124,7 +128,7 @@ export class FateClient<
   >();
   private readonly requests = new Map<
     Request,
-    Promise<RequestResult<Request>>
+    Map<RequestMode, Promise<RequestResult<Request>>>
   >();
   private readonly types: Map<string, TypeConfig>;
   private readonly transport: Transport<MutationTransport<Mutations>>;
@@ -536,22 +540,62 @@ export class FateClient<
     return this.store.getListState(connection.key);
   }
 
-  request<R extends Request>(request: R): Promise<RequestResult<R>> {
-    const existingRequest = this.requests.get(request);
+  request<R extends Request>(
+    request: R,
+    options?: RequestOptions,
+  ): Promise<RequestResult<R>> {
+    const mode = options?.mode ?? 'store-or-network';
+    const existingRequest = this.requests.get(request)?.get(mode);
     if (existingRequest) {
       return existingRequest as Promise<RequestResult<R>>;
     }
 
-    const promise = this.executeRequest(request).then(() =>
-      this.getRequestResult(request),
-    );
+    let promise: Promise<RequestResult<R>>;
+    switch (mode) {
+      case 'store-and-network':
+        promise = this.handleStoreAndNetworkRequest(request);
+        break;
+      case 'store-or-network':
+      case 'network':
+      default:
+        promise = this.executeRequest(
+          request,
+          mode === 'network' ? { fetchAll: true } : undefined,
+        ).then(() => this.getRequestResult(request));
+        break;
+    }
 
-    this.requests.set(request, promise);
+    let requests = this.requests.get(request);
+    if (!requests) {
+      requests = new Map();
+      this.requests.set(request, requests);
+    }
 
+    requests.set(mode, promise);
     return promise;
   }
 
-  private async executeRequest(request: Request) {
+  private async handleStoreAndNetworkRequest<R extends Request>(
+    request: R,
+  ): Promise<RequestResult<R>> {
+    const hasData = this.hasRequestData(request);
+    if (!hasData) {
+      await this.executeRequest(request, { fetchAll: true });
+      return this.getRequestResult(request);
+    }
+
+    const result = this.getRequestResult(request);
+    this.executeRequest(request, { fetchAll: true }).catch(() => {
+      /* empty */
+    });
+    return result;
+  }
+
+  private async executeRequest(
+    request: Request,
+    options: { fetchAll?: boolean } = {},
+  ) {
+    const fetchAll = options.fetchAll ?? false;
     type GroupKey = string;
     const groups = new Map<
       GroupKey,
@@ -583,7 +627,7 @@ export class FateClient<
         for (const raw of item.ids) {
           const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
-          if (missing.size > 0) {
+          if (fetchAll || missing.size > 0) {
             group.ids.push(raw);
           }
         }
@@ -605,6 +649,28 @@ export class FateClient<
           : Promise.resolve(),
       ),
     ]);
+  }
+
+  private hasRequestData(request: Request): boolean {
+    for (const [name, item] of Object.entries(request)) {
+      if (isNodeItem(item)) {
+        const plan = selectionFromView(item.root, null);
+        const fields = plan.paths;
+        for (const raw of item.ids) {
+          const entityId = toEntityId(item.type, raw);
+          const missing = this.store.missingForSelection(entityId, fields);
+          if (missing.size > 0) {
+            return false;
+          }
+        }
+        continue;
+      }
+
+      if (!this.store.getList(name)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   getRequestResult<R extends Request>(request: R): RequestResult<R> {

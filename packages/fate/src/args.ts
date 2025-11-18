@@ -1,4 +1,5 @@
-import { isPlainObject, SelectionPlan } from './selection.ts';
+import { isRecord } from './record.ts';
+import { SelectionPlan } from './selection.ts';
 import { ResolvedArgsPayload } from './transport.ts';
 import { AnyRecord } from './types.ts';
 
@@ -19,7 +20,7 @@ export const cloneArgs = (value: AnyRecord, path: string): AnyRecord => {
       );
     }
 
-    if (isPlainObject(entry)) {
+    if (isRecord(entry)) {
       const result: AnyRecord = {};
       for (const [key, child] of Object.entries(entry)) {
         result[key] = cloneValue(child, `${currentPath}.${key}`);
@@ -88,9 +89,6 @@ export const hashArgs = (
   }
   return stableSerialize(keys);
 };
-
-const isRecord = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
   for (const [key, value] of Object.entries(source)) {

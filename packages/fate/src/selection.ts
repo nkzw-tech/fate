@@ -1,4 +1,5 @@
 import { cloneArgs, hashArgs } from './args.ts';
+import { isRecord } from './record.ts';
 import {
   AnyRecord,
   isViewTag,
@@ -23,11 +24,8 @@ export type SelectionPlan = {
   readonly paths: Set<string>;
 };
 
-export const isPlainObject = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
 const isConnectionSelection = (value: AnyRecord): boolean =>
-  isPlainObject(value.items) && 'node' in value.items;
+  isRecord(value.items) && 'node' in value.items;
 
 export const selectionFromView = <
   T extends Entity,
@@ -70,20 +68,20 @@ export const selectionFromView = <
           continue;
         }
 
-        if (key === 'items' && isPlainObject(value)) {
-          if (isPlainObject(value.node)) {
+        if (key === 'items' && isRecord(value)) {
+          if (isRecord(value.node)) {
             walk(value.node, prefix);
           }
           continue;
         }
 
-        if (key === 'node' && isPlainObject(value)) {
+        if (key === 'node' && isRecord(value)) {
           walk(value, path);
           continue;
         }
       }
 
-      if (key === 'node' && isPlainObject(value)) {
+      if (key === 'node' && isRecord(value)) {
         walk(value, path);
         continue;
       }
@@ -102,15 +100,15 @@ export const selectionFromView = <
         continue;
       }
 
-      if (isPlainObject(value)) {
+      if (isRecord(value)) {
         const selectionObject = value;
 
         if (isConnectionSelection(selectionObject)) {
-          if (selectionObject.args && isPlainObject(selectionObject.args)) {
+          if (selectionObject.args && isRecord(selectionObject.args)) {
             const clonedArgs = cloneArgs(selectionObject.args, path);
             const ignoreKeys =
-              isPlainObject(selectionObject.items) &&
-              isPlainObject(selectionObject.items.node)
+              isRecord(selectionObject.items) &&
+              isRecord(selectionObject.items.node)
                 ? paginationKeys
                 : undefined;
             assignArgs(path, clonedArgs, ignoreKeys);
@@ -121,14 +119,13 @@ export const selectionFromView = <
           continue;
         }
 
-        const hasArgs =
-          selectionObject.args && isPlainObject(selectionObject.args);
+        const hasArgs = selectionObject.args && isRecord(selectionObject.args);
         let selectionWithoutArgs = selectionObject;
         if (hasArgs) {
           const clonedArgs = cloneArgs(selectionObject.args as AnyRecord, path);
           const ignoreKeys =
-            isPlainObject(selectionObject.items) &&
-            isPlainObject(selectionObject.items?.node)
+            isRecord(selectionObject.items) &&
+            isRecord(selectionObject.items?.node)
               ? paginationKeys
               : undefined;
           assignArgs(path, clonedArgs, ignoreKeys);

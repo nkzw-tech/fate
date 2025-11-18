@@ -1159,6 +1159,145 @@ test(`'request' forwards nested selection args to list transports`, async () => 
   );
 });
 
+test(`'request' refetches cached data when using 'store-and-network' mode`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValue([
+      { __typename: 'Post', content: 'Hello', id: 'post-1' },
+    ]);
+
+  const client = createClient({
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const entityId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    entityId,
+    { __typename: 'Post', content: 'Cached', id: 'post-1' },
+    new Set(['__typename', 'content', 'id']),
+  );
+
+  await client.request(
+    {
+      post: {
+        ids: ['post-1'],
+        root: PostView,
+        type: 'Post',
+      },
+    },
+    { mode: 'store-or-network' },
+  );
+
+  expect(fetchById).toHaveBeenCalledTimes(0);
+
+  await client.request(
+    {
+      post: {
+        ids: ['post-1'],
+        root: PostView,
+        type: 'Post',
+      },
+    },
+    { mode: 'store-and-network' },
+  );
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+});
+
+test(`'request' only fetches once when cache is missing for 'store-and-network'`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValue([
+      { __typename: 'Post', content: 'Hello', id: 'post-1' },
+    ]);
+
+  const client = createClient({
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  await client.request(
+    {
+      post: {
+        ids: ['post-1'],
+        root: PostView,
+        type: 'Post',
+      },
+    },
+    { mode: 'store-and-network' },
+  );
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+});
+
+test(`'request' waits for a network response when using 'network' mode`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  let resolveFetch: ((value: Array<Post>) => void) | undefined;
+  const fetchById = vi.fn(
+    () =>
+      new Promise<Array<Post>>((resolve) => {
+        resolveFetch = resolve;
+      }),
+  );
+
+  const client = createClient({
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const entityId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    entityId,
+    { __typename: 'Post', content: 'Cached', id: 'post-1' },
+    new Set(['__typename', 'content', 'id']),
+  );
+
+  let resolved = false;
+  const promise = client
+    .request(
+      {
+        post: {
+          ids: ['post-1'],
+          root: PostView,
+          type: 'Post',
+        },
+      },
+      { mode: 'network' },
+    )
+    .then(() => {
+      resolved = true;
+      return resolved;
+    });
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(resolved).toBe(false);
+
+  resolveFetch?.([{ __typename: 'Post', content: 'Hello', id: 'post-1' }]);
+
+  expect(await promise).toBe(true);
+});
+
 test(`'readView' returns list metadata when available`, () => {
   const client = createClient({
     transport: {
