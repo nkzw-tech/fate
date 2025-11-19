@@ -14,6 +14,7 @@ export default [
   },
   {
     files: [
+      './packages/fate/src/cli.ts',
       './server/scripts/**/*.tsx',
       './server/src/index.tsx',
       './server/src/prisma/seed.tsx',

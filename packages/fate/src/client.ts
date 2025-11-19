@@ -1,6 +1,7 @@
 import {
   applyArgsPayloadToPlan,
   combineArgsPayload,
+  hashArgs,
   resolvedArgsFromPlan,
   scopeArgsPayload,
 } from './args.ts';
@@ -18,7 +19,6 @@ import {
   FateThenable,
   isNodeItem,
   isViewTag,
-  ViewKind,
   ViewResult,
   ViewsTag,
   type AnyRecord,
@@ -36,7 +36,7 @@ import {
   type ViewData,
   type ViewRef,
 } from './types.ts';
-import { getViewPayloads } from './view.ts';
+import { getViewNames, getViewPayloads } from './view.ts';
 
 export type RequestMode = 'store-or-network' | 'store-and-network' | 'network';
 
@@ -86,6 +86,40 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
 
 const emptySet = new Set<string>();
 
+const serializeId = (value: string | number): string =>
+  `${typeof value}:${String(value)}`;
+
+const getViewSignature = (view: View<any, any>): string => {
+  const viewNames = getViewNames(view);
+  return viewNames.size ? [...viewNames].sort().join(',') : '';
+};
+
+const getRequestCacheKey = (request: Request): string => {
+  const parts: Array<string> = [];
+  const names = Object.keys(request).sort();
+
+  for (const name of names) {
+    const item = request[name];
+    if (!item) {
+      continue;
+    }
+
+    const viewSignature = getViewSignature(item.root);
+    if (isNodeItem(item)) {
+      parts.push(
+        `node:${name}:${item.type}:${viewSignature}:${item.ids.map(serializeId).join(',')}`,
+      );
+      continue;
+    }
+
+    parts.push(
+      `list:${name}:${item.type}:${viewSignature}:${item.args ? hashArgs(item.args) : ''}`,
+    );
+  }
+
+  return parts.join('$');
+};
+
 const groupSelectionByPrefix = (
   select: Set<string>,
 ): Map<string, Set<string>> => {
@@ -127,7 +161,7 @@ export class FateClient<
     PromiseLike<ViewSnapshot<any, any>>
   >();
   private readonly requests = new Map<
-    Request,
+    string,
     Map<RequestMode, Promise<RequestResult<Request>>>
   >();
   private readonly types: Map<string, TypeConfig>;
@@ -545,7 +579,8 @@ export class FateClient<
     options?: RequestOptions,
   ): Promise<RequestResult<R>> {
     const mode = options?.mode ?? 'store-or-network';
-    const existingRequest = this.requests.get(request)?.get(mode);
+    const requestKey = getRequestCacheKey(request);
+    const existingRequest = this.requests.get(requestKey)?.get(mode);
     if (existingRequest) {
       return existingRequest as Promise<RequestResult<R>>;
     }
@@ -565,14 +600,27 @@ export class FateClient<
         break;
     }
 
-    let requests = this.requests.get(request);
+    let requests = this.requests.get(requestKey);
     if (!requests) {
       requests = new Map();
-      this.requests.set(request, requests);
+      this.requests.set(requestKey, requests);
     }
 
     requests.set(mode, promise);
     return promise;
+  }
+
+  releaseRequest(request: Request, mode: RequestMode): void {
+    const requestKey = getRequestCacheKey(request);
+    const requests = this.requests.get(requestKey);
+    if (!requests) {
+      return;
+    }
+
+    requests.delete(mode);
+    if (requests.size === 0) {
+      this.requests.delete(requestKey);
+    }
   }
 
   private async handleStoreAndNetworkRequest<R extends Request>(
@@ -1143,10 +1191,6 @@ export class FateClient<
       prefix: string | null,
     ) => {
       for (const [key, selectionKind] of Object.entries(viewPayload)) {
-        if (key === ViewKind) {
-          continue;
-        }
-
         if (isViewTag(key)) {
           if (!target[ViewsTag]) {
             assignViewTag(target, new Set());

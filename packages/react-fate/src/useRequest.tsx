@@ -1,10 +1,22 @@
 import { RequestResult, type Request, type RequestOptions } from '@nkzw/fate';
-import { use } from 'react';
+import { use, useEffect } from 'react';
 import { useFateClient } from './context.tsx';
 
 export function useRequest<R extends Request>(
   request: R,
   options?: RequestOptions,
 ): RequestResult<R> {
-  return use(useFateClient().request(request, options));
+  const client = useFateClient();
+  const promise = client.request(request, options);
+  const mode = options?.mode ?? 'store-or-network';
+
+  useEffect(() => {
+    if (mode === 'network' || mode === 'store-and-network') {
+      return () => {
+        client.releaseRequest(request, mode);
+      };
+    }
+  }, [client, mode, request]);
+
+  return use(promise);
 }

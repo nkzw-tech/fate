@@ -1,4 +1,5 @@
 client/dist/
+client/src/lib/fate.generated.ts
 client/src/translations/
 coverage/
 dist/

@@ -6,7 +6,7 @@ import {
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import type { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
 import { postDataView, PostItem } from '../views.ts';
@@ -57,11 +57,30 @@ export const postRouter = router({
     .input(
       z.object({
         args: connectionArgs,
+        error: z.enum(['boundary', 'callSite']).optional(),
         id: z.string().min(1, 'Post id is required.'),
         select: z.array(z.string()),
+        slow: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.slow) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (input.error === 'boundary') {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Simulated error.',
+        });
+      } else if (input.error === 'callSite') {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        throw new TRPCError({
+          code: 'PAYMENT_REQUIRED',
+          message: 'Gotta pay up.',
+        });
+      }
+
       const existing = await ctx.prisma.post.findUnique({
         where: {
           id: input.id,

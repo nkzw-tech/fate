@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
 import type { User } from '../../prisma/prisma-client/client.ts';
-import { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
+import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
 import { userDataView } from '../views.ts';
 

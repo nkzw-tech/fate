@@ -9,7 +9,7 @@ import { auth } from './lib/auth.tsx';
 import env from './lib/env.tsx';
 import prisma from './prisma/prisma.tsx';
 import { createContext } from './trpc/context.ts';
-import { appRouter } from './trpc/root.ts';
+import { appRouter } from './trpc/router.ts';
 
 try {
   await prisma.$connect();

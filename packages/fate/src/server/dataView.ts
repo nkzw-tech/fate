@@ -1,6 +1,8 @@
 import { isRecord } from '../record.ts';
 import { prismaSelect } from './prismaSelect.ts';
 
+const dataViewFieldsKey = Symbol('__fate__DataViewFields');
+
 type AnyRecord = Record<string, unknown>;
 
 type ResolverSelect<Context> =
@@ -25,8 +27,6 @@ export type ResolverField<Item extends AnyRecord, Context> = {
   select?: ResolverSelect<Context>;
 };
 
-const dataViewFieldsKey = '__fateDataViewFields';
-
 type DataField<Item extends AnyRecord, Context> =
   | true
   | DataView<AnyRecord, Context>
@@ -42,6 +42,8 @@ export type Serializable<T> = T extends Date
 
 export type DataView<Item extends AnyRecord, Context = unknown> = {
   fields: Record<string, DataField<Item, Context>>;
+  kind?: 'resolver' | 'list';
+  typeName: string;
 };
 
 export type DataViewConfig<Item extends AnyRecord, Context> = Record<
@@ -49,22 +51,32 @@ export type DataViewConfig<Item extends AnyRecord, Context> = Record<
   DataField<Item, Context>
 >;
 
-export function dataView<Item extends AnyRecord, Context = unknown>() {
-  return <Fields extends DataViewConfig<Item, Context>>(fields: Fields) =>
-    ({
+export function dataView<Item extends AnyRecord, Context = unknown>(
+  typeName?: string,
+) {
+  return <Fields extends DataViewConfig<Item, Context>>(fields: Fields) => {
+    return {
       [dataViewFieldsKey]: fields,
       fields,
-    }) as DataView<Item, Context> & {
-      readonly __fateDataViewFields: Fields;
+      typeName,
+    } as DataView<Item, Context> & {
+      readonly [dataViewFieldsKey]: Fields;
     };
+  };
 }
+
+export const list = <Item extends AnyRecord, Context>(
+  view: DataView<Item, Context>,
+) => {
+  return { ...view, kind: 'list' as const };
+};
 
 export function resolver<Item extends AnyRecord, Context = unknown>(config: {
   resolve: ResolverResolve<Item, Context>;
   select?: ResolverSelect<Context>;
 }): ResolverField<Item, Context> {
   return {
-    kind: 'resolver',
+    kind: 'resolver' as const,
     ...config,
   };
 }
@@ -90,7 +102,7 @@ type RelationResult<ItemField, V extends DataView<AnyRecord, unknown>> =
     : WithNullish<ItemField, RawDataViewResult<V>>;
 
 type ViewFieldConfig<V extends DataView<AnyRecord, unknown>> = V extends {
-  readonly __fateDataViewFields: infer Fields;
+  readonly [dataViewFieldsKey]: infer Fields;
 }
   ? Fields
   : V['fields'];

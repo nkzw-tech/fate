@@ -44,6 +44,7 @@ ALTER DATABASE fate OWNER TO fate;
 - `pnpm prisma migrate dev` to create the database and run the migrations.
 - You might want to run `pnpm prisma migrate reset` to seed the database with initial data.
 - Run `pnpm dev` to run the example.
+- Run `pnpm fate generate` to regenerate the Fate client code.
 
 ### Running Tests
 

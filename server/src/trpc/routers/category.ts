@@ -5,7 +5,7 @@ import {
   scopedArgsForPath,
 } from '@nkzw/fate/server';
 import { z } from 'zod';
-import { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import type { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
 import { categoryDataView, CategoryItem } from '../views.ts';

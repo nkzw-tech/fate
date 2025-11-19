@@ -1,4 +1,4 @@
-import { dataView, DataViewResult, resolver } from '@nkzw/fate/server';
+import { dataView, DataViewResult, list, resolver } from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,
@@ -48,19 +48,19 @@ export type EventItem = PrismaEvent & {
   host?: PrismaUser | null;
 };
 
-export const userDataView = dataView<PrismaUser>()({
+export const userDataView = dataView<PrismaUser>('User')({
   id: true,
   name: true,
   username: true,
 });
 
-export const tagDataView = dataView<PrismaTag>()({
+export const tagDataView = dataView<PrismaTag>('Tag')({
   description: true,
   id: true,
   name: true,
 });
 
-const categorySummaryDataView = dataView<PrismaCategory>()({
+const categorySummaryDataView = dataView<PrismaCategory>('Category')({
   id: true,
   name: true,
 });
@@ -77,23 +77,28 @@ const basePost = {
   content: true,
   id: true,
   likes: true,
-  tags: tagDataView,
   title: true,
 } as const;
 
-export const commentDataView = dataView<CommentItem>()({
+const postSummaryDataView = dataView<PostItem>('Post')({
+  ...basePost,
+  tags: list(tagDataView),
+});
+
+export const commentDataView = dataView<CommentItem>('Comment')({
   author: userDataView,
   content: true,
   id: true,
-  post: dataView<PostItem>()(basePost),
+  post: postSummaryDataView,
 });
 
-export const postDataView = dataView<PostItem>()({
+export const postDataView = dataView<PostItem>('Post')({
   ...basePost,
-  comments: commentDataView,
+  comments: list(commentDataView),
+  tags: list(tagDataView),
 });
 
-export const categoryDataView = dataView<CategoryItem>()({
+export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
@@ -103,10 +108,12 @@ export const categoryDataView = dataView<CategoryItem>()({
       _count: { select: { posts: true } },
     }),
   }),
-  posts: postDataView,
+  posts: list(postDataView),
 });
 
-export const projectUpdateDataView = dataView<ProjectUpdateItem>()({
+export const projectUpdateDataView = dataView<ProjectUpdateItem>(
+  'ProjectUpdate',
+)({
   author: userDataView,
   confidence: true,
   content: true,
@@ -115,7 +122,7 @@ export const projectUpdateDataView = dataView<ProjectUpdateItem>()({
   mood: true,
 });
 
-export const projectDataView = dataView<ProjectItem>()({
+export const projectDataView = dataView<ProjectItem>('Project')({
   focusAreas: true,
   id: true,
   metrics: true,
@@ -126,18 +133,20 @@ export const projectDataView = dataView<ProjectItem>()({
   status: true,
   summary: true,
   targetDate: true,
-  updates: projectUpdateDataView,
+  updates: list(projectUpdateDataView),
 });
 
-export const eventAttendeeDataView = dataView<EventAttendeeItem>()({
+export const eventAttendeeDataView = dataView<EventAttendeeItem>(
+  'EventAttendee',
+)({
   id: true,
   notes: true,
   status: true,
   user: userDataView,
 });
 
-export const eventDataView = dataView<EventItem>()({
-  attendees: eventAttendeeDataView,
+export const eventDataView = dataView<EventItem>('Event')({
+  attendees: list(eventAttendeeDataView),
   attendingCount: resolver<EventItem>({
     resolve: ({ item }) => item._count?.attendees ?? 0,
     select: () => ({
@@ -222,4 +231,11 @@ export type Event = Omit<
   attendees: Array<EventAttendee>;
   attendingCount: number;
   host: User;
+};
+
+export const Lists = {
+  categories: categoryDataView,
+  events: eventDataView,
+  posts: postDataView,
+  projects: projectDataView,
 };

@@ -208,7 +208,7 @@ test('re-renders when a mutation updates the record', async () => {
 
   expect(container.textContent).toBe('Draft');
 
-  let pendingMutation: Promise<Post>;
+  let pendingMutation: Promise<{ result: Post } | { error: Error }>;
   await act(async () => {
     pendingMutation = client.mutations.updatePost({
       input: { content: 'Published', id: 'post-1' },
@@ -337,7 +337,7 @@ test('rolls back optimistic updates when a mutation fails', async () => {
 
   expect(container.textContent).toBe('Draft');
 
-  let pendingMutation: Promise<UpdatePostResult>;
+  let pendingMutation: Promise<{ result: UpdatePostResult } | { error: Error }>;
   await act(async () => {
     pendingMutation = client.mutations.updatePost({
       input: { content: 'Published', id: 'post-1' },

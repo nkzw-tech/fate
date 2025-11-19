@@ -3,7 +3,6 @@ import { isRecord } from './record.ts';
 import {
   AnyRecord,
   isViewTag,
-  ViewKind,
   ViewRef,
   ViewsTag,
   type Entity,
@@ -56,10 +55,6 @@ export const selectionFromView = <
     context: WalkContext = 'default',
   ) => {
     for (const [key, value] of Object.entries(selection)) {
-      if (key === ViewKind) {
-        continue;
-      }
-
       const valueType = typeof value;
       const path = prefix ? `${prefix}.${key}` : key;
 

@@ -3,7 +3,7 @@ import {
   createDataViewSelection,
   scopedArgsForPath,
 } from '@nkzw/fate/server';
-import { ProjectSelect } from '../../prisma/prisma-client/models.ts';
+import type { ProjectSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { router } from '../init.ts';
 import { projectDataView, ProjectItem } from '../views.ts';

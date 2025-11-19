@@ -3,7 +3,7 @@ import { FieldMask } from './mask.ts';
 export type TypeName = string;
 export type EntityId = string;
 
-export const ViewKind = '__fate__view';
+export const ViewKind = Symbol('__fate__view');
 export const ViewsTag = Symbol('__fate__views');
 export const NodeRefTag = Symbol('__fate__node-ref');
 export const ConnectionTag = Symbol('__fate__connection');

@@ -784,12 +784,13 @@ test('mutations write their responses into the store', async () => {
     name: true,
   });
 
-  const result = await client.mutations.updateUser({
+  const { error, result } = await client.mutations.updateUser({
     input: { id: 'user-1', name: 'Banana' },
     view: UserView,
   });
 
   expect(result).toEqual({ __typename: 'User', id: 'user-1', name: 'Banana' });
+  expect(error).toBeUndefined();
   expect(client.store.read(toEntityId('User', 'user-1'))).toMatchObject({
     id: 'user-1',
     name: 'Banana',
@@ -931,12 +932,13 @@ test(`optimistic updates without identifiers are ignored`, async () => {
 
   const writeSpy = vi.spyOn(client as any, 'write');
 
-  const result = await client.mutations.createPost({
+  const { error, result } = await client.mutations.createPost({
     input: { content: 'Draft' },
     optimisticUpdate: { content: 'Draft' },
   });
 
   expect(result).toEqual({ content: 'Published', id: 'post-1' });
+  expect(error).toBeUndefined();
   expect(mutate).toHaveBeenCalledTimes(1);
   expect(writeSpy).toHaveBeenCalledTimes(1);
   expect(writeSpy.mock.calls[0][1]).toEqual({

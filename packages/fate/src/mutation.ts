@@ -1,3 +1,5 @@
+import { TRPCError } from '@trpc/server';
+import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
 import { selectionFromView } from './selection.ts';
 import { List } from './store.ts';
@@ -39,7 +41,10 @@ type MutationOptions<Identifier extends MutationIdentifier<any, any, any>> = {
 
 export type MutationFunction<I extends MutationIdentifier<any, any, any>> = (
   options: MutationOptions<I>,
-) => Promise<MutationResult<I>>;
+) => Promise<
+  | { error: undefined; result: MutationResult<I> }
+  | { error: Error; result: undefined }
+>;
 
 const collectImplicitSelectedPaths = (value: AnyRecord): Set<string> => {
   const paths = new Set<string>();
@@ -174,7 +179,7 @@ export function wrapMutation<
         }
       }
 
-      return result;
+      return { error: undefined, result };
     } catch (error) {
       if (snapshots.size > 0) {
         for (const [id, snapshot] of snapshots) {
@@ -188,9 +193,52 @@ export function wrapMutation<
         }
       }
 
-      throw error instanceof Error
-        ? error
-        : new Error(`fate: Mutation '${identifier.key}' failed.`);
+      if (error instanceof Error) {
+        const { data } = error as unknown as { data?: TRPCError };
+        const errorCategory = data
+          ? categorizeTRPCError(getHTTPStatusCodeFromError(data))
+          : 'boundary';
+
+        if (errorCategory === 'boundary') {
+          throw error;
+        }
+
+        return { error, result: undefined };
+      } else {
+        throw new Error(`fate: Mutation '${identifier.key}' failed.`);
+      }
     }
   };
+}
+
+export type ErrorHandlingScope = 'callSite' | 'boundary';
+
+// See https://trpc.io/docs/server/error-handling#error-codes
+export function categorizeTRPCError(statusCode: number): ErrorHandlingScope {
+  switch (statusCode) {
+    case 400: // BAD_REQUEST
+    case 402: // PAYMENT_REQUIRED
+    case 404: // NOT_FOUND (resource-level)
+    case 408: // TIMEOUT
+    case 409: // CONFLICT
+    case 412: // PRECONDITION_FAILED
+    case 413: // PAYLOAD_TOO_LARGE
+    case 415: // UNSUPPORTED_MEDIA_TYPE
+    case 422: // UNPROCESSABLE_CONTENT
+    case 429: // TOO_MANY_REQUESTS
+    case 499: // CLIENT_CLOSED_REQUEST
+      return 'callSite';
+
+    case 401: // UNAUTHORIZED
+    case 403: // FORBIDDEN
+    case 405: // METHOD_NOT_SUPPORTED
+    case 428: // PRECONDITION_REQUIRED
+    case 500: // INTERNAL_SERVER_ERROR
+    case 501: // NOT_IMPLEMENTED
+    case 502: // BAD_GATEWAY
+    case 503: // SERVICE_UNAVAILABLE
+    case 504: // GATEWAY_TIMEOUT
+    default:
+      return 'boundary';
+  }
 }
