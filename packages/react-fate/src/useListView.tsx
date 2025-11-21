@@ -4,7 +4,12 @@ import {
   Pagination,
   type View,
 } from '@nkzw/fate';
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { useFateClient } from './context.tsx';
 
 type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
@@ -50,7 +55,9 @@ export function useListView<
     return client.store.getListState(metadata.key);
   }, [client, metadata]);
 
-  const listState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const listState = useDeferredValue(
+    useSyncExternalStore(subscribe, getSnapshot, getSnapshot),
+  );
   const pagination = connection?.pagination ?? listState?.pagination;
   const hasNext = Boolean(pagination?.hasNext);
   const hasPrevious = Boolean(pagination?.hasPrevious);

@@ -8,7 +8,13 @@ import {
   ViewSnapshot,
   ViewTag,
 } from '@nkzw/fate';
-import { use, useCallback, useRef, useSyncExternalStore } from 'react';
+import {
+  use,
+  useCallback,
+  useDeferredValue,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import { useFateClient } from './context.tsx';
 
 type ViewEntity<V> = V extends { readonly [__FateEntityBrand]?: infer T }
@@ -97,7 +103,9 @@ export function useView<V extends View<any, any>>(
 
   return (
     use(
-      useSyncExternalStore(subscribe, getSnapshot, getSnapshot),
+      useDeferredValue(
+        useSyncExternalStore(subscribe, getSnapshot, getSnapshot),
+      ),
     ) as ViewSnapshot<ViewEntity<V>, ViewSelection<V>>
   ).data;
 }
