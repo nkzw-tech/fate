@@ -466,6 +466,80 @@ export class FateClient<
     return resolveSnapshot();
   }
 
+  private mergeListState(
+    previous: List | undefined,
+    incomingIds: ReadonlyArray<EntityId>,
+    incomingCursors: ReadonlyArray<string | undefined>,
+    incomingPagination: Pagination | undefined,
+    options: { direction: 'forward' | 'backward'; hasCursorArg: boolean },
+  ): List {
+    const existingIds = previous?.ids ?? [];
+    const existingSet = new Set(existingIds);
+    const isBackward = options.direction === 'backward';
+
+    const mergeIds = () => {
+      if (!previous) {
+        return [...incomingIds];
+      }
+
+      if (!options.hasCursorArg) {
+        const incomingSet = new Set(incomingIds);
+        const remaining = existingIds.filter((id) => !incomingSet.has(id));
+        return isBackward
+          ? [...remaining, ...incomingIds]
+          : [...incomingIds, ...remaining];
+      }
+
+      const newIds = incomingIds.filter((id) => !existingSet.has(id));
+      return isBackward
+        ? [...newIds, ...existingIds]
+        : [...existingIds, ...newIds];
+    };
+
+    const ids = mergeIds();
+    const hasIncomingCursor = incomingCursors.some(
+      (cursor) => cursor !== undefined,
+    );
+
+    const cursorMap = new Map<EntityId, string | undefined>();
+    if (previous?.cursors) {
+      previous.cursors.forEach((cursor, index) => {
+        cursorMap.set(existingIds[index], cursor);
+      });
+    }
+    incomingCursors.forEach((cursor, index) => {
+      if (cursor !== undefined) {
+        cursorMap.set(incomingIds[index], cursor);
+      }
+    });
+
+    const shouldStoreCursors =
+      hasIncomingCursor || Boolean(previous?.cursors) || options.hasCursorArg;
+    const cursors = shouldStoreCursors
+      ? ids.map((id) => cursorMap.get(id))
+      : undefined;
+
+    const previousPagination = previous?.pagination;
+    const newPagination = incomingPagination;
+
+    const pagination =
+      previousPagination || newPagination
+        ? {
+            hasNext: !!(newPagination?.hasNext ?? previousPagination?.hasNext),
+            hasPrevious: !!(
+              newPagination?.hasPrevious ?? previousPagination?.hasPrevious
+            ),
+            nextCursor:
+              newPagination?.nextCursor ?? previousPagination?.nextCursor,
+            previousCursor:
+              newPagination?.previousCursor ??
+              previousPagination?.previousCursor,
+          }
+        : undefined;
+
+    return { cursors, ids, pagination };
+  }
+
   async loadConnection<V extends View<any, any>>(
     view: V,
     connection: ConnectionMetadata,
@@ -546,60 +620,18 @@ export class FateClient<
     }
 
     const previous = this.store.getListState(connection.key);
-    const existingIds = previous?.ids ?? [];
-    const existingSet = new Set(existingIds);
-    const newIds: Array<EntityId> = [];
-    const newCursors: Array<string | undefined> = [];
+    const previousIds = previous?.ids ?? [];
+    const previousSet = new Set(previousIds);
+    const newIds = incomingIds.filter((id) => !previousSet.has(id));
+    const nextListState = this.mergeListState(
+      previous,
+      incomingIds,
+      incomingCursors,
+      connectionPayload.pagination,
+      { direction, hasCursorArg: true },
+    );
 
-    incomingIds.forEach((id, index) => {
-      if (existingSet.has(id)) {
-        return;
-      }
-      newIds.push(id);
-      newCursors.push(incomingCursors[index]);
-    });
-
-    const nextIds =
-      direction === 'forward'
-        ? [...existingIds, ...newIds]
-        : [...newIds, ...existingIds];
-
-    let nextCursors: Array<string | undefined> | undefined;
-    if (
-      previous?.cursors ||
-      newCursors.some((cursor) => cursor !== undefined)
-    ) {
-      const baseCursors =
-        previous?.cursors ?? Array(existingIds.length).fill(undefined);
-      nextCursors =
-        direction === 'forward'
-          ? [...baseCursors, ...newCursors]
-          : [...newCursors, ...baseCursors];
-    }
-
-    const previousPagination = previous?.pagination;
-    const newPagination = connectionPayload.pagination;
-
-    const nextPagination =
-      previousPagination || newPagination
-        ? {
-            hasNext: !!(newPagination?.hasNext ?? previousPagination?.hasNext),
-            hasPrevious: !!(
-              newPagination?.hasPrevious ?? previousPagination?.hasPrevious
-            ),
-            nextCursor:
-              newPagination?.nextCursor ?? previousPagination?.nextCursor,
-            previousCursor:
-              newPagination?.previousCursor ??
-              previousPagination?.previousCursor,
-          }
-        : undefined;
-
-    this.store.setList(connection.key, {
-      cursors: nextCursors,
-      ids: nextIds,
-      pagination: nextPagination,
-    });
+    this.store.setList(connection.key, nextListState);
 
     const current = this.store.read(connection.owner);
     const existingField = Array.isArray(current?.[connection.field])
@@ -956,7 +988,6 @@ export class FateClient<
           if (connection) {
             const ids: Array<EntityId> = [];
             const cursors: Array<string | undefined> = [];
-            let hasCursor = false;
 
             const nodeSelection =
               childPaths.size > 0 ? new Set<string>() : childPaths;
@@ -986,9 +1017,6 @@ export class FateClient<
               const cursor =
                 'cursor' in entry ? (entry.cursor as string) : undefined;
               cursors.push(cursor);
-              if (cursor !== undefined) {
-                hasCursor = true;
-              }
               if (isNodeRef(node)) {
                 ids.push(getNodeRefId(node));
                 continue;
@@ -1018,7 +1046,6 @@ export class FateClient<
 
             const listKey = getListKey(entityId, key, fieldArgs?.hash);
             const previousList = this.store.getListState(listKey);
-            const existingIds = previousList?.ids ?? [];
             const argsValue = fieldArgs?.value as AnyRecord | undefined;
             const hasCursorArg = Boolean(
               argsValue &&
@@ -1032,74 +1059,17 @@ export class FateClient<
                   argsValue.last !== undefined),
             );
 
-            const mergeIds = () => {
-              if (!previousList) {
-                return [...ids];
-              }
+            const nextListState = this.mergeListState(
+              previousList,
+              ids,
+              cursors,
+              connection.pagination as List['pagination'],
+              { direction: isBackward ? 'backward' : 'forward', hasCursorArg },
+            );
 
-              if (!hasCursorArg) {
-                const incomingSet = new Set(ids);
-                const remaining = existingIds.filter(
-                  (id) => !incomingSet.has(id),
-                );
-                return isBackward
-                  ? [...remaining, ...ids]
-                  : [...ids, ...remaining];
-              }
+            result[key] = nextListState.ids.map((id) => createNodeRef(id));
 
-              const existingSet = new Set(existingIds);
-              const newIds = ids.filter((id) => !existingSet.has(id));
-              return isBackward
-                ? [...newIds, ...existingIds]
-                : [...existingIds, ...newIds];
-            };
-
-            const nextIds = mergeIds();
-            const cursorMap = new Map<EntityId, string | undefined>();
-            if (previousList?.cursors) {
-              previousList.cursors.forEach((cursor, index) => {
-                cursorMap.set(existingIds[index], cursor);
-              });
-            }
-            cursors.forEach((cursor, index) => {
-              if (cursor !== undefined) {
-                cursorMap.set(ids[index], cursor);
-              }
-            });
-
-            const shouldStoreCursors =
-              hasCursor || Boolean(previousList?.cursors);
-            const nextCursors = shouldStoreCursors
-              ? nextIds.map((id) => cursorMap.get(id))
-              : undefined;
-            const previousPagination = previousList?.pagination;
-            const newPagination = connection.pagination as List['pagination'];
-            const nextPagination =
-              previousPagination || newPagination
-                ? {
-                    hasNext: !!(
-                      newPagination?.hasNext ?? previousPagination?.hasNext
-                    ),
-                    hasPrevious: !!(
-                      newPagination?.hasPrevious ??
-                      previousPagination?.hasPrevious
-                    ),
-                    nextCursor:
-                      newPagination?.nextCursor ??
-                      previousPagination?.nextCursor,
-                    previousCursor:
-                      newPagination?.previousCursor ??
-                      previousPagination?.previousCursor,
-                  }
-                : undefined;
-
-            result[key] = nextIds.map((id) => createNodeRef(id));
-
-            this.store.setList(listKey, {
-              cursors: nextCursors,
-              ids: nextIds,
-              pagination: nextPagination,
-            });
+            this.store.setList(listKey, nextListState);
           }
         } else {
           result[key] = value;
