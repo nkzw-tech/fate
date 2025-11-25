@@ -1,11 +1,10 @@
 import type {
   Category,
-  Comment,
+  Comment as InlineComment,
   Post,
 } from '@nkzw/fate-server/src/trpc/router.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { cx } from 'class-variance-authority';
-import { X } from 'lucide-react';
 import {
   KeyboardEvent,
   startTransition,
@@ -23,62 +22,8 @@ import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import TagBadge, { TagView } from '../ui/TagBadge.tsx';
 import AuthClient from '../user/AuthClient.tsx';
+import CommentCard, { CommentView } from './CommentCard.tsx';
 import { UserView } from './UserCard.tsx';
-
-const CommentView = view<Comment>()({
-  author: {
-    id: true,
-    name: true,
-    username: true,
-  },
-  content: true,
-  id: true,
-});
-
-const Comment = ({
-  comment: commentRef,
-  post,
-}: {
-  comment: ViewRef<'Comment'>;
-  post: { commentCount: number; id: string };
-}) => {
-  const comment = useView(CommentView, commentRef);
-  const { author } = comment;
-
-  return (
-    <div
-      className="group rounded-md border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40"
-      key={comment.id}
-    >
-      <Stack between gap={16}>
-        <p className="font-medium text-gray-900 dark:text-gray-200">
-          {author?.name ?? 'Anonymous'}
-        </p>
-        <Button
-          className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
-          onClick={async () => {
-            await fate.mutations.deleteComment({
-              deleteRecord: true,
-              input: { id: comment.id },
-              optimisticUpdate: {
-                post: { commentCount: post.commentCount - 1, id: post.id },
-              },
-              view: view<Comment>()({
-                id: true,
-                post: { commentCount: true },
-              }),
-            });
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          <X size={14} />
-        </Button>
-      </Stack>
-      <p className="text-foreground/80">{comment.content}</p>
-    </div>
-  );
-};
 
 const CategorySummaryView = view<Category>()({
   id: true,
@@ -138,7 +83,7 @@ const CommentInput = ({
           id: `optimistic:${Date.now().toString(36)}`,
           post: { commentCount: post.commentCount + 1, id: post.id },
         },
-        view: view<Comment>()({
+        view: view<InlineComment>()({
           ...CommentView,
           post: { commentCount: true },
         }),
@@ -265,14 +210,16 @@ export function PostCard({
       <VStack gap={16}>
         <div>
           <Link to={`/post/${post.id}`}>
-            <h3 className="text-foreground text-lg font-semibold">
+            <h3 className="text-lg font-semibold text-blue-700 hover:underline">
               {post.title}
             </h3>
           </Link>
           <Stack alignCenter gap={8} wrap>
             {category ? (
               <Link to={`/category/${category.id}`}>
-                <span className="text-sm text-blue-800">{category.name}</span>
+                <span className="text-sm text-sky-700 hover:underline">
+                  {category.name}
+                </span>
               </Link>
             ) : null}
             {tags.length ? (
@@ -362,7 +309,7 @@ export function PostCard({
           {comments.length > 0 ? (
             <VStack gap={12}>
               {comments.map(({ node }) => (
-                <Comment comment={node} key={node.id} post={post} />
+                <CommentCard comment={node} key={node.id} post={post} />
               ))}
               {loadNext ? (
                 <Button onClick={loadNext} variant="ghost">

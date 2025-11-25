@@ -23,9 +23,11 @@ export const CommentViewWithPostCount = view<Comment>()({
 
 export default function CommentCard({
   comment: commentRef,
+  link,
   post,
 }: {
   comment: ViewRef<'Comment'>;
+  link?: boolean;
   post: { commentCount: number; id: string; title: string };
 }) {
   const comment = useView(CommentView, commentRef);
@@ -62,7 +64,11 @@ export default function CommentCard({
         </Button>
       </Stack>
       <p className="text-foreground/80">{comment.content}</p>
-      <Link to={`/post/${post.id}`}>{post.title}</Link>
+      {link && (
+        <Link className="text-sky-700 hover:underline" to={`/post/${post.id}`}>
+          {post.title}
+        </Link>
+      )}
     </div>
   );
 }

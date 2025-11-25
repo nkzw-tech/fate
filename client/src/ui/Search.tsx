@@ -29,7 +29,7 @@ const CommentResult = ({
   const comment = useView(CommentSearchView, commentRef);
   const post = useView(CommentPostView, comment.post);
 
-  return <CommentCard comment={comment} post={post} />;
+  return <CommentCard comment={comment} link post={post} />;
 };
 
 const SearchResults = ({
