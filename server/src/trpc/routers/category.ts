@@ -11,11 +11,10 @@ import { procedure, router } from '../init.ts';
 import { categoryDataView, CategoryItem } from '../views.ts';
 
 const transformCategory = (
-  { _count, posts, ...category }: CategoryItem,
+  { posts, ...category }: CategoryItem,
   args?: Record<string, unknown>,
 ) => ({
   ...category,
-  postCount: _count?.posts ?? 0,
   posts: arrayToConnection(posts, {
     args: scopedArgsForPath(args, 'posts'),
   }),

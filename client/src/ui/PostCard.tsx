@@ -271,9 +271,9 @@ export function PostCard({
           </Link>
           <Stack alignCenter gap={8} wrap>
             {category ? (
-              <span className="text-muted-foreground text-sm">
-                {category.name}
-              </span>
+              <Link to={`/category/${category.id}`}>
+                <span className="text-sm text-blue-800">{category.name}</span>
+              </Link>
             ) : null}
             {tags.length ? (
               <Stack gap wrap>

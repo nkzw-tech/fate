@@ -27,7 +27,9 @@ const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
   return (
     <VStack gap key={post.id}>
       <Stack alignCenter between gap={12}>
-        <span className="text-foreground font-medium">{post.title}</span>
+        <Link to={`/post/${post.id}`}>
+          <span className="font-medium text-blue-800">{post.title}</span>
+        </Link>
         <span className="text-muted-foreground text-xs">
           {post.likes} likes
         </span>
@@ -79,7 +81,7 @@ export default function CategoryCard({
         <Stack alignCenter between gap={12}>
           <div>
             <Link to={`/category/${category.id}`}>
-              <h4 className="text-foreground text-base font-semibold">
+              <h4 className="text-foreground text-lg font-semibold">
                 {category.name}
               </h4>
             </Link>
