@@ -161,6 +161,10 @@ export class FateClient<
     MutationDefinition<any, any, any>
   > = EmptyMutations,
 > {
+  private readonly parentLists = new Map<
+    string,
+    Array<{ field: string; parentType: string; via?: string }>
+  >();
   private readonly pending = new Map<
     string,
     PromiseLike<ViewSnapshot<any, any>>
@@ -169,14 +173,11 @@ export class FateClient<
     string,
     Map<RequestMode, Promise<RequestResult<Request>>>
   >();
+  private readonly stalledRequests = new Set<string>();
+  readonly store = new Store();
   private readonly types: Map<string, TypeConfig>;
   private readonly transport: Transport<MutationTransport<Mutations>>;
   private readonly viewDataCache = new ViewDataCache();
-  private readonly parentLists = new Map<
-    string,
-    Array<{ field: string; parentType: string; via?: string }>
-  >();
-  readonly store = new Store();
 
   readonly mutations: {
     [K in keyof Mutations]: MutationFunction<
@@ -401,8 +402,41 @@ export class FateClient<
     const selectedPaths = plan.paths;
     const missing = this.store.missingForSelection(entityId, selectedPaths);
 
+    const resolveSnapshot = () => {
+      const resolvedView = this.readViewSelection<T, S>(
+        view,
+        ref,
+        entityId,
+        plan,
+      );
+
+      const thenable = {
+        status: 'fulfilled' as const,
+        then: <TResult1 = ViewSnapshot<T, S>, TResult2 = never>(
+          onfulfilled?: (
+            value: ViewSnapshot<T, S>,
+          ) => TResult1 | PromiseLike<TResult1>,
+          onrejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
+        ): PromiseLike<TResult1 | TResult2> =>
+          Promise.resolve(resolvedView).then(onfulfilled, onrejected),
+        value: resolvedView,
+      } as const;
+
+      this.viewDataCache.set(entityId, view, ref, thenable, resolvedView.ids);
+      return thenable;
+    };
+
+    if (missing.size === 0) {
+      this.clearStalledRequestsForEntity(entityId);
+      return resolveSnapshot();
+    }
+
     if (missing.size > 0) {
-      const key = this.pendingKey(type, id, missing);
+      const key = this.pendingKey(entityId, missing);
+      if (this.stalledRequests.has(key)) {
+        return resolveSnapshot();
+      }
+
       const pendingPromise = this.pending.get(key) || null;
       if (pendingPromise) {
         return pendingPromise as FateThenable<ViewSnapshot<T, S>>;
@@ -410,34 +444,26 @@ export class FateClient<
 
       const promise = this.fetchByIdAndNormalize(type, [id], missing, plan)
         .finally(() => this.pending.delete(key))
-        .then(() => this.readView<T, S, V>(view, ref));
+        .then(() => {
+          const remainingMissing = this.store.missingForSelection(
+            entityId,
+            selectedPaths,
+          );
+
+          if (remainingMissing.size > 0) {
+            this.stalledRequests.add(key);
+            return resolveSnapshot();
+          }
+
+          this.stalledRequests.delete(key);
+          return this.readView<T, S, V>(view, ref);
+        });
 
       this.pending.set(key, promise);
 
       return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
     }
-
-    const resolvedView = this.readViewSelection<T, S>(
-      view,
-      ref,
-      entityId,
-      plan,
-    );
-
-    const thenable = {
-      status: 'fulfilled' as const,
-      then: <TResult1 = ViewSnapshot<T, S>, TResult2 = never>(
-        onfulfilled?: (
-          value: ViewSnapshot<T, S>,
-        ) => TResult1 | PromiseLike<TResult1>,
-        onrejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
-      ): PromiseLike<TResult1 | TResult2> =>
-        Promise.resolve(resolvedView).then(onfulfilled, onrejected),
-      value: resolvedView,
-    } as const;
-
-    this.viewDataCache.set(entityId, view, ref, thenable, resolvedView.ids);
-    return thenable;
+    return resolveSnapshot();
   }
 
   async loadConnection<V extends View<any, any>>(
@@ -1414,12 +1440,24 @@ export class FateClient<
     return { data: data as ViewData<T, S>, ids };
   }
 
-  private pendingKey(
-    type: string,
-    raw: string | number,
-    missingFields: Set<string>,
-  ) {
-    return `N|${type}|${raw}|${[...missingFields].sort().join(',')}`;
+  private clearStalledRequestsForEntity(entityId: EntityId) {
+    const prefix = this.pendingPrefix(entityId);
+
+    for (const key of this.stalledRequests) {
+      if (key.startsWith(prefix)) {
+        this.stalledRequests.delete(key);
+      }
+    }
+  }
+
+  private pendingPrefix(entityId: string) {
+    return `__fate__|${entityId}|`;
+  }
+
+  private pendingKey(entityId: string, missingFields: Set<string>) {
+    return `${this.pendingPrefix(entityId)}${[...missingFields]
+      .sort()
+      .join(',')}`;
   }
 }
 

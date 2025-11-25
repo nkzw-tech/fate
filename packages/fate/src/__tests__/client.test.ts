@@ -1038,6 +1038,94 @@ test('optimistic records are replaced once the mutation resolves', async () => {
   });
 });
 
+test('does not fetch missing fields for optimistic records', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  type Comment = {
+    __typename: 'Comment';
+    author: User;
+    content: string;
+    id: string;
+  };
+
+  const fetchById = vi.fn(async () => []);
+  const mutate = vi.fn(
+    async () =>
+      ({
+        __typename: 'Comment',
+        author: { __typename: 'User', id: 'user-1', name: 'Server' },
+        content: 'Server',
+        id: 'comment-1',
+      }) satisfies Comment,
+  );
+
+  const client = createClient({
+    mutations: {
+      addComment: mutation<
+        Comment,
+        { content: string; postId: string },
+        Comment
+      >('Comment'),
+    },
+    transport: {
+      fetchById,
+      // @ts-expect-error
+      mutate,
+    },
+    types: [
+      { fields: { author: { type: 'User' } }, type: 'Comment' },
+      { type: 'User' },
+    ],
+  });
+
+  const CommentView = view<Comment>()({
+    author: { name: true },
+    content: true,
+    id: true,
+  });
+
+  const optimisticId = 'optimistic:comment';
+  const mutationPromise = client.mutations.addComment({
+    input: { content: 'Optimistic', postId: 'post-1' },
+    optimisticUpdate: {
+      author: { __typename: 'User', id: 'optimistic:user-1' },
+      content: 'Optimistic',
+      id: optimisticId,
+    },
+    view: CommentView,
+  });
+
+  const ref = client.ref<Comment>('Comment', optimisticId, CommentView);
+  await client.readView(CommentView, ref);
+
+  expect(fetchById).not.toHaveBeenCalled();
+
+  await mutationPromise;
+});
+
+test('stops re-requesting unsatisfied selections', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+
+  const fetchById = vi.fn(async () => []);
+
+  const client = createClient({
+    transport: { fetchById },
+    types: [{ type: 'User' }],
+  });
+
+  const UserView = view<User>()({
+    id: true,
+    name: true,
+  });
+
+  const ref = client.ref<User>('User', 'user-1', UserView);
+
+  await client.readView(UserView, ref);
+  expect(fetchById).toHaveBeenCalledTimes(1);
+
+  await client.readView(UserView, ref);
+  expect(fetchById).toHaveBeenCalledTimes(1);
+});
+
 test(`'readView' fetches missing fields using the selection`, async () => {
   type User = { __typename: 'User'; id: string; name: string };
   type Post = {
