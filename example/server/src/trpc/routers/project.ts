@@ -21,10 +21,9 @@ export const projectRouter = router({
         }),
       ),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const selection = createSelectionResolver<ProjectItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: projectDataView,
       });
 

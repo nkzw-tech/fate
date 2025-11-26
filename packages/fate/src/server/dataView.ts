@@ -422,19 +422,19 @@ export function createSelectionResolver<
   Context = unknown,
 >({
   args,
-  context,
-  paths,
+  ctx,
+  select: initialSelect,
   view,
 }: {
   args?: AnyRecord;
-  context?: Context;
-  paths: Iterable<string>;
+  ctx?: Context;
+  select: Iterable<string>;
   view: DataView<Item, Context>;
 }) {
   const allowedPaths = new Set<string>();
   const root = createSelectedNode(view, null);
 
-  for (const path of paths) {
+  for (const path of initialSelect) {
     if (!path) {
       continue;
     }
@@ -443,7 +443,7 @@ export function createSelectionResolver<
   }
 
   const select = prismaSelect([...allowedPaths], args);
-  collectResolvers(root, select, args, context);
+  collectResolvers(root, select, args, ctx);
 
   return {
     resolve: async (item: Item): Promise<Item> =>
@@ -451,7 +451,7 @@ export function createSelectionResolver<
         await resolveNode({
           item,
           node: root,
-          options: { args, context },
+          options: { args, context: ctx },
         }),
         root.view,
       ) as Item,
@@ -463,7 +463,7 @@ export function createSelectionResolver<
               await resolveNode({
                 item,
                 node: root,
-                options: { args, context },
+                options: { args, context: ctx },
               }),
               root.view,
             ) as Item,

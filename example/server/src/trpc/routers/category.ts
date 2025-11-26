@@ -30,19 +30,16 @@ export const categoryRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const selection = createSelectionResolver<CategoryItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: categoryDataView,
       });
       const categories = await ctx.prisma.category.findMany({
         select: selection.select,
         where: { id: { in: input.ids } },
       } as CategoryFindManyArgs);
-      const resolved = await selection.resolveMany(
-        categories as Array<CategoryItem>,
-      );
+      const resolved = await selection.resolveMany(categories);
       const map = new Map(
         resolved.map((category) => {
           const result = transformCategory(category, input.args);
@@ -57,10 +54,9 @@ export const categoryRouter = router({
         transformCategory(category, input.args),
       ),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const selection = createSelectionResolver<CategoryItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: categoryDataView,
       });
 

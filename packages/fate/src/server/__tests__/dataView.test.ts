@@ -9,8 +9,8 @@ test('server views filter unexposed fields from selections', async () => {
     name: true,
   });
 
-  const selection = createSelectionResolver<UserItem>({
-    paths: ['name', 'password'],
+  const selection = createSelectionResolver({
+    select: ['name', 'password'],
     view,
   });
 
@@ -44,8 +44,8 @@ test('resolvers can add prisma selections and compute values', async () => {
     }),
   });
 
-  const selection = createSelectionResolver<CategoryItem>({
-    paths: ['postCount'],
+  const selection = createSelectionResolver({
+    select: ['postCount'],
     view,
   });
 
@@ -85,8 +85,8 @@ test('nested resolvers apply their selections within relations', async () => {
     id: true,
   });
 
-  const selection = createSelectionResolver<ParentItem>({
-    paths: ['child.total'],
+  const selection = createSelectionResolver({
+    select: ['child.total'],
     view: parentView,
   });
 
@@ -122,8 +122,8 @@ test('selecting a relation without nested paths respects the child view', () => 
     post: postView,
   });
 
-  const selection = createSelectionResolver<CommentItem>({
-    paths: ['post'],
+  const selection = createSelectionResolver({
+    select: ['post'],
     view: commentView,
   });
 

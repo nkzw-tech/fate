@@ -58,10 +58,9 @@ export const commentRouter = router({
         });
       }
 
-      const selection = createSelectionResolver<CommentItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: commentDataView,
       });
 
@@ -85,10 +84,9 @@ export const commentRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const selection = createSelectionResolver<CommentItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: commentDataView,
       });
       const comments = await ctx.prisma.comment.findMany({
@@ -96,9 +94,7 @@ export const commentRouter = router({
         where: { id: { in: input.ids } },
       } as CommentFindManyArgs);
 
-      const resolved = await selection.resolveMany(
-        comments as Array<CommentItem>,
-      );
+      const resolved = await selection.resolveMany(comments);
       const map = new Map(resolved.map((comment) => [comment.id, comment]));
       return input.ids.map((id) => map.get(id)).filter(Boolean);
     }),
@@ -123,10 +119,9 @@ export const commentRouter = router({
         });
       }
 
-      const selection = createSelectionResolver<CommentItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: commentDataView,
       });
 
@@ -171,10 +166,9 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const selection = createSelectionResolver<CommentItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: commentDataView,
       });
       const findOptions: CommentFindManyArgs = {

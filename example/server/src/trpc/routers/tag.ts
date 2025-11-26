@@ -1,6 +1,5 @@
 import { connectionArgs, createSelectionResolver } from '@nkzw/fate/server';
 import { z } from 'zod';
-import type { Tag } from '../../prisma/prisma-client/client.ts';
 import type { TagFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
 import { tagDataView } from '../views.ts';
@@ -15,22 +14,19 @@ export const tagRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const selection = createSelectionResolver<Tag>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: tagDataView,
       });
 
-      const tags = await ctx.prisma.tag.findMany({
-        select: selection.select,
-        where: { id: { in: input.ids } },
-      } as TagFindManyArgs);
-
-      const resolved = await selection.resolveMany(tags as Array<Tag>);
-      const map = new Map(resolved.map((tag) => [tag.id, tag] as const));
-      return input.ids
-        .map((id) => map.get(id))
-        .filter((tag): tag is (typeof resolved)[number] => tag != null);
+      return (
+        await selection.resolveMany(
+          await ctx.prisma.tag.findMany({
+            select: selection.select,
+            where: { id: { in: input.ids } },
+          } as TagFindManyArgs),
+        )
+      ).values();
     }),
 });

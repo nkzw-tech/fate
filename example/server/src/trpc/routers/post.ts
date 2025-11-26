@@ -34,17 +34,16 @@ export const postRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const selection = createSelectionResolver<PostItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: postDataView,
       });
       const posts = await ctx.prisma.post.findMany({
         select: selection.select,
         where: { id: { in: input.ids } },
       } as PostFindManyArgs);
-      const resolved = await selection.resolveMany(posts as Array<PostItem>);
+      const resolved = await selection.resolveMany(posts);
       const map = new Map(
         resolved.map((post) => {
           const result = transformPost(post, input.args);
@@ -94,10 +93,9 @@ export const postRouter = router({
         });
       }
 
-      const selection = createSelectionResolver<PostItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: postDataView,
       });
 
@@ -117,10 +115,9 @@ export const postRouter = router({
     map: ({ input, items }) =>
       (items as Array<PostItem>).map((post) => transformPost(post, input.args)),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const selection = createSelectionResolver<PostItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: postDataView,
       });
       const findOptions: PostFindManyArgs = {
@@ -150,10 +147,9 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
-        const selection = createSelectionResolver<PostItem>({
-          args: input.args,
-          context: ctx,
-          paths: input.select,
+        const selection = createSelectionResolver({
+          ...input,
+          ctx,
           view: postDataView,
         });
         const existing = await tx.post.findUnique({

@@ -30,10 +30,9 @@ export const eventRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const selection = createSelectionResolver<EventItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: eventDataView,
       });
       const events = await ctx.prisma.event.findMany({
@@ -57,10 +56,9 @@ export const eventRouter = router({
         transformEvent(event, input.args),
       ),
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const selection = createSelectionResolver<EventItem>({
-        args: input.args,
-        context: ctx,
-        paths: input.select,
+      const selection = createSelectionResolver({
+        ...input,
+        ctx,
         view: eventDataView,
       });
 
