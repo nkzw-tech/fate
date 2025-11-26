@@ -2,9 +2,7 @@
 import { styleText } from 'node:util';
 import randomEntry from '@nkzw/core/randomEntry.js';
 import { auth } from '../lib/auth.tsx';
-import { PrismaClient } from './prisma-client/client.ts';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.tsx';
 
 const users = new Set([
   {
