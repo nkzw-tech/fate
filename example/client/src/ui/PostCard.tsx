@@ -12,7 +12,6 @@ import {
   useCallback,
   useEffect,
   useState,
-  useTransition,
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useListView, useView, view, ViewRef } from 'react-fate';
@@ -170,9 +169,6 @@ export function PostCard({
     null,
   );
 
-  const [, startLikeTransition] = useTransition();
-  const [, startUnlikeTransition] = useTransition();
-
   useEffect(() => {
     if (likeResult?.error) {
       const timeout = setTimeout(() => likeAction('reset'), 3000);
@@ -182,26 +178,22 @@ export function PostCard({
 
   const handleLike = useCallback(
     async (options?: { error?: 'boundary' | 'callSite'; slow?: boolean }) => {
-      startLikeTransition(() =>
-        likeAction({
-          input: { id: post.id, ...options },
-          optimisticUpdate: { likes: post.likes + 1 },
-          view: PostView,
-        }),
-      );
+      likeAction({
+        input: { id: post.id, ...options },
+        optimisticUpdate: { likes: post.likes + 1 },
+        view: PostView,
+      });
     },
     [likeAction, post.id, post.likes],
   );
 
   const handleUnlike = useCallback(async () => {
-    startUnlikeTransition(async () => {
-      unlikeAction({
-        input: { id: post.id },
-        optimisticUpdate: {
-          likes: Math.max(post.likes - 1, 0),
-        },
-        view: PostView,
-      });
+    unlikeAction({
+      input: { id: post.id },
+      optimisticUpdate: {
+        likes: Math.max(post.likes - 1, 0),
+      },
+      view: PostView,
     });
   }, [post.id, post.likes, unlikeAction]);
 
@@ -242,8 +234,8 @@ export function PostCard({
             </div>
             <Stack alignCenter end gap wrap>
               <Button
+                action={handleLike}
                 disabled={likeIsPending}
-                onClick={() => handleLike()}
                 size="sm"
                 variant="outline"
               >
@@ -251,8 +243,8 @@ export function PostCard({
               </Button>
               {detail && (
                 <Button
+                  action={() => handleLike({ slow: true })}
                   disabled={likeIsPending}
-                  onClick={() => handleLike({ slow: true })}
                   size="sm"
                   variant="outline"
                 >
@@ -261,6 +253,7 @@ export function PostCard({
               )}
               {detail && (
                 <Button
+                  action={() => handleLike({ error: 'callSite' })}
                   className={cx(
                     'w-34 transition-colors duration-150',
                     likeResult?.error
@@ -268,7 +261,6 @@ export function PostCard({
                       : '',
                   )}
                   disabled={likeIsPending}
-                  onClick={() => handleLike({ error: 'callSite' })}
                   size="sm"
                   variant="outline"
                 >
@@ -277,8 +269,8 @@ export function PostCard({
               )}
               {detail && (
                 <Button
+                  action={() => handleLike({ error: 'boundary' })}
                   disabled={likeIsPending}
-                  onClick={() => handleLike({ error: 'boundary' })}
                   size="sm"
                   variant="outline"
                 >
@@ -286,17 +278,13 @@ export function PostCard({
                 </Button>
               )}
               {detail && (
-                <Button
-                  onClick={() => handleLike()}
-                  size="sm"
-                  variant="outline"
-                >
+                <Button action={handleLike} size="sm" variant="outline">
                   Like (Many)
                 </Button>
               )}
               <Button
+                action={handleUnlike}
                 disabled={unlikeIsPending || post.likes === 0}
-                onClick={handleUnlike}
                 size="sm"
                 variant="outline"
               >

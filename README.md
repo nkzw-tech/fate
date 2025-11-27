@@ -40,9 +40,9 @@ _Note: **fate** is currently in alpha and not production ready. If something doe
 
 ### Thinking in Views
 
-With fate, you declare which data you need at which component layer using "views", and compose your UI up to the nearest request. Data fetching is handled automatically by fate, loading states can be managed via Suspense, and errors can be caught by React error boundaries.
+With fate, each component declares the data it needs using views, and you compose your UI until the point where the closest request is made. Data fetching then happens automatically. Loading states are handled through React Suspense, and data fetching errors bubble up to the nearest React error boundaries.
 
-You don't have to think about when to fetch data, how to handle loading states for each request, or how to manage errors via imperative control flow. With fate, you will never overfetch data, never pass too much data to child components, or manually handle type definitions to select a slice of data in a child component.
+You no longer need to worry about _when_ to fetch data, how to coordinate loading states for individual requests, or how to manage errors imperatively. With fate, you avoid overfetching, prevent passing unnecessary data down the component tree, and eliminate the need to manually define types just to select a subset of data for a child component.
 
 ### fate Conventions
 
@@ -393,7 +393,21 @@ fate does not provide hooks for mutations like traditional data fetching librari
 
 Mutations in your tRPC backend will be made available automatically as actions and mutations by fate's generated client.
 
-Let's assume that our `Post` entity has a tRPC mutation for liking a post called `post.like`. A `LikeButton` component using fate Actions could then look like this:
+Let's assume that our `Post` entity has a tRPC mutation for liking a post called `post.like`. A `LikeButton` component using fate Actions and an async component library could then look like this:
+
+```tsx
+const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
+  const [likeResult, likeAction] = useActionState(fate.actions.post.like, null);
+
+  return (
+    <Button action={() => likeAction({ input: { id: post.id } })}>
+      {likeResult?.error ? 'Oops!' : 'Like'}
+    </Button>
+  );
+};
+```
+
+If you are not using an async component library, you can use React's `useTransition` to start the action in a transition:
 
 ```tsx
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
@@ -752,6 +766,22 @@ export const Lists = {
 ```
 
 This maps the `postSearch` list to a `search` procedure on your post router.
+
+### Resetting Action State
+
+When you are using `useActionState`, the result of the action is cached until the component using the action is unmounted. When a mutation fails with an error, you might want to clear the error state without invoking the action again. fate Actions take a `'reset'` token to reset the action state:
+
+```tsx
+const [likeResult, likeAction] = useActionState(fate.actions.post.like, null);
+
+useEffect(() => {
+  if (likeResult?.error) {
+    // Reset the action state after 3 seconds.
+    const timeout = setTimeout(() => likeAction('reset'), 3000);
+    return () => clearTimeout(timeout);
+  }
+}, [likeAction, likeResult]);
+```
 
 ## Future
 

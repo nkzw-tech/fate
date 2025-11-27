@@ -1,6 +1,6 @@
 import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { forwardRef } from 'react';
+import { ButtonHTMLAttributes, useTransition } from 'react';
 import cx from '../lib/cx.tsx';
 
 const buttonVariants = cva(
@@ -32,24 +32,35 @@ const buttonVariants = cva(
   },
 );
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
-}
+const Button = ({
+  action,
+  asChild = false,
+  className,
+  disabled,
+  onClick: initialOnClick,
+  size,
+  variant,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> &
+  VariantProps<typeof buttonVariants> & {
+    action?: () => void;
+    asChild?: boolean;
+  }) => {
+  const Component = asChild ? Slot : 'button';
 
-const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ asChild = false, className, size, variant, ...props }, ref) => {
-    const Comp = asChild ? Slot : 'button';
-    return (
-      <Comp
-        className={cx(buttonVariants({ className, size, variant }))}
-        ref={ref}
-        {...props}
-      />
-    );
-  },
-);
-Button.displayName = 'Button';
+  const [isPending, startTransition] = useTransition();
+
+  const onClick =
+    initialOnClick || (action ? () => startTransition(action) : undefined);
+
+  return (
+    <Component
+      className={cx(buttonVariants({ className, size, variant }))}
+      disabled={disabled !== undefined ? disabled : isPending}
+      onClick={onClick}
+      {...props}
+    />
+  );
+};
 
 export { Button, buttonVariants };

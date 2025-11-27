@@ -1,7 +1,7 @@
 import safeParse from '@nkzw/core/safeParse.js';
 import { User } from '@nkzw/fate-server/src/trpc/router.ts';
 import Stack, { VStack } from '@nkzw/stack';
-import { ChangeEvent, FormEvent, useState, useTransition } from 'react';
+import { ChangeEvent, useActionState, useState } from 'react';
 import { view } from 'react-fate';
 import { fate } from '../lib/fate.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -25,16 +25,13 @@ export const UserView = view<User>()({
 const UserNameForm = ({ user }: { user: SessionUser }) => {
   const [name, setName] = useState(user.name ?? '');
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     setError(null);
     setName(event.target.value);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const [, submitAction, isPending] = useActionState(async () => {
     const id = user?.id;
     if (!id) {
       return;
@@ -48,29 +45,26 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
       return;
     }
 
-    startTransition(async () => {
-      try {
-        setError(null);
-        await fate.mutations.user.update({
-          input: { name: newName },
-          optimisticUpdate: {
-            id,
-            username: newName,
-          },
-          view: UserView,
-        });
-        await AuthClient.updateUser({ name });
-      } catch (error) {
-        setError(
-          (error instanceof Error &&
-            error.message &&
-            safeParse<Array<{ message: string }>>(error.message)?.[0]
-              ?.message) ||
-            'Failed to update user name.',
-        );
-      }
-    });
-  };
+    try {
+      setError(null);
+      await fate.mutations.user.update({
+        input: { name: newName },
+        optimisticUpdate: {
+          id,
+          username: newName,
+        },
+        view: UserView,
+      });
+      await AuthClient.updateUser({ name });
+    } catch (error) {
+      setError(
+        (error instanceof Error &&
+          error.message &&
+          safeParse<Array<{ message: string }>>(error.message)?.[0]?.message) ||
+          'Failed to update user name.',
+      );
+    }
+  }, null);
 
   const trimmedName = name.trim();
   const originalName = user.name ?? '';
@@ -79,7 +73,7 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
 
   return (
     <div>
-      <form className="flex items-center gap-2" onSubmit={handleSubmit}>
+      <form action={submitAction} className="flex items-center gap-2">
         <label className="sr-only" htmlFor="header-username">
           Username
         </label>
