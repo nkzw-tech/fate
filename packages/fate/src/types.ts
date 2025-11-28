@@ -18,7 +18,7 @@ type __ViewEntityAnchor<T extends Entity> = {
   readonly [__FateEntityBrand]?: T;
 };
 type __ViewSelectionAnchor<S> = {
-  readonly [__FateSelectionBrand]?: S;
+  [__FateSelectionBrand]?: S;
 };
 type __MutationEntityAnchor<T extends Entity> = {
   readonly [__FateMutationEntityBrand]?: T;
@@ -96,18 +96,18 @@ type PlainObjectSelection<T> = {
   [K in keyof T]?: PlainObjectSelectionField<T[K]>;
 };
 
-type ConnectionSelectionBase<T extends Entity> = {
-  readonly items: {
-    readonly cursor?: true;
-    readonly node: Selection<T> | View<T, Selection<T>>;
-  };
-  readonly pagination?: {
-    readonly hasNext?: true;
-    readonly hasPrevious?: true;
-    readonly nextCursor?: true;
-    readonly previousCursor?: true;
-  };
-};
+type ConnectionSelectionBase<T extends Entity> = Readonly<{
+  items: Readonly<{
+    cursor?: true;
+    node: Selection<T> | View<T, Selection<T>>;
+  }>;
+  pagination?: Readonly<{
+    hasNext?: true;
+    hasPrevious?: true;
+    nextCursor?: true;
+    previousCursor?: true;
+  }>;
+}>;
 
 export type ConnectionSelection<T extends Entity> =
   | ConnectionSelectionBase<T>

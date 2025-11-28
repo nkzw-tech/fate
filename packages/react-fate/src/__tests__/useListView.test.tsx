@@ -61,20 +61,22 @@ test('loads additional items when loadNext is invoked', async () => {
     id: true,
   });
 
-  const PostView = view<Post>()({
-    comments: {
-      args: { first: 1 },
-      items: {
-        cursor: true,
-        node: CommentView,
-      },
-      pagination: {
-        hasNext: true,
-        hasPrevious: true,
-        nextCursor: true,
-        previousCursor: true,
-      },
+  const CommentConnectionView = {
+    args: { first: 1 },
+    items: {
+      cursor: true,
+      node: CommentView,
     },
+    pagination: {
+      hasNext: true,
+      hasPrevious: true,
+      nextCursor: true,
+      previousCursor: true,
+    },
+  } as const;
+
+  const PostView = view<Post>()({
+    comments: CommentConnectionView,
     id: true,
   });
 
@@ -125,7 +127,10 @@ test('loads additional items when loadNext is invoked', async () => {
 
   const Component = () => {
     const post = useView(PostView, postRef);
-    const [comments, loadNext] = useListView(CommentView, post.comments);
+    const [comments, loadNext] = useListView(
+      CommentConnectionView,
+      post.comments,
+    );
     renders.push(
       comments.map(({ node }) => (node?.id ? String(node.id) : null)),
     );
@@ -216,13 +221,15 @@ test('uses pagination from list state when not selected', async () => {
     id: true,
   });
 
-  const PostView = view<Post>()({
-    comments: {
-      args: { first: 1 },
-      items: {
-        node: CommentView,
-      },
+  const CommentConnectionView = {
+    args: { first: 1 },
+    items: {
+      node: CommentView,
     },
+  } as const;
+
+  const PostView = view<Post>()({
+    comments: CommentConnectionView,
     id: true,
   });
 
@@ -273,7 +280,10 @@ test('uses pagination from list state when not selected', async () => {
 
   const Component = () => {
     const post = useView(PostView, postRef);
-    const [comments, loadNext] = useListView(CommentView, post.comments);
+    const [comments, loadNext] = useListView(
+      CommentConnectionView,
+      post.comments,
+    );
     renders.push(
       comments.map(({ node }) => (node?.id ? String(node.id) : null)),
     );
@@ -356,20 +366,22 @@ test('loads previous items when loadPrevious is invoked', async () => {
     id: true,
   });
 
-  const PostView = view<Post>()({
-    comments: {
-      args: { first: 1 },
-      items: {
-        cursor: true,
-        node: CommentView,
-      },
-      pagination: {
-        hasNext: true,
-        hasPrevious: true,
-        nextCursor: true,
-        previousCursor: true,
-      },
+  const CommentConnectionView = {
+    args: { first: 1 },
+    items: {
+      cursor: true,
+      node: CommentView,
     },
+    pagination: {
+      hasNext: true,
+      hasPrevious: true,
+      nextCursor: true,
+      previousCursor: true,
+    },
+  } as const;
+
+  const PostView = view<Post>()({
+    comments: CommentConnectionView,
     id: true,
   });
 
@@ -420,7 +432,10 @@ test('loads previous items when loadPrevious is invoked', async () => {
 
   const Component = () => {
     const post = useView(PostView, postRef);
-    const [comments, , loadPrevious] = useListView(CommentView, post.comments);
+    const [comments, , loadPrevious] = useListView(
+      CommentConnectionView,
+      post.comments,
+    );
 
     useEffect(() => {
       loadPreviousRef = loadPrevious;

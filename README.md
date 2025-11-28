@@ -274,7 +274,7 @@ export const PostView = view<Post>()({
 
 You can wrap a list of references using `useListView` to enable connection-style lists with pagination support.
 
-For example, you can define a `CommentView` and turn your `comments` field into a connection inside of the `PostView`:
+For example, you can define a `CommentView` and reuse it inside of a `CommentConnectionView`:
 
 ```tsx
 import { useListView, ViewRef } from 'react-fate';
@@ -284,13 +284,15 @@ const CommentView = view<Comment>()({
   id: true,
 });
 
-const PostView = view<Post>()({
-  comments: {
-    args: { first: 10 },
-    items: {
-      node: CommentView,
-    },
+const CommentConnectionView = {
+  args: { first: 10 },
+  items: {
+    node: CommentView,
   },
+} as const;
+
+const PostView = view<Post>()({
+  comments: CommentConnectionView,
 });
 ```
 
@@ -305,8 +307,8 @@ export function PostCard({
   post: ViewRef<'Post'>;
 }) {
   const post = useView(PostView, postRef);
-  const [comments, loadNext, loadPrevious] = useListView(
-    CommentView,
+  const [comments, loadNext] = useListView(
+    CommentConnectionView,
     post.comments,
   );
 

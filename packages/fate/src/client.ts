@@ -632,11 +632,8 @@ export class FateClient<
       requestArgs.id = owner.id;
     }
 
-    const {
-      argsPayload,
-      plan,
-      selection: nodeSelection,
-    } = this.resolveListSelection(view, requestArgs);
+    const { argsPayload, plan } = this.resolveListSelection(view, requestArgs);
+    const nodeSelection = plan.paths;
     const scopedArgsPayload = scopeArgsPayload(argsPayload, connection.field);
 
     const parentSelection = new Set<string>();
@@ -925,13 +922,13 @@ export class FateClient<
       );
     }
 
-    const { argsPayload, plan, selection } = this.resolveListSelection(
+    const { argsPayload, plan } = this.resolveListSelection(
       item.root,
       item.args,
     );
     const { items, pagination } = await this.transport.fetchList(
       name,
-      selection,
+      plan.paths,
       argsPayload,
     );
     const ids: Array<EntityId> = [];
@@ -940,7 +937,7 @@ export class FateClient<
       const id = this.normalizeEntity(
         item.type,
         entry.node as AnyRecord,
-        selection,
+        plan.paths,
         undefined,
         plan,
       );
@@ -959,12 +956,9 @@ export class FateClient<
     args: AnyRecord | undefined,
   ) {
     const plan = getSelectionPlan(view, null);
-    const selection = plan.paths;
-    const defaultArgs = resolvedArgsFromPlan(plan);
-    const argsPayload = combineArgsPayload(defaultArgs, args);
+    const argsPayload = combineArgsPayload(resolvedArgsFromPlan(plan), args);
     applyArgsPayloadToPlan(plan, argsPayload);
-
-    return { argsPayload, plan, selection };
+    return { argsPayload, plan };
   }
 
   private normalizeEntity(

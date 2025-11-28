@@ -1,6 +1,7 @@
 import {
   ConnectionMetadata,
   ConnectionTag,
+  isViewTag,
   Pagination,
   type View,
 } from '@nkzw/fate';
@@ -16,19 +17,35 @@ type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
   ? ReadonlyArray<Item>
   : ReadonlyArray<never>;
 
-type LoadMoreFn = (() => Promise<void>) | null;
+type LoadMoreFn = () => Promise<void>;
+
+type ConnectionSelection = { items?: { node?: unknown } };
+
+const getNodeView = (view: ConnectionSelection) => {
+  const maybeView = (view as ConnectionSelection)?.items?.node;
+
+  if (maybeView) {
+    for (const key of Object.keys(maybeView)) {
+      if (isViewTag(key)) {
+        return maybeView as View<any, any>;
+      }
+    }
+  }
+
+  return view;
+};
 
 export function useListView<
-  V extends View<any, any>,
   C extends
     | { items?: ReadonlyArray<any>; pagination?: Pagination }
     | null
     | undefined,
 >(
-  view: V,
+  selection: ConnectionSelection,
   connection: C,
-): [ConnectionItems<NonNullable<C>>, LoadMoreFn, LoadMoreFn] {
+): [ConnectionItems<NonNullable<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
+  const nodeView = useMemo(() => getNodeView(selection), [selection]);
   const metadata =
     connection && typeof connection === 'object'
       ? ((connection as Record<symbol, unknown>)[ConnectionTag] as
@@ -64,7 +81,7 @@ export function useListView<
   const nextCursor = pagination?.nextCursor;
   const previousCursor = pagination?.previousCursor;
 
-  const loadNext: LoadMoreFn = useMemo(() => {
+  const loadNext = useMemo(() => {
     if (!metadata || !hasNext || !nextCursor) {
       return null;
     }
@@ -72,7 +89,7 @@ export function useListView<
     return async () => {
       const { before, last, ...values } = metadata.args || {};
       await client.loadConnection(
-        view,
+        nodeView,
         metadata,
         {
           ...values,
@@ -83,9 +100,9 @@ export function useListView<
         },
       );
     };
-  }, [client, hasNext, metadata, nextCursor, view]);
+  }, [client, hasNext, nodeView, metadata, nextCursor]);
 
-  const loadPrevious: LoadMoreFn = useMemo(() => {
+  const loadPrevious = useMemo(() => {
     if (!metadata || !hasPrevious || !previousCursor) {
       return null;
     }
@@ -93,7 +110,7 @@ export function useListView<
     return async () => {
       const { after, ...values } = metadata.args || {};
       await client.loadConnection(
-        view,
+        nodeView,
         metadata,
         {
           ...values,
@@ -104,7 +121,7 @@ export function useListView<
         },
       );
     };
-  }, [client, hasPrevious, metadata, previousCursor, view]);
+  }, [client, hasPrevious, nodeView, metadata, previousCursor]);
 
   return [
     connection?.items as unknown as ConnectionItems<NonNullable<C>>,

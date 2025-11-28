@@ -29,16 +29,18 @@ const CategorySummaryView = view<Category>()({
   name: true,
 });
 
+const CommentConnectionView = {
+  args: { first: 3 },
+  items: {
+    node: CommentView,
+  },
+} as const;
+
 export const PostView = view<Post>()({
   author: UserView,
   category: CategorySummaryView,
   commentCount: true,
-  comments: {
-    args: { first: 3 },
-    items: {
-      node: CommentView,
-    },
-  },
+  comments: CommentConnectionView,
   content: true,
   id: true,
   likes: true,
@@ -156,7 +158,10 @@ export function PostCard({
   const post = useView(PostView, postRef);
   const author = useView(UserView, post.author);
   const category = useView(CategorySummaryView, post.category);
-  const [comments, loadNext] = useListView(CommentView, post.comments);
+  const [comments, loadNext] = useListView(
+    CommentConnectionView,
+    post.comments,
+  );
   const tags = post.tags?.items ?? [];
 
   const [likeResult, likeAction, likeIsPending] = useActionState(
