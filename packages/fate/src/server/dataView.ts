@@ -21,6 +21,9 @@ type ResolverResolve<Item extends AnyRecord, Context> = Bivariant<
   }) => Promise<unknown> | unknown
 >;
 
+/**
+ * Field configuration for selecting and resolving a computed value on the backend.
+ */
 export type ResolverField<Item extends AnyRecord, Context> = {
   kind: 'resolver';
   resolve: ResolverResolve<Item, Context>;
@@ -32,6 +35,9 @@ type DataField<Item extends AnyRecord, Context> =
   | DataView<AnyRecord, Context>
   | ResolverField<Item, Context>;
 
+/**
+ * Recursively serializes resolver results for transport across the network.
+ */
 export type Serializable<T> = T extends Date
   ? string
   : T extends Array<infer U>
@@ -40,17 +46,33 @@ export type Serializable<T> = T extends Date
       ? { [K in keyof T]: Serializable<T[K]> }
       : T;
 
+/**
+ * Server-side mirror of a view definition describing how to select and resolve
+ * fields when fulfilling a client request.
+ */
 export type DataView<Item extends AnyRecord, Context = unknown> = {
   fields: Record<string, DataField<Item, Context>>;
   kind?: 'resolver' | 'list';
   typeName: string;
 };
 
+/**
+ * Convenience type for declaring the fields of a server data view.
+ */
 export type DataViewConfig<Item extends AnyRecord, Context> = Record<
   string,
   DataField<Item, Context>
 >;
 
+/**
+ * Declares a server data view that exposes an object's available fields to the client.
+ *
+ * @example
+ * const Post = dataView<PostItem>('Post')({
+ *   id: true,
+ *   title: true,
+ * });
+ */
 export function dataView<Item extends AnyRecord, Context = unknown>(
   typeName?: string,
 ) {
@@ -65,12 +87,20 @@ export function dataView<Item extends AnyRecord, Context = unknown>(
   };
 }
 
+/**
+ * Marks a data view as a list resolver so the server can respond with
+ * connection information.
+ */
 export const list = <Item extends AnyRecord, Context>(
   view: DataView<Item, Context>,
 ) => {
   return { ...view, kind: 'list' as const };
 };
 
+/**
+ * Declares a resolver field inside a data view, optionally providing a
+ * selection for any data dependencies.
+ */
 export function resolver<Item extends AnyRecord, Context = unknown>(config: {
   resolve: ResolverResolve<Item, Context>;
   select?: ResolverSelect<Context>;
@@ -134,6 +164,9 @@ type RawDataViewResult<V extends DataView<AnyRecord, unknown>> =
       }
     : never;
 
+/**
+ * Resolved and serialized shape returned from a data view.
+ */
 export type DataViewResult<V extends DataView<AnyRecord, unknown>> =
   Serializable<RawDataViewResult<V>>;
 
@@ -417,6 +450,10 @@ const resolveNode = async <Item extends AnyRecord, Context>(
   return (result ?? item) as Item;
 };
 
+/**
+ * Builds a resolver that applies a client's selection to a server data view,
+ * filtering fields, running nested resolvers, and shaping selects.
+ */
 export function createResolver<Item extends AnyRecord, Context = unknown>({
   args,
   ctx,

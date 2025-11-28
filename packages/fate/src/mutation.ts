@@ -19,6 +19,10 @@ import type {
 } from './types.ts';
 import { MutationKind } from './types.ts';
 
+/**
+ * Defines a mutation for a given entity type, preserving the input and output
+ * types for transports.
+ */
 export function mutation<T extends Entity, I, R>(
   entity: T['__typename'],
 ): MutationDefinition<T, I, R> {
@@ -28,19 +32,32 @@ export function mutation<T extends Entity, I, R>(
   }) as MutationDefinition<T, I, R>;
 }
 
+/**
+ * Options accepted by a mutation invocation, including optimistic updates and
+ * optional selection for the returned payload.
+ */
 export type MutationOptions<
   Identifier extends MutationIdentifier<any, any, any>,
 > = {
+  /** Optional arguments to pass to the mutation resolver. */
   args?: Record<string, unknown>;
+  /** If true, deletes the record with the ID specified in the input. */
   deleteRecord?: boolean;
+  /** Input data for the mutation. */
   input: Omit<MutationInput<Identifier>, 'select'>;
+  /** Optional optimistic update to apply immediately. */
   optimisticUpdate?: OptimisticUpdate<MutationResult<Identifier>>;
+  /** Optional view specifying which fields to select from the server. */
   view?: View<
     MutationEntity<Identifier>,
     Selection<MutationEntity<Identifier>>
   >;
 };
 
+/**
+ * Callable mutation entry point returned on the client that resolves to either
+ * a successful result or an error.
+ */
 export type MutationFunction<I extends MutationIdentifier<any, any, any>> = (
   options: MutationOptions<I>,
 ) => Promise<
@@ -48,8 +65,15 @@ export type MutationFunction<I extends MutationIdentifier<any, any, any>> = (
   | { error: Error; result: undefined }
 >;
 
+/**
+ * React action-compatible wrapper that can be passed directly to form actions
+ * or transitions.
+ */
 export type MutationAction<I extends MutationIdentifier<any, any, any>> = (
   previousState: unknown,
+  /**
+   * Mutation options or 'reset' to reset the action state.
+   */
   options: MutationOptions<I> | 'reset',
 ) => Promise<
   | { error: undefined; result: MutationResult<I> }
@@ -97,6 +121,10 @@ const maybeGetId = (getId: TypeConfig['getId'], input: AnyRecord) => {
   }
 };
 
+/**
+ * Binds a mutation definition to a `FateClient`, wiring up optimistic updates,
+ * cache writes, and error handling.
+ */
 export function wrapMutation<
   I extends MutationIdentifier<any, any, any>,
   M extends Record<string, MutationDefinition<any, any, any>>,

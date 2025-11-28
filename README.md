@@ -458,9 +458,9 @@ addComment({
 });
 ```
 
-#### Providing a View to Actions
+#### Selecting a View with Actions
 
-Mutations may change data that is not directly specified in the mutation result. For example, adding a comment increases the post's comment count. For such cases, you can provide a `view` to the optimistic update that specifies which fields to fetch as part of the mutation:
+Mutations may change data that is not directly specified in the mutation result. For example, adding a comment increases the post's comment count. For such cases, you can provide a `view` to an action that specifies which fields to fetch as part of the mutation:
 
 ```tsx
 addComment({
@@ -470,6 +470,21 @@ addComment({
     post: { commentCount: true },
   }),
 });
+```
+
+The server will return the selected fields and fate updates the cache and re-renders all views that depend on the changed data automatically. The action result will contain the newly added comment with the selected fields:
+
+```tsx
+const [addCommentResult, addComment] = useActionState(
+  fate.actions.comment.add,
+  null,
+);
+
+const newComment = addCommentResult?.result;
+if (newComment) {
+  // All the fields selected in the view are available on `newComment`:
+  console.log(newComment.post.commentCount);
+}
 ```
 
 #### Mutations

@@ -22,6 +22,12 @@ type ViewEntityWithTypename<V extends View<any, any>> = ViewEntity<V> & {
   __typename: ViewEntityName<V>;
 };
 
+/**
+ * Resolves a reference against a view and subscribes to updates for that selection.
+ *
+ * @example
+ * const post = useView(PostView, postRef);
+ */
 export function useView<V extends View<any, any>>(
   view: V,
   ref: ViewRef<ViewEntityName<V>>,

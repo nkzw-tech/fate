@@ -39,18 +39,14 @@ export const postRouter = router({
         ctx,
         view: postDataView,
       });
-      const posts = await ctx.prisma.post.findMany({
-        select,
-        where: { id: { in: input.ids } },
-      } as PostFindManyArgs);
-      const resolved = await resolveMany(posts);
-      const map = new Map(
-        resolved.map((post) => {
-          const result = transformPost(post, input.args);
-          return [result.id, result];
-        }),
-      );
-      return input.ids.map((id) => map.get(id)).filter(Boolean);
+      return (
+        await resolveMany(
+          await ctx.prisma.post.findMany({
+            select,
+            where: { id: { in: input.ids } },
+          } as PostFindManyArgs),
+        )
+      ).map((post) => transformPost(post, input.args));
     }),
   like: procedure
     .input(

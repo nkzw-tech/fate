@@ -18,6 +18,9 @@ const toPrismaArgs = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
+/**
+ * Narrows nested args to the slice relevant for a particular selection path.
+ */
 export function getScopedArgs(
   args: Record<string, unknown> | undefined,
   path: string,
@@ -39,6 +42,10 @@ export function getScopedArgs(
   return isRecord(current) ? current : undefined;
 }
 
+/**
+ * Builds a Prisma `select` object from flattened selection paths and optional
+ * scoped args, always including the `id` field.
+ */
 export function prismaSelect(
   paths: Array<string>,
   args?: Record<string, unknown>,

@@ -18,11 +18,17 @@ type ConnectionInputWithAdditional<
 
 type ConnectionCursor = string;
 
+/**
+ * Connection item including the node and opaque cursor.
+ */
 export type ConnectionItem<TNode> = {
   cursor: ConnectionCursor;
   node: TNode;
 };
 
+/**
+ * Pagination metadata returned with connection lists.
+ */
 export type ConnectionPagination = {
   hasNext: boolean;
   hasPrevious: boolean;
@@ -30,6 +36,9 @@ export type ConnectionPagination = {
   previousCursor?: ConnectionCursor;
 };
 
+/**
+ * Connection payload that mirrors what the client expects for list fields.
+ */
 export type ConnectionResult<TNode> = {
   items: Array<ConnectionItem<TNode>>;
   pagination: ConnectionPagination;
@@ -70,6 +79,9 @@ const args: z.ZodType<Record<string, unknown>> = z
   .object({})
   .catchall(z.union([z.unknown(), z.lazy(() => args)]));
 
+/**
+ * Zod schema for connection args (`after`, `before`, `first`, `last`, etc.).
+ */
 export const connectionArgs = args.optional();
 
 const connectionInput = z.strictObject({
@@ -109,6 +121,10 @@ const extractPaginationArgs = (
       )
     : {};
 
+/**
+ * Converts an array of nodes into a list view connection result the client
+ * can normalize.
+ */
 export function arrayToConnection<TNode extends { id: string | number }>(
   nodes?: Array<TNode>,
   {
@@ -168,6 +184,10 @@ export function arrayToConnection<TNode extends { id: string | number }>(
   };
 }
 
+/**
+ * Wraps a tRPC procedure to handle cursor-based pagination with consistent
+ * connection semantics.
+ */
 export const withConnection =
   <TContext>(procedure: ProcedureLike<TContext>) =>
   <

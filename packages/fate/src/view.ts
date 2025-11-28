@@ -10,6 +10,9 @@ import type {
 } from './types.ts';
 import { getViewTag, isViewTag, ViewKind, ViewsTag } from './types.ts';
 
+/**
+ * Collects all view payloads that apply to the given ref.
+ */
 export const getViewPayloads = <
   T extends Entity,
   S extends Selection<T>,
@@ -27,6 +30,9 @@ export const getViewPayloads = <
   return result;
 };
 
+/**
+ * Returns the set of view tags defined on a view composition.
+ */
 export const getViewNames = <
   T extends Entity,
   S extends Selection<T>,
@@ -43,6 +49,9 @@ export const getViewNames = <
   return result;
 };
 
+/**
+ * Extracts view tags from a nested selection object.
+ */
 export const getSelectionViewNames = <T extends Entity, S extends Selection<T>>(
   selection: S,
 ): ReadonlySet<ViewTag> => {
@@ -59,6 +68,15 @@ type SelectionValidation<T extends Entity, S extends Selection<T>> =
     ? unknown
     : never;
 
+/**
+ * Creates a reusable view for an object using the declared selection.
+ *
+ * @example
+ * const PostView = view<Post>()({
+ *   id: true,
+ *   title: true,
+ * });
+ */
 export function view<T extends Entity>() {
   const viewId = id++;
 

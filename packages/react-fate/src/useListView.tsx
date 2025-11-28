@@ -35,6 +35,10 @@ const getNodeView = (view: ConnectionSelection) => {
   return view;
 };
 
+/**
+ * Subscribes to a connection field, returning the current items and pagination
+ * helpers to load the next or previous page.
+ */
 export function useListView<
   C extends
     | { items?: ReadonlyArray<any>; pagination?: Pagination }

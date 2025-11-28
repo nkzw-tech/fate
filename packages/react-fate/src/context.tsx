@@ -3,6 +3,9 @@ import { createContext, ReactNode, use } from 'react';
 
 const FateContext = createContext<FateClientT | null>(null);
 
+/**
+ * Provider component that supplies a configured `FateClient` to React hooks.
+ */
 export function FateClient({
   children,
   client,
@@ -13,6 +16,9 @@ export function FateClient({
   return <FateContext value={client}>{children}</FateContext>;
 }
 
+/**
+ * Returns the nearest `FateClient` from context.
+ */
 export function useFateClient(): FateClientT {
   const context = use(FateContext);
   if (!context) {

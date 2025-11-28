@@ -35,19 +35,14 @@ export const eventRouter = router({
         ctx,
         view: eventDataView,
       });
-      const events = await ctx.prisma.event.findMany({
-        select: select as EventSelect,
-        where: { id: { in: input.ids } },
-      });
-      const resolved = await resolveMany(events);
-
-      const map = new Map(
-        resolved.map((event) => {
-          const result = transformEvent(event, input.args);
-          return [result.id, result];
-        }),
-      );
-      return input.ids.map((id) => map.get(id)).filter(Boolean);
+      return (
+        await resolveMany(
+          await ctx.prisma.event.findMany({
+            select: select as EventSelect,
+            where: { id: { in: input.ids } },
+          }),
+        )
+      ).map((event) => transformEvent(event, input.args));
     }),
   list: createConnectionProcedure({
     defaultSize: 3,

@@ -89,14 +89,12 @@ export const commentRouter = router({
         ctx,
         view: commentDataView,
       });
-      const comments = await ctx.prisma.comment.findMany({
-        select,
-        where: { id: { in: input.ids } },
-      } as CommentFindManyArgs);
-
-      const resolved = await resolveMany(comments);
-      const map = new Map(resolved.map((comment) => [comment.id, comment]));
-      return input.ids.map((id) => map.get(id)).filter(Boolean);
+      return await resolveMany(
+        await ctx.prisma.comment.findMany({
+          select,
+          where: { id: { in: input.ids } },
+        } as CommentFindManyArgs),
+      );
     }),
   delete: procedure
     .input(

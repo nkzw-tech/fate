@@ -15,6 +15,10 @@ const paginationKeys = new Set(['after', 'before', 'cursor']);
 
 type WalkContext = 'default' | 'connection';
 
+/**
+ * Representation of a composed selection including hashed args and the
+ * flat set of field paths to read or fetch.
+ */
 export type SelectionPlan = {
   readonly args: Map<
     string,
@@ -26,6 +30,10 @@ export type SelectionPlan = {
 const isConnectionSelection = (value: AnyRecord): boolean =>
   isRecord(value.items) && 'node' in value.items;
 
+/**
+ * Flattens a view into a `SelectionPlan`, expanding composed views and
+ * partitioning nested args so the client can fetch exactly what is declared.
+ */
 export const getSelectionPlan = <
   T extends Entity,
   S extends Selection<T>,

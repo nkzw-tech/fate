@@ -2,11 +2,19 @@ import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
 import { AnyRecord, Pagination, type MutationShape } from './types.ts';
 
+/**
+ * Normalized representation of args passed to a transport.
+ */
 export type ResolvedArgsPayload = AnyRecord;
 
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
 
+/**
+ * Contract the fate client expects from a network transport. The transport is
+ * responsible for fetching records by ID, fetching lists, and executing
+ * mutations with the provided selections.
+ */
 export interface Transport<
   Mutations extends TransportMutations = EmptyTransportMutations,
 > {
@@ -31,6 +39,9 @@ export interface Transport<
   ): Promise<Mutations[K]['output']>;
 }
 
+/**
+ * Mapping of entity type to tRPC procedures used for fetching entities by ID.
+ */
 export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
   string,
   (
@@ -42,6 +53,9 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
   }) => Promise<Array<unknown>>
 >;
 
+/**
+ * Mapping of list procedure name to a tRPC resolver factory.
+ */
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
   (client: TRPCClient<AppRouter>) => (input: {
@@ -53,6 +67,9 @@ export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   }>
 >;
 
+/**
+ * Mapping of a mutation procedure name to a tRPC resolver factory.
+ */
 type MutationResolver<AppRouter extends AnyRouter> = (
   client: TRPCClient<AppRouter>,
 ) => (input: any) => Promise<any>;
@@ -76,6 +93,10 @@ type EmptyMutationResolvers<AppRouter extends AnyRouter> = Record<
   MutationResolver<AppRouter>
 >;
 
+/**
+ * Builds a `Transport` backed by a tRPC client using the configured resolvers
+ * for by-id queries, lists, and mutations.
+ */
 export function createTRPCTransport<
   AppRouter extends AnyRouter,
   Mutations extends TRPCMutationResolvers<AppRouter> =

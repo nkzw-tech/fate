@@ -23,6 +23,10 @@ type ListConfig =
       view: DataView<AnyRecord, unknown>;
     };
 
+/**
+ * Builds the schema object used by the CLI generator from your data views and
+ * list resolver configs.
+ */
 export const createFateSchema = (
   dataViews: ReadonlyArray<DataView<AnyRecord, unknown>>,
   lists: Record<string, ListConfig>,

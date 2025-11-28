@@ -43,11 +43,20 @@ import {
 } from './types.ts';
 import { getViewNames, getViewPayloads } from './view.ts';
 
+/**
+ * Strategy used when resolving a request.
+ */
 export type RequestMode =
+  /** (default) Use cached data if present, otherwise fetch. */
   | 'cache-or-network'
+  /** Show cached data immediately and refresh in the background. */
   | 'cache-and-network'
+  /** Always fetch from the network and ignore cached entries. */
   | 'network-only';
 
+/**
+ * Request options that affect how requests are fetched and retained.
+ */
 export type RequestOptions = Readonly<{ mode?: RequestMode }>;
 
 type MutationIdentifierFor<
@@ -225,6 +234,10 @@ const groupSelectionByPrefix = (
   return result;
 };
 
+/**
+ * Core client that normalizes records, manages the view cache, and coordinates
+ * data fetching.
+ */
 export class FateClient<
   Mutations extends Record<string, MutationDefinition<any, any, any>> =
     EmptyMutations,
@@ -384,14 +397,7 @@ export class FateClient<
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
   ) {
-    return this.normalizeEntity(
-      type,
-      data,
-      select,
-      snapshots,
-      plan,
-      pathPrefix,
-    );
+    return this.writeEntity(type, data, select, snapshots, plan, pathPrefix);
   }
 
   deleteRecord(
@@ -905,7 +911,7 @@ export class FateClient<
       resolvedArgs,
     );
     for (const record of records) {
-      this.normalizeEntity(
+      this.writeEntity(
         type,
         record as AnyRecord,
         select,
@@ -938,7 +944,7 @@ export class FateClient<
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
     for (const entry of items) {
-      const id = this.normalizeEntity(
+      const id = this.writeEntity(
         item.type,
         entry.node as AnyRecord,
         plan.paths,
@@ -965,7 +971,7 @@ export class FateClient<
     return { argsPayload, plan };
   }
 
-  private normalizeEntity(
+  private writeEntity(
     type: string,
     record: AnyRecord,
     select: Set<string>,
@@ -1009,7 +1015,7 @@ export class FateClient<
             const childId = toEntityId(childType, childConfig.getId(value));
             result[key] = createNodeRef(childId);
 
-            this.normalizeEntity(
+            this.writeEntity(
               childType,
               value as AnyRecord,
               childPaths,
@@ -1105,7 +1111,7 @@ export class FateClient<
                   childConfig.getId(node as AnyRecord),
                 );
 
-                this.normalizeEntity(
+                this.writeEntity(
                   childType,
                   node as AnyRecord,
                   nodeSelection,

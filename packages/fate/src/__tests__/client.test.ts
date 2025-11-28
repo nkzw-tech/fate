@@ -1656,7 +1656,7 @@ test(`'readView' returns list metadata when available`, () => {
   });
 });
 
-test('normalizeEntity stores connection lists using argument hashes', () => {
+test('stores connection lists using argument hashes', () => {
   type Comment = { __typename: 'Comment'; id: string };
   type Post = {
     __typename: 'Post';

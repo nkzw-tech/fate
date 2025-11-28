@@ -35,18 +35,14 @@ export const categoryRouter = router({
         ctx,
         view: categoryDataView,
       });
-      const categories = await ctx.prisma.category.findMany({
-        select,
-        where: { id: { in: input.ids } },
-      } as CategoryFindManyArgs);
-      const resolved = await resolveMany(categories);
-      const map = new Map(
-        resolved.map((category) => {
-          const result = transformCategory(category, input.args);
-          return [result.id, result];
-        }),
-      );
-      return input.ids.map((id) => map.get(id)).filter(Boolean);
+      return (
+        await resolveMany(
+          await ctx.prisma.category.findMany({
+            select,
+            where: { id: { in: input.ids } },
+          } as CategoryFindManyArgs),
+        )
+      ).map((category) => transformCategory(category, input.args));
     }),
   list: createConnectionProcedure({
     map: ({ input, items }) =>
