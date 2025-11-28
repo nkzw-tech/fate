@@ -497,6 +497,48 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
+#### Mutation Server Implementation
+
+fate Actions & Mutations are backed by regular tRPC mutations on the server. Here is an example implementation of the `like` mutation in the `postRouter`.
+
+```tsx
+import { z } from 'zod';
+import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { procedure, router } from '../init.ts';
+import { postDataView, PostItem } from '../views.ts';
+
+export const postRouter = router({
+  like: procedure
+    .input(
+      z.object({
+        args: connectionArgs,
+        id: z.string().min(1, 'Post id is required.'),
+        select: z.array(z.string()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { resolve, select } = createResolver({
+        ...input,
+        ctx,
+        view: postDataView,
+      });
+
+      const updated = await ctx.prisma.post.update({
+        data: {
+          likes: {
+            increment: 1,
+          },
+        },
+        select,
+        where: { id: input.id },
+      });
+      return resolve(updated as unknown as PostItem);
+    }),
+});
+```
+
+See the [Server Integration](#server-integration) section for more details on how to integrate tRPC routers with fate.
+
 #### Action & Mutation Error Handling
 
 fate Actions & Mutations separate error handling into two scopes: "call site" and "boundary". Call site errors are errors that are expected to be handled at the location where the action or mutation is called. Boundary errors are unexpected errors that should be handled by a higher-level error boundary.
@@ -841,9 +883,24 @@ useEffect(() => {
 
 ## Acknowledgements
 
-- [Relay](https://relay.dev/) & [GraphQL](https://graphql.org/) for inspiration.
-- [Rick Hanlon](https://x.com/rickyfm) for guidance on Async React.
--
+- [Relay](https://relay.dev/) & [GraphQL](https://graphql.org/) for inspiration
+- [Rick Hanlon](https://x.com/rickyfm) for guidance on Async React
+
+## Is this serious software?
+
+**fate** is an ambitious React data library that tries to blend Relay-style ideas with tRPC, held together by equal parts vision and vibes. It aims to fix problems you definitely wouldn't have if you enjoy writing the same fetch logic in three different places with imperative loading state and error handling. fate promises predictable data flow, minimal APIs, and “no magic,” though you may occasionally suspect otherwise.
+
+80% of the code was written by Codex – four versions per task, carefully curated by a human. The remaining 20% was written by [@cpojer](https://x.com/cnakazawa). You get to decide which parts are the good ones. The README was 100% written by a human. _Maybe._
+
+**fate** is almost certainly worse than actual sync engines, but it will eventually be way better than every other existing React data-fetching library. Use it if you have a high tolerance for pain and want to help shape the future of data fetching in React.
+
+### Is fate better than Relay?
+
+Absolutely not.
+
+### Is fate better than using GraphQL?
+
+Probably. One day. _Maybe._
 
 ## Future
 
