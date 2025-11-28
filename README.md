@@ -44,16 +44,6 @@ With fate, each component declares the data it needs using views, and you compos
 
 You no longer need to worry about _when_ to fetch data, how to coordinate loading states for individual requests, or how to manage errors imperatively. With fate, you avoid overfetching, prevent passing unnecessary data down the component tree, and eliminate the need to manually define types just to select a subset of data for a child component.
 
-### fate Conventions
-
-fate expects that data is served by a tRPC backend that follows these conventions:
-
-- A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
-- A `list` query for fetching lists of objects with support for pagination.
-- The framework identifies objects by their ID and a type name (e.g. `Post`, `User`), usually referred to as the `__typename`.
-
-fate's type definitions might feel verbose at first glance, but due to the minimal API surface, AI tools can easily generate this code for you. For example, fate has a minimal CLI that generates types for the client, but you can also let your LLM write it by hand if you prefer.
-
 ### Views
 
 #### Defining Views
@@ -386,6 +376,8 @@ const PostDetail = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
+ViewRefs carry a set of view names they can resolve. `useView` throws if a ref does not include the required view.
+
 ### Actions
 
 fate does not provide hooks for mutations like traditional data fetching libraries do. Instead, mutations are exposed in two ways:
@@ -523,10 +515,20 @@ You can find the error classification behavior in [`mutation.ts`](https://github
 
 Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. To continue with our client example, let's assume you have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
 
-Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client.
+### Conventions & Object Identity
+
+fate expects that data is served by a tRPC backend that follows these conventions:
+
+- A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
+- A `list` query for fetching lists of objects with support for pagination.
+
+Objects are identified by their ID and a type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
+
+fate's type definitions might feel verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you. For example, fate has a minimal CLI that generates types for the client, but you can also let your LLM write it by hand if you prefer.
 
 ### Data Views
 
+Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client.
 On the client, we define views to select fields on each type. We can do the same on the server using fate data views and the `dataView` function from `@nkzw/fate/server`.
 
 Create a `views.ts` file next to your root tRPC router that exports the data views for each type. Here is how you can define a `User` data view for Prisma's `User` model:
@@ -784,6 +786,12 @@ useEffect(() => {
   }
 }, [likeAction, likeResult]);
 ```
+
+## Acknowledgements
+
+- [Relay](https://relay.dev/) & [GraphQL](https://graphql.org/) for inspiration.
+- [Rick Hanlon](https://x.com/rickyfm) for guidance on Async React.
+-
 
 ## Future
 

@@ -446,13 +446,13 @@ export class FateClient<
     const type = ref.__typename;
     if (id == null) {
       throw new Error(
-        `fate: Invalid view reference. Expected 'id' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+        `fate: Invalid view reference. Expected 'id' to be provided as part of the reference, received '${JSON.stringify(ref)}'.`,
       );
     }
 
     if (type == null) {
       throw new Error(
-        `fate: Invalid view reference. Expected '__typename' to be provided as part of the reference, received '${JSON.stringify(ref, null, 2)}'.`,
+        `fate: Invalid view reference. Expected '__typename' to be provided as part of the reference, received '${JSON.stringify(ref)}'.`,
       );
     }
 
@@ -461,8 +461,12 @@ export class FateClient<
     const refViews = ref[ViewsTag];
 
     if (!refViews || ![...viewNames].every((name) => refViews.has(name))) {
+      const received = refViews
+        ? [...refViews].join(', ')
+        : JSON.stringify(ref);
+
       throw new Error(
-        `fate: Invalid view reference. Expected the provided ref to include the view(s) '${[...viewNames].join("', '")}', received '${JSON.stringify(ref, null, 2)}'. Ensure the ref was created using a parent view that spreads the required view.`,
+        `fate: Invalid view reference. Expected the provided ref to include the view(s) '${[...viewNames].join("', '")}', received '${received}'. You can fix this issue by spreading the correct view into its parent so fate can create the correct view refs for you.`,
       );
     }
 
