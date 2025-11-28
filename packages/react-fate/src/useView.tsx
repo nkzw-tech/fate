@@ -28,13 +28,18 @@ export function useView<V extends View<any, any>>(
 ): ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> {
   const client = useFateClient();
 
-  const idRef = useRef<ReadonlySet<EntityId> | null>(null);
+  const snapshotRef = useRef<ViewSnapshot<
+    ViewEntity<V>,
+    V[ViewTag]['select']
+  > | null>(null);
+
   const getSnapshot = useCallback(() => {
     const snapshot = client.readView<ViewEntity<V>, V[ViewTag]['select'], V>(
       view,
       ref,
     );
-    idRef.current = snapshot.status === 'fulfilled' ? snapshot.value.ids : null;
+    snapshotRef.current =
+      snapshot.status === 'fulfilled' ? snapshot.value : null;
     return snapshot;
   }, [client, view, ref]);
 
@@ -47,16 +52,16 @@ export function useView<V extends View<any, any>>(
         onStoreChange();
       };
 
-      const subscribe = (entityId: EntityId) => {
+      const subscribe = (entityId: EntityId, paths: ReadonlySet<string>) => {
         if (!subscriptions.has(entityId)) {
           subscriptions.set(
             entityId,
-            client.store.subscribe(entityId, onChange),
+            client.store.subscribe(entityId, paths, onChange),
           );
         }
       };
 
-      const cleanupObsolete = (nextIds: ReadonlySet<EntityId>) => {
+      const cleanup = (nextIds: ReadonlySet<EntityId>) => {
         for (const [entityId, unsubscribe] of subscriptions) {
           if (!nextIds.has(entityId)) {
             unsubscribe();
@@ -66,15 +71,15 @@ export function useView<V extends View<any, any>>(
       };
 
       const updateSubscriptions = () => {
-        if (!idRef.current) {
+        if (!snapshotRef.current) {
           return;
         }
 
-        for (const entityId of idRef.current) {
-          subscribe(entityId);
+        for (const [entityId, paths] of snapshotRef.current.coverage) {
+          subscribe(entityId, paths);
         }
 
-        cleanupObsolete(idRef.current);
+        cleanup(new Set(snapshotRef.current.coverage.map(([id]) => id)));
       };
 
       updateSubscriptions();

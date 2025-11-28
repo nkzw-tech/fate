@@ -95,3 +95,26 @@ export function diffPaths(
   }
   return missing;
 }
+
+export function intersects(a: FieldMask, b: FieldMask): boolean {
+  if (a.all || b.all) {
+    return true;
+  }
+
+  for (const [key, child] of a.children) {
+    const otherChild = b.children.get(key);
+    if (!otherChild) {
+      continue;
+    }
+
+    if (child.all || otherChild.all) {
+      return true;
+    }
+
+    if (intersects(child, otherChild)) {
+      return true;
+    }
+  }
+
+  return false;
+}

@@ -5,6 +5,7 @@ import {
   emptyMask,
   FieldMask,
   fromPaths,
+  intersects,
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
@@ -16,7 +17,9 @@ export type List = Readonly<{
   pagination?: Pagination;
 }>;
 
-export type Subscriptions = Map<EntityId, Set<() => void>>;
+type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
+
+export type Subscriptions = Map<EntityId, Set<Subscription>>;
 
 export const getListKey = (
   ownerId: EntityId,
@@ -44,6 +47,8 @@ const cloneValue = (value: unknown): unknown => {
   return value;
 };
 
+const emptyFunction = () => {};
+
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
   private lists = new Map<string, List>();
@@ -56,8 +61,9 @@ export class Store {
   }
 
   merge(id: EntityId, partial: AnyRecord, paths: Iterable<string>) {
-    if (this.mergeInternal(id, partial, paths)) {
-      this.notify(id);
+    const changedPaths = this.mergeInternal(id, partial, paths);
+    if (changedPaths) {
+      this.notify(id, changedPaths);
     }
   }
 
@@ -65,20 +71,21 @@ export class Store {
     id: EntityId,
     partial: AnyRecord,
     paths: Iterable<string>,
-  ): boolean {
+  ): ReadonlySet<string> | null {
     const previous = this.records.get(id);
+    const changedPaths = new Set<string>();
 
     if (previous) {
       let hasChanges = false;
       for (const [key, value] of Object.entries(partial)) {
         if (previous[key] !== value) {
           hasChanges = true;
-          break;
+          changedPaths.add(key);
         }
       }
 
       if (!hasChanges) {
-        return false;
+        return null;
       }
 
       this.records.set(id, { ...previous, ...partial });
@@ -93,7 +100,7 @@ export class Store {
     }
 
     union(mask, fromPaths(paths));
-    return true;
+    return changedPaths;
   }
 
   deleteRecord(id: EntityId) {
@@ -113,35 +120,66 @@ export class Store {
     return diffPaths(requested, mask);
   }
 
-  subscribe(id: EntityId, fn: () => void): () => void {
-    let set = this.subscriptions.get(id);
-    if (!set) {
-      set = new Set();
-      this.subscriptions.set(id, set);
+  subscribe(
+    id: EntityId,
+    selection: ReadonlySet<string> | null,
+    fn: () => void,
+  ): () => void;
+
+  subscribe(id: EntityId, fn: () => void): () => void;
+
+  subscribe(
+    id: EntityId,
+    selectionOrFn: ReadonlySet<string> | (() => void) | null,
+    callback?: () => void,
+  ): () => void {
+    let mask: FieldMask | null = null;
+    let fn = emptyFunction;
+
+    if (typeof selectionOrFn === 'function') {
+      fn = selectionOrFn;
+    } else if (callback) {
+      mask = selectionOrFn ? fromPaths(selectionOrFn) : null;
+      fn = callback;
     }
 
-    set.add(fn);
+    let subscribers = this.subscriptions.get(id);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.subscriptions.set(id, subscribers);
+    }
+
+    const subscription: Subscription = { fn, mask };
+    subscribers.add(subscription);
 
     return () => {
-      const subscription = this.subscriptions.get(id);
-      if (!subscription) {
+      const set = this.subscriptions.get(id);
+      if (!set) {
         return;
       }
 
-      subscription.delete(fn);
-      if (subscription.size === 0) {
+      set.delete(subscription);
+      if (set.size === 0) {
         this.subscriptions.delete(id);
       }
     };
   }
 
-  private notify(id: EntityId) {
+  private notify(id: EntityId, paths?: Iterable<string>) {
     const set = this.subscriptions.get(id);
     if (!set) {
       return;
     }
 
-    for (const fn of set) {
+    const changedPaths = paths ? [...paths] : [];
+    const changedMask =
+      changedPaths.length > 0 ? fromPaths(changedPaths) : null;
+
+    for (const { fn, mask } of set) {
+      if (mask && changedMask && !intersects(changedMask, mask)) {
+        continue;
+      }
+
       try {
         fn();
       } catch {
@@ -262,7 +300,7 @@ export class Store {
       });
     }
 
-    const ids = new Set<EntityId>();
+    const ids = new Map<EntityId, Set<string>>();
 
     for (const [id, record] of this.records.entries()) {
       let updated = false;
@@ -297,11 +335,11 @@ export class Store {
 
       viewDataCache.invalidate(id);
       this.mergeInternal(id, next, paths);
-      ids.add(id);
+      ids.set(id, paths);
     }
 
-    for (const id of ids) {
-      this.notify(id);
+    for (const [id, paths] of ids) {
+      this.notify(id, paths);
     }
   }
 

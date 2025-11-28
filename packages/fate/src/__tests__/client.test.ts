@@ -225,7 +225,7 @@ test(`'readView' returns view refs for list selections`, () => {
     {
       __typename: 'Comment',
       author: null,
-      content: 'Hello world',
+      content: 'Apple',
       id: 'comment-1',
     },
     new Set(['__typename', 'author', 'content', 'id']),
@@ -295,7 +295,7 @@ test(`'readView' returns only directly selected fields when view spreads are use
     {
       __typename: 'Comment',
       author: null,
-      content: 'Hello world',
+      content: 'Apple',
       id: 'comment-1',
     },
     new Set(['__typename', 'author', 'content', 'id']),
@@ -348,7 +348,7 @@ test(`'readView' returns only directly selected fields when view spreads are use
   const comment = result.comments?.items?.[0]?.node;
   expect(comment).toEqual({
     __typename: 'Comment',
-    content: 'Hello world',
+    content: 'Apple',
     id: 'comment-1',
   });
 
@@ -516,7 +516,7 @@ test(`'deleteRecord' removes an entity and cleans references`, () => {
     {
       __typename: 'Comment',
       author: null,
-      content: 'Hello world',
+      content: 'Apple',
       id: 'comment-1',
     },
     new Set(['__typename', 'author', 'content', 'id']),
@@ -651,7 +651,7 @@ test(`delete mutations can select a view and update related entities`, async () 
       __typename: 'Post',
       commentCount: 2,
       comments: [],
-      content: 'Hello',
+      content: 'Banana',
       id: 'post-1',
     },
     new Set(['__typename', 'commentCount', 'comments', 'content', 'id']),
@@ -1183,9 +1183,12 @@ test(`'readView' fetches missing fields using the selection`, async () => {
     undefined,
   );
 
-  const { data, ids } = await thenable;
+  const { coverage, data } = await thenable;
   expect(data.content).toBe('Kiwi');
-  expect(ids).toEqual(new Set([postEntityId, toEntityId('User', 'user-1')]));
+  expect(coverage).toEqual([
+    [postEntityId, new Set(['author', 'content', 'id'])],
+    [toEntityId('User', 'user-1'), new Set(['id', 'name'])],
+  ]);
 });
 
 test(`'request' groups ids by selection before fetching`, async () => {
@@ -1194,7 +1197,7 @@ test(`'request' groups ids by selection before fetching`, async () => {
   const fetchById = vi.fn(async () => [
     {
       __typename: 'Post',
-      content: 'Hello',
+      content: 'Banana',
       id: 'post-1',
     },
   ]);
@@ -1417,7 +1420,7 @@ test(`'request' refetches cached data when using 'store-and-network' mode`, asyn
   const fetchById = vi
     .fn()
     .mockResolvedValue([
-      { __typename: 'Post', content: 'Hello', id: 'post-1' },
+      { __typename: 'Post', content: 'Banana', id: 'post-1' },
     ]);
 
   const client = createClient({
@@ -1470,7 +1473,7 @@ test(`'request' only fetches once when cache is missing for 'store-and-network'`
   const fetchById = vi
     .fn()
     .mockResolvedValue([
-      { __typename: 'Post', content: 'Hello', id: 'post-1' },
+      { __typename: 'Post', content: 'Banana', id: 'post-1' },
     ]);
 
   const client = createClient({
@@ -1545,7 +1548,7 @@ test(`'request' waits for a network response when using 'network' mode`, async (
   expect(fetchById).toHaveBeenCalledTimes(1);
   expect(resolved).toBe(false);
 
-  resolveFetch?.([{ __typename: 'Post', content: 'Hello', id: 'post-1' }]);
+  resolveFetch?.([{ __typename: 'Post', content: 'Banana', id: 'post-1' }]);
 
   expect(await promise).toBe(true);
 });
@@ -1793,7 +1796,7 @@ test(`mutation results with arrays mark nested fields as fetched`, async () => {
     comments: [
       {
         __typename: 'Comment',
-        content: 'Hello from mutation',
+        content: 'Banana from mutation',
         id: 'comment-1',
       },
     ],
@@ -1823,7 +1826,7 @@ test(`mutation results with arrays mark nested fields as fetched`, async () => {
   const commentEntityId = toEntityId('Comment', 'comment-1');
   expect(client.store.read(commentEntityId)).toMatchObject({
     __typename: 'Comment',
-    content: 'Hello from mutation',
+    content: 'Banana from mutation',
     id: 'comment-1',
   });
 
@@ -1877,7 +1880,7 @@ test(`mutation results with connections reuse view args and hydrate nodes`, asyn
                   id: 'user-1',
                   name: 'Alice',
                 },
-                content: 'Hello from mutation',
+                content: 'Banana from mutation',
                 id: 'comment-1',
               },
             },
@@ -1961,7 +1964,7 @@ test(`mutation results with connections reuse view args and hydrate nodes`, asyn
   );
 
   expect(comment.id).toBe('comment-1');
-  expect(comment.content).toBe('Hello from mutation');
+  expect(comment.content).toBe('Banana from mutation');
   expect(comment.author).toEqual({
     __typename: 'User',
     id: 'user-1',
@@ -2185,7 +2188,7 @@ test(`'linkParentLists' maintains list registrations for parent entities`, () =>
     'Comment',
     {
       __typename: 'Comment',
-      content: 'Hello',
+      content: 'Banana',
       id: 'comment-1',
       post: { __typename: 'Post', id: 'post-1' },
     },
@@ -2254,7 +2257,7 @@ test(`'linkParentLists' preserves pagination metadata across scoped lists`, () =
     'Comment',
     {
       __typename: 'Comment',
-      content: 'Hello',
+      content: 'Banana',
       id: 'comment-2',
       post: { __typename: 'Post', id: 'post-1' },
     },

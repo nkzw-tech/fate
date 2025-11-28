@@ -183,8 +183,8 @@ export type ViewData<T extends Entity, S extends Selection<T>> = Readonly<
 >;
 
 export type ViewSnapshot<T extends Entity, S extends Selection<T>> = Readonly<{
+  coverage: ReadonlyArray<readonly [id: EntityId, paths: ReadonlySet<string>]>;
   data: ViewData<T, S>;
-  ids: ReadonlySet<EntityId>;
 }>;
 
 type ConnectionMask<T extends Entity, S> = S extends {

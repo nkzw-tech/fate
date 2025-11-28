@@ -103,14 +103,14 @@ test('passes selection when invoking mutations', async () => {
 
   await transport.mutate?.(
     'post.create',
-    { content: 'Hello', id: 'post-1' },
+    { content: 'Kiwi', id: 'post-1' },
     new Set(['id', 'content']),
   );
 
   expect(mutationResolver).toHaveBeenCalledWith(client);
   expect(call).toHaveBeenCalledTimes(1);
   expect(call).toHaveBeenCalledWith({
-    content: 'Hello',
+    content: 'Kiwi',
     id: 'post-1',
     select: ['id', 'content'],
   });

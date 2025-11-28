@@ -43,16 +43,6 @@ test('updates when nested entities change', () => {
   const postSelection = new Set(['id', 'content', 'author.id', 'author.name']);
 
   client.write(
-    'User',
-    {
-      __typename: 'User',
-      id: 'user-1',
-      name: 'Apple',
-    },
-    userSelection,
-  );
-
-  client.write(
     'Post',
     {
       __typename: 'Post',
@@ -61,7 +51,7 @@ test('updates when nested entities change', () => {
         id: 'user-1',
         name: 'Apple',
       },
-      content: 'Hello',
+      content: 'Kiwi',
       id: 'post-1',
     },
     postSelection,
@@ -117,6 +107,98 @@ test('updates when nested entities change', () => {
   expect(container.textContent).toBe('Banana');
   expect(renders[0]).toBe('Apple');
   expect(renders.at(-1)).toBe('Banana');
+});
+
+test('only updates components that match the selection', () => {
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postSelection = new Set(['id', 'content']);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      content: 'Kiwi',
+      id: 'post-1',
+    },
+    postSelection,
+  );
+
+  const PostAView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const PostBView = view<Post>()({
+    id: true,
+  });
+
+  const postARef = client.ref<Post>('Post', 'post-1', PostAView);
+  const postBRef = client.ref<Post>('Post', 'post-1', PostBView);
+
+  let renders: Array<string | null | undefined> = [];
+
+  const ComponentA = () => {
+    const post = useView(PostAView, postARef);
+    renders.push('renderA');
+    return <span>{post.content}</span>;
+  };
+
+  const ComponentB = () => {
+    const post = useView(PostBView, postBRef);
+    renders.push('renderB');
+    return <span>{post.id}</span>;
+  };
+
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  act(() => {
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <ComponentA /> <ComponentB />
+        </Suspense>
+      </FateClient>,
+    );
+  });
+
+  expect(container.textContent).toBe('Kiwi post-1');
+  expect(renders).toMatchInlineSnapshot(`
+    [
+      "renderA",
+      "renderB",
+    ]
+  `);
+
+  renders = [];
+
+  act(() => {
+    client.write(
+      'Post',
+      {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-1',
+      },
+      new Set(['content']),
+    );
+  });
+
+  expect(container.textContent).toBe('Banana post-1');
+  expect(renders).toMatchInlineSnapshot(`
+    [
+      "renderA",
+      "renderA",
+    ]
+  `);
 });
 
 test('re-renders when a mutation updates the record', async () => {

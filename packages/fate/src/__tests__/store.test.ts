@@ -66,3 +66,39 @@ test('does not update records or notify subscribers for shallow equal merges', (
   expect(store.read(entityId)).not.toBe(initialRecord);
   expect(subscriber).toHaveBeenCalled();
 });
+
+test('only notifies subscribers with intersecting selections', () => {
+  const store = new Store();
+  const entityId = 'Post:1';
+
+  store.merge(
+    entityId,
+    {
+      __typename: 'Post',
+      id: 'post-1',
+      likes: 1,
+      title: 'Initial',
+    },
+    new Set(['__typename', 'id', 'likes', 'title']),
+  );
+
+  const likesSubscriber = vi.fn();
+  const titleSubscriber = vi.fn();
+  const catchAllSubscriber = vi.fn();
+
+  store.subscribe(entityId, new Set(['likes']), likesSubscriber);
+  store.subscribe(entityId, new Set(['title']), titleSubscriber);
+  store.subscribe(entityId, catchAllSubscriber);
+
+  store.merge(entityId, { likes: 2 }, new Set(['likes']));
+
+  expect(likesSubscriber).toHaveBeenCalledTimes(1);
+  expect(titleSubscriber).not.toHaveBeenCalled();
+  expect(catchAllSubscriber).toHaveBeenCalledTimes(1);
+
+  store.merge(entityId, { title: 'Updated' }, new Set(['title']));
+
+  expect(likesSubscriber).toHaveBeenCalledTimes(1);
+  expect(titleSubscriber).toHaveBeenCalledTimes(1);
+  expect(catchAllSubscriber).toHaveBeenCalledTimes(2);
+});

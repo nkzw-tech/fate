@@ -37,16 +37,19 @@ test('evicts dependents and the dependency when invalidating an entity', () => {
   const dependencyView = createView();
   const dependencyRef = createViewRef('Dependency', 'dependency-ref');
   const dependencySnapshot: ViewSnapshot<any, any> = {
+    coverage: [[dependencyId, new Set()]],
     data: { [ViewsTag]: new Set() },
-    ids: new Set<EntityId>([dependencyId]),
   };
   const dependencyThenable = createThenable(dependencySnapshot);
 
   const dependentView = createView();
   const dependentRef = createViewRef('Dependent', 'dependent-ref');
   const dependentSnapshot: ViewSnapshot<any, any> = {
+    coverage: [
+      [dependentId, new Set()],
+      [dependencyId, new Set()],
+    ],
     data: { [ViewsTag]: new Set() },
-    ids: new Set<EntityId>([dependentId, dependencyId]),
   };
   const dependentThenable = createThenable(dependentSnapshot);
 

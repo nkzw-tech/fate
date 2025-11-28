@@ -495,7 +495,13 @@ export class FateClient<
         value: resolvedView,
       } as const;
 
-      this.viewDataCache.set(entityId, view, ref, thenable, resolvedView.ids);
+      this.viewDataCache.set(
+        entityId,
+        view,
+        ref,
+        thenable,
+        new Set(resolvedView.coverage.map(([id]) => id)),
+      );
       return thenable;
     };
 
@@ -1270,6 +1276,8 @@ export class FateClient<
     const ids = new Set<EntityId>();
     ids.add(entityId);
 
+    const coverageById = new Map<EntityId, Set<string>>();
+
     const walk = (
       viewPayload: object,
       record: AnyRecord,
@@ -1286,6 +1294,11 @@ export class FateClient<
           target[ViewsTag]!.add(key);
           continue;
         }
+
+        coverageById.set(
+          parentId,
+          (coverageById.get(parentId) ?? new Set()).add(key),
+        );
 
         const fieldPath = prefix ? `${prefix}.${key}` : key;
         const selectionType = typeof selectionKind;
@@ -1481,7 +1494,10 @@ export class FateClient<
       walk(viewPayload.select, record, data, entityId, pathPrefix);
     }
 
-    return { data: data as ViewData<T, S>, ids };
+    return {
+      coverage: [...coverageById.entries()],
+      data: data as ViewData<T, S>,
+    };
   }
 
   private clearStalledRequestsForEntity(entityId: EntityId) {
