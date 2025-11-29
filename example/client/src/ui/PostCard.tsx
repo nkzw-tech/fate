@@ -245,7 +245,17 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
                 </Button>
               )}
               {detail && (
-                <Button action={handleLike} size="sm" variant="outline">
+                <Button
+                  onClick={() =>
+                    fate.mutations.post.like({
+                      input: { id: post.id },
+                      optimisticUpdate: { likes: post.likes + 1 },
+                      view: PostView,
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
                   Like (Many)
                 </Button>
               )}

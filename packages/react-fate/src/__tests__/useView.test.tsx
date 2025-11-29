@@ -324,6 +324,145 @@ test('re-renders when a mutation updates the record', async () => {
   expect(mutate).toHaveBeenCalledTimes(1);
 });
 
+test('optimistic updates compose when mutations resolve out of order', async () => {
+  type PostWithLikes = Post & { likes: number };
+  type UpdateLikesInput = { id: string };
+  type UpdateLikesResult = PostWithLikes;
+
+  let resolveLike: (() => void) | undefined;
+  let serverLikes = 100;
+
+  const client = createClient({
+    mutations: {
+      like: mutation<PostWithLikes, UpdateLikesInput, UpdateLikesResult>('Post'),
+      unlike: mutation<PostWithLikes, UpdateLikesInput, UpdateLikesResult>('Post'),
+    },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      // @ts-expect-error
+      mutate: vi.fn((key) => {
+        if (key === 'like') {
+          const { promise, resolve } = Promise.withResolvers<UpdateLikesResult>();
+          resolveLike = () =>
+            resolve({
+              __typename: 'Post',
+              author: null,
+              content: '',
+              id: 'post-1',
+              likes: ++serverLikes,
+            });
+          return promise;
+        }
+
+        serverLikes = Math.max(serverLikes - 1, 0);
+        return Promise.resolve({
+          __typename: 'Post',
+          author: null,
+          content: '',
+          id: 'post-1',
+          likes: serverLikes,
+        });
+      }),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<PostWithLikes>()({
+    id: true,
+    likes: true,
+  });
+
+  const postRef = client.ref<PostWithLikes>('Post', 'post-1', PostView);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      author: null,
+      content: '',
+      id: 'post-1',
+      likes: serverLikes,
+    },
+    new Set(['id', 'likes']),
+  );
+
+  let likePromise: ReturnType<typeof client.mutations.like> | undefined;
+  let unlikePromise: ReturnType<typeof client.mutations.unlike> | undefined;
+  let triggerLike: (() => void) | undefined;
+  let triggerUnlike: (() => void) | undefined;
+
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  const Component = () => {
+    const post = useView(PostView, postRef);
+
+    // eslint-disable-next-line react-hooks/globals
+    triggerLike = () => {
+      likePromise = client.mutations.like({
+        input: { id: post.id },
+        optimisticUpdate: { likes: post.likes + 1 },
+        view: PostView,
+      });
+    };
+
+    // eslint-disable-next-line react-hooks/globals
+    triggerUnlike = () => {
+      unlikePromise = client.mutations.unlike({
+        input: { id: post.id },
+        optimisticUpdate: { likes: Math.max(post.likes - 1, 0) },
+        view: PostView,
+      });
+    };
+
+    return <span>{post.likes}</span>;
+  };
+
+  await act(async () => {
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+    await flushAsync();
+  });
+
+  expect(container.textContent).toBe('100');
+
+  await act(async () => {
+    triggerLike?.();
+    await flushAsync();
+  });
+
+  expect(container.textContent).toBe('101');
+
+  await act(async () => {
+    triggerUnlike?.();
+    await flushAsync();
+  });
+
+  expect(container.textContent).toBe('100');
+
+  await act(async () => {
+    await unlikePromise;
+    await flushAsync();
+  });
+
+  expect(container.textContent).toBe('100');
+
+  await act(async () => {
+    resolveLike?.();
+    await likePromise;
+    await flushAsync();
+  });
+
+  expect(container.textContent).toBe('100');
+});
+
 test('rolls back optimistic updates when a mutation fails', async () => {
   type UpdatePostInput = { content: string; id: string };
   type UpdatePostResult = Post;

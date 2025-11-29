@@ -916,7 +916,6 @@ We welcome contributions and ideas to improve fate. Here are some features we ar
 - Support for Drizzle.
 - Support backends other than tRPC.
 - Better code generation and less type repetition.
-- Better server integration for nested connections.
 - Support for live views (subscriptions) and real-time updates via `useLiveView` and SSE.
 - Implement garbage collection for the cache.
 - Add persistent storage for offline support.

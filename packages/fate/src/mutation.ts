@@ -15,6 +15,7 @@ import type {
   TypeConfig,
   View,
 } from './types.ts';
+import { toEntityId } from './ref.ts';
 import { getSelectionPlan } from './selection.ts';
 import { List } from './store.ts';
 import { MutationKind } from './types.ts';
@@ -110,6 +111,8 @@ const maybeGetId = (getId: TypeConfig['getId'], input: AnyRecord) => {
   }
 };
 
+const emptySet: ReadonlySet<string> = new Set();
+
 /**
  * Binds a mutation definition to a `FateClient`, wiring up optimistic updates,
  * cache writes, and error handling.
@@ -131,6 +134,13 @@ export function wrapMutation<
     const optimisticRecordId =
       optimisticRecord !== undefined ? maybeGetId(config.getId, optimisticRecord) : null;
 
+    const optimisticEntityId =
+      id != null
+        ? toEntityId(identifier.entity, id)
+        : optimisticRecordId != null
+          ? toEntityId(identifier.entity, optimisticRecordId)
+          : null;
+
     const snapshots = new Map<string, Snapshot>();
     const listSnapshots = deleteRecord ? new Map<string, List>() : undefined;
     const optimisticSelection = optimisticRecord
@@ -145,11 +155,15 @@ export function wrapMutation<
           ])
         : new Set<string>();
 
-    if (optimisticRecord && (id != null || optimisticRecordId != null)) {
+    const optimisticToken = optimisticEntityId
+      ? client.registerOptimisticUpdate(optimisticEntityId, optimisticSelection ?? emptySet)
+      : null;
+
+    if (optimisticRecord && optimisticEntityId) {
       client.write(
         identifier.entity,
         optimisticRecord,
-        optimisticSelection ?? new Set<string>(),
+        optimisticSelection ?? emptySet,
         snapshots,
         plan,
       );
@@ -174,7 +188,24 @@ export function wrapMutation<
 
       if (shouldWriteResult) {
         const select = collectImplicitSelectedPaths(result);
-        client.write(identifier.entity, result, select, undefined, plan);
+        const pendingMask = optimisticEntityId
+          ? client.getPendingOptimisticMask(optimisticEntityId, { excludeToken: optimisticToken })
+          : null;
+        const filteredSelection = optimisticEntityId
+          ? client.filterSelectionForPendingOptimistics(optimisticEntityId, select, {
+              excludeToken: optimisticToken,
+            })
+          : select;
+
+        client.write(
+          identifier.entity,
+          result,
+          filteredSelection,
+          undefined,
+          plan,
+          null,
+          pendingMask,
+        );
 
         if (deleteRecord && id != null) {
           client.deleteRecord(identifier.entity, id);
@@ -188,6 +219,7 @@ export function wrapMutation<
 
       return { error: undefined, result };
     } catch (error) {
+      client.clearOptimisticUpdate(optimisticToken);
       if (snapshots.size > 0) {
         for (const [id, snapshot] of snapshots) {
           client.restore(id, snapshot);
@@ -214,6 +246,8 @@ export function wrapMutation<
       } else {
         throw new Error(`fate: Mutation '${identifier.key}' failed.`);
       }
+    } finally {
+      client.clearOptimisticUpdate(optimisticToken);
     }
   };
 }

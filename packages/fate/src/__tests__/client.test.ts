@@ -34,6 +34,7 @@ type Post = {
   comments: Array<Comment>;
   content: string;
   id: string;
+  likes: number;
 };
 
 const tagsFor = (...views: Array<View<any, any>>) =>
@@ -813,6 +814,83 @@ test('mutations apply optimistic updates before resolving', async () => {
     id: 'user-1',
     name: 'Server',
   });
+});
+
+test('optimistic updates stack when mutations resolve out of order', async () => {
+  type UpdateLikesInput = { id: string };
+  type UpdateLikesResult = { __typename: 'Post'; id: string; likes: number };
+
+  let resolveLike: (() => void) | undefined;
+  let serverLikes = 100;
+
+  const client = createClient({
+    mutations: {
+      like: mutation<Post, UpdateLikesInput, UpdateLikesResult>('Post'),
+      unlike: mutation<Post, UpdateLikesInput, UpdateLikesResult>('Post'),
+    },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      // @ts-expect-error
+      mutate: vi.fn((key) => {
+        if (key === 'like') {
+          const { promise, resolve } = Promise.withResolvers<UpdateLikesResult>();
+          resolveLike = () =>
+            resolve({
+              __typename: 'Post',
+              id: 'post-1',
+              likes: ++serverLikes,
+            });
+          return promise;
+        }
+
+        serverLikes = Math.max(serverLikes - 1, 0);
+        return Promise.resolve({
+          __typename: 'Post',
+          id: 'post-1',
+          likes: serverLikes,
+        });
+      }),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    id: true,
+    likes: true,
+  });
+
+  client.write(
+    'Post',
+    { __typename: 'Post', id: 'post-1', likes: serverLikes },
+    new Set(['id', 'likes']),
+  );
+
+  const likePromise = client.mutations.like({
+    input: { id: 'post-1' },
+    optimisticUpdate: { likes: serverLikes + 1 },
+    view: PostView,
+  });
+
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({ likes: 101 });
+
+  const current = client.store.read(toEntityId('Post', 'post-1')) as Post;
+  const unlikePromise = client.mutations.unlike({
+    input: { id: 'post-1' },
+    optimisticUpdate: { likes: Math.max(current.likes - 1, 0) },
+    view: PostView,
+  });
+
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({ likes: 100 });
+
+  await unlikePromise;
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({ likes: 100 });
+
+  resolveLike?.();
+  await likePromise;
+
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({ likes: 100 });
 });
 
 test('mutations roll back optimistic updates when requests fail', async () => {

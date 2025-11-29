@@ -24,6 +24,17 @@ test('passes selection when fetching by id', async () => {
   });
 });
 
+test('throws when fetching by id with unknown entity type', async () => {
+  const transport = createTRPCTransport({
+    byId: {},
+    client: {} as any,
+  });
+
+  await expect(
+    transport.fetchById('Post', ['post-1'], new Set(['content', 'author.id'])),
+  ).rejects.toThrowError("fate(trpc): No 'byId' resolver configured for entity type 'Post'.");
+});
+
 test('passes selection when fetching lists', async () => {
   const call = vi.fn(async () => ({
     items: [],
@@ -52,6 +63,33 @@ test('passes selection when fetching lists', async () => {
     args: { filter: 'recent' },
     select: ['id', 'content'],
   });
+});
+
+test('throws when fetching lists without configured resolvers', async () => {
+  const transport = createTRPCTransport({
+    byId: {
+      Post: vi.fn(() => vi.fn(async () => [])),
+    },
+    client: {} as any,
+  });
+
+  await expect(transport.fetchList?.('post.all', new Set(['id']))).rejects.toThrowError(
+    'fate(trpc): No list resolvers configured; cannot call "post.all".',
+  );
+});
+
+test('throws when fetching lists with missing resolver', async () => {
+  const transport = createTRPCTransport({
+    byId: {
+      Post: vi.fn(() => vi.fn(async () => [])),
+    },
+    client: {} as any,
+    lists: {},
+  });
+
+  await expect(transport.fetchList?.('post.all', new Set(['id']))).rejects.toThrowError(
+    'fate(trpc): Missing list resolver for procedure "post.all"',
+  );
 });
 
 test('omits args when none are provided for lists', async () => {
@@ -110,4 +148,18 @@ test('passes selection when invoking mutations', async () => {
     id: 'post-1',
     select: ['id', 'content'],
   });
+});
+
+test('throws when invoking missing mutation resolver', async () => {
+  const transport = createTRPCTransport({
+    byId: {
+      Post: vi.fn(() => vi.fn(async () => [])),
+    },
+    client: {} as any,
+  });
+
+  await expect(
+    // @ts-expect-error
+    transport.mutate?.('post.create', { content: 'Kiwi' }, new Set(['id'])),
+  ).rejects.toThrowError("fate(trpc): Missing mutation resolver for procedure 'post.create'.");
 });

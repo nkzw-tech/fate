@@ -6,6 +6,7 @@ import {
   scopeArgsPayload,
 } from './args.ts';
 import ViewDataCache from './cache.ts';
+import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import { MutationAction, MutationFunction, MutationOptions, wrapMutation } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
@@ -177,7 +178,7 @@ const getRequestCacheKey = (request: Request): string => {
   return parts.join('$');
 };
 
-const groupSelectionByPrefix = (select: Set<string>): Map<string, Set<string>> => {
+const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string, Set<string>> => {
   if (select.size === 0) {
     return new Map();
   }
@@ -218,6 +219,9 @@ export class FateClient<
     Array<{ field: string; parentType: string; via?: string }>
   >();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
+  private readonly optimisticMasks = new Map<number, { entityId: EntityId; mask: FieldMask }>();
+  private readonly optimisticByEntity = new Map<EntityId, Set<number>>();
+  private optimisticTokenCounter = 0;
   private readonly requests = new Map<string, Map<RequestMode, Promise<RequestResult<Request>>>>();
   private readonly stalledRequests = new Set<string>();
   readonly store = new Store();
@@ -349,12 +353,13 @@ export class FateClient<
   write(
     type: string,
     data: AnyRecord,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     snapshots?: Map<EntityId, Snapshot>,
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
+    blockedMask?: FieldMask | null,
   ) {
-    return this.writeEntity(type, data, select, snapshots, plan, pathPrefix);
+    return this.writeEntity(type, data, select, snapshots, plan, pathPrefix, blockedMask);
   }
 
   deleteRecord(
@@ -556,6 +561,103 @@ export class FateClient<
         : undefined;
 
     return { cursors, ids, pagination };
+  }
+
+  registerOptimisticUpdate(entityId: EntityId | null, select: ReadonlySet<string>): number | null {
+    if (!entityId || select.size === 0) {
+      return null;
+    }
+
+    const mask = fromPaths(select);
+    const token = ++this.optimisticTokenCounter;
+    this.optimisticMasks.set(token, { entityId, mask });
+
+    let entries = this.optimisticByEntity.get(entityId);
+    if (!entries) {
+      entries = new Set();
+      this.optimisticByEntity.set(entityId, entries);
+    }
+    entries.add(token);
+
+    return token;
+  }
+
+  clearOptimisticUpdate(token: number | null) {
+    if (token == null) {
+      return;
+    }
+
+    const entry = this.optimisticMasks.get(token);
+    if (!entry) {
+      return;
+    }
+
+    this.optimisticMasks.delete(token);
+    const entityTokens = this.optimisticByEntity.get(entry.entityId);
+    if (entityTokens) {
+      entityTokens.delete(token);
+      if (entityTokens.size === 0) {
+        this.optimisticByEntity.delete(entry.entityId);
+      }
+    }
+  }
+
+  getPendingOptimisticMask(
+    entityId: EntityId | null,
+    options: { excludeToken?: number | null } = {},
+  ): FieldMask | null {
+    if (!entityId) {
+      return null;
+    }
+    const tokens = this.optimisticByEntity.get(entityId);
+    if (!tokens || tokens.size === 0) {
+      return null;
+    }
+
+    let mask: FieldMask | null = null;
+
+    for (const token of tokens) {
+      if (options.excludeToken != null && token === options.excludeToken) {
+        continue;
+      }
+
+      const entry = this.optimisticMasks.get(token);
+      if (!entry) {
+        continue;
+      }
+
+      if (!mask) {
+        mask = cloneMask(entry.mask);
+      } else {
+        union(mask, entry.mask);
+      }
+    }
+
+    return mask;
+  }
+
+  filterSelectionForPendingOptimistics(
+    entityId: EntityId | null,
+    select: Set<string>,
+    options: { excludeToken?: number | null } = {},
+  ): Set<string> {
+    if (!entityId || select.size === 0) {
+      return select;
+    }
+
+    const pendingMask = this.getPendingOptimisticMask(entityId, options);
+    if (!pendingMask) {
+      return select;
+    }
+
+    const filtered = new Set<string>();
+    for (const path of select) {
+      if (!isCovered(pendingMask, path)) {
+        filtered.add(path);
+      }
+    }
+
+    return filtered;
   }
 
   async loadConnection<V extends View<any, any>>(
@@ -947,10 +1049,11 @@ export class FateClient<
   private writeEntity(
     type: string,
     record: AnyRecord,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     snapshots?: Map<EntityId, Snapshot>,
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
+    blockedMask?: FieldMask | null,
   ): EntityId {
     const config = this.types.get(type);
     if (!config) {
@@ -967,13 +1070,20 @@ export class FateClient<
         const value = record[key];
         const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
         const fieldArgs = plan?.args.get(fieldPath);
+        const isFieldBlocked = blockedMask ? isCovered(blockedMask, fieldPath) : false;
         if (relationDescriptor === 'scalar') {
+          if (isFieldBlocked) {
+            continue;
+          }
           result[key] = value;
         } else if (
           relationDescriptor &&
           typeof relationDescriptor === 'object' &&
           'type' in relationDescriptor
         ) {
+          if (isFieldBlocked) {
+            continue;
+          }
           const childPaths = selectionTree.get(key) ?? emptySet;
           if (value && typeof value === 'object' && !isNodeRef(value)) {
             const childType = relationDescriptor.type;
@@ -986,13 +1096,24 @@ export class FateClient<
             const childId = toEntityId(childType, childConfig.getId(value));
             result[key] = createNodeRef(childId);
 
-            this.writeEntity(childType, value as AnyRecord, childPaths, snapshots, plan, fieldPath);
+            this.writeEntity(
+              childType,
+              value as AnyRecord,
+              childPaths,
+              snapshots,
+              plan,
+              fieldPath,
+              blockedMask,
+            );
           }
         } else if (
           relationDescriptor &&
           typeof relationDescriptor === 'object' &&
           'listOf' in relationDescriptor
         ) {
+          if (isFieldBlocked) {
+            continue;
+          }
           const childPaths = selectionTree.get(key) ?? emptySet;
           const childType = relationDescriptor.listOf;
           const childConfig = this.types.get(childType);
@@ -1075,6 +1196,7 @@ export class FateClient<
                   snapshots,
                   plan,
                   fieldPath,
+                  blockedMask,
                 );
 
                 ids.push(childId);
@@ -1114,6 +1236,10 @@ export class FateClient<
 
     for (const [key, value] of Object.entries(record)) {
       if (!(key in (config.fields ?? {}))) {
+        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+        if (blockedMask && isCovered(blockedMask, fieldPath)) {
+          continue;
+        }
         result[key] = value;
       }
     }
