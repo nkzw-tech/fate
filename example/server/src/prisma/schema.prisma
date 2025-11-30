@@ -8,11 +8,6 @@ generator client {
   provider            = "prisma-client"
 }
 
-generator json {
-  provider     = "prisma-json-types-generator"
-  clientOutput = "./prisma-client"
-}
-
 datasource db {
   provider = "postgresql"
 }

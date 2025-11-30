@@ -42,7 +42,7 @@
     "build": "tsdown -d lib --target=node24 src/index.ts src/server.ts src/cli.ts"
   },
   "dependencies": {
-    "superjson": "^2.2.5",
+    "superjson": "^2.2.6",
     "zod": "^4.1.13"
   },
   "devDependencies": {

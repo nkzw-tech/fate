@@ -7,6 +7,7 @@ export default [
   {
     ignores: [
       'dist',
+      'coverage',
       'example/server/src/prisma/pothos-types.ts',
       'example/server/src/prisma/prisma-client/*',
       'packages/**/lib',
