@@ -1,18 +1,33 @@
 @import 'tailwindcss';
 
-@config '../tailwind.config.js';
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'Open Sans', 'Helvetica Neue', sans-serif;
+
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
-code {
-  font-family: monospace;
+@theme {
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
 }
 
 @layer utilities {
@@ -93,14 +108,9 @@ code {
       --sidebar-ring: 217.2 91.2% 59.8%;
     }
   }
-}
 
-@layer base {
   * {
     @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
   }
 }
 

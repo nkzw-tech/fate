@@ -10,8 +10,6 @@
 
 **_fate_** is a modern data client for React and tRPC inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and tRPC's type safety.
 
-**_fate_** is designed to make data fetching and state management in React applications more composable, declarative, and predictable. The framework has a minimal API, no DSL, and no magic—_it's just JavaScript_.
-
 ### Features
 
 - **View Composition:** Components declare their data requirements using co-located "views". Views are composed into a single request per screen, minimizing network requests and eliminating waterfalls.
@@ -26,33 +24,114 @@
 
 **_fate_** is designed to make data fetching and state management in React applications more composable, declarative, and predictable. The framework has a minimal API, no DSL, and no magic—_it's just JavaScript_.
 
-GraphQL and Relay introduced several novel ideas: fragments co‑located with components, a normalized cache keyed by global identifiers, and a compiler that hoists fragments into a single network request. These innovations made it possible to build large applications where data requirements are modular and self‑contained.
+GraphQL and Relay introduced several novel ideas: fragments co‑located with components, [a normalized cache](https://relay.dev/docs/principles-and-architecture/thinking-in-graphql/#caching-a-graph) keyed by global identifiers, and a compiler that hoists fragments into a single network request. These innovations made it possible to build large applications where data requirements are modular and self‑contained.
 
-Nakazawa Tech builds apps primarily with GraphQL and Relay. We advocate for these technologies in [talks](https://www.youtube.com/watch?v=rxPTEko8J7c&t=36s) and provide templates ([server](https://github.com/nkzw-tech/server-template), [client](https://github.com/nkzw-tech/web-app-template/tree/with-relay)) to help developers get started quickly.
+[Nakazawa Tech](https://nakazawa.tech) builds apps and [games](https://athenacrisis.com) primarily with GraphQL and Relay. We advocate for these technologies in [talks](https://www.youtube.com/watch?v=rxPTEko8J7c&t=36s) and provide templates ([server](https://github.com/nkzw-tech/server-template), [client](https://github.com/nkzw-tech/web-app-template/tree/with-relay)) to help developers get started quickly.
 
-However, GraphQL comes with its own type system and query language. If you are already using tRPC or another type‑safe RPC framework, it's a significant investment to adopt and implement GraphQL on the backend. This investment often prevents teams from adopting Relay on the frontend. Many other React data frameworks lack Relay's ergonomics, especially fragment composition, co-located data requirements, predictable caching, and deep integration with modern React features. Optimistic updates usually require manually managing keys and imperative data updates, which is error-prone and tedious.
+However, GraphQL comes with its own type system and query language. If you are already using tRPC or another type‑safe RPC framework, it's a significant investment to adopt and implement GraphQL on the backend. This investment often prevents teams from adopting Relay on the frontend.
 
-fate takes the great ideas from Relay and puts them on top of tRPC. You get the best of both worlds: type safety between the client and server, and GraphQL-like ergonomics for data fetching.
+Many React data frameworks lack Relay's ergonomics, especially fragment composition, co-located data requirements, predictable caching, and deep integration with modern React features. Optimistic updates usually require manually managing keys and imperative data updates, which is error-prone and tedious.
 
-_[Learn more](/docs/guide/getting-started.md) about fate's core concepts and features._
+fate takes the great ideas from Relay and puts them on top of tRPC. You get the best of both worlds: type safety between the client and server, and GraphQL-like ergonomics for data fetching. Using _fate_ usually looks like this:
+
+```tsx
+export const PostView = view<Post>()({
+  content: true,
+  id: true,
+  title: true,
+  author: UserView,
+});
+
+export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
+  const post = useView(PostView, postRef);
+
+  return (
+    <Card>
+      <h2>{post.title}</h2>
+      <p>{post.content}</p>
+      <UserCard user={post.author} />
+    </Card>
+  );
+};
+```
+
+_[Learn more](/docs/guide/getting-started.md) about fate's core concepts or get started with [a ready-made template](https://github.com/nkzw-tech/fate-template#readme)._
 
 ## Getting Started
 
-### Installation
+### Template
 
-**_fate_** requires React 19.2+.
+Get started with [a ready-made template](https://github.com/nkzw-tech/fate-template#readme) quickly:
 
-```bash
-pnpm add react-fate @nkzw/fate
+::: code-group
+
+```npm
+npx giget@latest gh:nkzw-tech/fate-template
 ```
 
-_Note: **fate** is currently in alpha and not production ready. If something doesn't work for you, please open a Pull Request._
+```pnpm
+pnpx giget@latest gh:nkzw-tech/fate-template
+```
 
-### Core Concepts
+```yarn
+yarn dlx giget@latest gh:nkzw-tech/fate-template
+```
+
+:::
+
+`fate-template` comes with a simple tRPC backend and a React frontend using **_fate_**. It features modern tools to deliver an incredibly fast development experience. Follow its [README.md](https://github.com/nkzw-tech/fate-template#fate-quick-start-template) to get started.
+
+### Manual Installation
+
+**_fate_** requires React 19.2+. For your client you need to install `react-fate`:
+
+::: code-group
+
+```npm
+npm add react-fate
+```
+
+```pnpm
+pnpm add react-fate
+```
+
+```yarn
+yarn add react-fate
+```
+
+:::
+
+And for your server, install the core `@nkzw/fate` package:
+
+::: code-group
+
+```npm
+npm add @nkzw/fate
+```
+
+```pnpm
+pnpm add @nkzw/fate
+```
+
+```yarn
+yarn add @nkzw/fate
+```
+
+:::
+
+> [!WARNING]
+>
+> **_fate_** is currently in alpha and not production ready. If something doesn't work for you, please open a pull request.
+
+If you'd like to try the example app in GitHub Codespaces, click the button below:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nkzw-tech/fate)
+
+## Core Concepts
 
 **_fate_** has a minimal API surface and is aimed at reducing data fetching complexity.
 
-#### Thinking in Views
+### Thinking in Views
 
 In fate, each component declares the data it needs using views. Views are composed upward through the component tree until they reach a root, where the actual request is made. fate fetches all required data in a single request. React Suspense manages loading states, and any data-fetching errors naturally bubble up to React error boundaries. This eliminates the need for imperative loading logic or manual error handling.
 
@@ -68,6 +147,9 @@ Traditionally, React apps are built with components and hooks. fate introduces a
 
 With fate, you no longer worry about _when_ to fetch data, how to coordinate loading states, or how to handle errors imperatively. You avoid overfetching, stop passing unnecessary data down the tree, and eliminate boilerplate types created solely for passing server data to child components.
 
+> [!NOTE]
+> Views in _fate_ are what fragments are in GraphQL.
+
 ## Views
 
 ### Defining Views
@@ -78,18 +160,22 @@ Let's start by defining a simple view for a blog's `Post` component. fate requir
 import { view } from 'react-fate';
 
 type Post = {
+  content: string;
   id: string;
   title: string;
-  content: string;
 };
 
 export const PostView = view<Post>()({
-  title: true,
   content: true,
+  id: true,
+  title: true,
 });
 ```
 
-_Note: The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code._
+Fields are selected by setting them to `true` in the view definition. This tells **_fate_** that these fields should be fetched from the server and made available to components that use this view.
+
+> [!NOTE]
+> The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code.
 
 ### Resolving a View with `useView`
 
@@ -110,7 +196,7 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-A `ViewRef` is a reference to an object of a specific type, in this case a `Post`. It contains the unique ID for the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
+A `ViewRef` is a reference to a concrete object of a specific type, for example a `Post` with id `7`. It contains the unique ID of the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
@@ -141,6 +227,10 @@ This component suspends or throws errors, which bubble up to the nearest error b
 </ErrorBoundary>
 ```
 
+> [!NOTE]
+>
+> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+
 ### Composing Views
 
 In the above example we are defining a single view for a `Post`. One of fate's core strengths is view composition. Let's say we want to show the author's name along with the post. A simple way to do this is by adding an `author` field to the `PostView` with a concrete selection:
@@ -154,8 +244,9 @@ export const PostView = view<Post>()({
     id: true,
     name: true,
   },
-  title: true,
   content: true,
+  id: true,
+  title: true,
 });
 
 const PostCard = ({ postRef }: { postRef: ViewRef<'Post'> }) => {
@@ -183,9 +274,9 @@ import type { Post, User } from '@your-org/server/trpc/views';
 import { view } from 'react-fate';
 
 export const UserView = view<User>()({
-  profilePicture: true,
   id: true,
   name: true,
+  profilePicture: true,
 });
 
 export const PostView = view<Post>()({
@@ -271,8 +362,8 @@ We can also spread multiple views together. For example, if we have another view
 
 ```tsx
 export const UserStatsView = view<User>()({
-  postCount: true,
   followerCount: true,
+  postCount: true,
 });
 
 export const PostView = view<Post>()({
@@ -287,7 +378,7 @@ export const PostView = view<Post>()({
 });
 ```
 
-Views are opaque objects. Even if you select the same field multiple times through different views, the composed object won't have conflicting fiels or result in TypeScript errors. fate automatically deduplicates fields during runtime and ensures that each field is only fetched once.
+Views are opaque objects. Even if you select the same field multiple times through different views, the composed object won't have conflicting fields or result in TypeScript errors. fate automatically deduplicates fields during runtime and ensures that each field is only fetched once.
 
 ### `useView` and Suspense
 
@@ -674,7 +765,7 @@ useEffect(() => {
 
 ## Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. To continue with our client example, let's assume you have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
+Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. At the moment _fate_ is designed to work with tRPC and Prisma, but the framework is not coupled to any particular ORM or database, it's just what we are starting with.
 
 ### Conventions & Object Identity
 
@@ -683,18 +774,23 @@ fate expects that data is served by a tRPC backend that follows these convention
 - A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
 - A `list` query for fetching lists of objects with support for pagination.
 
-Objects are identified by their ID and a type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
+Objects are identified by their ID and type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
 
 fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you. For example, fate has a minimal CLI that generates types for the client, but you can also let your LLM write it by hand if you prefer.
 
+> [!NOTE]
+> You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
+
 ### Data Views
+
+To continue with our client example, let's assume we have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
 
 Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client. On the client, we define views to select fields on each type. We can do the same on the server using fate data views and the `dataView` function from `@nkzw/fate/server`.
 
 Create a `views.ts` file next to your root tRPC router that exports the data views for each type. Here is how you can define a `User` data view for Prisma's `User` model:
 
 ```tsx
-import { dataView, DataViewResult } from '@nkzw/fate/server';
+import { dataView, type Entity } from '@nkzw/fate/server';
 import type { User as PrismaUser } from '../prisma/prisma-client/client.ts';
 
 export const userDataView = dataView<PrismaUser>('User')({
@@ -703,9 +799,7 @@ export const userDataView = dataView<PrismaUser>('User')({
   username: true,
 });
 
-export type User = DataViewResult<typeof userDataView> & {
-  __typename: 'User';
-};
+export type User = Entity<typeof userDataView, 'User'>;
 ```
 
 _Note: Currently, fate provides helpers to integrate with Prisma, but the framework is not coupled to any particular ORM or database. We hope to provide more direct integrations in the future, and are always open to contributions._
@@ -800,9 +894,9 @@ Similar to client-side views, data views can be composed of other data views:
 ```tsx
 export const postDataView = dataView<PostItem>('Post')({
   author: userDataView,
+  content: true,
   id: true,
   title: true,
-  content: true,
 } as const;
 ```
 
@@ -872,7 +966,7 @@ This definition makes the `commentCount` field available to your client-side vie
 
 Now that we have defined our client views and our tRPC server, we need to connect them with some glue code. We recommend using fate's CLI for convenience.
 
-First, make sure your tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views you have defined:
+First, make sure our tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views we have defined:
 
 ```tsx
 import { router } from './init.ts';
@@ -897,7 +991,7 @@ pnpm fate generate @your-org/server/trpc/router.ts client/src/lib/fate.generated
 
 _Note: fate uses the specified server module name to extract the server types it needs and uses the same module name to import the views into the generated client. Make sure that the module is available both at the root where you are running the CLI and in the client package._
 
-### Creating a fate Client
+### Creating a _fate_ Client
 
 Now that we have generated the client types, all that remains is creating the instance of the fate client, and using it in our React app using the `FateClient` context provider.
 
@@ -933,34 +1027,45 @@ export function App() {
 
 _And you are all set. Happy building!_
 
-## Is this serious software?
+## Frequently Asked Questions
 
-**_fate_** is an ambitious React data library that tries to blend Relay-style ideas with tRPC, held together by equal parts vision and vibes. It aims to fix problems you definitely wouldn't have if you enjoy writing the same fetch logic in three different places with imperative loading state and error handling. fate promises predictable data flow, minimal APIs, and “no magic,” though you may occasionally suspect otherwise.
+### Is this serious software?
 
-80% of the code was written by Codex – four versions per task, carefully curated by a human. The remaining 20% was written by [@cnakazawa](https://x.com/cnakazawa). You get to decide which parts are the good ones. The README was 100% written by a human. _Maybe._
+[In an alternate reality](https://github.com/phacility/javelin), _fate_ can be described like this:
 
-**_fate_** is almost certainly worse than actual sync engines, but it will eventually be better than existing React data-fetching libraries. Use it if you have a high tolerance for pain and want to help shape the future of data fetching in React.
+**_fate_** is an ambitious React data library that tries to blend Relay-style ideas with tRPC, held together by equal parts vision and vibes. It aims to fix problems you definitely wouldn't have if you enjoy writing the same fetch logic in three different places with imperative loading state and error handling. fate promises predictable data flow, minimal APIs, and "no magic", though you may occasionally suspect otherwise.
 
-### Is fate better than Relay?
+**_fate_** is almost certainly worse than actual sync engines, but will hopefully be better than existing React data-fetching libraries eventually. Use it if you have a high tolerance for pain and want to help shape the future of data fetching in React.
+
+### Is _fate_ better than Relay?
 
 Absolutely not.
 
-### Is fate better than using GraphQL?
+### Is _fate_ better than using GraphQL?
 
 Probably. One day. _Maybe._
 
+### How was fate built?
+
+> [!NOTE]
+> 80% of _fate_'s code was written by OpenAI's Codex – four versions per task, carefully curated by a human. The remaining 20% was written by [@cnakazawa](https://x.com/cnakazawa). _You get to decide which parts are the good ones!_ The docs were 100% written by a human.
+>
+> If you contribute to _fate_, we [require you to disclose your use of AI tools](https://github.com/nkzw-tech/fate/blob/main/CONTRIBUTING.md#ai-assistance-notice).
+
 ## Future
 
-We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
+**_fate_** is not complete yet. It lacks core features such as garbage collection, a compiler to extract view definitions statically and ahead of time, and there is too much backend boilerplate. The current implementation of _fate_ is not tied to tRPC or Prisma, those are just the ones we are starting with. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
 
-- Support for Drizzle.
-- Support backends other than tRPC.
-- Better code generation and less type repetition.
-- Support for live views and real-time updates via `useLiveView` and SSE.
-- Implement garbage collection for the cache.
-- Add persistent storage for offline support.
+- Support for Drizzle
+- Support backends other than tRPC
+- Better code generation and less type repetition
+- Support for live views and real-time updates via `useLiveView` and SSE
+- Implement garbage collection for the cache
+- Add persistent storage for offline support
 
 ## Acknowledgements
 
 - [Relay](https://relay.dev/), [Isograph](https://isograph.dev/) & [GraphQL](https://graphql.org/) for inspiration
-- [Rick Hanlon](https://x.com/rickyfm) for guidance on Async React
+- [Ricky Hanlon](https://x.com/rickyfm) for guidance on Async React
+
+**_fate_** was created by [@cnakazawa](https://x.com/cnakazawa) and is maintained by [Nakazawa Tech](https://nakazawa.tech/).

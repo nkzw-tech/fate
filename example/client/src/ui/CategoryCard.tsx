@@ -29,14 +29,14 @@ const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
     <VStack gap key={post.id}>
       <Stack alignCenter between gap={12}>
         <Link to={`/post/${post.id}`}>
-          <span className="font-medium text-blue-600 dark:text-blue-200 no-underline hover:underline">
+          <span className="font-medium text-blue-600 no-underline hover:underline dark:text-blue-200">
             {post.title}
           </span>
         </Link>
-        <span className="text-muted-foreground text-xs">{post.likes} likes</span>
+        <span className="text-xs text-muted-foreground">{post.likes} likes</span>
       </Stack>
       <Stack alignCenter gap wrap>
-        <span className="text-muted-foreground text-xs">
+        <span className="text-xs text-muted-foreground">
           {author?.name ? `by ${author.name}` : 'By an anonymous collaborator'}
         </span>
         {tags.length ? (
@@ -80,7 +80,7 @@ export default function CategoryCard({ category: categoryRef }: { category: View
             <Link to={`/category/${category.id}`}>
               <H3>{category.name}</H3>
             </Link>
-            <p className="text-muted-foreground text-sm">{category.description}</p>
+            <p className="text-sm text-muted-foreground">{category.description}</p>
           </div>
           <Badge className="text-nowrap" variant="outline">
             {category.postCount} posts
@@ -95,7 +95,7 @@ export default function CategoryCard({ category: categoryRef }: { category: View
           })}
         </VStack>
         {category.posts?.pagination?.hasNext ? (
-          <span className="text-muted-foreground text-sm">
+          <span className="text-sm text-muted-foreground">
             More posts available in this category...
           </span>
         ) : null}

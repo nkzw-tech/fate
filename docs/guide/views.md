@@ -8,18 +8,22 @@ Let's start by defining a simple view for a blog's `Post` component. fate requir
 import { view } from 'react-fate';
 
 type Post = {
+  content: string;
   id: string;
   title: string;
-  content: string;
 };
 
 export const PostView = view<Post>()({
-  title: true,
   content: true,
+  id: true,
+  title: true,
 });
 ```
 
-_Note: The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code._
+Fields are selected by setting them to `true` in the view definition. This tells **_fate_** that these fields should be fetched from the server and made available to components that use this view.
+
+> [!NOTE]
+> The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code.
 
 ## Resolving a View with `useView`
 
@@ -40,7 +44,7 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-A `ViewRef` is a reference to an object of a specific type, in this case a `Post`. It contains the unique ID for the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
+A `ViewRef` is a reference to a concrete object of a specific type, for example a `Post` with id `7`. It contains the unique ID of the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
@@ -71,6 +75,10 @@ This component suspends or throws errors, which bubble up to the nearest error b
 </ErrorBoundary>
 ```
 
+> [!NOTE]
+>
+> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+
 ## Composing Views
 
 In the above example we are defining a single view for a `Post`. One of fate's core strengths is view composition. Let's say we want to show the author's name along with the post. A simple way to do this is by adding an `author` field to the `PostView` with a concrete selection:
@@ -84,8 +92,9 @@ export const PostView = view<Post>()({
     id: true,
     name: true,
   },
-  title: true,
   content: true,
+  id: true,
+  title: true,
 });
 
 const PostCard = ({ postRef }: { postRef: ViewRef<'Post'> }) => {
@@ -113,9 +122,9 @@ import type { Post, User } from '@your-org/server/trpc/views';
 import { view } from 'react-fate';
 
 export const UserView = view<User>()({
-  profilePicture: true,
   id: true,
   name: true,
+  profilePicture: true,
 });
 
 export const PostView = view<Post>()({
@@ -201,8 +210,8 @@ We can also spread multiple views together. For example, if we have another view
 
 ```tsx
 export const UserStatsView = view<User>()({
-  postCount: true,
   followerCount: true,
+  postCount: true,
 });
 
 export const PostView = view<Post>()({
@@ -217,7 +226,7 @@ export const PostView = view<Post>()({
 });
 ```
 
-Views are opaque objects. Even if you select the same field multiple times through different views, the composed object won't have conflicting fiels or result in TypeScript errors. fate automatically deduplicates fields during runtime and ensures that each field is only fetched once.
+Views are opaque objects. Even if you select the same field multiple times through different views, the composed object won't have conflicting fields or result in TypeScript errors. fate automatically deduplicates fields during runtime and ensures that each field is only fetched once.
 
 ## `useView` and Suspense
 

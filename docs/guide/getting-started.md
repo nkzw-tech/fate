@@ -1,31 +1,69 @@
 # Getting Started
 
-## Installation
+## Template
 
-**_fate_** requires React 19.2+.
+Get started with [a ready-made template](https://github.com/nkzw-tech/fate-template#readme) quickly:
 
-```bash
-pnpm add react-fate @nkzw/fate
+::: code-group
+
+```npm
+npx giget@latest gh:nkzw-tech/fate-template
 ```
 
-_Note: **fate** is currently in alpha and not production ready. If something doesn't work for you, please open a Pull Request._
+```pnpm
+pnpx giget@latest gh:nkzw-tech/fate-template
+```
 
-## Core Concepts
+```yarn
+yarn dlx giget@latest gh:nkzw-tech/fate-template
+```
 
-**_fate_** has a minimal API surface and is aimed at reducing data fetching complexity.
+:::
 
-### Thinking in Views
+`fate-template` comes with a simple tRPC backend and a React frontend using **_fate_**. It features modern tools to deliver an incredibly fast development experience. Follow its [README.md](https://github.com/nkzw-tech/fate-template#fate-quick-start-template) to get started.
 
-In fate, each component declares the data it needs using views. Views are composed upward through the component tree until they reach a root, where the actual request is made. fate fetches all required data in a single request. React Suspense manages loading states, and any data-fetching errors naturally bubble up to React error boundaries. This eliminates the need for imperative loading logic or manual error handling.
+## Manual Installation
 
-Traditionally, React apps are built with components and hooks. fate introduces a third primitive: views – a declarative way for components to express their data requirements. An app built with fate looks more like this:
+**_fate_** requires React 19.2+. For your client you need to install `react-fate`:
 
-<p align="center">
-  <picture class="fate-tree">
-    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-tree-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="/public/fate-tree.svg">
-    <img alt="Tree" src="/public/fate-tree.svg" width="90%">
-  </picture>
-</p>
+::: code-group
 
-With fate, you no longer worry about _when_ to fetch data, how to coordinate loading states, or how to handle errors imperatively. You avoid overfetching, stop passing unnecessary data down the tree, and eliminate boilerplate types created solely for passing server data to child components.
+```npm
+npm add react-fate
+```
+
+```pnpm
+pnpm add react-fate
+```
+
+```yarn
+yarn add react-fate
+```
+
+:::
+
+And for your server, install the core `@nkzw/fate` package:
+
+::: code-group
+
+```npm
+npm add @nkzw/fate
+```
+
+```pnpm
+pnpm add @nkzw/fate
+```
+
+```yarn
+yarn add @nkzw/fate
+```
+
+:::
+
+> [!WARNING]
+>
+> **_fate_** is currently in alpha and not production ready. If something doesn't work for you, please open a pull request.
+
+If you'd like to try the example app in GitHub Codespaces, click the button below:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nkzw-tech/fate)

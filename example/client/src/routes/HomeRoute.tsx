@@ -1,6 +1,7 @@
 import Stack, { VStack } from '@nkzw/stack';
 import { ConnectionRef, useListView, useRequest, ViewRef } from 'react-fate';
 import { Link } from 'react-router';
+import cx from '../lib/cx.tsx';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import CategoryCard, { CategoryView } from '../ui/CategoryCard.tsx';
@@ -89,40 +90,38 @@ export default function HomeRoute() {
 
   return (
     <Section gap={32}>
-      <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr] lg:items-stretch">
-        <Card className=" border border-white/20 bg-linear-to-r from-blue-500 to-sky-500 dark:from-blue-600 dark:to-sky-600 text-white">
-          <VStack className="py-2 lg:py-4 lg:px-2" gap={16}>
-            <Stack alignCenter gap={12} wrap>
-              <span className="squircle bg-white/20 px-2 py-1 text-xs font-semibold uppercase tracking-widest">
-                <span className="lowercase italic">fate</span> demo
-              </span>
-            </Stack>
-            <div className="space-y-3">
-              <h1 className="text-balance text-3xl font-semibold leading-tight lg:text-4xl">
-                fate is a modern data client for React and tRPC inspired by Relay and GraphQL.
-              </h1>
-              <p className="text-white/80 text-sm lg:text-base">
-                fate combines view composition, normalized caching, data masking, Async React
-                features, and tRPC&apos;s type safety.
-              </p>
-            </div>
-            <Stack alignCenter gap={12} wrap>
-              {!user && (
-                <>
-                  <Button asChild size="sm" variant="secondary">
-                    <Link className="squircle px-4 py-2 text-sm font-semibold" to="/login">
-                      Login
-                    </Link>
-                  </Button>
-                  <span className="text-white/80 text-sm">Sign in to post comments.</span>
-                </>
-              )}
-            </Stack>
-          </VStack>
+      <div className={cx('grid gap-8 lg:items-stretch', user ? 'lg:grid-cols-[1.6fr_1fr]' : '')}>
+        <Card className="border border-white/20 bg-linear-to-r from-blue-500 to-sky-500 text-white dark:from-blue-600 dark:to-sky-600">
+          <Stack alignCenter gap={12} wrap>
+            <span className="squircle bg-white/20 px-2 py-1 text-xs font-semibold tracking-widest uppercase">
+              <span className="lowercase italic">fate</span> demo
+            </span>
+          </Stack>
+          <div className="space-y-3">
+            <h1 className="text-3xl leading-tight font-semibold text-balance lg:text-4xl">
+              fate is a modern data client for React and tRPC inspired by Relay and GraphQL.
+            </h1>
+            <p className="text-sm text-white/80 lg:text-base">
+              fate combines view composition, normalized caching, data masking, Async React
+              features, and tRPC&apos;s type safety.
+            </p>
+          </div>
+          <Stack alignCenter gap={12} wrap>
+            {!user && (
+              <>
+                <Button asChild size="sm" variant="secondary">
+                  <Link className="squircle px-4 py-2 text-sm font-semibold" to="/login">
+                    Login
+                  </Link>
+                </Button>
+                <span className="text-sm text-white/80">Sign in to post comments.</span>
+              </>
+            )}
+          </Stack>
         </Card>
-        <UserCard user={user ?? null} />
+        {user && <UserCard user={user} />}
       </div>
-      <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr] lg:items-start" id="feed">
+      <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr] lg:items-start">
         <PostFeed posts={posts} />
         <VStack gap={24}>
           <CategoryFeed categories={categories} />

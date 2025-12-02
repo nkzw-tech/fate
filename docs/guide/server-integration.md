@@ -1,6 +1,6 @@
 # Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. To continue with our client example, let's assume you have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
+Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. At the moment _fate_ is designed to work with tRPC and Prisma, but the framework is not coupled to any particular ORM or database, it's just what we are starting with.
 
 ## Conventions & Object Identity
 
@@ -9,18 +9,23 @@ fate expects that data is served by a tRPC backend that follows these convention
 - A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
 - A `list` query for fetching lists of objects with support for pagination.
 
-Objects are identified by their ID and a type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
+Objects are identified by their ID and type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
 
 fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you. For example, fate has a minimal CLI that generates types for the client, but you can also let your LLM write it by hand if you prefer.
 
+> [!NOTE]
+> You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
+
 ## Data Views
+
+To continue with our client example, let's assume we have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
 
 Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client. On the client, we define views to select fields on each type. We can do the same on the server using fate data views and the `dataView` function from `@nkzw/fate/server`.
 
 Create a `views.ts` file next to your root tRPC router that exports the data views for each type. Here is how you can define a `User` data view for Prisma's `User` model:
 
 ```tsx
-import { dataView, DataViewResult } from '@nkzw/fate/server';
+import { dataView, type Entity } from '@nkzw/fate/server';
 import type { User as PrismaUser } from '../prisma/prisma-client/client.ts';
 
 export const userDataView = dataView<PrismaUser>('User')({
@@ -29,9 +34,7 @@ export const userDataView = dataView<PrismaUser>('User')({
   username: true,
 });
 
-export type User = DataViewResult<typeof userDataView> & {
-  __typename: 'User';
-};
+export type User = Entity<typeof userDataView, 'User'>;
 ```
 
 _Note: Currently, fate provides helpers to integrate with Prisma, but the framework is not coupled to any particular ORM or database. We hope to provide more direct integrations in the future, and are always open to contributions._
@@ -126,9 +129,9 @@ Similar to client-side views, data views can be composed of other data views:
 ```tsx
 export const postDataView = dataView<PostItem>('Post')({
   author: userDataView,
+  content: true,
   id: true,
   title: true,
-  content: true,
 } as const;
 ```
 
@@ -198,7 +201,7 @@ This definition makes the `commentCount` field available to your client-side vie
 
 Now that we have defined our client views and our tRPC server, we need to connect them with some glue code. We recommend using fate's CLI for convenience.
 
-First, make sure your tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views you have defined:
+First, make sure our tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views we have defined:
 
 ```tsx
 import { router } from './init.ts';
@@ -223,7 +226,7 @@ pnpm fate generate @your-org/server/trpc/router.ts client/src/lib/fate.generated
 
 _Note: fate uses the specified server module name to extract the server types it needs and uses the same module name to import the views into the generated client. Make sure that the module is available both at the root where you are running the CLI and in the client package._
 
-## Creating a fate Client
+## Creating a _fate_ Client
 
 Now that we have generated the client types, all that remains is creating the instance of the fate client, and using it in our React app using the `FateClient` context provider.
 

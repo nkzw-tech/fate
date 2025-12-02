@@ -9,6 +9,7 @@ const README = path.join(root, 'README.md');
 const files = [
   'docs/parts/intro.md',
   'docs/guide/getting-started.md',
+  'docs/guide/core-concepts.md',
   'docs/guide/views.md',
   'docs/guide/list-views.md',
   'docs/guide/actions.md',

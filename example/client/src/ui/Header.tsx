@@ -11,7 +11,7 @@ export default function Header() {
   const { data: session, isPending } = AuthClient.useSession();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/60 backdrop-blur bg-white/60 dark:border-neutral-800 dark:bg-neutral-950/70">
+    <header className="sticky top-0 z-50 border-b border-white/60 bg-white/60 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/70">
       <Stack
         alignCenter
         between
@@ -25,7 +25,7 @@ export default function Header() {
           to="/"
         >
           <Stack alignCenter gap={12}>
-            <div className="relative flex h-10 w-10 items-center justify-center squircle bg-linear-to-br from-gray-100 to-gray-200 text-white shadow-lg shadow-gray-500/20 hover:scale-110 active:scale-90 transition duration-250">
+            <div className="squircle relative flex h-10 w-10 items-center justify-center bg-linear-to-br from-gray-100 to-gray-200 text-white shadow-lg shadow-gray-500/20 transition duration-250 hover:scale-110 active:scale-90">
               {pathname === '/' ? (
                 <svg
                   className="h-6 w-6 text-gray-500"
@@ -44,11 +44,11 @@ export default function Header() {
                 <ChevronLeft className="h-6 w-6 text-gray-500" />
               )}
             </div>
-            <div className="transition-opacity duration-250 opacity-100 hover:opacity-70">
+            <div className="opacity-100 transition-opacity duration-250 hover:opacity-70">
               <span className="bg-linear-to-r from-gray-500 to-gray-900 bg-clip-text text-xl font-semibold text-transparent dark:from-gray-200 dark:to-white">
                 <span className="italic">fate</span>
               </span>
-              <p className="text-muted-foreground text-xs hidden sm:block">
+              <p className="hidden text-xs text-muted-foreground sm:block">
                 A modern data client for React.
               </p>
             </div>

@@ -240,7 +240,7 @@ const comments = [
   'The generated request artifacts screenshot was clutch for debugging; mapping it to the co-located fragments made the planner easier to trust.',
   'Suspense batching notes pair nicely with useDeferredValue in useRequest, giving us smoother transitions when requests fan out.',
   'Rollback edge cases were wild to read, especially the optimistic id swap example that still kept list subscribers accurate.',
-  'Streaming preload experiment is on my TODO after seeing the args hashing; that section read like a mini lab notebook.',
+  'The streaming preload experiment notes—especially the args hashing—read like a detailed lab notebook and make me want to try it next.',
   'Love seeing community quotes in the recap of invalidateList behavior and how it keeps cache consistency intact during launch days.',
   'Connection helper sketch reminded me of Relay days but with getListKey, which feels cleaner than juggling query keys.',
   'Cannot wait for pagination helpers to land on top of Store.setList; the placeholders in the post already look production-ready.',

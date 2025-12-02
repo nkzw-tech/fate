@@ -69,7 +69,7 @@ export default function Search() {
           ref={(ref) => ref?.focus()}
           value={query}
         />
-        <div className="text-muted-foreground text-xs">500ms artificial slowdown</div>
+        <div className="text-xs text-muted-foreground">500ms artificial slowdown</div>
       </Stack>
 
       <ErrorBoundary FallbackComponent={Error}>

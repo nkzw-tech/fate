@@ -55,7 +55,7 @@ const indentBlock = (value: string, spaces: number) =>
 const generate = async () => {
   console.log(styleText('bold', `Generating fate client…\n`));
 
-  const [{ appRouter, Lists, ...dataViews }] = await Promise.all([import(moduleName)]);
+  const { appRouter, Lists, ...dataViews } = await import(moduleName);
 
   const { entities, types } = createSchema(Object.values(dataViews), Lists);
 
@@ -206,7 +206,7 @@ ${byIdBlock}
       client: trpcClient,
 ${listsBlock}      mutations,
     }),
-    types: ${typesBlock},
+    types: ${typesBlock.trimStart()},
   });
 };
 `;

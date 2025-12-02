@@ -37,7 +37,7 @@ export default function SignIn() {
     <VStack center gap={16}>
       <H2 className="pl-5">Sign In</H2>
       <Stack gap={32} wrap>
-        <Card className="max-w-56">
+        <Card className="w-84">
           <Stack gap vertical>
             <VStack as="form" gap={12} onSubmit={signIn}>
               <Input
@@ -62,13 +62,13 @@ export default function SignIn() {
             </VStack>
           </Stack>
         </Card>
-        <Card>
+        <Card className="w-84">
           <p>
             Try one of the
             <Stack
               alignCenter
               as="a"
-              className="inline-flex underline hover:no-underline"
+              className="inline-flex! px-1 underline hover:no-underline"
               gap={4}
               href="https://github.com/nkzw-tech/fate/blob/main/example/server/src/prisma/seed.tsx#L7"
               rel="noreferrer"

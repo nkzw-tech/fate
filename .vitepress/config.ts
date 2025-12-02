@@ -6,12 +6,16 @@ import pkg from '../packages/fate/package.json' with { type: 'json' };
 import dunkel from './theme/dunkel.json';
 import licht from './theme/licht.json';
 
+const origin = 'https://fate.technology';
 const nkzwLogo = readFileSync(join(import.meta.dirname, './nkzw-logo.svg'), 'utf8');
 
 export default defineConfig({
   cleanUrls: true,
   description: 'A Modern React Data Framework',
-  head: [['link', { href: '/icon.svg', rel: 'icon' }]],
+  head: [
+    ['link', { href: '/icon.svg', rel: 'icon' }],
+    ['meta', { content: `${origin}/og-image.png`, name: 'og:image' }],
+  ],
   markdown: {
     theme: {
       dark: dunkel,
@@ -60,14 +64,8 @@ export default defineConfig({
       {
         collapsed: false,
         items: [
-          {
-            items: [
-              { link: '/guide/getting-started#installation', text: 'Installation' },
-              { link: '/guide/getting-started#core-concepts', text: 'Core Concepts' },
-            ],
-            link: '/guide/getting-started',
-            text: 'Getting Started',
-          },
+          { link: '/guide/getting-started', text: 'Getting Started' },
+          { link: '/guide/core-concepts', text: 'Core Concepts' },
           { link: '/guide/views', text: 'Views' },
           { link: '/guide/list-views', text: 'List Views' },
           { link: '/guide/actions', text: 'Actions' },

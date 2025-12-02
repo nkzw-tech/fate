@@ -2,7 +2,6 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  binaryTargets       = ["native", "linux-musl"]
   importFileExtension = "ts"
   output              = "./prisma-client"
   provider            = "prisma-client"

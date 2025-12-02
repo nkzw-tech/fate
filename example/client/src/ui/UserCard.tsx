@@ -100,18 +100,18 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
   );
 };
 
-export default function UserCard({ user }: { user: SessionUser | null }) {
-  return user ? (
+export default function UserCard({ user }: { user: SessionUser }) {
+  return (
     <Card>
       <VStack between className="h-full" gap={16}>
         <VStack gap={16}>
           <H2>Your account</H2>
           <Stack alignCenter between gap={16}>
-            <p className="text-muted-foreground text-sm">Signed in as {user.name}.</p>
+            <p className="text-sm text-muted-foreground">Signed in as {user.name}.</p>
           </Stack>
         </VStack>
         <UserNameForm user={user} />
       </VStack>
     </Card>
-  ) : null;
+  );
 }

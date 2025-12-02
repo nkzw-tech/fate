@@ -65,8 +65,8 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
       <VStack gap={12}>
         <Stack alignCenter between gap={12}>
           <div>
-            <h4 className="text-foreground text-base font-semibold">{event.name}</h4>
-            <p className="text-muted-foreground text-sm">{event.description}</p>
+            <h4 className="text-base font-semibold text-foreground">{event.name}</h4>
+            <p className="text-sm text-muted-foreground">{event.description}</p>
           </div>
           <Badge className="text-nowrap" variant="secondary">
             {formatLabel(event.type)}
@@ -74,23 +74,23 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
         </Stack>
         <Stack alignCenter gap>
           <CalendarDays className="text-muted-foreground" size={14} />
-          <span className="text-foreground/80 text-sm">
+          <span className="text-sm text-foreground/80">
             {formatDateTime(event.startAt)} → {formatDateTime(event.endAt)}
           </span>
         </Stack>
         <Stack alignCenter gap>
           <MapPin className="text-muted-foreground" size={14} />
-          <span className="text-foreground/80 text-sm">{event.location}</span>
+          <span className="text-sm text-foreground/80">{event.location}</span>
         </Stack>
         <Stack alignCenter gap>
           <Users className="text-muted-foreground" size={14} />
-          <span className="text-foreground/80 text-sm">
+          <span className="text-sm text-foreground/80">
             {event.attendingCount ?? attendees.length} attending · capacity {event.capacity}
           </span>
         </Stack>
         <Stack alignCenter gap>
           <ArrowUpRight className="text-muted-foreground" size={14} />
-          <span className="text-foreground/80 text-sm">Hosted by {host?.name ?? 'Unknown'}</span>
+          <span className="text-sm text-foreground/80">Hosted by {host?.name ?? 'Unknown'}</span>
         </Stack>
         {topics.length ? (
           <Stack gap wrap>
@@ -103,7 +103,7 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
         ) : null}
         {attendees.length ? (
           <VStack gap>
-            <span className="text-muted-foreground text-xs">Community RSVPs</span>
+            <span className="text-xs text-muted-foreground">Community RSVPs</span>
             <Stack gap wrap>
               {attendees.slice(0, 4).map(({ node }) => (
                 <EventAttendeeChip attendee={node} key={node.id} />

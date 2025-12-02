@@ -10,7 +10,7 @@ export default function H2({
   return (
     <h3
       className={cx(
-        'bg-linear-to-r from-slate-900 to-slate-600 bg-clip-text text-lg font-semibold text-transparent transition dark:from-white dark:to-slate-200 uppercase tracking-widest duration-150 opacity-100 hover:opacity-70 active:translate-y-[1.5px]',
+        'bg-linear-to-r from-slate-900 to-slate-600 bg-clip-text text-lg font-semibold tracking-widest text-transparent uppercase opacity-100 transition duration-150 hover:opacity-70 active:translate-y-[1.5px] dark:from-white dark:to-slate-200',
         className,
       )}
     >

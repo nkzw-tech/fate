@@ -3,14 +3,14 @@ import { HTMLAttributes } from 'react';
 import cx from '../lib/cx.tsx';
 
 const badgeVariants = cva(
-  'inline-flex items-center squircle border px-1.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'squircle inline-flex items-center border px-1.5 py-0.5 text-xs font-semibold transition-colors focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-none',
   {
     defaultVariants: {
       variant: 'default',
     },
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground hover:bg-primary/80',
+        default: 'bg-primary text-primary-foreground border-transparent hover:bg-primary/80',
         destructive:
           'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80',
         outline: 'text-foreground',

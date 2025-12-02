@@ -1,6 +1,6 @@
 {
   "name": "react-fate",
-  "version": "0.0.0",
+  "version": "0.0.6",
   "description": "fate is a modern data client for React.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "repository": {
@@ -16,7 +16,6 @@
   "exports": {
     ".": {
       "types": "./lib/index.d.mts",
-      "development": "./src/index.tsx",
       "default": "./lib/index.mjs"
     }
   },
@@ -32,7 +31,7 @@
     "build": "tsdown -d lib --target=node24 src/index.tsx src/cli.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "workspace:*"
+    "@nkzw/fate": "workspace:^"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",

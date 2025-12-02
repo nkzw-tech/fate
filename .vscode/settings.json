@@ -24,6 +24,6 @@
     "**/node_modules/vitest"
   ],
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.experimental.useTsgo": false,
+  "typescript.experimental.useTsgo": true,
   "oxc.fmt.experimental": true
 }

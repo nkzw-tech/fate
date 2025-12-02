@@ -1,0 +1,40 @@
+{
+  "name": "fate",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24",
+      "pnpm": "true"
+    },
+    "ghcr.io/devcontainers/features/postgres:1": {
+      "version": "16",
+      "database": "fate",
+      "user": "postgres",
+      "password": "postgres"
+    }
+  },
+  "forwardPorts": [6001, 9020],
+  "portsAttributes": {
+    "6001": {
+      "label": "fate client",
+      "onAutoForward": "openPreview"
+    },
+    "9020": {
+      "label": "fate server",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "bash .devcontainer/start-dev.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    },
+    "codespaces": {
+      "openFiles": ["README.md"]
+    }
+  }
+}
