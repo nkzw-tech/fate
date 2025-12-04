@@ -12,7 +12,7 @@ export default function PostRoute() {
 
   const { post } = useRequest({
     post: {
-      ids: [id],
+      id,
       root: PostView,
       type: 'Post',
     },
@@ -20,7 +20,7 @@ export default function PostRoute() {
 
   return (
     <Section>
-      <PostCard detail post={post[0]} />
+      <PostCard detail post={post} />
     </Section>
   );
 }

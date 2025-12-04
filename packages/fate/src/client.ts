@@ -13,15 +13,11 @@ import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
 import { Transport } from './transport.ts';
-import { Pagination, RequestResult, ViewSnapshot } from './types.js';
 import {
   ConnectionMetadata,
   ConnectionTag,
   FateThenable,
-  isNodeItem,
   isViewTag,
-  ViewResult,
-  ViewsTag,
   type AnyRecord,
   type Entity,
   type EntityId,
@@ -29,13 +25,20 @@ import {
   type MutationDefinition,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
+  type Pagination,
   type Request,
+  type RequestResult,
   type Selection,
   type Snapshot,
   type TypeConfig,
   type View,
   type ViewData,
   type ViewRef,
+  type ViewSnapshot,
+  isNodeItem,
+  isNodesItem,
+  ViewResult,
+  ViewsTag,
 } from './types.ts';
 import { getViewNames, getViewPayloads } from './view.ts';
 
@@ -164,6 +167,11 @@ const getRequestCacheKey = (request: Request): string => {
 
     const viewSignature = getViewSignature(item.root);
     if (isNodeItem(item)) {
+      parts.push(`node:${name}:${item.type}:${viewSignature}:${item.id}`);
+      continue;
+    }
+
+    if (isNodesItem(item)) {
       parts.push(
         `node:${name}:${item.type}:${viewSignature}:${item.ids.map(serializeId).join(',')}`,
       );
@@ -891,7 +899,8 @@ export class FateClient<
 
     const promises: Array<Promise<void>> = [];
     for (const [name, item] of Object.entries(request)) {
-      if (isNodeItem(item)) {
+      const isNode = isNodeItem(item);
+      if (isNode || isNodesItem(item)) {
         const plan = getSelectionPlan(item.root, null);
         const fields = plan.paths;
         const fieldsSignature = [...fields].slice().sort().join(',');
@@ -906,7 +915,7 @@ export class FateClient<
           groups.set(groupKey, group);
         }
 
-        for (const raw of item.ids) {
+        for (const raw of isNode ? [item.id] : item.ids) {
           const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
           if (fetchAll || missing.size > 0) {
@@ -930,10 +939,11 @@ export class FateClient<
 
   private hasRequestData(request: Request): boolean {
     for (const [name, item] of Object.entries(request)) {
-      if (isNodeItem(item)) {
+      const isNode = isNodeItem(item);
+      if (isNode || isNodesItem(item)) {
         const plan = getSelectionPlan(item.root, null);
         const fields = plan.paths;
-        for (const raw of item.ids) {
+        for (const raw of isNode ? [item.id] : item.ids) {
           const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
           if (missing.size > 0) {
@@ -954,6 +964,11 @@ export class FateClient<
     const result: AnyRecord = {};
     for (const [name, item] of Object.entries(request)) {
       if (isNodeItem(item)) {
+        result[name] = this.ref(item.type, item.id, item.root);
+        continue;
+      }
+
+      if (isNodesItem(item)) {
         result[name] = item.ids.map((id) => this.ref(item.type, id, item.root));
         continue;
       }

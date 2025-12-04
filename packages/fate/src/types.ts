@@ -290,14 +290,21 @@ export type ListItem<V extends View<any, any>> = Readonly<{
   type: ViewEntityName<V>;
 }>;
 
-/** Definition of a node request with explicit IDs for fetching data from the backend. */
+/** Definition of a node request with one explicit ID for fetching data from the backend. */
 export type NodeItem<V extends View<any, any>> = Readonly<{
+  id: string | number;
+  root: V;
+  type: ViewEntityName<V>;
+}>;
+
+/** Definition of a node request with explicit IDs for fetching data from the backend. */
+export type NodesItem<V extends View<any, any>> = Readonly<{
   ids: ReadonlyArray<string | number>;
   root: V;
   type: ViewEntityName<V>;
 }>;
 
-type RequestItem = ListItem<View<any, any>> | NodeItem<View<any, any>>;
+type RequestItem = ListItem<View<any, any>> | NodeItem<View<any, any>> | NodesItem<View<any, any>>;
 
 /** Collection of node and list requests describing the data a screen needs. */
 export type Request = Record<string, RequestItem>;
@@ -305,7 +312,8 @@ export type Request = Record<string, RequestItem>;
 type AnyView = View<any, any>;
 type AnyListItem = ListItem<AnyView>;
 type AnyNodeItem = NodeItem<AnyView>;
-type AnyRequestItem = AnyListItem | AnyNodeItem;
+type AnyNodesItem = NodesItem<AnyView>;
+type AnyRequestItem = AnyListItem | AnyNodeItem | AnyNodesItem;
 type AnyRequest = Record<string, AnyRequestItem>;
 
 /**
@@ -317,23 +325,33 @@ type ConnectionNodeType<Root> = Root extends { items?: { node?: infer Node } }
   : never;
 
 type ListResult<Item extends AnyRequestItem> = Item extends AnyNodeItem
-  ? Array<ViewRef<Item['type']>>
-  : Item extends AnyListItem
-    ? Item['root'] extends { items?: { node?: View<any, any> } }
-      ? Readonly<{
-          items: ReadonlyArray<{
-            cursor?: string | undefined;
-            node: ViewRef<ConnectionNodeType<Item['root']>>;
-          }>;
-          pagination?: Pagination;
-        }>
-      : Array<ViewRef<Item['type']>>
-    : never;
+  ? ViewRef<Item['type']>
+  : Item extends AnyNodesItem
+    ? Array<ViewRef<Item['type']>>
+    : Item extends AnyListItem
+      ? Item['root'] extends { items?: { node?: View<any, any> } }
+        ? Readonly<{
+            items: ReadonlyArray<{
+              cursor?: string | undefined;
+              node: ViewRef<ConnectionNodeType<Item['root']>>;
+            }>;
+            pagination?: Pagination;
+          }>
+        : Array<ViewRef<Item['type']>>
+      : never;
 
+/**
+ * The result of a `FateClient.request` and `useRequest` call, mapping each
+ * request key to its corresponding result.
+ */
 export type RequestResult<Q extends AnyRequest> = { [K in keyof Q]: ListResult<Q[K]> };
 
-/** Indicates whether a request item represents explicit node IDs. */
+/** Indicates whether a request item represents an explicit node ID. */
 export function isNodeItem(item: AnyRequestItem): item is AnyNodeItem {
+  return 'id' in item;
+}
+/** Indicates whether a request item represents explicit node IDs. */
+export function isNodesItem(item: AnyRequestItem): item is AnyNodesItem {
   return 'ids' in item;
 }
 

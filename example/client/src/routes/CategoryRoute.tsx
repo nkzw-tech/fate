@@ -13,7 +13,7 @@ export default function CategoryRoute() {
   const { category } = useRequest(
     {
       category: {
-        ids: [id],
+        id,
         root: CategoryView,
         type: 'Category',
       },
@@ -23,7 +23,7 @@ export default function CategoryRoute() {
 
   return (
     <Section>
-      <CategoryCard category={category[0]} />
+      <CategoryCard category={category} />
     </Section>
   );
 }

@@ -7,12 +7,13 @@ import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vitest';
 import { createClient, view } from '@nkzw/fate';
 import { FateClient } from '../context.tsx';
+import { useView } from '../index.tsx';
 import { useRequest } from '../useRequest.tsx';
 
 // @ts-expect-error React 🤷‍♂️
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-type Post = { __typename: 'Post'; id: string };
+type Post = { __typename: 'Post'; content: string; id: string };
 
 const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -65,4 +66,50 @@ test('releases network-only requests on unmount', async () => {
   });
 
   expect(releaseSpy).toHaveBeenCalledWith(request, 'network-only');
+});
+
+test('supports requesting a single node through `byId` calls', async () => {
+  const fetchById = vi.fn().mockResolvedValue([
+    {
+      __typename: 'Post',
+      content: 'Apple',
+      id: 'post-1',
+    },
+  ]);
+
+  const client = createClient({
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const request = { post: { id: 'post-1', root: PostView, type: 'Post' as const } };
+  const renders: Array<string> = [];
+
+  const Component = () => {
+    const { post: postRef } = useRequest(request);
+    const post = useView(PostView, postRef);
+    renders.push(post.content);
+    return <span>{post.content}</span>;
+  };
+
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+  });
+
+  expect(renders).toEqual(['Apple']);
+  expect(fetchById).toHaveBeenCalledTimes(1);
 });
