@@ -178,6 +178,8 @@ const isDataViewField = <Context>(
 const filterToViewFields = <Context>(
   item: unknown,
   view: DataView<AnyRecord, Context>,
+  selectedPaths: ReadonlySet<string>,
+  prefix: string | null = null,
 ): AnyRecord => {
   if (!isRecord(item)) {
     return item as AnyRecord;
@@ -186,6 +188,23 @@ const filterToViewFields = <Context>(
   const filtered: AnyRecord = {};
 
   for (const [field, config] of Object.entries(view.fields)) {
+    const path = prefix ? `${prefix}.${field}` : field;
+
+    let hasSelection = selectedPaths.has(path);
+
+    if (!hasSelection) {
+      for (const selected of selectedPaths) {
+        if (selected.startsWith(`${path}.`)) {
+          hasSelection = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasSelection) {
+      continue;
+    }
+
     if (!(field in item)) {
       continue;
     }
@@ -195,13 +214,13 @@ const filterToViewFields = <Context>(
     if (isDataViewField(config)) {
       if (Array.isArray(value)) {
         filtered[field] = value.map((entry) =>
-          isRecord(entry) ? filterToViewFields(entry, config) : entry,
+          isRecord(entry) ? filterToViewFields(entry, config, selectedPaths, path) : entry,
         );
         continue;
       }
 
       if (isRecord(value)) {
-        filtered[field] = filterToViewFields(value, config);
+        filtered[field] = filterToViewFields(value, config, selectedPaths, path);
         continue;
       }
     }
@@ -274,6 +293,7 @@ const assignPath = <Context>(
   node: SelectedViewNode<Context>,
   segments: Array<string>,
   path: string | null,
+  selectedPaths: Set<string>,
   view: DataView<AnyRecord, Context>,
   allowedPaths: Set<string>,
 ) => {
@@ -293,6 +313,7 @@ const assignPath = <Context>(
   if (isResolverField(field)) {
     if (rest.length === 0) {
       node.resolvers.set(segment, field);
+      selectedPaths.add(nextPath);
     }
     return;
   }
@@ -304,36 +325,23 @@ const assignPath = <Context>(
       node.relations.set(segment, relationNode);
     }
 
+    if (field.fields.id === true) {
+      allowedPaths.add(`${nextPath}.id`);
+      selectedPaths.add(`${nextPath}.id`);
+    }
+
     if (rest.length === 0) {
-      collectViewPaths(nextPath, field, allowedPaths);
+      selectedPaths.add(nextPath);
       return;
     }
 
-    assignPath(relationNode, rest, nextPath, field, allowedPaths);
+    assignPath(relationNode, rest, nextPath, selectedPaths, field, allowedPaths);
     return;
   }
 
   if (rest.length === 0) {
     allowedPaths.add(nextPath);
-  }
-};
-
-const collectViewPaths = <Context>(
-  basePath: string,
-  view: DataView<AnyRecord, Context>,
-  allowedPaths: Set<string>,
-) => {
-  for (const [field, child] of Object.entries(view.fields)) {
-    const nextPath = `${basePath}.${field}`;
-
-    if (child === true) {
-      allowedPaths.add(nextPath);
-      continue;
-    }
-
-    if (isDataViewField(child)) {
-      collectViewPaths(nextPath, child, allowedPaths);
-    }
+    selectedPaths.add(nextPath);
   }
 };
 
@@ -446,6 +454,8 @@ export function createResolver<Item extends AnyRecord, Context = unknown>({
   view: DataView<Item, Context>;
 }) {
   const allowedPaths = new Set<string>();
+  const selectedPaths = new Set<string>();
+  selectedPaths.add('id');
   const root = createSelectedNode(view, null);
 
   for (const path of initialSelect) {
@@ -453,7 +463,7 @@ export function createResolver<Item extends AnyRecord, Context = unknown>({
       continue;
     }
 
-    assignPath(root, path.split('.'), null, view, allowedPaths);
+    assignPath(root, path.split('.'), null, selectedPaths, view, allowedPaths);
   }
 
   const select = prismaSelect([...allowedPaths], args);
@@ -469,6 +479,7 @@ export function createResolver<Item extends AnyRecord, Context = unknown>({
           options: { args, context: ctx },
         }),
         root.view,
+        selectedPaths,
       ),
       view: root.view,
     });

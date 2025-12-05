@@ -94,6 +94,7 @@ test('nested resolvers apply their selections within relations', async () => {
     child: {
       select: {
         _count: { select: { items: true } },
+        id: true,
       },
     },
     id: true,
@@ -111,7 +112,7 @@ type PostItem = { id: string; secret: string; title: string };
 
 type CommentItem = { id: string; post?: PostItem | null };
 
-test('selecting a relation without nested paths respects the child view', () => {
+test('selecting a relation without nested paths only selects minimal fields', () => {
   const postView = dataView<PostItem>()({
     id: true,
     title: true,
@@ -129,8 +130,33 @@ test('selecting a relation without nested paths respects the child view', () => 
 
   expect(selection.select).toEqual({
     id: true,
-    post: { select: { id: true, title: true } },
+    post: { select: { id: true } },
   });
+});
+
+test('relation selections without nested paths do not expose unrequested fields', async () => {
+  const postView = dataView<PostItem>()({
+    id: true,
+    secret: true,
+    title: true,
+  });
+
+  const commentView = dataView<CommentItem>()({
+    id: true,
+    post: postView,
+  });
+
+  const { resolve } = createResolver({
+    select: ['post'],
+    view: commentView,
+  });
+
+  const item = await resolve({
+    id: 'comment-1',
+    post: { id: 'post-1', secret: 'hidden', title: 'Hello' },
+  });
+
+  expect(item.post).toEqual({ id: 'post-1' });
 });
 
 type AuthorItem = { id: string; name: string };
