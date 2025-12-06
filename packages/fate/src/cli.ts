@@ -2,7 +2,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { styleText } from 'node:util';
-import { createFateSchema } from './codegen/schema.ts';
+import { createSchema } from './codegen/schema.ts';
 
 const root = process.cwd();
 const [, , command, moduleName, targetFile] = process.argv;
@@ -57,7 +57,7 @@ const generate = async () => {
 
   const [{ appRouter, Lists, ...dataViews }] = await Promise.all([import(moduleName)]);
 
-  const { entities, types } = createFateSchema(Object.values(dataViews), Lists);
+  const { entities, types } = createSchema(Object.values(dataViews), Lists);
 
   const routerRecord = (appRouter as any)._def?.record ?? {};
 

@@ -23,7 +23,7 @@ type ListConfig =
  * Builds the schema object used by the CLI generator from your data views and
  * list resolver configs.
  */
-export const createFateSchema = (
+export const createSchema = (
   dataViews: ReadonlyArray<DataView<AnyRecord, unknown>>,
   lists: Record<string, ListConfig>,
 ) => {
@@ -92,6 +92,10 @@ export const createFateSchema = (
       listProcedure: config.procedure,
       type: typeName,
     };
+  }
+
+  for (const view of dataViews) {
+    ensureType(view);
   }
 
   return {

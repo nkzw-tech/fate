@@ -1,10 +1,11 @@
 import { expect, test } from 'vitest';
 import { dataView, list } from '../../server/dataView.ts';
-import { createFateSchema } from '../schema.ts';
+import { createSchema } from '../schema.ts';
 
 type User = { id: string; name: string };
 type Comment = { author: User; id: string; replies: Array<Comment> };
 type Post = { author: User; comments: Array<Comment>; id: string };
+type Event = { id: string; title: string };
 
 test('derives types and entities from data views', () => {
   const userView = dataView<User>('User')({
@@ -30,17 +31,23 @@ test('derives types and entities from data views', () => {
     id: true,
   });
 
-  const schema = createFateSchema([commentView, postView, userView], {
+  const eventView = dataView<Event>('Event')({
+    id: true,
+    title: true,
+  });
+
+  const { entities, types } = createSchema([commentView, postView, userView, eventView], {
     posts: postView,
   });
 
-  expect(schema.entities).toEqual({
+  expect(entities).toEqual({
     comment: { type: 'Comment' },
+    event: { type: 'Event' },
     post: { list: 'posts', type: 'Post' },
     user: { type: 'User' },
   });
 
-  expect(schema.types).toEqual([
+  expect(types).toEqual([
     { type: 'User' },
     {
       fields: {
@@ -56,6 +63,7 @@ test('derives types and entities from data views', () => {
       },
       type: 'Post',
     },
+    { type: 'Event' },
   ]);
 });
 
@@ -71,11 +79,11 @@ test('allows defining custom list procedure names', () => {
     replies: list(dataView<Comment>('Comment')({ id: true })),
   });
 
-  const schema = createFateSchema([commentView, userView], {
+  const { entities } = createSchema([commentView, userView], {
     commentSearch: { procedure: 'search', view: commentView },
   });
 
-  expect(schema.entities.comment).toEqual({
+  expect(entities.comment).toEqual({
     list: 'commentSearch',
     listProcedure: 'search',
     type: 'Comment',
