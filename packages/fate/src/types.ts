@@ -1,4 +1,5 @@
 import { FieldMask } from './mask.ts';
+import { FateMutations } from './mutation.ts';
 
 /** Canonical runtime name for an entity type as returned by the server. */
 export type TypeName = string;
@@ -386,9 +387,7 @@ export type MutationShape = { input: unknown; output: unknown };
  * Convenience helper that maps mutation definitions to their input/output
  * shapes for use by transports.
  */
-export type MutationMapFromDefinitions<
-  D extends Record<string, MutationDefinition<any, any, any>>,
-> = {
+export type MutationMapFromDefinitions<D extends FateMutations> = {
   [K in keyof D]: {
     input: MutationInput<D[K]>;
     output: MutationResult<D[K]>;

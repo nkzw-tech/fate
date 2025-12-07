@@ -156,6 +156,7 @@ A `LikeButton` component using fate Actions and an async component library might
 
 ```tsx
 const LikeButton = ({ post }) => {
+  const fate = useFateClient();
   const [result, like] = useActionState(fate.actions.post.like, null);
 
   return (

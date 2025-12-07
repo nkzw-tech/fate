@@ -7,7 +7,15 @@ import {
 } from './args.ts';
 import ViewDataCache from './cache.ts';
 import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
-import { MutationAction, MutationFunction, MutationOptions, wrapMutation } from './mutation.ts';
+import {
+  MutationFunction,
+  MutationOptions,
+  wrapMutation,
+  FateMutations,
+  EmptyMutations,
+  MutationActionsFor,
+  MutationFunctionsFor,
+} from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
@@ -22,7 +30,6 @@ import {
   type Entity,
   type EntityId,
   type ListItem,
-  type MutationDefinition,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
   type Pagination,
@@ -58,56 +65,9 @@ export type RequestMode =
  */
 export type RequestOptions = Readonly<{ mode?: RequestMode }>;
 
-type MutationIdentifierFor<K extends string, Def extends MutationDefinition<any, any, any>> =
-  Def extends MutationDefinition<infer T, infer I, infer R>
-    ? MutationIdentifier<T, I, R> & Readonly<{ key: K }>
-    : never;
-
-type MutationTransport<Mutations extends Record<string, MutationDefinition<any, any, any>>> =
-  MutationMapFromDefinitions<Mutations>;
-
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
-  ? I
-  : never;
-
-type NestedValue<Path extends string, Value> = Path extends `${infer Head}.${infer Tail}`
-  ? { [K in Head]: NestedValue<Tail, Value> }
-  : { [K in Path]: Value };
-
-type MutationTreeFromRecord<
-  Mutations extends Record<string, MutationDefinition<any, any, any>>,
-  ValueMap extends Record<string, unknown>,
-> = [keyof Mutations] extends [never]
-  ? object
-  : UnionToIntersection<
-      {
-        [K in keyof Mutations & string]: NestedValue<K, ValueMap[K]>;
-      }[keyof Mutations & string]
-    >;
-
-type MutationFunctionsFor<Mutations extends Record<string, MutationDefinition<any, any, any>>> =
-  MutationTreeFromRecord<
-    Mutations,
-    {
-      [K in keyof Mutations & string]: MutationFunction<MutationIdentifierFor<K, Mutations[K]>>;
-    }
-  >;
-
-type MutationActionsFor<Mutations extends Record<string, MutationDefinition<any, any, any>>> =
-  MutationTreeFromRecord<
-    Mutations,
-    {
-      [K in keyof Mutations & string]: MutationAction<MutationIdentifierFor<K, Mutations[K]>>;
-    }
-  >;
-
-type EmptyMutations = Record<never, MutationDefinition<any, any, any>>;
-
-type FateClientOptions<
-  Mutations extends Record<string, MutationDefinition<any, any, any>> = EmptyMutations,
-> = {
+type FateClientOptions<Mutations extends FateMutations = EmptyMutations> = {
   mutations?: Mutations;
-  transport: Transport<MutationTransport<Mutations>>;
+  transport: Transport<MutationMapFromDefinitions<Mutations>>;
   types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<{ getId: TypeConfig['getId'] }>>;
 };
 
@@ -218,9 +178,7 @@ const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string
  * Core client that normalizes records, manages the view cache, and coordinates
  * data fetching.
  */
-export class FateClient<
-  Mutations extends Record<string, MutationDefinition<any, any, any>> = EmptyMutations,
-> {
+export class FateClient<Mutations extends FateMutations> {
   private readonly mutationMap: Record<string, MutationFunction<any>>;
   private readonly parentLists = new Map<
     string,
@@ -233,13 +191,12 @@ export class FateClient<
   private readonly requests = new Map<string, Map<RequestMode, Promise<RequestResult<Request>>>>();
   private readonly stalledRequests = new Set<string>();
   readonly store = new Store();
-  private readonly types: Map<string, TypeConfig>;
-  private readonly transport: Transport<MutationTransport<Mutations>>;
+  private readonly types: ReadonlyMap<string, TypeConfig>;
+  private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
   private readonly viewDataCache = new ViewDataCache();
 
-  readonly mutations: MutationFunctionsFor<Mutations>;
-
   readonly actions: MutationActionsFor<Mutations>;
+  readonly mutations: MutationFunctionsFor<Mutations>;
 
   constructor(options: FateClientOptions<Mutations>) {
     this.transport = options.transport;
@@ -1594,8 +1551,8 @@ export class FateClient<
   }
 }
 
-export function createClient<
-  Mutations extends Record<string, MutationDefinition<any, any, any>> = EmptyMutations,
->(options: FateClientOptions<Mutations>) {
+export function createClient<Mutations extends FateMutations = EmptyMutations>(
+  options: FateClientOptions<Mutations>,
+) {
   return new FateClient<Mutations>(options);
 }

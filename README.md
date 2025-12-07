@@ -549,7 +549,11 @@ Mutations in your tRPC backend are made available as actions and mutations by fa
 Let's assume that our `Post` entity has a tRPC mutation for liking a post called `post.like`. A `LikeButton` component using fate Actions and an async component library could then look like this:
 
 ```tsx
+import { useActionState } from 'react';
+import { useFateClient } from 'react-fate';
+
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
+  const fate = useFateClient();
   const [result, like] = useActionState(fate.actions.post.like, null);
 
   return (
@@ -564,6 +568,7 @@ If you are not using an async component library, you can use React's `useTransit
 
 ```tsx
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
+  const fate = useFateClient();
   const [, startTransition] = useTransition();
   const [result, like, isPending] = useActionState(
     fate.actions.post.like,
@@ -983,10 +988,10 @@ export type AppRouter = typeof appRouter;
 export * from './views.ts';
 ```
 
-_Note: We try to keep magic to a minimum and you can handwrite the [generated client](https://github.com/nkzw-tech/fate/blob/main/example/client/src/lib/fate.generated.ts) if you prefer._
+_Note: We try to keep magic to a minimum and you can handwrite the [generated client](https://github.com/nkzw-tech/fate/blob/main/example/client/src/fate.ts) if you prefer._
 
 ```bash
-pnpm fate generate @your-org/server/trpc/router.ts client/src/lib/fate.generated.ts
+pnpm fate generate @your-org/server/trpc/router.ts client/src/fate.ts
 ```
 
 _Note: fate uses the specified server module name to extract the server types it needs and uses the same module name to import the views into the generated client. Make sure that the module is available both at the root where you are running the CLI and in the client package._
@@ -1067,5 +1072,6 @@ Probably. One day. _Maybe._
 
 - [Relay](https://relay.dev/), [Isograph](https://isograph.dev/) & [GraphQL](https://graphql.org/) for inspiration
 - [Ricky Hanlon](https://x.com/rickyfm) for guidance on Async React
+- [Anthony Powell](https://x.com/Cephalization) for testing fate and providing feedback
 
 **_fate_** was created by [@cnakazawa](https://x.com/cnakazawa) and is maintained by [Nakazawa Tech](https://nakazawa.tech/).

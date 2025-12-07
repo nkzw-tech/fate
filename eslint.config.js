@@ -11,6 +11,7 @@ export default [
       '.vitepress/dist',
       'coverage',
       'dist',
+      'example/client/src/fate.ts',
       'example/server/src/prisma/pothos-types.ts',
       'example/server/src/prisma/prisma-client/*',
       'packages/**/lib',

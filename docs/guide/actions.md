@@ -10,7 +10,11 @@ Mutations in your tRPC backend are made available as actions and mutations by fa
 Let's assume that our `Post` entity has a tRPC mutation for liking a post called `post.like`. A `LikeButton` component using fate Actions and an async component library could then look like this:
 
 ```tsx
+import { useActionState } from 'react';
+import { useFateClient } from 'react-fate';
+
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
+  const fate = useFateClient();
   const [result, like] = useActionState(fate.actions.post.like, null);
 
   return (
@@ -25,6 +29,7 @@ If you are not using an async component library, you can use React's `useTransit
 
 ```tsx
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
+  const fate = useFateClient();
   const [, startTransition] = useTransition();
   const [result, like, isPending] = useActionState(
     fate.actions.post.like,

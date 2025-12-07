@@ -70,6 +70,52 @@ export type MutationAction<I extends MutationIdentifier<any, any, any>> = (
   options: MutationOptions<I> | 'reset',
 ) => Promise<{ error: undefined; result: MutationResult<I> } | { error: Error; result: undefined }>;
 
+type MutationIdentifierFor<K extends string, Def extends MutationDefinition<any, any, any>> =
+  Def extends MutationDefinition<infer T, infer I, infer R>
+    ? MutationIdentifier<T, I, R> & Readonly<{ key: K }>
+    : never;
+
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
+  ? I
+  : never;
+
+type NestedValue<Path extends string, Value> = Path extends `${infer Head}.${infer Tail}`
+  ? { [K in Head]: NestedValue<Tail, Value> }
+  : { [K in Path]: Value };
+
+export type EmptyMutations = Record<never, MutationDefinition<any, any, any>>;
+
+/**
+ * Base type for client mutations.
+ */
+
+export type FateMutations = Record<string, MutationDefinition<any, any, any>>;
+
+type MutationTreeFromRecord<
+  Mutations extends FateMutations,
+  ValueMap extends Record<string, unknown>,
+> = [keyof Mutations] extends [never]
+  ? object
+  : UnionToIntersection<
+      {
+        [K in keyof Mutations & string]: NestedValue<K, ValueMap[K]>;
+      }[keyof Mutations & string]
+    >;
+
+export type MutationFunctionsFor<Mutations extends FateMutations> = MutationTreeFromRecord<
+  Mutations,
+  {
+    [K in keyof Mutations & string]: MutationFunction<MutationIdentifierFor<K, Mutations[K]>>;
+  }
+>;
+
+export type MutationActionsFor<Mutations extends FateMutations> = MutationTreeFromRecord<
+  Mutations,
+  {
+    [K in keyof Mutations & string]: MutationAction<MutationIdentifierFor<K, Mutations[K]>>;
+  }
+>;
+
 const collectImplicitSelectedPaths = (value: AnyRecord): Set<string> => {
   const paths = new Set<string>();
 

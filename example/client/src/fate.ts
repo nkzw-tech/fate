@@ -8,12 +8,36 @@ type TRPCClientType = ReturnType<typeof createTRPCProxyClient<AppRouter>>;
 type RouterInputs = inferRouterInputs<AppRouter>;
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 
+const mutations = {
+  'comment.add': mutation<Comment, RouterInputs['comment']['add'], RouterOutputs['comment']['add']>(
+    'Comment',
+  ),
+  'comment.delete': mutation<
+    Comment,
+    RouterInputs['comment']['delete'],
+    RouterOutputs['comment']['delete']
+  >('Comment'),
+  'post.like': mutation<Post, RouterInputs['post']['like'], RouterOutputs['post']['like']>('Post'),
+  'post.unlike': mutation<Post, RouterInputs['post']['unlike'], RouterOutputs['post']['unlike']>(
+    'Post',
+  ),
+  'user.update': mutation<User, RouterInputs['user']['update'], RouterOutputs['user']['update']>(
+    'User',
+  ),
+} as const;
+
+type GeneratedClientMutations = typeof mutations;
+
+declare module 'react-fate' {
+  interface ClientMutations extends GeneratedClientMutations {}
+}
+
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
 }) => {
   const trpcClient = createTRPCProxyClient<AppRouter>(options);
 
-  const mutations = {
+  const trpcMutations = {
     'comment.add': (client: TRPCClientType) => client.comment.add.mutate,
     'comment.delete': (client: TRPCClientType) => client.comment.delete.mutate,
     'post.like': (client: TRPCClientType) => client.post.like.mutate,
@@ -22,32 +46,8 @@ export const createFateClient = (options: {
   } as const;
 
   return createClient({
-    mutations: {
-      'comment.add': mutation<
-        Comment,
-        RouterInputs['comment']['add'],
-        RouterOutputs['comment']['add']
-      >('Comment'),
-      'comment.delete': mutation<
-        Comment,
-        RouterInputs['comment']['delete'],
-        RouterOutputs['comment']['delete']
-      >('Comment'),
-      'post.like': mutation<Post, RouterInputs['post']['like'], RouterOutputs['post']['like']>(
-        'Post',
-      ),
-      'post.unlike': mutation<
-        Post,
-        RouterInputs['post']['unlike'],
-        RouterOutputs['post']['unlike']
-      >('Post'),
-      'user.update': mutation<
-        User,
-        RouterInputs['user']['update'],
-        RouterOutputs['user']['update']
-      >('User'),
-    },
-    transport: createTRPCTransport<AppRouter, typeof mutations>({
+    mutations,
+    transport: createTRPCTransport<AppRouter, typeof trpcMutations>({
       byId: {
         Category:
           (client: TRPCClientType) =>
@@ -121,7 +121,7 @@ export const createFateClient = (options: {
         events: (client: TRPCClientType) => client.event.list.query,
         posts: (client: TRPCClientType) => client.post.list.query,
       },
-      mutations,
+      mutations: trpcMutations,
     }),
     types: [
       {

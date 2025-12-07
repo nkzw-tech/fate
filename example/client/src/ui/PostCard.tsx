@@ -15,8 +15,8 @@ import {
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useListView, useView, view, ViewRef } from 'react-fate';
+import { useFateClient } from 'react-fate';
 import { Link } from 'react-router';
-import { fate } from '../lib/fate.tsx';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import TagBadge, { TagView } from '../ui/TagBadge.tsx';
@@ -61,6 +61,7 @@ const CommentInput = ({
   error?: Error;
   post: { commentCount: number; id: string };
 }) => {
+  const fate = useFateClient();
   const { data: session } = AuthClient.useSession();
   const user = session?.user;
   const [commentText, setCommentText] = useState('');
@@ -134,6 +135,7 @@ const CommentInput = ({
 };
 
 export function PostCard({ detail, post: postRef }: { detail?: boolean; post: ViewRef<'Post'> }) {
+  const fate = useFateClient();
   const post = useView(PostView, postRef);
   const author = useView(UserView, post.author);
   const category = useView(CategorySummaryView, post.category);

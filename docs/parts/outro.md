@@ -38,5 +38,6 @@ Probably. One day. _Maybe._
 
 - [Relay](https://relay.dev/), [Isograph](https://isograph.dev/) & [GraphQL](https://graphql.org/) for inspiration
 - [Ricky Hanlon](https://x.com/rickyfm) for guidance on Async React
+- [Anthony Powell](https://x.com/Cephalization) for testing fate and providing feedback
 
 **_fate_** was created by [@cnakazawa](https://x.com/cnakazawa) and is maintained by [Nakazawa Tech](https://nakazawa.tech/).

@@ -10,7 +10,7 @@
     "coverage/",
     "dist/",
     "example/client/dist/",
-    "example/client/src/lib/fate.generated.ts",
+    "example/client/src/fate.ts",
     "example/client/src/translations/",
     "example/server/dist",
     "pnpm-lock.yaml"

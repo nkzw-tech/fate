@@ -218,10 +218,10 @@ export type AppRouter = typeof appRouter;
 export * from './views.ts';
 ```
 
-_Note: We try to keep magic to a minimum and you can handwrite the [generated client](https://github.com/nkzw-tech/fate/blob/main/example/client/src/lib/fate.generated.ts) if you prefer._
+_Note: We try to keep magic to a minimum and you can handwrite the [generated client](https://github.com/nkzw-tech/fate/blob/main/example/client/src/fate.ts) if you prefer._
 
 ```bash
-pnpm fate generate @your-org/server/trpc/router.ts client/src/lib/fate.generated.ts
+pnpm fate generate @your-org/server/trpc/router.ts client/src/fate.ts
 ```
 
 _Note: fate uses the specified server module name to extract the server types it needs and uses the same module name to import the views into the generated client. Make sure that the module is available both at the root where you are running the CLI and in the client package._

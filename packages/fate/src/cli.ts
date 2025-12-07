@@ -16,7 +16,7 @@ Generates the fate client from the server's tRPC router.
   ${styleText('dim', '<moduleName>')}  The module name to import the tRPC router from.
   ${styleText('dim', '<targetFile>')}  The file path to write the generated client to.
   
-  ${styleText('bold', 'Example:')} ${styleText('blue', `pnpm fate generate @org/server/trpc/router.ts client/lib/fate.generated.ts`)}
+  ${styleText('bold', 'Example:')} ${styleText('blue', `pnpm fate generate @org/server/trpc/router.ts client/lib/fate.ts`)}
 `,
   );
   process.exit(1);
@@ -169,7 +169,7 @@ const generate = async () => {
   );
 
   const mutationResolverBlock = indentBlock(mutationResolverLines.join('\n'), 4);
-  const mutationConfigBlock = indentBlock(mutationConfigLines.join('\n'), 6);
+  const mutationConfigBlock = indentBlock(mutationConfigLines.join('\n'), 2);
   const byIdBlock = indentBlock(byIdLines.join('\n'), 8);
   const listsBlockContent = listLines.join('\n');
   const listsBlock = listLines.length
@@ -186,25 +186,33 @@ type TRPCClientType = ReturnType<typeof createTRPCProxyClient<AppRouter>>;
 type RouterInputs = inferRouterInputs<AppRouter>;
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 
+const mutations = {
+${mutationConfigBlock}
+} as const;
+
+type GeneratedClientMutations = typeof mutations;
+
+declare module 'react-fate' {
+  interface ClientMutations extends GeneratedClientMutations {}
+}
+
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
 }) => {
   const trpcClient = createTRPCProxyClient<AppRouter>(options);
 
-  const mutations = {
+  const trpcMutations = {
 ${mutationResolverBlock}
   } as const;
 
   return createClient({
-    mutations: {
-${mutationConfigBlock}
-    },
-    transport: createTRPCTransport<AppRouter, typeof mutations>({
+    mutations,
+    transport: createTRPCTransport<AppRouter, typeof trpcMutations>({
       byId: {
 ${byIdBlock}
       },
       client: trpcClient,
-${listsBlock}      mutations,
+${listsBlock}      mutations: trpcMutations,
     }),
     types: ${typesBlock.trimStart()},
   });
