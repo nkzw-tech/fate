@@ -6,8 +6,9 @@ type User = { id: string; name: string };
 type Comment = { author: User; id: string; replies: Array<Comment> };
 type Post = { author: User; comments: Array<Comment>; id: string };
 type Event = { id: string; title: string };
+type Category = { id: string; name: string };
 
-test('derives types and entities from data views', () => {
+test('derives types and roots from data views', () => {
   const userView = dataView<User>('User')({
     id: true,
     name: true,
@@ -36,15 +37,29 @@ test('derives types and entities from data views', () => {
     title: true,
   });
 
-  const { entities, types } = createSchema([commentView, postView, userView, eventView], {
-    posts: postView,
+  const categoryView = dataView<Category>('Category')({
+    id: true,
+    name: true,
+    posts: list(postView),
   });
 
-  expect(entities).toEqual({
-    comment: { type: 'Comment' },
-    event: { type: 'Event' },
-    post: { list: 'posts', type: 'Post' },
-    user: { type: 'User' },
+  const { roots, types } = createSchema(
+    [commentView, postView, userView, eventView, categoryView],
+    {
+      categories: list(categoryView),
+      commentSearch: { procedure: 'search', view: list(commentView) },
+      events: list(eventView),
+      posts: list(postView),
+      viewer: userView,
+    },
+  );
+
+  expect(roots).toEqual({
+    categories: { kind: 'list', procedure: 'list', router: 'category', type: 'Category' },
+    commentSearch: { kind: 'list', procedure: 'search', router: 'comment', type: 'Comment' },
+    events: { kind: 'list', procedure: 'list', router: 'event', type: 'Event' },
+    posts: { kind: 'list', procedure: 'list', router: 'post', type: 'Post' },
+    viewer: { kind: 'query', procedure: 'viewer', router: 'user', type: 'User' },
   });
 
   expect(types).toEqual([
@@ -64,6 +79,7 @@ test('derives types and entities from data views', () => {
       type: 'Post',
     },
     { type: 'Event' },
+    { fields: { posts: { listOf: 'Post' } }, type: 'Category' },
   ]);
 });
 
@@ -79,18 +95,20 @@ test('allows defining custom list procedure names', () => {
     replies: list(dataView<Comment>('Comment')({ id: true })),
   });
 
-  const { entities } = createSchema([commentView, userView], {
-    commentSearch: { procedure: 'search', view: commentView },
+  const { roots } = createSchema([commentView, userView], {
+    commentSearch: { procedure: 'search', view: list(commentView) },
+    user: userView,
   });
 
-  expect(entities.comment).toEqual({
-    list: 'commentSearch',
-    listProcedure: 'search',
+  expect(roots.commentSearch).toEqual({
+    kind: 'list',
+    procedure: 'search',
+    router: 'comment',
     type: 'Comment',
   });
 });
 
-test('collects entites as camelCase', () => {
+test('derives root type from lists when byId is missing', () => {
   const userProfileView = dataView<User>('UserProfile')({
     id: true,
     name: true,
@@ -101,8 +119,8 @@ test('collects entites as camelCase', () => {
     id: true,
   });
 
-  const { entities, types } = createSchema([commentView, userProfileView], {
-    userProfile: userProfileView,
+  const { roots, types } = createSchema([commentView, userProfileView], {
+    userProfile: list(userProfileView),
   });
 
   expect(types).toEqual([
@@ -110,11 +128,7 @@ test('collects entites as camelCase', () => {
     { fields: { author: { type: 'UserProfile' } }, type: 'Comment' },
   ]);
 
-  expect(entities).toEqual({
-    comment: { type: 'Comment' },
-    userProfile: {
-      list: 'userProfile',
-      type: 'UserProfile',
-    },
+  expect(roots).toEqual({
+    userProfile: { kind: 'list', procedure: 'list', router: 'userProfile', type: 'UserProfile' },
   });
 });

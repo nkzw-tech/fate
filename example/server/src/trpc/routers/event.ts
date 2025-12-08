@@ -1,32 +1,23 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
-import { z } from 'zod';
+import { byIdInput, createResolver } from '@nkzw/fate/server';
 import type { EventSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
 import { eventDataView } from '../views.ts';
 
 export const eventRouter = router({
-  byId: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        ids: z.array(z.string().min(1)).nonempty(),
-        select: z.array(z.string()),
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
+    const { resolveMany, select } = createResolver({
+      ...input,
+      ctx,
+      view: eventDataView,
+    });
+    return resolveMany(
+      await ctx.prisma.event.findMany({
+        select: select as EventSelect,
+        where: { id: { in: input.ids } },
       }),
-    )
-    .query(async ({ ctx, input }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: eventDataView,
-      });
-      return resolveMany(
-        await ctx.prisma.event.findMany({
-          select: select as EventSelect,
-          where: { id: { in: input.ids } },
-        }),
-      );
-    }),
+    );
+  }),
   list: createConnectionProcedure({
     defaultSize: 3,
     query: async ({ ctx, cursor, direction, input, skip, take }) => {

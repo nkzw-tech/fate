@@ -54,3 +54,6 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      - name: Publish
+        run: pnpx pkg-pr-new publish './packages/*' --compact

@@ -1291,6 +1291,43 @@ test(`'request' forwards nested selection args to by-id transports`, async () =>
   });
 });
 
+test(`'request' fetches root queries via the transport`, async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+
+  const fetchQuery = vi.fn().mockResolvedValue({ __typename: 'User', id: 'user-1', name: 'Kiwi' });
+
+  const client = createClient({
+    transport: {
+      fetchById: vi.fn(),
+      fetchQuery,
+    },
+    types: [{ type: 'User' }],
+  });
+
+  const UserView = view<User>()({
+    id: true,
+    name: true,
+  });
+
+  const { viewer } = await client.request({
+    viewer: {
+      args: { expand: true },
+      kind: 'query',
+      root: UserView,
+      type: 'User' as const,
+    },
+  });
+
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+  expect(fetchQuery).toHaveBeenCalledWith('viewer', new Set(['id', 'name']), { expand: true });
+
+  const user = unwrap(
+    client.readView<User, SelectionOf<typeof UserView>, typeof UserView>(UserView, viewer),
+  );
+
+  expect(user.name).toBe('Kiwi');
+});
+
 test(`'request' fetches view selections via the transport`, async () => {
   const fetchById = vi
     .fn()

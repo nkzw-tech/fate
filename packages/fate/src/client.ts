@@ -20,7 +20,7 @@ import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
-import { Transport } from './transport.ts';
+import { ResolvedArgsPayload, Transport } from './transport.ts';
 import {
   ConnectionMetadata,
   ConnectionTag,
@@ -30,6 +30,7 @@ import {
   type Entity,
   type EntityId,
   type ListItem,
+  type QueryItem,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
   type Pagination,
@@ -44,6 +45,7 @@ import {
   type ViewSnapshot,
   isNodeItem,
   isNodesItem,
+  isQueryItem,
   ViewResult,
   ViewsTag,
 } from './types.ts';
@@ -138,6 +140,13 @@ const getRequestCacheKey = (request: Request): string => {
       continue;
     }
 
+    if (isQueryItem(item)) {
+      parts.push(
+        `query:${name}:${item.type}:${viewSignature}:${item.args ? hashArgs(item.args) : ''}`,
+      );
+      continue;
+    }
+
     parts.push(
       `list:${name}:${item.type}:${viewSignature}:${item.args ? hashArgs(item.args) : ''}`,
     );
@@ -189,6 +198,7 @@ export class FateClient<Mutations extends FateMutations> {
   private readonly optimisticByEntity = new Map<EntityId, Set<number>>();
   private optimisticTokenCounter = 0;
   private readonly requests = new Map<string, Map<RequestMode, Promise<RequestResult<Request>>>>();
+  private readonly rootRequests = new Map<string, EntityId>();
   private readonly stalledRequests = new Set<string>();
   readonly store = new Store();
   private readonly types: ReadonlyMap<string, TypeConfig>;
@@ -640,7 +650,7 @@ export class FateClient<Mutations extends FateMutations> {
       }
 
       const requestArgs = { ...connection.args, ...args };
-      const { argsPayload, plan } = this.resolveListSelection(view, requestArgs);
+      const { argsPayload, plan } = this.resolveSelection(view, requestArgs);
       const { items, pagination } = await this.transport.fetchList(
         connection.field,
         plan.paths,
@@ -694,7 +704,7 @@ export class FateClient<Mutations extends FateMutations> {
       requestArgs.id = owner.id;
     }
 
-    const { argsPayload, plan } = this.resolveListSelection(view, requestArgs);
+    const { argsPayload, plan } = this.resolveSelection(view, requestArgs);
     const nodeSelection = plan.paths;
     const scopedArgsPayload = argsPayload
       ? scopeArgsPayload(argsPayload, connection.field)
@@ -880,7 +890,19 @@ export class FateClient<Mutations extends FateMutations> {
           }
         }
       } else {
-        promises.push(this.fetchListAndNormalize(name, item));
+        if (isQueryItem(item)) {
+          const { argsPayload, plan } = this.resolveSelection(item.root, item.args);
+          const entityId = this.rootRequests.get(name);
+          const missing = entityId
+            ? this.store.missingForSelection(entityId, plan.paths)
+            : plan.paths;
+
+          if (fetchAll || missing.size > 0) {
+            promises.push(this.fetchQueryAndNormalize(name, item, plan, argsPayload));
+          }
+        } else {
+          promises.push(this.fetchListAndNormalize(name, item));
+        }
       }
     }
 
@@ -910,6 +932,18 @@ export class FateClient<Mutations extends FateMutations> {
         continue;
       }
 
+      if (isQueryItem(item)) {
+        const { plan } = this.resolveSelection(item.root, item.args);
+        const entityId = this.rootRequests.get(name);
+        const missing = entityId
+          ? this.store.missingForSelection(entityId, plan.paths)
+          : plan.paths;
+        if (missing.size > 0) {
+          return false;
+        }
+        continue;
+      }
+
       if (!this.store.getList(name)) {
         return false;
       }
@@ -930,6 +964,17 @@ export class FateClient<Mutations extends FateMutations> {
         continue;
       }
 
+      if (isQueryItem(item)) {
+        const entityId = this.rootRequests.get(name);
+        if (entityId) {
+          const { id } = parseEntityId(entityId);
+          result[name] = createRef(item.type, id, item.root, { root: true });
+        } else {
+          result[name] = null;
+        }
+        continue;
+      }
+
       const listState = this.store.getListState(name);
       const nodeView = (
         item.root && typeof item.root === 'object' && 'items' in item.root && item.root.items
@@ -945,7 +990,7 @@ export class FateClient<Mutations extends FateMutations> {
           pagination: listState?.pagination,
         };
 
-        const { argsPayload } = this.resolveListSelection(item.root, item.args);
+        const { argsPayload } = this.resolveSelection(item.root, item.args);
 
         const metadata: ConnectionMetadata = {
           args: argsPayload,
@@ -987,6 +1032,27 @@ export class FateClient<Mutations extends FateMutations> {
     }
   }
 
+  private async fetchQueryAndNormalize<T extends Entity, S extends Selection<T>>(
+    name: string,
+    item: QueryItem<View<T, S>>,
+    plan: SelectionPlan,
+    argsPayload: ResolvedArgsPayload | undefined,
+  ) {
+    if (!this.transport.fetchQuery) {
+      throw new Error(
+        `fate: transport does not support queries. Please add support for 'fetchQuery' in your transport for '${name}'.`,
+      );
+    }
+
+    const record = await this.transport.fetchQuery(name, plan.paths, argsPayload);
+    if (!record || typeof record !== 'object') {
+      return;
+    }
+
+    const entityId = this.writeEntity(item.type, record as AnyRecord, plan.paths, undefined, plan);
+    this.rootRequests.set(name, entityId);
+  }
+
   private async fetchListAndNormalize<T extends Entity, S extends Selection<T>>(
     name: string,
     item: ListItem<View<T, S>>,
@@ -997,7 +1063,7 @@ export class FateClient<Mutations extends FateMutations> {
       );
     }
 
-    const { argsPayload, plan } = this.resolveListSelection(item.root, item.args);
+    const { argsPayload, plan } = this.resolveSelection(item.root, item.args);
     const { items, pagination } = await this.transport.fetchList(name, plan.paths, argsPayload);
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
@@ -1013,7 +1079,7 @@ export class FateClient<Mutations extends FateMutations> {
     });
   }
 
-  private resolveListSelection(view: View<any, any>, args: AnyRecord | undefined) {
+  private resolveSelection(view: View<any, any>, args: AnyRecord | undefined) {
     const plan = getSelectionPlan(view, null);
     const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
     if (argsPayload) {

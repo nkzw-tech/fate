@@ -53,10 +53,7 @@ export const userRouter = router({
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.sessionUser) {
-        throw new TRPCError({
-          code: 'UNAUTHORIZED',
-          message: 'You must be logged in to view your profile',
-        });
+        return null;
       }
 
       const { resolve, select } = createResolver({
@@ -65,11 +62,10 @@ export const userRouter = router({
         view: userDataView,
       });
 
-      return resolve(
-        await ctx.prisma.user.findUniqueOrThrow({
-          select,
-          where: { id: ctx.sessionUser.id },
-        } as UserFindUniqueArgs),
-      );
+      const user = await ctx.prisma.user.findUnique({
+        select,
+        where: { id: ctx.sessionUser.id },
+      } as UserFindUniqueArgs);
+      return user ? resolve(user) : null;
     }),
 });

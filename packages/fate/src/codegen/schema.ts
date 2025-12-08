@@ -12,25 +12,32 @@ type FateTypeConfig = {
 const isDataViewField = (field: unknown): field is DataView<AnyRecord> =>
   Boolean(field) && typeof field === 'object' && 'fields' in (field as AnyRecord);
 
-type ListConfig =
+type RootConfig =
   | DataView<AnyRecord>
   | {
       procedure?: string;
+      router?: string;
       view: DataView<AnyRecord>;
     };
 
-const camelCase = (value: string) => value.charAt(0).toLowerCase() + value.slice(1);
-
 /**
  * Builds the schema object used by the CLI generator from your data views and
- * list resolver configs.
+ * root resolver configs.
  */
 export const createSchema = (
   dataViews: ReadonlyArray<DataView<AnyRecord>>,
-  lists: Record<string, ListConfig>,
+  roots: Record<string, RootConfig>,
 ) => {
   const canonicalViews = new Map<string, DataView<AnyRecord>>();
-  const entities: Record<string, { list?: string; listProcedure?: string; type: string }> = {};
+  const rootSchema: Record<
+    string,
+    {
+      kind: 'list' | 'query';
+      procedure: string;
+      router: string;
+      type: string;
+    }
+  > = {};
   const fateTypes = new Map<string, FateTypeConfig>();
   const processing = new Set<string>();
 
@@ -81,18 +88,32 @@ export const createSchema = (
     if (!canonicalViews.has(typeName)) {
       canonicalViews.set(typeName, view);
     }
-
-    entities[camelCase(typeName)] = { type: typeName };
   }
 
-  for (const [name, list] of Object.entries(lists)) {
-    const config = 'fields' in list ? { view: list } : list;
-    const typeName = ensureType(config.view);
+  for (const view of dataViews) {
+    ensureType(view);
+  }
 
-    entities[camelCase(typeName)] = {
-      list: name,
-      listProcedure: config.procedure,
-      type: typeName,
+  for (const [name, root] of Object.entries(roots)) {
+    const config = 'fields' in root ? { view: root } : root;
+    const view = config.view;
+    const type = ensureType(view);
+
+    if (!view.typeName) {
+      throw new Error(`Root "${name}" is missing a data view.`);
+    }
+
+    const router = config.router ?? view.typeName[0]?.toLowerCase() + view.typeName.slice(1);
+
+    if (!router) {
+      throw new Error(`Root "${name}" is missing a router name.`);
+    }
+
+    rootSchema[name] = {
+      kind: view.kind === 'list' ? 'list' : 'query',
+      procedure: config.procedure ?? (view.kind === 'list' ? 'list' : name),
+      router,
+      type,
     };
   }
 
@@ -101,7 +122,7 @@ export const createSchema = (
   }
 
   return {
-    entities,
+    roots: rootSchema,
     types: Array.from(fateTypes.values()),
   } as const;
 };

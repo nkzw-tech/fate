@@ -120,6 +120,41 @@ test('omits args when none are provided for lists', async () => {
   });
 });
 
+test('passes selection when fetching queries', async () => {
+  const call = vi.fn(async () => ({ id: 'user-1' }));
+  const queryResolver = vi.fn(() => call);
+  const client = {} as any;
+
+  const transport = createTRPCTransport({
+    byId: {
+      Post: vi.fn(() => vi.fn(async () => [])),
+    },
+    client,
+    queries: {
+      viewer: queryResolver,
+    },
+  });
+
+  await transport.fetchQuery?.('viewer', new Set(['id', 'name']), { greeting: 'hi' });
+
+  expect(queryResolver).toHaveBeenCalledWith(client);
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith({ args: { greeting: 'hi' }, select: ['id', 'name'] });
+});
+
+test('throws when fetching queries without configured resolvers', async () => {
+  const transport = createTRPCTransport({
+    byId: {
+      Post: vi.fn(() => vi.fn(async () => [])),
+    },
+    client: {} as any,
+  });
+
+  await expect(transport.fetchQuery?.('viewer', new Set(['id']))).rejects.toThrowError(
+    'fate(trpc): No query resolvers configured; cannot call "viewer".',
+  );
+});
+
 test('passes selection when invoking mutations', async () => {
   const call = vi.fn(async () => ({ id: 'post-1' }));
   const mutationResolver = vi.fn(() => call);

@@ -30,6 +30,7 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     items: Array<{ cursor: string | undefined; node: unknown }>;
     pagination: Pagination;
   }>;
+  fetchQuery?(proc: string, select: Iterable<string>, args?: ResolvedArgsPayload): Promise<unknown>;
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],
@@ -63,6 +64,16 @@ export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
     items: Array<{ cursor: string | undefined; node: unknown }>;
     pagination: Pagination;
   }>
+>;
+
+/**
+ * Mapping of query procedure name to a tRPC resolver factory.
+ */
+export type TRPCQueryResolvers<AppRouter extends AnyRouter> = Record<
+  string,
+  (
+    client: TRPCClient<AppRouter>,
+  ) => (input: { args?: ResolvedArgsPayload; select: Array<string> }) => Promise<unknown>
 >;
 
 /**
@@ -100,11 +111,13 @@ export function createTRPCTransport<
   client,
   lists,
   mutations,
+  queries,
 }: {
   byId: TRPCByIdResolvers<AppRouter>;
   client: TRPCClient<AppRouter>;
   lists?: TRPCListResolvers<AppRouter>;
   mutations?: Mutations;
+  queries?: TRPCQueryResolvers<AppRouter>;
 }): Transport<MutationMapFromResolvers<Mutations>> {
   const transport: Transport<MutationMapFromResolvers<Mutations>> = {
     async fetchById(type, ids, select, args) {
@@ -126,6 +139,21 @@ export function createTRPCTransport<
       if (!resolver) {
         throw new Error(`fate(trpc): Missing list resolver for procedure "${procedure}"`);
       }
+      return resolver(client)({
+        args,
+        select: [...select],
+      });
+    },
+    async fetchQuery(procedure, select, args) {
+      if (!queries) {
+        throw new Error(`fate(trpc): No query resolvers configured; cannot call "${procedure}".`);
+      }
+
+      const resolver = queries[procedure];
+      if (!resolver) {
+        throw new Error(`fate(trpc): Missing query resolver for procedure "${procedure}"`);
+      }
+
       return resolver(client)({
         args,
         select: [...select],

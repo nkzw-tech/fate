@@ -279,7 +279,7 @@ export function wrapMutation<
       }
 
       if (error instanceof Error) {
-        const { data } = error as unknown as { data?: TRPCError };
+        const { data } = error as { data?: TRPCError };
         const errorCategory = data
           ? categorizeTRPCError(getHTTPStatusCodeFromError(data))
           : 'boundary';

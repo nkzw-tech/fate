@@ -151,16 +151,17 @@ export const postRouter = router({
         view: postDataView,
       });
 
-      const updated = await ctx.prisma.post.update({
-        data: {
-          likes: {
-            increment: 1,
+      return resolve(
+        await ctx.prisma.post.update({
+          data: {
+            likes: {
+              increment: 1,
+            },
           },
-        },
-        select,
-        where: { id: input.id },
-      });
-      return resolve(updated as unknown as PostItem);
+          select,
+          where: { id: input.id },
+        } as PostUpdateArgs),
+      );
     }),
 });
 ```

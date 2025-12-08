@@ -9,7 +9,7 @@ import EventCard, { EventView } from '../ui/EventCard.tsx';
 import H2 from '../ui/H2.tsx';
 import { PostCard, PostView } from '../ui/PostCard.tsx';
 import Section from '../ui/Section.tsx';
-import UserCard from '../ui/UserCard.tsx';
+import UserCard, { UserCardView } from '../ui/UserCard.tsx';
 import AuthClient from '../user/AuthClient.tsx';
 
 const PostConnectionView = {
@@ -81,12 +81,17 @@ const request = {
     root: PostConnectionView,
     type: 'Post',
   },
+  viewer: {
+    kind: 'query',
+    root: UserCardView,
+    type: 'User',
+  },
 } as const;
 
 export default function HomeRoute() {
   const { data: session } = AuthClient.useSession();
   const user = session?.user;
-  const { categories, events, posts } = useRequest(request);
+  const { categories, events, posts, viewer } = useRequest(request);
 
   return (
     <Section gap={32}>
@@ -119,7 +124,7 @@ export default function HomeRoute() {
             )}
           </Stack>
         </Card>
-        {user && <UserCard user={user} />}
+        {viewer?.id && <UserCard viewer={viewer} />}
       </div>
       <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr] lg:items-start">
         <PostFeed posts={posts} />

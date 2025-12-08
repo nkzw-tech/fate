@@ -4,6 +4,8 @@ import Stack, { VStack } from '@nkzw/stack';
 import { ChangeEvent, useActionState, useState } from 'react';
 import { view } from 'react-fate';
 import { useFateClient } from 'react-fate';
+import { ViewRef } from 'react-fate';
+import { useView } from 'react-fate';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import AuthClient from '../user/AuthClient.tsx';
@@ -108,17 +110,22 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
   );
 };
 
-export default function UserCard({ user }: { user: SessionUser }) {
+export default function UserCard({ viewer: viewerRef }: { viewer: ViewRef<'User'> }) {
+  const viewer = useView(UserCardView, viewerRef);
+
   return (
     <Card>
       <VStack between className="h-full" gap={16}>
         <VStack gap={16}>
           <H2>Your account</H2>
           <Stack alignCenter between gap={16}>
-            <p className="text-sm text-muted-foreground">Signed in as {user.name}.</p>
+            <p className="text-sm text-muted-foreground">
+              Signed in as {viewer.name}
+              {viewer.email ? ` <${viewer.email}>` : null}.
+            </p>
           </Stack>
         </VStack>
-        <UserNameForm user={user} />
+        <UserNameForm user={viewer} />
       </VStack>
     </Card>
   );

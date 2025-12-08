@@ -67,7 +67,7 @@ export function useListView<
       }));
     }
 
-    return connection?.items as unknown as ConnectionItems<NonNullable<C>>;
+    return connection?.items;
   }, [client, connection?.items, listState, metadata?.root, nodeView]);
 
   const loadNext = useMemo(() => {

@@ -1,33 +1,29 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import type { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import type {
+  PostFindManyArgs,
+  PostFindUniqueArgs,
+  PostUpdateArgs,
+} from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { Post, postDataView, PostItem } from '../views.ts';
+import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
-  byId: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        ids: z.array(z.string().min(1)).nonempty(),
-        select: z.array(z.string()),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-      return resolveMany(
-        await ctx.prisma.post.findMany({
-          select,
-          where: { id: { in: input.ids } },
-        } as PostFindManyArgs),
-      );
-    }),
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
+    const { resolveMany, select } = createResolver({
+      ...input,
+      ctx,
+      view: postDataView,
+    });
+    return resolveMany(
+      await ctx.prisma.post.findMany({
+        select,
+        where: { id: { in: input.ids } },
+      } as PostFindManyArgs),
+    );
+  }),
   like: procedure
     .input(
       z.object({
@@ -75,16 +71,17 @@ export const postRouter = router({
         view: postDataView,
       });
 
-      const updated = await ctx.prisma.post.update({
-        data: {
-          likes: {
-            increment: 1,
+      return (await resolve(
+        await ctx.prisma.post.update({
+          data: {
+            likes: {
+              increment: 1,
+            },
           },
-        },
-        select,
-        where: { id: input.id },
-      });
-      return (await resolve(updated as unknown as PostItem)) as Post;
+          select,
+          where: { id: input.id },
+        } as PostUpdateArgs),
+      )) as Post;
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
@@ -140,23 +137,25 @@ export const postRouter = router({
         }
 
         if (existing.likes <= 0) {
-          const result = await tx.post.findUniqueOrThrow({
-            select,
-            where: { id: input.id },
-          });
-          return resolve(result as unknown as PostItem);
+          return (await resolve(
+            await tx.post.findUniqueOrThrow({
+              select,
+              where: { id: input.id },
+            } as PostFindUniqueArgs),
+          )) as Post;
         }
 
-        const updated = await tx.post.update({
-          data: {
-            likes: {
-              decrement: 1,
+        return (await resolve(
+          await tx.post.update({
+            data: {
+              likes: {
+                decrement: 1,
+              },
             },
-          },
-          select,
-          where: { id: input.id },
-        });
-        return (await resolve(updated as unknown as PostItem)) as Post;
+            select,
+            where: { id: input.id },
+          } as PostUpdateArgs),
+        )) as Post;
       }),
     ),
 });

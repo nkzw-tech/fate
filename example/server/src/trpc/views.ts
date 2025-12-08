@@ -182,9 +182,10 @@ export type Event = Entity<
   }
 >;
 
-export const Lists = {
-  categories: categoryDataView,
-  commentSearch: { procedure: 'search', view: commentDataView },
-  events: eventDataView,
-  posts: postDataView,
+export const Root = {
+  categories: list(categoryDataView),
+  commentSearch: { procedure: 'search', view: list(commentDataView) },
+  events: list(eventDataView),
+  posts: list(postDataView),
+  viewer: userDataView,
 };

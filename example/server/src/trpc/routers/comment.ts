@@ -1,4 +1,4 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentFindManyArgs, CommentSelect } from '../../prisma/prisma-client/models.ts';
@@ -72,27 +72,19 @@ export const commentRouter = router({
         }),
       ) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
-  byId: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        ids: z.array(z.string().min(1)).nonempty(),
-        select: z.array(z.string()),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: commentDataView,
-      });
-      return await resolveMany(
-        await ctx.prisma.comment.findMany({
-          select,
-          where: { id: { in: input.ids } },
-        } as CommentFindManyArgs),
-      );
-    }),
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
+    const { resolveMany, select } = createResolver({
+      ...input,
+      ctx,
+      view: commentDataView,
+    });
+    return await resolveMany(
+      await ctx.prisma.comment.findMany({
+        select,
+        where: { id: { in: input.ids } },
+      } as CommentFindManyArgs),
+    );
+  }),
   delete: procedure
     .input(
       z.object({

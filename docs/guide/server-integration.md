@@ -44,35 +44,27 @@ _Note: Currently, fate provides helpers to integrate with Prisma, but the framew
 We can apply the above data view in our tRPC router and resolve the client's selection against it using `createResolver`. Here is an example implementation of the `byId` query for the `User` type which allows fetching multiple users by `id`:
 
 ```tsx
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, createResolver } from '@nkzw/fate/server';
 import { z } from 'zod';
 import type { UserFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
 import { userDataView } from '../views.ts';
 
 export const userRouter = router({
-  byId: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        ids: z.array(z.string().min(1)).nonempty(),
-        select: z.array(z.string()),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: userDataView,
-      });
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
+    const { resolveMany, select } = createResolver({
+      ...input,
+      ctx,
+      view: userDataView,
+    });
 
-      const users = await ctx.prisma.user.findMany({
-        select: select,
-        where: { id: { in: input.ids } },
-      } as UserFindManyArgs);
+    const users = await ctx.prisma.user.findMany({
+      select: select,
+      where: { id: { in: input.ids } },
+    } as UserFindManyArgs);
 
-      return await resolveMany(users);
-    }),
+    return await resolveMany(users);
+  }),
 });
 ```
 
@@ -153,29 +145,19 @@ export const postDataView = dataView<PostItem>('Post')({
 });
 ```
 
-We can also define root-level lists by exporting a `Lists` object from our `views.ts` file:
+We can define extra root-level lists and queries by exporting a `Root` object from our `views.ts` file using the same view syntax as everywhere else:
 
 ```tsx
-export const Lists = {
-  posts: postDataView,
+export const Root = {
+  categories: list(categoryDataView),
+  commentSearch: { procedure: 'search', view: list(commentDataView) },
+  events: list(eventDataView),
+  posts: list(postDataView),
+  viewer: userDataView,
 };
 ```
 
-This makes it possible to fetch a list of posts from the client using `useRequest`.
-
-### Custom Root Lists
-
-You might want to define custom root lists that don't directly map to a single data view. For example, a search endpoint that returns a list of posts based on a search query:
-
-```tsx
-export const Lists = {
-  // …
-  postSearch: { procedure: 'search', view: postDataView },
-  // …
-};
-```
-
-This maps the `postSearch` list to a `search` procedure on your post router.
+Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
 
 ## Data View Resolvers
 
