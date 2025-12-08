@@ -100,21 +100,20 @@ export default function HomeRoute() {
   const user = session?.user;
   const { categories, events, posts, viewer } = useRequest({
     categories: {
-      root: CategoryView,
+      list: CategoryView,
       type: 'Category',
     },
     events: {
-      root: EventView,
+      list: EventView,
       type: 'Event',
     },
     posts: {
-      root: PostConnectionView,
+      list: PostConnectionView,
       type: 'Post',
     },
     viewer: {
-      kind: 'query',
-      root: UserCardView,
       type: 'User',
+      view: UserCardView,
     },
   } as const);
 

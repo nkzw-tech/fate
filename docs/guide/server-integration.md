@@ -159,6 +159,25 @@ export const Root = {
 
 Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
 
+For the above `Root` definitions, you can make the following requests using `useRequest`:
+
+```tsx
+const query = 'Apple';
+
+const { posts, categories, viewer } = useRequest({
+  // Explicit Root queries:
+  categories: { list: categoryView, type: 'Category' },
+  commentSearch: { args: { query }, list: commentView, type: 'Comment' },
+  events: { list: eventView, type: 'Event' },
+  posts: { list: postView, type: 'Post' },
+  viewer: { type: 'User', view: userView },
+
+  // Queries by id, if those entities have a `byId` query defined:
+  post: { id: '12', type: 'Post', view: postView },
+  comment: { ids: ['6', '7'], type: 'Comment', view: commentView },
+} as const);
+```
+
 ## Data View Resolvers
 
 fate data views support resolvers for computed fields. If we want to add a `commentCount` field to our `Post` data view, we can use the `resolver` helper that defines a Prisma selection for the database query together with a `resolve` function:
@@ -224,34 +243,30 @@ _Note: fate uses the specified server module name to extract the server types it
 
 ## Creating a _fate_ Client
 
-Now that we have generated the client types, all that remains is creating the instance of the fate client, and using it in our React app using the `FateClient` context provider.
-
-Create a `fate.ts` file:
+Now that we have generated the client types, all that remains is creating an instance of the fate client, and using it in our React app using the `FateClient` context provider:
 
 ```tsx
-import { createFateClient } from './lib/fate.generated';
-
-export const fate = createFateClient({
-  links: [
-    httpBatchLink({
-      fetch: (input, init) =>
-        fetch(input, {
-          ...init,
-          credentials: 'include',
-        }),
-      url: `${env('SERVER_URL')}/trpc`,
-    }),
-  ],
-});
-```
-
-Now wrap your app with the `FateClient` provider:
-
-```tsx
+import { httpBatchLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { fate } from './fate.ts';
+import { createFateClient } from './fate.ts';
 
 export function App() {
+  const fate = useMemo(
+    () =>
+      createFateClient({
+        links: [
+          httpBatchLink({
+            fetch: (input, init) =>
+              fetch(input, {
+                ...init,
+                credentials: 'include',
+              }),
+            url: `${env('SERVER_URL')}/trpc`,
+          }),
+        ],
+      }),
+    [],
+  );
   return <FateClient client={fate}>{/* Components go here */}</FateClient>;
 }
 ```

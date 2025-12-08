@@ -287,31 +287,29 @@ export type ViewSelection<V> = V extends {
 /** Definition of a list request for fetching data from the backend. */
 export type ListItem<V extends View<any, any>> = Readonly<{
   args?: Record<string, unknown>;
-  kind?: 'list';
-  root: V;
+  list: V;
   type: ViewEntityName<V>;
 }>;
 
 /** Definition of a root-level query request. */
 export type QueryItem<V extends View<any, any>> = Readonly<{
   args?: Record<string, unknown>;
-  kind: 'query';
-  root: V;
   type: ViewEntityName<V>;
+  view: V;
 }>;
 
 /** Definition of a node request with one explicit ID for fetching data from the backend. */
 export type NodeItem<V extends View<any, any>> = Readonly<{
   id: string | number;
-  root: V;
   type: ViewEntityName<V>;
+  view: V;
 }>;
 
 /** Definition of a node request with explicit IDs for fetching data from the backend. */
 export type NodesItem<V extends View<any, any>> = Readonly<{
   ids: ReadonlyArray<string | number>;
-  root: V;
   type: ViewEntityName<V>;
+  view: V;
 }>;
 
 type RequestItem =
@@ -346,11 +344,11 @@ type ListResult<Item extends AnyRequestItem> = Item extends AnyNodeItem
     : Item extends AnyQueryItem
       ? ViewRef<Item['type']>
       : Item extends AnyListItem
-        ? Item['root'] extends { items?: { node?: View<any, any> } }
+        ? Item['list'] extends { items?: { node?: View<any, any> } }
           ? Readonly<{
               items: ReadonlyArray<{
                 cursor?: string | undefined;
-                node: ViewRef<ConnectionNodeType<Item['root']>>;
+                node: ViewRef<ConnectionNodeType<Item['list']>>;
               }>;
               pagination?: Pagination;
             }>
@@ -374,7 +372,7 @@ export function isNodesItem(item: AnyRequestItem): item is AnyNodesItem {
 
 /** Indicates whether a request item represents a root query. */
 export function isQueryItem(item: AnyRequestItem): item is AnyQueryItem {
-  return 'kind' in item && (item as AnyQueryItem).kind === 'query';
+  return 'view' in item && !('id' in item) && !('ids' in item);
 }
 
 /** Brand used on mutation definitions to mark their identity in the d.ts output. */

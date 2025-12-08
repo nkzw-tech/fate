@@ -34,7 +34,7 @@ test('releases network-only requests on unmount', async () => {
     id: true,
   });
 
-  const request = { post: { ids: ['post-1'], root: PostView, type: 'Post' as const } };
+  const request = { post: { ids: ['post-1'], type: 'Post' as const, view: PostView } };
   const releaseSpy = vi.spyOn(client, 'releaseRequest');
 
   const Component = () => {
@@ -87,7 +87,7 @@ test('supports requesting a single node through `byId` calls', async () => {
     id: true,
   });
 
-  const request = { post: { id: 'post-1', root: PostView, type: 'Post' as const } };
+  const request = { post: { id: 'post-1', type: 'Post' as const, view: PostView } };
   const renders: Array<string> = [];
 
   const Component = () => {

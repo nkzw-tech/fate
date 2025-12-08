@@ -1106,7 +1106,7 @@ test('mutations insert records into root lists optimistically', async () => {
   } as const;
 
   await client.request({
-    posts: { args: { first: 1 }, root: PostConnectionView, type: 'Post' },
+    posts: { args: { first: 1 }, list: PostConnectionView, type: 'Post' },
   });
 
   const optimisticId = 'optimistic:post-2';
@@ -1166,11 +1166,11 @@ test('mutations can control root list insertion order', async () => {
   } as const;
 
   await client.request({
-    posts: { args: { first: 2 }, root: PostConnectionView, type: 'Post' },
+    posts: { args: { first: 2 }, list: PostConnectionView, type: 'Post' },
   });
 
   const { posts: listBefore } = client.getRequestResult({
-    posts: { args: { first: 2 }, root: PostConnectionView, type: 'Post' },
+    posts: { args: { first: 2 }, list: PostConnectionView, type: 'Post' },
   });
 
   expect(
@@ -1377,8 +1377,8 @@ test(`'request' groups ids by selection before fetching`, async () => {
   await client.request({
     post: {
       ids: ['post-1'],
-      root: PostView,
       type: 'Post',
+      view: PostView,
     },
   });
 
@@ -1414,8 +1414,8 @@ test(`'request' forwards nested selection args to by-id transports`, async () =>
   await client.request({
     post: {
       ids: ['post-1'],
-      root: PostView,
       type: 'Post',
+      view: PostView,
     },
   });
 
@@ -1445,9 +1445,8 @@ test(`'request' fetches root queries via the transport`, async () => {
   const { viewer } = await client.request({
     viewer: {
       args: { expand: true },
-      kind: 'query',
-      root: UserView,
       type: 'User' as const,
+      view: UserView,
     },
   });
 
@@ -1491,8 +1490,8 @@ test(`'request' fetches view selections via the transport`, async () => {
   await client.request({
     post: {
       ids: ['post-1'],
-      root: PostView,
       type: 'Post',
+      view: PostView,
     },
   });
 
@@ -1529,7 +1528,7 @@ test(`'request' fetches list selections via the transport`, async () => {
   await client.request({
     comments: {
       args: { first: 1 },
-      root: CommentView,
+      list: CommentView,
       type: 'Comment',
     },
   });
@@ -1566,7 +1565,7 @@ test(`'request' forwards nested selection args to list transports`, async () => 
   await client.request({
     posts: {
       args: { first: 1 },
-      root: PostView,
+      list: PostView,
       type: 'Post',
     },
   });
@@ -1614,7 +1613,7 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
   const request = {
     posts: {
       args: { first: 2 },
-      root: PostConnectionView,
+      list: PostConnectionView,
       type: 'Post',
     },
   } as const;
@@ -1668,8 +1667,8 @@ test(`'request' refetches cached data when using 'store-and-network' mode`, asyn
     {
       post: {
         ids: ['post-1'],
-        root: PostView,
         type: 'Post',
+        view: PostView,
       },
     },
     { mode: 'cache-first' },
@@ -1681,8 +1680,8 @@ test(`'request' refetches cached data when using 'store-and-network' mode`, asyn
     {
       post: {
         ids: ['post-1'],
-        root: PostView,
         type: 'Post',
+        view: PostView,
       },
     },
     { mode: 'stale-while-revalidate' },
@@ -1712,8 +1711,8 @@ test(`'request' only fetches once when cache is missing for 'store-and-network'`
     {
       post: {
         ids: ['post-1'],
-        root: PostView,
         type: 'Post',
+        view: PostView,
       },
     },
     { mode: 'stale-while-revalidate' },
@@ -1756,8 +1755,8 @@ test(`'request' waits for a network response when using 'network' mode`, async (
       {
         post: {
           ids: ['post-1'],
-          root: PostView,
           type: 'Post',
+          view: PostView,
         },
       },
       { mode: 'network-only' },

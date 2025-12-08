@@ -504,7 +504,7 @@ test('updates root list items after loading the next page', async () => {
   const request = {
     projects: {
       args: { first: 1 },
-      root: ProjectConnectionView,
+      list: ProjectConnectionView,
       type: 'Project',
     },
   } as const;

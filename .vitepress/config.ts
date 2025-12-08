@@ -69,6 +69,7 @@ export default defineConfig({
           { link: '/guide/views', text: 'Views' },
           { link: '/guide/list-views', text: 'List Views' },
           { link: '/guide/actions', text: 'Actions' },
+          { link: '/guide/requests', text: 'Requests' },
           { link: '/guide/server-integration', text: 'Server Integration' },
         ],
         text: 'Guide',

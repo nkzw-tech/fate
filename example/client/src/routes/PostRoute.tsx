@@ -13,8 +13,8 @@ export default function PostRoute() {
   const { post } = useRequest({
     post: {
       id,
-      root: PostView,
       type: 'Post',
+      view: PostView,
     },
   } as const);
 

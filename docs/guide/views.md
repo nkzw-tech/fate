@@ -50,34 +50,22 @@ Components using `useView` listen to changes for all selected fields. When data 
 
 ## Fetching Data with `useRequest`
 
-Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our `HomePage` component, we can request a list of posts like this:
+Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
 
 ```tsx
 import { useRequest } from 'react-fate';
 import { PostCard, PostView } from './PostCard.tsx';
 
-export function HomePage() {
+export function App() {
   const { posts } = useRequest({
-    posts: { root: PostView, type: 'Post' },
+    posts: { list: PostView, type: 'Post' },
   } as const);
 
   return posts.map((post) => <PostCard key={post.id} post={post} />);
 }
 ```
 
-This component suspends or throws errors, which bubble up to the nearest error boundary. Wrap your component tree with `ErrorBoundary` and `Suspense` components to show error and loading states:
-
-```tsx
-<ErrorBoundary FallbackComponent={ErrorComponent}>
-  <Suspense fallback={<div>Loading…</div>}>
-    <HomePage />
-  </Suspense>
-</ErrorBoundary>
-```
-
-> [!NOTE]
->
-> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+_Learn more about `useRequest` in the [Requests Guide](/docs/guide/requests.md)._
 
 ## Composing Views
 
@@ -85,7 +73,7 @@ In the above example we are defining a single view for a `Post`. One of fate's c
 
 ```tsx
 import { Suspense } from 'react';
-import { useRequest, useView, ViewRef } from 'react-fate';
+import { useView, ViewRef } from 'react-fate';
 
 export const PostView = view<Post>()({
   author: {
@@ -290,36 +278,3 @@ const PostDetail = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 ```
 
 ViewRefs carry a set of view names they can resolve. `useView` throws if a ref does not include the required view.
-
-## Request Modes
-
-`useRequest` supports different request modes to control caching and data freshness. The available modes are:
-
-- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network.
-- `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
-- `network-only`: Always fetches data from the network, bypassing the cache.
-
-You can pass the request mode as an option to `useRequest`:
-
-```tsx
-const { posts } = useRequest(
-  {
-    posts: { root: PostView, type: 'Post' },
-  },
-  { mode: 'stale-while-revalidate' },
-);
-```
-
-## Request Arguments
-
-You can pass arguments to `useRequest` calls. This is useful for pagination, filtering, or sorting. For example, to fetch the first 10 posts, you can do the following:
-
-```tsx
-const { posts } = useRequest({
-  posts: {
-    args: { first: 10 },
-    root: PostView,
-    type: 'Post',
-  },
-});
-```

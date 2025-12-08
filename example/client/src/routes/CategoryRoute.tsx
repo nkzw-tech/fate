@@ -14,8 +14,8 @@ export default function CategoryRoute() {
     {
       category: {
         id,
-        root: CategoryView,
         type: 'Category',
+        view: CategoryView,
       },
     } as const,
     { mode: 'stale-while-revalidate' },

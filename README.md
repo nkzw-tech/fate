@@ -202,34 +202,22 @@ Components using `useView` listen to changes for all selected fields. When data 
 
 ### Fetching Data with `useRequest`
 
-Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our `HomePage` component, we can request a list of posts like this:
+Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
 
 ```tsx
 import { useRequest } from 'react-fate';
 import { PostCard, PostView } from './PostCard.tsx';
 
-export function HomePage() {
+export function App() {
   const { posts } = useRequest({
-    posts: { root: PostView, type: 'Post' },
+    posts: { list: PostView, type: 'Post' },
   } as const);
 
   return posts.map((post) => <PostCard key={post.id} post={post} />);
 }
 ```
 
-This component suspends or throws errors, which bubble up to the nearest error boundary. Wrap your component tree with `ErrorBoundary` and `Suspense` components to show error and loading states:
-
-```tsx
-<ErrorBoundary FallbackComponent={ErrorComponent}>
-  <Suspense fallback={<div>Loading…</div>}>
-    <HomePage />
-  </Suspense>
-</ErrorBoundary>
-```
-
-> [!NOTE]
->
-> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+_Learn more about `useRequest` in the [Requests Guide](/docs/guide/requests.md)._
 
 ### Composing Views
 
@@ -237,7 +225,7 @@ In the above example we are defining a single view for a `Post`. One of fate's c
 
 ```tsx
 import { Suspense } from 'react';
-import { useRequest, useView, ViewRef } from 'react-fate';
+import { useView, ViewRef } from 'react-fate';
 
 export const PostView = view<Post>()({
   author: {
@@ -443,6 +431,81 @@ const PostDetail = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 
 ViewRefs carry a set of view names they can resolve. `useView` throws if a ref does not include the required view.
 
+## Requests
+
+### Requesting Lists
+
+The `useRequest` hook can be used to declare our data needs for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
+
+```tsx
+import { useRequest } from 'react-fate';
+import { PostCard, PostView } from './PostCard.tsx';
+
+export function App() {
+  const { posts } = useRequest({
+    posts: { list: PostView, type: 'Post' },
+  } as const);
+
+  return posts.map((post) => <PostCard key={post.id} post={post} />);
+}
+```
+
+This component suspends or throws errors, which bubble up to the nearest error boundary. Wrap your component tree with `ErrorBoundary` and `Suspense` components to show error and loading states:
+
+```tsx
+<ErrorBoundary FallbackComponent={ErrorComponent}>
+  <Suspense fallback={<div>Loading…</div>}>
+    <App />
+  </Suspense>
+</ErrorBoundary>
+```
+
+> [!NOTE]
+>
+> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink) into a single network request.
+
+### Requesting Objects by ID
+
+If you want to fetch data for a single object instead of a list, you can specify the `id` and the associated `view` like this:
+
+```tsx
+const { post } = useRequest({
+  post: { id: '12', type: 'Post', view: PostView } as const,
+});
+```
+
+If you want to fetch multiple objects by their IDs, you can use the `ids` field:
+
+```tsx
+const { posts } = useRequest({
+  posts: { ids: ['6', '7'], type: 'Post', view: PostView } as const,
+});
+```
+
+### Other Types of Requests
+
+For any other queries, pass only the `type` and `view`:
+
+```tsx
+const { viewer } = useRequest({
+  viewer: { type: 'User', view: UserView } as const,
+});
+```
+
+### Request Arguments
+
+You can pass arguments to `useRequest` calls. This is useful for pagination, filtering, or sorting. For example, to fetch the first 10 posts, you can do the following:
+
+```tsx
+const { posts } = useRequest({
+  posts: {
+    args: { first: 10 },
+    list: PostView,
+    type: 'Post',
+  },
+});
+```
+
 ### Request Modes
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
@@ -455,25 +518,11 @@ You can pass the request mode as an option to `useRequest`:
 
 ```tsx
 const { posts } = useRequest(
+  { posts: { list: PostView, type: 'Post' } } as const,
   {
-    posts: { root: PostView, type: 'Post' },
+    mode: 'stale-while-revalidate',
   },
-  { mode: 'stale-while-revalidate' },
 );
-```
-
-### Request Arguments
-
-You can pass arguments to `useRequest` calls. This is useful for pagination, filtering, or sorting. For example, to fetch the first 10 posts, you can do the following:
-
-```tsx
-const { posts } = useRequest({
-  posts: {
-    args: { first: 10 },
-    root: PostView,
-    type: 'Post',
-  },
-});
 ```
 
 ## List Views
@@ -950,6 +999,25 @@ export const Root = {
 
 Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
 
+For the above `Root` definitions, you can make the following requests using `useRequest`:
+
+```tsx
+const query = 'Apple';
+
+const { posts, categories, viewer } = useRequest({
+  // Explicit Root queries:
+  categories: { list: categoryView, type: 'Category' },
+  commentSearch: { args: { query }, list: commentView, type: 'Comment' },
+  events: { list: eventView, type: 'Event' },
+  posts: { list: postView, type: 'Post' },
+  viewer: { type: 'User', view: userView },
+
+  // Queries by id, if those entities have a `byId` query defined:
+  post: { id: '12', type: 'Post', view: postView },
+  comment: { ids: ['6', '7'], type: 'Comment', view: commentView },
+} as const);
+```
+
 ### Data View Resolvers
 
 fate data views support resolvers for computed fields. If we want to add a `commentCount` field to our `Post` data view, we can use the `resolver` helper that defines a Prisma selection for the database query together with a `resolve` function:
@@ -1015,34 +1083,30 @@ _Note: fate uses the specified server module name to extract the server types it
 
 ### Creating a _fate_ Client
 
-Now that we have generated the client types, all that remains is creating the instance of the fate client, and using it in our React app using the `FateClient` context provider.
-
-Create a `fate.ts` file:
+Now that we have generated the client types, all that remains is creating an instance of the fate client, and using it in our React app using the `FateClient` context provider:
 
 ```tsx
-import { createFateClient } from './lib/fate.generated';
-
-export const fate = createFateClient({
-  links: [
-    httpBatchLink({
-      fetch: (input, init) =>
-        fetch(input, {
-          ...init,
-          credentials: 'include',
-        }),
-      url: `${env('SERVER_URL')}/trpc`,
-    }),
-  ],
-});
-```
-
-Now wrap your app with the `FateClient` provider:
-
-```tsx
+import { httpBatchLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { fate } from './fate.ts';
+import { createFateClient } from './fate.ts';
 
 export function App() {
+  const fate = useMemo(
+    () =>
+      createFateClient({
+        links: [
+          httpBatchLink({
+            fetch: (input, init) =>
+              fetch(input, {
+                ...init,
+                credentials: 'include',
+              }),
+            url: `${env('SERVER_URL')}/trpc`,
+          }),
+        ],
+      }),
+    [],
+  );
   return <FateClient client={fate}>{/* Components go here */}</FateClient>;
 }
 ```

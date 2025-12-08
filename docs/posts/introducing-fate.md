@@ -14,7 +14,7 @@
 
 <span style="color: var(--vp-c-text-2);">
 
-_December 9<sup>th</sup> 2025 by <img src="https://gravatar.com/avatar/77a332a7da779ef594cb6db9970c7b2f?s=128" style="border-radius: 32px; corner-shape: squircle; width: 20px; height: 20px; display: inline; vertical-align: text-bottom;" /> [Christoph Nakazawa](https://x.com/cnakazawa)_
+_December 9<sup>th</sup> 2025 by [<img src="https://gravatar.com/avatar/77a332a7da779ef594cb6db9970c7b2f?s=128" style="border-radius: 32px; corner-shape: squircle; width: 20px; height: 20px; display: inline; vertical-align: text-bottom;" /> Christoph Nakazawa](https://x.com/cnakazawa)_
 
 </span>
 
@@ -133,15 +133,15 @@ A `ViewRef` is a reference to a concrete object of a specific type, for example 
 
 ### Requests
 
-At the root of your application, you pass the composed views to `useRequest` which fetches data in a single request using tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink):
+Pass the composed views to `useRequest` at the root of your app, and it'll suspend and fetch data in a single request using tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
 
 ```tsx
 import { useRequest } from 'react-fate';
 import { PostCard, PostView } from './PostCard.tsx';
 
-export function HomePage() {
+export function App() {
   const { posts } = useRequest({
-    posts: { root: PostView, type: 'Post' },
+    posts: { list: PostView, type: 'Post' },
   } as const);
 
   return posts.map((post) => <PostCard key={post.id} post={post} />);
@@ -179,13 +179,11 @@ All of the above works because _fate_ has a normalized data cache under the hood
 
 With these three code examples we covered almost the entire client API surface of _fate_. As a result, the mental model of using _fate_ is dramatically simpler compared to the status quo. _fate_'s API is a joy to use and requires less code, boilerplate, and manual state management.
 
-**It's this _clarity_ together with _reducing the API surface_ that helps humans and AI write better code.**
+**_It's this clarity together with reducing the API surface that helps humans and AI write better code._**
 
 ### Async
 
 Finally, by using modern Async React, the latest React DevTools features for Suspense and Component Tracks, the [React Compiler](https://react.dev/learn/react-compiler) and even [Hot Module Reloading (HMR) for data views](https://x.com/cnakazawa/status/1996144553603322227) work out of the box.
-
-<!--@include: ../parts/outro.md#how-was-fate-built-->
 
 ### Get Started
 
@@ -218,6 +216,8 @@ _You can also try a runnable demo directly in your browser:_
 ## Future
 
 <!--@include: ../parts/outro.md#future -->
+
+<!--@include: ../parts/outro.md#how-was-fate-built-->
 
 ## Hope
 

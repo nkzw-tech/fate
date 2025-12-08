@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/fate-private",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": true,
   "description": "fate is a modern data client for React.",
   "repository": {

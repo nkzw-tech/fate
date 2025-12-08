@@ -11,6 +11,7 @@ const files = [
   'docs/guide/getting-started.md',
   'docs/guide/core-concepts.md',
   'docs/guide/views.md',
+  'docs/guide/requests.md',
   'docs/guide/list-views.md',
   'docs/guide/actions.md',
   'docs/guide/server-integration.md',

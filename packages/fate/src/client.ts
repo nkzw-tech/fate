@@ -128,28 +128,27 @@ const getRequestCacheKey = (request: Request): string => {
       continue;
     }
 
-    const viewSignature = getViewSignature(item.root);
     if (isNodeItem(item)) {
-      parts.push(`node:${name}:${item.type}:${viewSignature}:${item.id}`);
+      parts.push(`node:${name}:${item.type}:${getViewSignature(item.view)}:${item.id}`);
       continue;
     }
 
     if (isNodesItem(item)) {
       parts.push(
-        `node:${name}:${item.type}:${viewSignature}:${item.ids.map(serializeId).join(',')}`,
+        `node:${name}:${item.type}:${getViewSignature(item.view)}:${item.ids.map(serializeId).join(',')}`,
       );
       continue;
     }
 
     if (isQueryItem(item)) {
       parts.push(
-        `query:${name}:${item.type}:${viewSignature}:${item.args ? hashArgs(item.args) : ''}`,
+        `query:${name}:${item.type}:${getViewSignature(item.view)}:${item.args ? hashArgs(item.args) : ''}`,
       );
       continue;
     }
 
     parts.push(
-      `list:${name}:${item.type}:${viewSignature}:${item.args ? hashArgs(item.args) : ''}`,
+      `list:${name}:${item.type}:${getViewSignature(item.list)}:${item.args ? hashArgs(item.args) : ''}`,
     );
   }
 
@@ -916,7 +915,7 @@ export class FateClient<Mutations extends FateMutations> {
     for (const [name, item] of Object.entries(request)) {
       const isNode = isNodeItem(item);
       if (isNode || isNodesItem(item)) {
-        const plan = getSelectionPlan(item.root, null);
+        const plan = getSelectionPlan(item.view, null);
         const fields = plan.paths;
         const fieldsSignature = [...fields].slice().sort().join(',');
         const argsSignature = [...plan.args.entries()]
@@ -939,7 +938,7 @@ export class FateClient<Mutations extends FateMutations> {
         }
       } else {
         if (isQueryItem(item)) {
-          const { argsPayload, plan } = this.resolveSelection(item.root, item.args);
+          const { argsPayload, plan } = this.resolveSelection(item.view, item.args);
           const entityId = this.rootRequests.get(name);
           const missing = entityId
             ? this.store.missingForSelection(entityId, plan.paths)
@@ -968,7 +967,7 @@ export class FateClient<Mutations extends FateMutations> {
     for (const [name, item] of Object.entries(request)) {
       const isNode = isNodeItem(item);
       if (isNode || isNodesItem(item)) {
-        const plan = getSelectionPlan(item.root, null);
+        const plan = getSelectionPlan(item.view, null);
         const fields = plan.paths;
         for (const raw of isNode ? [item.id] : item.ids) {
           const entityId = toEntityId(item.type, raw);
@@ -981,7 +980,7 @@ export class FateClient<Mutations extends FateMutations> {
       }
 
       if (isQueryItem(item)) {
-        const { plan } = this.resolveSelection(item.root, item.args);
+        const { plan } = this.resolveSelection(item.view, item.args);
         const entityId = this.rootRequests.get(name);
         const missing = entityId
           ? this.store.missingForSelection(entityId, plan.paths)
@@ -1003,12 +1002,12 @@ export class FateClient<Mutations extends FateMutations> {
     const result: AnyRecord = {};
     for (const [name, item] of Object.entries(request)) {
       if (isNodeItem(item)) {
-        result[name] = this.ref(item.type, item.id, item.root);
+        result[name] = this.ref(item.type, item.id, item.view);
         continue;
       }
 
       if (isNodesItem(item)) {
-        result[name] = item.ids.map((id) => this.ref(item.type, id, item.root));
+        result[name] = item.ids.map((id) => this.ref(item.type, id, item.view));
         continue;
       }
 
@@ -1016,7 +1015,7 @@ export class FateClient<Mutations extends FateMutations> {
         const entityId = this.rootRequests.get(name);
         if (entityId) {
           const { id } = parseEntityId(entityId);
-          result[name] = createRef(item.type, id, item.root, { root: true });
+          result[name] = createRef(item.type, id, item.view, { root: true });
         } else {
           result[name] = null;
         }
@@ -1024,21 +1023,19 @@ export class FateClient<Mutations extends FateMutations> {
       }
 
       const listState = this.store.getListState(name);
+      const hasItems = item.list && typeof item.list === 'object' && 'items' in item.list;
       const nodeView = (
-        item.root && typeof item.root === 'object' && 'items' in item.root && item.root.items
-          ? ((item.root.items as AnyRecord).node ?? item.root)
-          : item.root
+        hasItems && item.list.items ? ((item.list.items as AnyRecord).node ?? item.list) : item.list
       ) as View<any, any>;
-
       const nodes = (listState?.ids ?? []).map((id: string) => this.rootListRef(id, nodeView));
 
-      if (item.root && typeof item.root === 'object' && 'items' in item.root) {
+      if (hasItems) {
         const connection: AnyRecord = {
           items: nodes.map((node, index) => ({ cursor: listState?.cursors?.[index], node })),
           pagination: listState?.pagination,
         };
 
-        const { argsPayload } = this.resolveSelection(item.root, item.args);
+        const { argsPayload } = this.resolveSelection(item.list, item.args);
 
         const metadata: ConnectionMetadata = {
           args: argsPayload,
@@ -1111,7 +1108,7 @@ export class FateClient<Mutations extends FateMutations> {
       );
     }
 
-    const { argsPayload, plan } = this.resolveSelection(item.root, item.args);
+    const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
     const { items, pagination } = await this.transport.fetchList(name, plan.paths, argsPayload);
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
