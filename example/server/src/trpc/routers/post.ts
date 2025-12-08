@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { postDataView, PostItem } from '../views.ts';
+import { Post, postDataView, PostItem } from '../views.ts';
 
 export const postRouter = router({
   byId: procedure
@@ -84,7 +84,7 @@ export const postRouter = router({
         select,
         where: { id: input.id },
       });
-      return resolve(updated as unknown as PostItem);
+      return (await resolve(updated as unknown as PostItem)) as Post;
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
@@ -156,7 +156,7 @@ export const postRouter = router({
           select,
           where: { id: input.id },
         });
-        return resolve(updated as unknown as PostItem);
+        return (await resolve(updated as unknown as PostItem)) as Post;
       }),
     ),
 });

@@ -1,36 +1,37 @@
 import { isRecord } from '../record.ts';
+import { AnyRecord } from '../types.ts';
 import { toConnectionResult } from './connection.ts';
 import { prismaSelect } from './prismaSelect.ts';
 
 const dataViewFieldsKey = Symbol('__fate__DataViewFields');
-
-type AnyRecord = Record<string, unknown>;
 
 type ResolverSelect<Context> =
   | AnyRecord
   | ((options: { args?: AnyRecord; context?: Context }) => AnyRecord | void);
 
 type Bivariant<Fn extends (...args: Array<any>) => unknown> = {
-  bivarianceHack(...args: Parameters<Fn>): ReturnType<Fn>;
-}['bivarianceHack'];
+  bivariance(...args: Parameters<Fn>): ReturnType<Fn>;
+}['bivariance'];
 
-type ResolverResolve<Item extends AnyRecord, Context> = Bivariant<
-  (options: { args?: AnyRecord; context?: Context; item: Item }) => Promise<unknown> | unknown
+type ResolverResolve<Item extends AnyRecord, Result, Context> = Bivariant<
+  (item: Item, context?: Context, args?: AnyRecord) => Promise<Result> | Result
+>;
+
+type ResolverAuthorize<Item extends AnyRecord, Context> = Bivariant<
+  (item: Item, context?: Context, args?: AnyRecord) => Promise<boolean> | boolean
 >;
 
 /**
  * Field configuration for selecting and resolving a computed value on the backend.
  */
-export type ResolverField<Item extends AnyRecord, Context> = {
+export type ResolverField<Item extends AnyRecord, Result, Context> = {
+  authorize?: ResolverAuthorize<Item, Context>;
   kind: 'resolver';
-  resolve: ResolverResolve<Item, Context>;
+  resolve: ResolverResolve<Item, Result, Context>;
   select?: ResolverSelect<Context>;
 };
 
-type DataField<Item extends AnyRecord, Context> =
-  | true
-  | DataView<AnyRecord, Context>
-  | ResolverField<Item, Context>;
+type DataField<Item extends AnyRecord> = true | DataView<AnyRecord> | ResolverField<Item, any, any>;
 
 /**
  * Recursively serializes resolver results for transport across the network.
@@ -47,8 +48,8 @@ export type Serializable<T> = T extends Date
  * Server-side mirror of a view definition describing how to select and resolve
  * fields when fulfilling a client request.
  */
-export type DataView<Item extends AnyRecord, Context = unknown> = {
-  fields: Record<string, DataField<Item, Context>>;
+export type DataView<Item extends AnyRecord> = {
+  fields: Record<string, DataField<Item>>;
   kind?: 'resolver' | 'list';
   typeName: string;
 };
@@ -56,10 +57,7 @@ export type DataView<Item extends AnyRecord, Context = unknown> = {
 /**
  * Convenience type for declaring the fields of a server data view.
  */
-export type DataViewConfig<Item extends AnyRecord, Context> = Record<
-  string,
-  DataField<Item, Context>
->;
+export type DataViewConfig<Item extends AnyRecord> = Record<string, DataField<Item>>;
 
 /**
  * Declares a server data view that exposes an object's available fields to the client.
@@ -70,13 +68,13 @@ export type DataViewConfig<Item extends AnyRecord, Context> = Record<
  *   title: true,
  * });
  */
-export function dataView<Item extends AnyRecord, Context = unknown>(typeName: string) {
-  return <Fields extends DataViewConfig<Item, Context>>(fields: Fields) => {
+export function dataView<Item extends AnyRecord>(typeName: string) {
+  return <Fields extends DataViewConfig<Item>>(fields: Fields) => {
     return {
       [dataViewFieldsKey]: fields,
       fields,
       typeName,
-    } as DataView<Item, Context> & {
+    } as DataView<Item> & {
       readonly [dataViewFieldsKey]: Fields;
     };
   };
@@ -86,7 +84,7 @@ export function dataView<Item extends AnyRecord, Context = unknown>(typeName: st
  * Marks a data view as a list resolver so the server can respond with
  * connection information.
  */
-export const list = <Item extends AnyRecord, Context>(view: DataView<Item, Context>) => {
+export const list = <Item extends AnyRecord>(view: DataView<Item>) => {
   return { ...view, kind: 'list' as const };
 };
 
@@ -94,10 +92,11 @@ export const list = <Item extends AnyRecord, Context>(view: DataView<Item, Conte
  * Declares a resolver field inside a data view, optionally providing a
  * selection for any data dependencies.
  */
-export function resolver<Item extends AnyRecord, Context = unknown>(config: {
-  resolve: ResolverResolve<Item, Context>;
+export function resolver<Item extends AnyRecord, Result = unknown, Context = unknown>(config: {
+  authorize?: ResolverAuthorize<Item, Context>;
+  resolve: ResolverResolve<Item, Result, Context>;
   select?: ResolverSelect<Context>;
-}): ResolverField<Item, Context> {
+}): ResolverField<Item, Result, Context> {
   return {
     kind: 'resolver' as const,
     ...config,
@@ -115,14 +114,18 @@ type WithNullish<Original, Value> = null extends Original
     : Value;
 
 type ResolverResult<Field> =
-  Field extends ResolverField<AnyRecord, unknown> ? Awaited<ReturnType<Field['resolve']>> : never;
+  Field extends ResolverField<AnyRecord, any, any>
+    ? Field['authorize'] extends ResolverAuthorize<any, any>
+      ? Awaited<ReturnType<Field['resolve']>> | null
+      : Awaited<ReturnType<Field['resolve']>>
+    : never;
 
-type RelationResult<ItemField, V extends DataView<AnyRecord, unknown>> =
+type RelationResult<ItemField, V extends DataView<AnyRecord>> =
   NonNullish<ItemField> extends Array<unknown>
     ? WithNullish<ItemField, Array<RawDataViewResult<V>>>
     : WithNullish<ItemField, RawDataViewResult<V>>;
 
-type ViewFieldConfig<V extends DataView<AnyRecord, unknown>> = V extends {
+type ViewFieldConfig<V extends DataView<AnyRecord>> = V extends {
   readonly [dataViewFieldsKey]: infer Fields;
 }
   ? Fields
@@ -131,27 +134,27 @@ type ViewFieldConfig<V extends DataView<AnyRecord, unknown>> = V extends {
 type RawFieldResult<
   Item extends AnyRecord,
   Key extends PropertyKey,
-  Field extends DataField<Item, unknown>,
+  Field extends DataField<Item>,
 > = Field extends true
   ? Key extends keyof Item
     ? Item[Key]
     : never
-  : Field extends DataView<infer ChildItem, unknown>
+  : Field extends DataView<infer ChildItem>
     ? Key extends keyof Item
-      ? RelationResult<Item[Key], DataView<ChildItem, unknown>>
+      ? RelationResult<Item[Key], DataView<ChildItem>>
       : never
-    : Field extends ResolverField<Item, unknown>
+    : Field extends ResolverField<Item, any, any>
       ? ResolverResult<Field>
       : never;
 
-type RawDataViewResult<V extends DataView<AnyRecord, unknown>> =
-  V extends DataView<infer Item, unknown>
+type RawDataViewResult<V extends DataView<AnyRecord>> =
+  V extends DataView<infer Item>
     ? {
         [K in keyof ViewFieldConfig<V>]: RawFieldResult<Item, K, ViewFieldConfig<V>[K]>;
       }
     : never;
 
-type DataViewResult<V extends DataView<AnyRecord, unknown>> = Serializable<RawDataViewResult<V>>;
+type DataViewResult<V extends DataView<AnyRecord>> = Serializable<RawDataViewResult<V>>;
 
 type WithTypename<T, Name extends string> = T & { __typename: Name };
 
@@ -159,31 +162,29 @@ type WithTypename<T, Name extends string> = T & { __typename: Name };
  * Resolved entity type from a data view for client use.
  */
 export type Entity<
-  TView extends DataView<AnyRecord, unknown>,
+  TView extends DataView<AnyRecord>,
   Name extends string,
-  Replacements extends Record<string, unknown> = Record<string, never>,
+  Replacements extends Record<string, unknown> = Record<never, never>,
 > = WithTypename<Omit<DataViewResult<TView>, keyof Replacements> & Replacements, Name>;
 
 type SelectedViewNode<Context> = {
   path: string | null;
   relations: Map<string, SelectedViewNode<Context>>;
-  resolvers: Map<string, ResolverField<AnyRecord, Context>>;
-  view: DataView<AnyRecord, Context>;
+  resolvers: Map<string, ResolverField<AnyRecord, any, Context>>;
+  view: DataView<AnyRecord>;
 };
 
 const isResolverField = <Item extends AnyRecord, Context>(
-  field: DataField<Item, Context>,
-): field is ResolverField<Item, Context> =>
+  field: DataField<Item>,
+): field is ResolverField<Item, unknown, Context> =>
   Boolean(field) && typeof field === 'object' && 'kind' in field && field.kind === 'resolver';
 
-const isDataViewField = <Context>(
-  field: DataField<AnyRecord, Context>,
-): field is DataView<AnyRecord, Context> =>
+const isDataViewField = (field: DataField<AnyRecord>): field is DataView<AnyRecord> =>
   Boolean(field) && typeof field === 'object' && 'fields' in field;
 
-const filterToViewFields = <Context>(
+const filterToViewFields = (
   item: unknown,
-  view: DataView<AnyRecord, Context>,
+  view: DataView<AnyRecord>,
   selectedPaths: ReadonlySet<string>,
   prefix: string | null = null,
 ): AnyRecord => {
@@ -286,7 +287,7 @@ type ResolveOptions<Item extends AnyRecord, Context> = {
 };
 
 const createSelectedNode = <Context>(
-  view: DataView<AnyRecord, Context>,
+  view: DataView<AnyRecord>,
   path: string | null,
 ): SelectedViewNode<Context> => ({
   path,
@@ -300,7 +301,7 @@ const assignPath = <Context>(
   segments: Array<string>,
   path: string | null,
   selectedPaths: Set<string>,
-  view: DataView<AnyRecord, Context>,
+  view: DataView<AnyRecord>,
   allowedPaths: Set<string>,
 ) => {
   if (segments.length === 0) {
@@ -376,11 +377,11 @@ const collectResolvers = <Context>(
   }
 };
 
-const resolveNode = async <Item extends AnyRecord, Context>(
-  options: ResolveOptions<Item, Context>,
-): Promise<Item> => {
-  const { item, node, options: resolverOptions } = options;
-
+const resolveNode = async <Item extends AnyRecord, Context>({
+  item,
+  node,
+  options: resolverOptions,
+}: ResolveOptions<Item, Context>): Promise<Item> => {
   if (!isRecord(item)) {
     return item;
   }
@@ -394,13 +395,23 @@ const resolveNode = async <Item extends AnyRecord, Context>(
     result[key] = value;
   };
 
-  const base = () => result ?? item;
+  const getItem = () => result ?? item;
 
   for (const [field, resolver] of node.resolvers) {
-    const value = await resolver.resolve({
-      ...resolverOptions,
-      item: base() as Item,
-    });
+    if (resolver.authorize) {
+      const authorized = await resolver.authorize(
+        getItem(),
+        resolverOptions.context,
+        resolverOptions.args,
+      );
+
+      if (!authorized) {
+        assign(field, null);
+        continue;
+      }
+    }
+
+    const value = await resolver.resolve(getItem(), resolverOptions.context, resolverOptions.args);
 
     if (value !== undefined) {
       assign(field, value);
@@ -408,7 +419,7 @@ const resolveNode = async <Item extends AnyRecord, Context>(
   }
 
   for (const [field, relationNode] of node.relations) {
-    const current = base()[field];
+    const current = getItem()[field];
 
     if (Array.isArray(current)) {
       const resolved = await Promise.all(
@@ -441,7 +452,7 @@ const resolveNode = async <Item extends AnyRecord, Context>(
     }
   }
 
-  return (result ?? item) as Item;
+  return result ?? item;
 };
 
 /**
@@ -457,7 +468,7 @@ export function createResolver<Item extends AnyRecord, Context = unknown>({
   args?: AnyRecord;
   ctx?: Context;
   select: Iterable<string>;
-  view: DataView<Item, Context>;
+  view: DataView<Item>;
 }) {
   const allowedPaths = new Set<string>();
   const selectedPaths = new Set<string>();

@@ -954,18 +954,32 @@ fate data views support resolvers for computed fields. If we want to add a `comm
 ```tsx
 export const postDataView = dataView<PostItem>('Post')({
   author: userDataView,
-  commentCount: resolver<PostItem>({
-    resolve: ({ item }) => item._count?.comments ?? 0,
+  commentCount: resolver<PostItem, number>({
+    resolve: ({ _count }) => _count?.comments ?? 0,
     select: () => ({
       _count: { select: { comments: true } },
     }),
   }),
   comments: list(commentDataView),
   id: true,
-} as const;
+});
 ```
 
 This definition makes the `commentCount` field available to your client-side views.
+
+### Authorization in Resolvers
+
+You might want to restrict access to certain fields based on the current user or other contextual information. You can do this by adding an `authorize` function to your resolver definition:
+
+```tsx
+export const userDataView = dataView<UserItem>('User')({
+  email: resolver<UserItem, string | null, { sessionUser: string }>({
+    authorize: ({ id }, context) => context?.sessionUserId === id,
+    resolve: ({ email }) => email,
+  }),
+  id: true,
+});
+```
 
 ### Generating a typed client
 

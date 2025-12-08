@@ -1,5 +1,7 @@
-import { expect, test } from 'vitest';
-import { createResolver, dataView, list, resolver } from '../dataView.ts';
+import { expect, expectTypeOf, test } from 'vitest';
+import { SelectionOf, ViewData } from '../../types.ts';
+import { view } from '../../view.ts';
+import { createResolver, dataView, Entity, list, resolver } from '../dataView.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -37,7 +39,7 @@ test('resolvers can add prisma selections and compute values', async () => {
   const view = dataView<CategoryItem>('Category')({
     id: true,
     postCount: resolver<CategoryItem>({
-      resolve: ({ item }) => item._count?.posts ?? 0,
+      resolve: ({ _count }) => _count?.posts ?? 0,
       select: () => ({
         _count: { select: { posts: true } },
       }),
@@ -58,6 +60,28 @@ test('resolvers can add prisma selections and compute values', async () => {
   expect(item).toEqual({ id: 'cat-1', postCount: 4 });
 });
 
+test('a view selection for a resolver has the correct type', async () => {
+  const categoryView = dataView<CategoryItem>('Category')({
+    id: true,
+    postCount: resolver<CategoryItem, number>({
+      resolve: ({ _count }) => _count?.posts ?? 0,
+      select: () => ({
+        _count: { select: { posts: true } },
+      }),
+    }),
+  });
+
+  type Category = Entity<typeof categoryView, 'Category'>;
+
+  const CategoryView = view<Category>()({
+    postCount: true,
+  });
+
+  type CategoryData = ViewData<Category, SelectionOf<typeof CategoryView>>;
+
+  expectTypeOf<CategoryData['postCount']>().toEqualTypeOf<number>();
+});
+
 type ChildItem = {
   _count?: { items: number };
   id: string;
@@ -73,7 +97,7 @@ test('nested resolvers apply their selections within relations', async () => {
   const childView = dataView<ChildItem>('Child')({
     id: true,
     total: resolver<ChildItem>({
-      resolve: ({ item }) => item._count?.items ?? 0,
+      resolve: ({ _count }) => _count?.items ?? 0,
       select: () => ({
         _count: { select: { items: true } },
       }),
@@ -214,4 +238,64 @@ test('list fields are wrapped into connections recursively using scoped args', a
   expect(repliesConnection?.items).toHaveLength(1);
   expect(repliesConnection?.items[0]?.node?.author?.name).toBe('Ada');
   expect(repliesConnection?.pagination?.hasPrevious).toBe(false);
+});
+
+type SessionContext = { sessionUserId?: string };
+
+type UserWithEmailItem = { email: string; id: string; name: string };
+
+test('authorized resolvers can access context and return null when unauthorized', async () => {
+  const userDataView = dataView<UserWithEmailItem>('User')({
+    email: resolver<UserWithEmailItem, string | null, SessionContext>({
+      authorize: ({ id }, context) => context?.sessionUserId === id,
+      resolve: ({ email }) => email,
+      select: { email: true },
+    }),
+    id: true,
+    name: true,
+  });
+
+  const selfSelection = createResolver({
+    ctx: { sessionUserId: 'user-1' },
+    select: ['email'],
+    view: userDataView,
+  });
+
+  expect(
+    (
+      await selfSelection.resolve({
+        email: 'jane@example.com',
+        id: 'user-1',
+        name: 'Jane',
+      })
+    ).email,
+  ).toBe('jane@example.com');
+
+  const otherSelection = createResolver({
+    ctx: { sessionUserId: 'user-2' },
+    select: ['email'],
+    view: userDataView,
+  });
+
+  expect(
+    (
+      await otherSelection.resolve({
+        email: 'jane@example.com',
+        id: 'user-1',
+        name: 'Jane',
+      })
+    ).email,
+  ).toBeNull();
+
+  type User = Entity<typeof userDataView, 'User'>;
+
+  const UserView = view<User>()({
+    email: true,
+    name: true,
+  });
+
+  type UserData = ViewData<User, SelectionOf<typeof UserView>>;
+
+  expectTypeOf<UserData['name']>().toEqualTypeOf<string>();
+  expectTypeOf<UserData['email']>().toEqualTypeOf<string | null>();
 });

@@ -178,7 +178,7 @@ export function arrayToConnection<TNode extends { id: string | number }>(
   };
 }
 
-const isDataViewField = <Context>(field: unknown): field is DataView<AnyRecord, Context> =>
+const isDataViewField = (field: unknown): field is DataView<AnyRecord> =>
   Boolean(field) && typeof field === 'object' && 'fields' in (field as AnyRecord);
 
 const assignIfChanged = <Value>(
@@ -199,7 +199,7 @@ const assignIfChanged = <Value>(
   return current;
 };
 
-export function toConnectionResult<Item extends AnyRecord, Context>({
+export function toConnectionResult<Item extends AnyRecord>({
   args,
   item,
   path,
@@ -208,7 +208,7 @@ export function toConnectionResult<Item extends AnyRecord, Context>({
   args?: Record<string, unknown>;
   item: Item;
   path?: string;
-  view: DataView<Item, Context>;
+  view: DataView<Item>;
 }): Item {
   if (!isRecord(item)) {
     return item;
@@ -219,7 +219,7 @@ export function toConnectionResult<Item extends AnyRecord, Context>({
   const base = () => (result ? { ...item, ...result } : item);
 
   for (const [field, config] of Object.entries(view.fields)) {
-    if (!isDataViewField<Context>(config)) {
+    if (!isDataViewField(config)) {
       continue;
     }
 

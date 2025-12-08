@@ -12,11 +12,11 @@
   </div>
 </h1>
 
-<small>
+<span style="color: var(--vp-c-text-2);">
 
-_December 9<sup>th</sup> 2025 by [Christoph Nakazawa](https://x.com/cnakazawa)_
+_December 9<sup>th</sup> 2025 by <img src="https://gravatar.com/avatar/77a332a7da779ef594cb6db9970c7b2f?s=128" style="border-radius: 32px; corner-shape: squircle; width: 20px; height: 20px; display: inline; vertical-align: text-bottom;" /> [Christoph Nakazawa](https://x.com/cnakazawa)_
 
-</small>
+</span>
 
 I'm excited to announce the initial alpha release of **_fate_**, a modern data client for React & tRPC. fate combines view composition, normalized caching, data masking, Async React features, and tRPC's type safety.
 

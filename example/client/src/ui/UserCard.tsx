@@ -22,6 +22,13 @@ export const UserView = view<User>()({
   username: true,
 });
 
+export const UserCardView = view<User>()({
+  email: true,
+  id: true,
+  name: true,
+  username: true,
+});
+
 const UserNameForm = ({ user }: { user: SessionUser }) => {
   const fate = useFateClient();
   const [name, setName] = useState(user.name ?? '');

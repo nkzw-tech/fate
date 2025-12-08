@@ -8,6 +8,7 @@ import type {
   Tag as PrismaTag,
   User as PrismaUser,
 } from '../prisma/prisma-client/client.ts';
+import { AppContext } from './context.ts';
 
 export type CommentItem = PrismaComment & {
   author?: PrismaUser | null;
@@ -38,6 +39,10 @@ export type EventItem = PrismaEvent & {
 };
 
 export const userDataView = dataView<PrismaUser>('User')({
+  email: resolver<PrismaUser, string | null, AppContext>({
+    authorize: ({ id }, context) => context?.sessionUser?.id === id,
+    resolve: ({ email }) => email,
+  }),
   id: true,
   name: true,
   username: true,
@@ -57,8 +62,8 @@ const categorySummaryDataView = dataView<PrismaCategory>('Category')({
 const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
-  commentCount: resolver<PostItem>({
-    resolve: ({ item }) => item._count?.comments ?? 0,
+  commentCount: resolver<PostItem, number>({
+    resolve: ({ _count }) => _count?.comments ?? 0,
     select: () => ({
       _count: { select: { comments: true } },
     }),
@@ -91,8 +96,8 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
-  postCount: resolver<CategoryItem>({
-    resolve: ({ item }) => item._count?.posts ?? 0,
+  postCount: resolver<CategoryItem, number>({
+    resolve: ({ _count }) => _count?.posts ?? 0,
     select: () => ({
       _count: { select: { posts: true } },
     }),
@@ -109,8 +114,8 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 
 export const eventDataView = dataView<EventItem>('Event')({
   attendees: list(eventAttendeeDataView),
-  attendingCount: resolver<EventItem>({
-    resolve: ({ item }) => item._count?.attendees ?? 0,
+  attendingCount: resolver<EventItem, number>({
+    resolve: ({ _count }) => _count?.attendees ?? 0,
     select: () => ({
       _count: {
         select: {

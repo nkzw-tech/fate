@@ -9,14 +9,14 @@ type FateTypeConfig = {
   type: string;
 };
 
-const isDataViewField = (field: unknown): field is DataView<AnyRecord, unknown> =>
+const isDataViewField = (field: unknown): field is DataView<AnyRecord> =>
   Boolean(field) && typeof field === 'object' && 'fields' in (field as AnyRecord);
 
 type ListConfig =
-  | DataView<AnyRecord, unknown>
+  | DataView<AnyRecord>
   | {
       procedure?: string;
-      view: DataView<AnyRecord, unknown>;
+      view: DataView<AnyRecord>;
     };
 
 const camelCase = (value: string) => value.charAt(0).toLowerCase() + value.slice(1);
@@ -26,15 +26,15 @@ const camelCase = (value: string) => value.charAt(0).toLowerCase() + value.slice
  * list resolver configs.
  */
 export const createSchema = (
-  dataViews: ReadonlyArray<DataView<AnyRecord, unknown>>,
+  dataViews: ReadonlyArray<DataView<AnyRecord>>,
   lists: Record<string, ListConfig>,
 ) => {
-  const canonicalViews = new Map<string, DataView<AnyRecord, unknown>>();
+  const canonicalViews = new Map<string, DataView<AnyRecord>>();
   const entities: Record<string, { list?: string; listProcedure?: string; type: string }> = {};
   const fateTypes = new Map<string, FateTypeConfig>();
   const processing = new Set<string>();
 
-  const ensureType = (view: DataView<AnyRecord, unknown>): string => {
+  const ensureType = (view: DataView<AnyRecord>): string => {
     const typeName = view.typeName;
 
     const canonicalView = canonicalViews.get(typeName) ?? view;
