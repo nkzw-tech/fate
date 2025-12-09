@@ -26,7 +26,7 @@ export function FateClient({
 export function useFateClient<T extends [Roots, Mutations]>(): FateClientT<T[0], T[1]> {
   const context = use(FateContext);
   if (!context) {
-    throw new Error(`react-fate: '<FateContext value={client}>' is missing.`);
+    throw new Error(`react-fate: '<FateClient client={fate}>' is missing.`);
   }
   return context;
 }

@@ -54,7 +54,7 @@ test('fails when the context was not provided', () => {
 
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toBe(
-      "react-fate: '<FateContext value={client}>' is missing.",
+      "react-fate: '<FateClient client={fate}>' is missing.",
     );
   } finally {
     console.error = consoleError;
