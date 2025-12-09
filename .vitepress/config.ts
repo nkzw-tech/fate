@@ -26,6 +26,9 @@ export default defineConfig({
   rewrites: {
     'docs/:path*': ':path*',
   },
+  sitemap: {
+    hostname: 'https://fate.technology',
+  },
   srcExclude: ['docs/parts/**.', 'packages/**/README.md', 'scripts/**'],
   themeConfig: {
     footer: {
