@@ -63,7 +63,7 @@ export function App() {
 }
 ```
 
-_Learn more about `useRequest` in the [Requests Guide](/docs/guide/requests.md)._
+_Learn more about `useRequest` in the [Requests Guide](/guide/requests)._
 
 ## Composing Views
 

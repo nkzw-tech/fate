@@ -37,15 +37,8 @@ const segments = [];
 for (const file of files) {
   let content = await fs.readFile(file, 'utf8');
 
-  if (content.includes(`(/guide/getting-started)`)) {
-    content = content
-      .split('\n')
-      .map((line) =>
-        line.includes(`(/guide/getting-started)`)
-          ? line.replaceAll(`(/guide/getting-started)`, `(/docs/guide/getting-started.md)`)
-          : line,
-      )
-      .join('\n');
+  if (content.includes(`(/guide/`)) {
+    content = content.replaceAll(/\(\/guide\/([^\s)]+?)\)/g, '(/docs/guide/$1.md)');
   }
 
   segments.push(shiftHeadings(stripFrontmatter(content).trim()));
