@@ -6,7 +6,7 @@
       "version": "24",
       "pnpm": "true"
     },
-    "ghcr.io/devcontainers/features/postgres:1": {
+    "ghcr.io/itsmechlark/features/postgresql:1": {
       "version": "16",
       "database": "fate",
       "user": "postgres",
