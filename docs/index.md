@@ -7,7 +7,7 @@ hero:
   image:
     dark: /fate-logo-dark.svg
     light: /fate-logo.svg
-    alt: VitePress
+    alt: fate logo
   actions:
     - theme: brand
       text: Get Started
