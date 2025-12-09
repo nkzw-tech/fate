@@ -78,7 +78,7 @@ When your data client is an abstraction over `fetch`, keeping client state consi
 
 To be clear: These libraries are _great at fetching data_. I know better patterns are available in most of these libraries, and advanced developers can avoid many of the downsides. Sync engines address these problems, but they're challenging to adopt and also come with trade-offs.
 
-Still, it's too easy to get something wrong. Codebases become brittle and hard to maintain. Looking ahead to a world where AI increasingly writes more of our code and gravitates towards simple, idiomatic APIs, **_the problem is that these APIs exist at all_**.
+Still, it's too easy to get something wrong. Codebases become brittle and hard to maintain. Looking ahead to a world where AI increasingly writes more of our code and gravitates towards simple, idiomatic APIs, **_the problem is that request-centric fetch APIs exist at all_**.
 
 ## Building _fate_
 
