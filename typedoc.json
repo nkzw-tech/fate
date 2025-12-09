@@ -1,4 +1,6 @@
 {
+  "$schema": "https://typedoc.org/schema.json",
+  "docsRoot": "./docs",
   "entryPoints": [
     "packages/fate/src/index.ts",
     "packages/fate/src/server.ts",
