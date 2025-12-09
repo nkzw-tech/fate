@@ -32,7 +32,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.10.2",
     "nodemon": "^3.1.11",
     "prisma": "^7.1.0"
   }

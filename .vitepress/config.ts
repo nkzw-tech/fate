@@ -52,7 +52,7 @@ export default defineConfig({
             text: 'Contributing',
           },
         ],
-        text: pkg.version,
+        text: `v${pkg.version}`,
       },
     ],
     outline: {

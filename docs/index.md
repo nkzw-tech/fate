@@ -16,6 +16,9 @@ hero:
       text: API Documentation
       link: /api
     - theme: alt
+      text: Read the Announcement
+      link: /posts/introducing-fate
+    - theme: alt
       text: View on GitHub
       link: https://github.com/nkzw-tech/fate
 features:
