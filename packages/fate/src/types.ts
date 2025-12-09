@@ -59,6 +59,10 @@ export function isViewTag(key: string): key is ViewTag {
 /** Alias for a loose record used throughout the fate's internals. */
 export type AnyRecord = Record<string, unknown>;
 
+type Nullish<T> = Extract<T, null | undefined>;
+type NonNullish<T> = Exclude<T, null | undefined>;
+type WithNullish<T, R> = R | Nullish<T>;
+
 type SelectionArgs = Readonly<{ args: AnyRecord }>;
 
 /** Metadata stored alongside connection results to power pagination and cache updates. */
@@ -250,7 +254,7 @@ type ConnectionMask<T extends Entity, S> = S extends {
 type EntityName<T> = T extends { __typename: infer N extends string } ? N : never;
 
 /** Recursively applies a view selection to an entity to mask fields that aren't selected. */
-export type Mask<T, S> =
+type MaskNonNullish<T, S> =
   T extends Array<infer U extends Entity>
     ? S extends true
       ? Array<U>
@@ -263,13 +267,17 @@ export type Mask<T, S> =
       ? T
       : S extends object
         ? HasViewTag<S> extends true
-          ? ViewRef<EntityName<NonNullable<T>>>
+          ? NonNullish<T> extends Entity
+            ? ViewRef<EntityName<NonNullish<T>>>
+            : ViewRef<EntityName<NonNullable<T>>>
           : {
               [K in keyof S as K extends 'args' ? never : K]: S[K] extends true
-                ? NonNullable<T>[Extract<K, keyof T>]
-                : Mask<NonNullable<T>[Extract<K, keyof T>], Extract<S[K], object>>;
-            } & (T extends Entity ? Pick<NonNullable<T>, '__typename'> : Record<never, never>)
+                ? NonNullish<T>[Extract<K, keyof T>]
+                : Mask<NonNullish<T>[Extract<K, keyof T>], Extract<S[K], object>>;
+            } & (T extends Entity ? Pick<NonNullish<T>, '__typename'> : Record<never, never>)
         : T;
+
+export type Mask<T, S> = WithNullish<T, MaskNonNullish<NonNullish<T>, S>>;
 
 /** Entity type captured from a view definition. */
 export type ViewEntity<V> = V extends View<infer T, any> ? T : never;
@@ -412,9 +420,6 @@ export type MutationMapFromDefinitions<D extends FateMutations> = {
     output: MutationResult<D[K]>;
   };
 };
-
-type Nullish<T> = Extract<T, null | undefined>;
-type NonNullish<T> = Exclude<T, null | undefined>;
 
 type OptimisticUpdateValue<T> =
   T extends ReadonlyArray<infer U>

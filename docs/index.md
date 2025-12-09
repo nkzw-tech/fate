@@ -22,43 +22,23 @@ features:
   - title: View Composition
     icon: 🎑
     details: Components declare their data requirements using co-located "views". Views are composed into a single request per screen, minimizing network requests and eliminating waterfalls.
-    link: /guide/views
+    link: /guide/core-concepts
     linkText: Thinking in Views
-  - title: Normalized Cache
-    icon: 🗄️
-    details: fate maintains a normalized cache for all fetched data. This enables efficient data updates through actions and mutations and avoids stale or duplicated data.
-    link: /guide/server-integration#conventions-object-identity
-    linkText: Conventions & Object Identity
-  - title: Data Masking & Strict Selection
-    icon: 🥽
-    details: fate enforces strict data selection for each view, and masks (hides) data that components did not request. This prevents accidental coupling between components and reduces overfetching.
-    link: /guide/views#type-safety-and-data-masking
-    linkText: Data Masking
   - title: Async React
     icon: ⚛️
-    details: fate uses modern Async React features like Actions, Suspense, and `use` to support concurrent rendering and enable a seamless user experience.
+    details: fate uses modern Async React features like Actions, Suspense, and `use` for a seamless user experience. Optimistic updates enable instant UI feedback and rollbacks are handled automatically.
     link: /guide/actions
     linkText: Actions in fate
-  - title: Lists & Pagination
-    icon: 📜
-    details: fate provides built-in support for connection-style lists with cursor-based pagination, making it easy to implement infinite scrolling and "load-more" functionality.
-    link: /guide/views#pagination-with-uselistview
-    linkText: Lists & Pagination
-  - title: Optimistic Updates
-    icon: 🚅
-    details: fate supports declarative optimistic updates for mutations, allowing the UI to update immediately while the server request is in-flight. If the request fails, the cache and its associated views are rolled back to their previous state.
-    link: /guide/actions#optimistic-updates
-    linkText: Optimistic Updates
+  - title: Data Masking & Strict Selection
+    icon: 🥽
+    details: fate prevents accidental coupling and overfetching by enforcing strict data selection for each view, and masks (hides) data that components did not request.
+    link: /guide/views#type-safety-and-data-masking
+    linkText: Data Masking
   - title: AI-Ready
     icon: ✨
-    details: fate's minimal, predictable API and explicit data selection enable local reasoning, allowing AI tools to generate stable, type-safe data-fetching code.
+    details: fate's minimal, predictable API and explicit data selection enable local reasoning, enabling humans and AI tools to generate stable, type-safe data-fetching code.
     link: https://github.com/nkzw-tech/fate-template/blob/main/AGENTS.md
     linkText: AGENTS.md
-  - title: Open Source
-    icon: 🛠️
-    details: fate is an MIT-licensed open-source project developed and maintained by Nakazawa Tech.
-    link: https://github.com/nkzw-tech/fate
-    linkText: GitHub
 ---
 
 <script setup lang="ts">

@@ -1,4 +1,4 @@
-import { dataView, type Entity, list, resolver } from '@nkzw/fate/server';
+import { dataView, list, resolver, type Entity } from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,

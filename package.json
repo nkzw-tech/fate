@@ -18,7 +18,7 @@
     "dev:server": "cd example/server && pnpm dev",
     "dev:setup": "(cd example/server && pnpm dev:setup)",
     "dev": "npm-run-all --parallel dev:client dev:server",
-    "fate": "node --conditions=development --no-warnings --loader ts-node/esm --env-file example/server/.env packages/fate/src/cli.ts generate @nkzw/fate-server/src/trpc/router.ts example/client/src/fate.ts",
+    "fate:generate": "node --conditions=development --no-warnings --loader ts-node/esm --env-file example/server/.env packages/fate/src/cli.ts generate @nkzw/fate-server/src/trpc/router.ts example/client/src/fate.ts",
     "format": "oxfmt",
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "lint:format": "oxfmt --check .",

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
 import { auth } from '../../lib/auth.tsx';
 import { procedure, router } from '../init.ts';
-import { userDataView } from '../views.ts';
+import { User, userDataView } from '../views.ts';
 
 export const userRouter = router({
   update: procedure
@@ -66,6 +66,6 @@ export const userRouter = router({
         select,
         where: { id: ctx.sessionUser.id },
       } as UserFindUniqueArgs);
-      return user ? resolve(user) : null;
+      return user ? ((await resolve(user)) as User) : null;
     }),
 });

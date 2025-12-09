@@ -1,5 +1,6 @@
 import {
   EntityId,
+  FateThenable,
   View,
   ViewData,
   ViewEntity,
@@ -16,21 +17,41 @@ type ViewEntityWithTypename<V extends View<any, any>> = ViewEntity<V> & {
   __typename: ViewEntityName<V>;
 };
 
+const nullSnapshot = {
+  status: 'fulfilled' as const,
+  then<TResult1 = null, TResult2 = never>(
+    onfulfilled?: ((value: null) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ) {
+    return Promise.resolve(null).then(onfulfilled, onrejected);
+  },
+  value: null,
+} satisfies FateThenable<null>;
+
 /**
  * Resolves a reference against a view and subscribes to updates for that selection.
  *
  * @example
  * const post = useView(PostView, postRef);
  */
+export function useView<V extends View<any, any>, R extends ViewRef<ViewEntityName<V>> | null>(
+  view: V,
+  ref: R,
+): R extends null ? null : ViewData<ViewEntityWithTypename<V>, ViewSelection<V>>;
 export function useView<V extends View<any, any>>(
   view: V,
-  ref: ViewRef<ViewEntityName<V>>,
-): ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> {
+  ref: ViewRef<ViewEntityName<V>> | null,
+): ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null {
   const client = useFateClient();
 
   const snapshotRef = useRef<ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']> | null>(null);
 
   const getSnapshot = useCallback(() => {
+    if (ref === null) {
+      snapshotRef.current = null;
+      return nullSnapshot;
+    }
+
     const snapshot = client.readView<ViewEntity<V>, V[ViewTag]['select'], V>(view, ref);
     snapshotRef.current = snapshot.status === 'fulfilled' ? snapshot.value : null;
     return snapshot;
@@ -38,6 +59,11 @@ export function useView<V extends View<any, any>>(
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
+      if (ref === null) {
+        snapshotRef.current = null;
+        return () => {};
+      }
+
       const subscriptions = new Map<EntityId, () => void>();
 
       const onChange = () => {
@@ -79,12 +105,12 @@ export function useView<V extends View<any, any>>(
         subscriptions.clear();
       };
     },
-    [client.store],
+    [client.store, ref],
   );
 
-  return (
-    use(
-      useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot)),
-    ) as ViewSnapshot<ViewEntity<V>, ViewSelection<V>>
-  ).data;
+  const snapshot = use(
+    useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot)),
+  ) as ViewSnapshot<ViewEntity<V>, ViewSelection<V>> | null;
+
+  return snapshot ? snapshot.data : null;
 }

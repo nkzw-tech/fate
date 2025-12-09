@@ -14,8 +14,7 @@ import {
   useState,
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { useListView, useView, view, ViewRef } from 'react-fate';
-import { useFateClient } from 'react-fate';
+import { useFateClient, useListView, useView, view, ViewRef } from 'react-fate';
 import { Link } from 'react-router';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
@@ -94,7 +93,7 @@ const CommentInput = ({
 
   const maybeSubmitComment = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      startTransition(() => addComment());
+      startTransition(addComment);
     }
   };
 

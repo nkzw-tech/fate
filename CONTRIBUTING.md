@@ -52,7 +52,7 @@ Then, at the root of the project, run:
 - `pnpm prisma migrate dev` to create the database and run the migrations.
 - You might want to run `pnpm prisma migrate reset` and `pnpm prisma db seed` to seed the database with initial data.
 - Run `pnpm dev` to run the example.
-- Run `pnpm fate generate` to regenerate the fate client code.
+- Run `pnpm fate:generate` to regenerate the fate client code.
 
 ## Running Tests
 

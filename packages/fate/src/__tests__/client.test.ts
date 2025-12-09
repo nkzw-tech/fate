@@ -195,6 +195,46 @@ test(`'readView' returns view refs when views are used`, () => {
   expect(commentB.node[ViewsTag]).toEqual(tagsFor(CommentView));
 });
 
+test(`'readView' returns null for nullable view selections`, () => {
+  type Category = { __typename: 'Category'; id: string };
+  type PostWithCategory = { __typename: 'Post'; category: Category | null; id: string };
+
+  const client = createClient({
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ fields: { category: { type: 'Category' } }, type: 'Post' }, { type: 'Category' }],
+  });
+
+  const CategoryView = view<Category>()({ id: true });
+  const PostView = view<PostWithCategory>()({
+    category: CategoryView,
+    id: true,
+  });
+
+  const plan = getSelectionPlan(PostView, null);
+
+  client.write(
+    'Post',
+    { __typename: 'Post', category: null, id: 'post-1' },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const postRef = client.ref<PostWithCategory>('Post', 'post-1', PostView);
+  const result = unwrap(
+    client.readView<PostWithCategory, SelectionOf<typeof PostView>, typeof PostView>(
+      PostView,
+      postRef,
+    ),
+  );
+
+  expect(result.category).toBeNull();
+});
+
 test(`'readView' returns view refs for list selections`, () => {
   const client = createClient({
     transport: {
@@ -399,7 +439,7 @@ test(`'readView' resolves object references and their views`, () => {
     id: 'user-1',
   });
 
-  expect(result.author[ViewsTag]).toEqual(tagsFor(UserView));
+  expect(result.author?.[ViewsTag]).toEqual(tagsFor(UserView));
 });
 
 test(`'readView' resolves fields only if the ref contains the expected views`, () => {

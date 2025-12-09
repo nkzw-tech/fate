@@ -25,16 +25,21 @@ import { ResolvedArgsPayload, Transport } from './transport.ts';
 import {
   ConnectionMetadata,
   ConnectionTag,
-  FateThenable,
+  isNodeItem,
+  isNodesItem,
+  isQueryItem,
   isViewTag,
+  ViewResult,
+  ViewsTag,
   type AnyRecord,
   type Entity,
   type EntityId,
+  type FateThenable,
   type ListItem,
-  type QueryItem,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
   type Pagination,
+  type QueryItem,
   type Request,
   type RequestResult,
   type Selection,
@@ -44,11 +49,6 @@ import {
   type ViewData,
   type ViewRef,
   type ViewSnapshot,
-  isNodeItem,
-  isNodesItem,
-  isQueryItem,
-  ViewResult,
-  ViewsTag,
 } from './types.ts';
 import { getViewNames, getViewPayloads } from './view.ts';
 
@@ -1174,6 +1174,10 @@ export class FateClient<Mutations extends FateMutations> {
             continue;
           }
           const childPaths = selectionTree.get(key) ?? emptySet;
+          if (value === null) {
+            result[key] = null;
+            continue;
+          }
           if (value && typeof value === 'object' && !isNodeRef(value)) {
             const childType = relationDescriptor.type;
             const childConfig = this.types.get(childType);
@@ -1204,6 +1208,10 @@ export class FateClient<Mutations extends FateMutations> {
             continue;
           }
           const childPaths = selectionTree.get(key) ?? emptySet;
+          if (value === null) {
+            result[key] = null;
+            continue;
+          }
           const childType = relationDescriptor.listOf;
           const childConfig = this.types.get(childType);
           if (!childConfig) {
@@ -1500,6 +1508,12 @@ export class FateClient<Mutations extends FateMutations> {
             : selectionValue;
 
           const value = record[key];
+
+          if (value == null) {
+            target[key] = null;
+            continue;
+          }
+
           if (Array.isArray(value)) {
             if (nextSelection.items && typeof nextSelection.items === 'object') {
               const selection = nextSelection.items as AnyRecord;

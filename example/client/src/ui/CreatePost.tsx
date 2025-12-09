@@ -1,23 +1,22 @@
 import Stack, { VStack } from '@nkzw/stack';
-import { useActionState, useState } from 'react';
-import { useFateClient } from 'react-fate';
+import { KeyboardEvent, startTransition, useActionState, useState } from 'react';
+import { useFateClient, useView, ViewRef } from 'react-fate';
 import { Button } from '../ui/Button.tsx';
-import AuthClient from '../user/AuthClient.tsx';
 import Card from './Card.tsx';
 import H3 from './H3.tsx';
 import Input from './Input.tsx';
 import { PostView } from './PostCard.tsx';
+import { UserCardView } from './UserCard.tsx';
 
-export default function CreatePost() {
+export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | null }) {
   const fate = useFateClient();
-  const { data: session } = AuthClient.useSession();
-  const user = session?.user;
-  const [contentText, setCommentText] = useState('');
-  const [titleText, setTitleText] = useState('');
+  const user = useView(UserCardView, userRef);
+  const [contentValue, setContentValue] = useState('');
+  const [titleValue, setTitleValue] = useState('');
 
   const [, createPost, isPending] = useActionState(async () => {
-    const content = contentText.trim();
-    const title = titleText.trim();
+    const content = contentValue.trim();
+    const title = titleValue.trim();
 
     if (!content || !title || !user) {
       return;
@@ -27,10 +26,7 @@ export default function CreatePost() {
       input: { content, title },
       insert: 'before',
       optimistic: {
-        author: {
-          id: user.id,
-          name: user.name,
-        },
+        author: user,
         comments: [],
         content,
         id: `optimistic:${Date.now().toString(36)}`,
@@ -39,13 +35,20 @@ export default function CreatePost() {
       view: PostView,
     });
 
-    setCommentText('');
+    setContentValue('');
+    setTitleValue('');
 
     return result;
   }, null);
 
+  const maybeSubmitPost = (event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      startTransition(createPost);
+    }
+  };
+
   const commentingIsDisabled =
-    isPending || titleText.trim().length === 0 || contentText.trim().length === 0;
+    isPending || titleValue.trim().length === 0 || contentValue.trim().length === 0;
 
   return (
     <Card>
@@ -54,16 +57,18 @@ export default function CreatePost() {
         <Input
           className="w-full"
           disabled={isPending}
-          onChange={(event) => setTitleText(event.target.value)}
+          onChange={(event) => setTitleValue(event.target.value)}
+          onKeyDown={maybeSubmitPost}
           placeholder="Post Title"
-          value={titleText}
+          value={titleValue}
         />
         <textarea
           className="squircle border-input flex min-h-20 w-full border bg-background px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 focus-visible:ring-offset-background focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-900/40"
           disabled={isPending}
-          onChange={(event) => setCommentText(event.target.value)}
+          onChange={(event) => setContentValue(event.target.value)}
+          onKeyDown={maybeSubmitPost}
           placeholder={'Share your thoughts about fate...'}
-          value={contentText}
+          value={contentValue}
         />
         <Stack end gap>
           <Button disabled={commentingIsDisabled} size="sm" type="submit" variant="secondary">

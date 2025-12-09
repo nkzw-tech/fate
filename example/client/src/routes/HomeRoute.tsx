@@ -25,8 +25,13 @@ const PostConnectionView = {
   },
 } as const;
 
-const PostFeed = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
-  const { data: session } = AuthClient.useSession();
+const PostFeed = ({
+  posts: postsRef,
+  user,
+}: {
+  posts: ConnectionRef<'Post'>;
+  user: ViewRef<'User'> | null;
+}) => {
   const [showPostEditor, setShowPostEditor] = useState(false);
   const [posts, loadNext] = useListView(PostConnectionView, postsRef);
 
@@ -38,9 +43,7 @@ const PostFeed = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
           <button
             className={cx(
               'pr-5',
-              session?.user
-                ? 'active:translate-y-0.5 active:opacity-50'
-                : 'pointer-events-none opacity-0',
+              user ? 'active:translate-y-0.5 active:opacity-50' : 'pointer-events-none opacity-0',
             )}
             onClick={() => setShowPostEditor((showPostEditor) => !showPostEditor)}
           >
@@ -54,7 +57,7 @@ const PostFeed = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
       </Stack>
       <VStack gap={32}>
         <Activity mode={showPostEditor ? 'visible' : 'hidden'}>
-          <CreatePost />
+          <CreatePost user={user} />
         </Activity>
         {posts.map(({ node }) => (
           <PostCard key={node.id} post={node} />
@@ -151,7 +154,7 @@ export default function HomeRoute() {
         {viewer?.id && <UserCard viewer={viewer} />}
       </div>
       <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr] lg:items-start">
-        <PostFeed posts={posts} />
+        <PostFeed posts={posts} user={viewer} />
         <VStack gap={24}>
           <CategoryFeed categories={categories} />
           <EventFeed events={events} />

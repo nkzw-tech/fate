@@ -143,6 +143,25 @@ test('infer view refs for list selections', () => {
   expectTypeOf<PostData['comments'][number]>().toEqualTypeOf<ViewRef<'Comment'>>();
 });
 
+test('preserves nullability when selecting views', () => {
+  type Category = { __typename: 'Category'; id: string };
+  type PostWithCategory = {
+    __typename: 'Post';
+    category: Category | null;
+    id: string;
+  };
+
+  const CategoryView = view<Category>()({ id: true });
+  const PostView = view<PostWithCategory>()({
+    category: CategoryView,
+    id: true,
+  });
+
+  type PostData = ViewData<PostWithCategory, SelectionOf<typeof PostView>>;
+
+  expectTypeOf<PostData['category']>().toEqualTypeOf<ViewRef<'Category'> | null>();
+});
+
 test('rejects selecting fields not defined on the entity', () => {
   type Fruit = {
     __typename: 'Fruit';
