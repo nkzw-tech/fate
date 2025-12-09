@@ -250,23 +250,20 @@ import { httpBatchLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
 import { createFateClient } from './fate.ts';
 
+const fate = createFateClient({
+  links: [
+    httpBatchLink({
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          credentials: 'include',
+        }),
+      url: `${env('SERVER_URL')}/trpc`,
+    }),
+  ],
+});
+
 export function App() {
-  const fate = useMemo(
-    () =>
-      createFateClient({
-        links: [
-          httpBatchLink({
-            fetch: (input, init) =>
-              fetch(input, {
-                ...init,
-                credentials: 'include',
-              }),
-            url: `${env('SERVER_URL')}/trpc`,
-          }),
-        ],
-      }),
-    [],
-  );
   return <FateClient client={fate}>{/* Components go here */}</FateClient>;
 }
 ```
