@@ -198,8 +198,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   >();
   private readonly rootLists = new Map<string, Set<string>>();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
+  private readonly pendingOptimisticMutations = new Map<EntityId, Set<Promise<unknown>>>();
   private readonly optimisticMasks = new Map<number, { entityId: EntityId; mask: FieldMask }>();
   private readonly optimisticByEntity = new Map<EntityId, Set<number>>();
+  private readonly optimisticEntityResolutions = new Map<EntityId, EntityId>();
   private optimisticTokenCounter = 0;
   private readonly requests = new Map<
     string,
@@ -448,6 +450,11 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
 
     const entityId = toEntityId(type, id);
+    const resolvedEntityId = this.optimisticEntityResolutions.get(entityId) ?? null;
+    if (resolvedEntityId && resolvedEntityId !== entityId) {
+      const { id: resolvedId, type: resolvedType } = parseEntityId(resolvedEntityId);
+      return this.readView<T, S, V>(view, createRef(resolvedType, resolvedId, view));
+    }
     const viewNames = getViewNames(view);
     const refViews = ref[ViewsTag];
 
@@ -498,6 +505,21 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     if (missing.size > 0) {
       const key = this.pendingKey(entityId, missing);
+
+      const pendingOptimistic = this.getPendingOptimisticMutations(entityId);
+      if (pendingOptimistic) {
+        const pending = this.pending.get(key);
+        if (pending) {
+          return pending as FateThenable<ViewSnapshot<T, S>>;
+        }
+
+        const promise = Promise.all(pendingOptimistic)
+          .then(() => this.readView<T, S, V>(view, ref))
+          .finally(() => this.pending.delete(key));
+
+        this.pending.set(key, promise);
+        return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
+      }
       if (this.stalledRequests.has(key)) {
         return resolveSnapshot();
       }
@@ -589,6 +611,33 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     return { cursors, ids, pagination };
   }
 
+  registerPendingOptimisticMutation(entityId: EntityId, promise: Promise<unknown>) {
+    let entries = this.pendingOptimisticMutations.get(entityId);
+    if (!entries) {
+      entries = new Set();
+      this.pendingOptimisticMutations.set(entityId, entries);
+    }
+
+    const trackedPromise = promise.catch(() => undefined);
+    entries.add(trackedPromise);
+
+    trackedPromise.finally(() => {
+      const current = this.pendingOptimisticMutations.get(entityId);
+      if (!current) {
+        return;
+      }
+
+      current.delete(trackedPromise);
+      if (current.size === 0) {
+        this.pendingOptimisticMutations.delete(entityId);
+      }
+    });
+  }
+
+  resolveOptimisticEntity(optimisticEntityId: EntityId, resolvedEntityId: EntityId) {
+    this.optimisticEntityResolutions.set(optimisticEntityId, resolvedEntityId);
+  }
+
   registerOptimisticUpdate(entityId: EntityId | null, select: ReadonlySet<string>): number | null {
     if (!entityId || select.size === 0) {
       return null;
@@ -660,6 +709,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
 
     return mask;
+  }
+
+  private getPendingOptimisticMutations(
+    entityId: EntityId,
+  ): ReadonlyArray<Promise<unknown>> | null {
+    const pending = this.pendingOptimisticMutations.get(entityId);
+    return pending && pending.size > 0 ? [...pending] : null;
   }
 
   filterSelectionForPendingOptimistics(

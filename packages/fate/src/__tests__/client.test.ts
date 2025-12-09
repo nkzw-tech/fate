@@ -1338,6 +1338,66 @@ test('does not fetch missing fields for optimistic records', async () => {
   await mutationPromise;
 });
 
+const emptyFunction = () => {};
+
+test('waits for optimistic mutations before fetching missing fields', async () => {
+  type Comment = { __typename: 'Comment'; content: string; id: string };
+
+  const fetchById = vi.fn(async () => [
+    { __typename: 'Comment', content: 'Server content', id: 'comment-1' },
+  ]);
+
+  let resolveMutation: ((value: Comment) => void) | null = emptyFunction;
+  const mutate = vi.fn(
+    async () =>
+      new Promise<Comment>((resolve) => {
+        resolveMutation = resolve;
+      }),
+  );
+
+  const mutations = {
+    addComment: mutation<Comment, { content: string; postId: string }, Comment>('Comment'),
+  };
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    transport: {
+      fetchById,
+      // @ts-expect-error
+      mutate,
+    },
+    types: [{ fields: { content: 'scalar' }, type: 'Comment' }],
+  });
+
+  const CommentView = view<Comment>()({ content: true, id: true });
+
+  const mutationPromise = client.mutations.addComment({
+    input: { content: 'Draft', postId: 'post-1' },
+    optimistic: { id: 'client:comment-1' },
+    view: CommentView,
+  });
+
+  const optimisticRef = client.ref<Comment>('Comment', 'client:comment-1', CommentView);
+  const pending = client.readView(CommentView, optimisticRef);
+
+  expect(fetchById).not.toHaveBeenCalled();
+
+  expect(resolveMutation).not.toBe(emptyFunction);
+  resolveMutation({ __typename: 'Comment', id: 'comment-1' } as Comment);
+  await mutationPromise;
+  await pending;
+
+  const result = await client.readView<
+    Comment,
+    SelectionOf<typeof CommentView>,
+    typeof CommentView
+  >(CommentView, client.ref<Comment>('Comment', 'comment-1', CommentView));
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(fetchById).toHaveBeenCalledWith('Comment', ['comment-1'], new Set(['content']), undefined);
+  expect(result.data.content).toBe('Server content');
+});
+
 test('stops re-requesting unsatisfied selections', async () => {
   type User = { __typename: 'User'; id: string; name: string };
 

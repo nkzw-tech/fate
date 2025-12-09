@@ -234,79 +234,95 @@ export function wrapMutation<
       client.deleteRecord(identifier.entity, id, snapshots, listSnapshots);
     }
 
-    try {
-      const result = (await client.executeMutation(identifier.key, input, selection, {
-        args,
-        plan,
-      })) as MutationResult<I>;
-
-      const shouldWriteResult =
-        result && typeof result === 'object' && (!deleteRecord || Boolean(view));
-
-      if (shouldWriteResult) {
-        const select = collectImplicitSelectedPaths(result);
-        const pendingMask = optimisticEntityId
-          ? client.getPendingOptimisticMask(optimisticEntityId, { excludeToken: optimisticToken })
-          : null;
-        const filteredSelection = optimisticEntityId
-          ? client.filterSelectionForPendingOptimistics(optimisticEntityId, select, {
-              excludeToken: optimisticToken,
-            })
-          : select;
-
-        client.write(
-          identifier.entity,
-          result,
-          filteredSelection,
-          undefined,
+    const performMutation = async () => {
+      try {
+        const result = (await client.executeMutation(identifier.key, input, selection, {
+          args,
           plan,
-          null,
-          pendingMask,
-          insert,
-        );
+        })) as MutationResult<I>;
 
-        if (deleteRecord && id != null) {
-          client.deleteRecord(identifier.entity, id);
+        const shouldWriteResult =
+          result && typeof result === 'object' && (!deleteRecord || Boolean(view));
+
+        if (shouldWriteResult) {
+          const select = collectImplicitSelectedPaths(result);
+          const pendingMask = optimisticEntityId
+            ? client.getPendingOptimisticMask(optimisticEntityId, { excludeToken: optimisticToken })
+            : null;
+          const filteredSelection = optimisticEntityId
+            ? client.filterSelectionForPendingOptimistics(optimisticEntityId, select, {
+                excludeToken: optimisticToken,
+              })
+            : select;
+
+          client.write(
+            identifier.entity,
+            result,
+            filteredSelection,
+            undefined,
+            plan,
+            null,
+            pendingMask,
+            insert,
+          );
+
+          if (deleteRecord && id != null) {
+            client.deleteRecord(identifier.entity, id);
+          }
+
+          const resultId = maybeGetId(config.getId, result as AnyRecord);
+          if (optimisticEntityId && resultId != null) {
+            client.resolveOptimisticEntity(
+              optimisticEntityId,
+              toEntityId(identifier.entity, resultId),
+            );
+          }
+          if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
+            client.deleteRecord(identifier.entity, optimisticRecordId);
+          }
         }
 
-        const resultId = maybeGetId(config.getId, result as AnyRecord);
-        if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
-          client.deleteRecord(identifier.entity, optimisticRecordId);
+        return { error: undefined, result };
+      } catch (error) {
+        client.clearOptimisticUpdate(optimisticToken);
+        if (snapshots.size > 0) {
+          for (const [id, snapshot] of snapshots) {
+            client.restore(id, snapshot);
+          }
         }
+
+        if (listSnapshots && listSnapshots.size > 0) {
+          for (const [name, list] of listSnapshots) {
+            client.restoreList(name, list);
+          }
+        }
+
+        if (error instanceof Error) {
+          const { data } = error as { data?: TRPCError };
+          const errorCategory = data
+            ? categorizeTRPCError(getHTTPStatusCodeFromError(data))
+            : 'boundary';
+
+          if (errorCategory === 'boundary') {
+            throw error;
+          }
+
+          return { error, result: undefined };
+        } else {
+          throw new Error(`fate: Mutation '${identifier.key}' failed.`);
+        }
+      } finally {
+        client.clearOptimisticUpdate(optimisticToken);
       }
+    };
 
-      return { error: undefined, result };
-    } catch (error) {
-      client.clearOptimisticUpdate(optimisticToken);
-      if (snapshots.size > 0) {
-        for (const [id, snapshot] of snapshots) {
-          client.restore(id, snapshot);
-        }
-      }
+    const mutationPromise = performMutation();
 
-      if (listSnapshots && listSnapshots.size > 0) {
-        for (const [name, list] of listSnapshots) {
-          client.restoreList(name, list);
-        }
-      }
-
-      if (error instanceof Error) {
-        const { data } = error as { data?: TRPCError };
-        const errorCategory = data
-          ? categorizeTRPCError(getHTTPStatusCodeFromError(data))
-          : 'boundary';
-
-        if (errorCategory === 'boundary') {
-          throw error;
-        }
-
-        return { error, result: undefined };
-      } else {
-        throw new Error(`fate: Mutation '${identifier.key}' failed.`);
-      }
-    } finally {
-      client.clearOptimisticUpdate(optimisticToken);
+    if (optimisticEntityId) {
+      client.registerPendingOptimisticMutation(optimisticEntityId, mutationPromise);
     }
+
+    return mutationPromise;
   };
 }
 

@@ -4,7 +4,7 @@ import { useFateClient, useView, ViewRef } from 'react-fate';
 import { Button } from '../ui/Button.tsx';
 import Card from './Card.tsx';
 import H3 from './H3.tsx';
-import Input from './Input.tsx';
+import Input, { CheckBox } from './Input.tsx';
 import { PostView } from './PostCard.tsx';
 import { UserCardView } from './UserCard.tsx';
 
@@ -13,6 +13,8 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
   const user = useView(UserCardView, userRef);
   const [contentValue, setContentValue] = useState('');
   const [titleValue, setTitleValue] = useState('');
+  const [missingOptimisticContent, setMissingOptimisticContent] = useState(false);
+  const [missingMutationSelection, setMissingMutationSelection] = useState(false);
 
   const [, createPost, isPending] = useActionState(async () => {
     const content = contentValue.trim();
@@ -25,14 +27,23 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
     const result = await fate.mutations.post.add({
       input: { content, title },
       insert: 'before',
-      optimistic: {
-        author: user,
-        comments: [],
-        content,
-        id: `optimistic:${Date.now().toString(36)}`,
-        title,
-      },
-      view: PostView,
+      optimistic: missingOptimisticContent
+        ? {
+            author: user,
+            comments: [],
+            id: `optimistic:${Date.now().toString(36)}`,
+            title,
+          }
+        : {
+            author: user,
+            commentCount: 0,
+            comments: [],
+            content,
+            id: `optimistic:${Date.now().toString(36)}`,
+            likes: 0,
+            title,
+          },
+      ...(missingMutationSelection ? null : { view: PostView }),
     });
 
     setContentValue('');
@@ -47,7 +58,7 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
     }
   };
 
-  const commentingIsDisabled =
+  const postingIsDisabled =
     isPending || titleValue.trim().length === 0 || contentValue.trim().length === 0;
 
   return (
@@ -70,8 +81,27 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
           placeholder={'Share your thoughts about fate...'}
           value={contentValue}
         />
-        <Stack end gap>
-          <Button disabled={commentingIsDisabled} size="sm" type="submit" variant="secondary">
+        <Stack alignCenter between className="text-sm" gap={16}>
+          Mutation Debug Options
+          <Stack alignCenter as="label" gap>
+            <CheckBox
+              checked={missingMutationSelection}
+              disabled={isPending}
+              onChange={(event) => setMissingMutationSelection(event.target.checked)}
+            />
+            Missing mutation selection
+          </Stack>
+          <Stack alignCenter as="label" gap>
+            <CheckBox
+              checked={missingOptimisticContent}
+              disabled={isPending}
+              onChange={(event) => setMissingOptimisticContent(event.target.checked)}
+            />
+            Missing optimistic content
+          </Stack>
+        </Stack>
+        <Stack alignCenter end gap={16}>
+          <Button disabled={postingIsDisabled} size="sm" type="submit" variant="secondary">
             Post comment
           </Button>
         </Stack>
