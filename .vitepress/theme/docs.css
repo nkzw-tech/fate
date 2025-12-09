@@ -118,6 +118,14 @@ h2[id='why-fate'] {
   margin-top: 12px;
 }
 
+picture.fetch-tree > img {
+  content: url('/public/fetch-tree.svg');
+}
+
+picture.fate-tree > img {
+  content: url('/public/fate-tree.svg');
+}
+
 html.dark picture.fetch-tree > img {
   content: url('/public/fetch-tree-dark.svg');
 }
