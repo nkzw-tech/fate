@@ -134,6 +134,14 @@ html.dark picture.fate-tree > img {
   content: url('/public/fate-tree-dark.svg');
 }
 
+picture.fate-logo > img {
+  content: url('/fate-logo.svg');
+}
+
+html.dark picture.fate-logo > img {
+  content: url('/fate-logo-dark.svg');
+}
+
 .vp-doc[class^='_posts_'] h2,
 .vp-doc[class*=' _posts_'] h2 {
   border-top: 0;
