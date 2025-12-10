@@ -1,6 +1,6 @@
 <h1 style="font-weight: 500; color: var(--vp-post-headline);">
   Introducing
-  <picture>
+  <picture class="fate-logo">
     <source media="(prefers-color-scheme: dark)" srcset="/fate-logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="/fate-logo.svg">
     <img alt="fate" src="/fate-logo.svg" style="display: inline; height: 40px; vertical-align: middle;">
