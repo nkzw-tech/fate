@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 
-import { createClient, getSelectionPlan, clientRoot, view } from '@nkzw/fate';
+import { createClient, FateMutations, getSelectionPlan, clientRoot, view } from '@nkzw/fate';
 import { act, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vitest';
@@ -484,10 +484,11 @@ test('updates root list items after loading the next page', async () => {
       pagination: { hasNext: false },
     });
 
-  const client = createClient({
-    roots: {
-      projects: clientRoot('Project'),
-    },
+  const roots = {
+    projects: clientRoot('Project'),
+  };
+  const client = createClient<[typeof roots, FateMutations]>({
+    roots,
     transport: {
       async fetchById() {
         return [];
@@ -511,15 +512,14 @@ test('updates root list items after loading the next page', async () => {
     projects: {
       args: { first: 1 },
       list: ProjectConnectionView,
-      type: 'Project',
     },
-  } as const;
+  };
 
   const renders: Array<Array<string | null>> = [];
   let loadNextRef: (() => Promise<void>) | null = null;
 
   const Component = () => {
-    const { projects } = useRequest(request);
+    const { projects } = useRequest<typeof request, typeof roots>(request);
     const [projectList, loadNext] = useListView(ProjectConnectionView, projects);
 
     renders.push(projectList.map(({ node }) => (node ? String(node.id) : null)));

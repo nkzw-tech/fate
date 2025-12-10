@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
-    "allowJs": true,
     "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "customConditions": ["@nkzw/source"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "incremental": true,

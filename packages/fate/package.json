@@ -15,14 +15,17 @@
   "type": "module",
   "exports": {
     ".": {
+      "@nkzw/source": "./src/index.ts",
       "types": "./lib/index.d.mts",
       "default": "./lib/index.mjs"
     },
     "./cli": {
+      "@nkzw/source": "./src/cli.ts",
       "types": "./lib/cli.d.mts",
       "default": "./lib/cli.mjs"
     },
     "./server": {
+      "@nkzw/source": "./src/server.ts",
       "types": "./lib/server.d.mts",
       "default": "./lib/server.mjs"
     }

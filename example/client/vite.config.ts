@@ -27,11 +27,6 @@ export default defineConfig({
       },
     }),
   ],
-  resolve: {
-    alias: {
-      '@nkzw/fate': join(root, '../../packages/fate/src/index.ts'),
-      'react-fate': join(root, '../../packages/react-fate/src/index.tsx'),
-    },
-  },
+  resolve: { conditions: ['@nkzw/source'] },
   server: { port: 6001 },
 });

@@ -15,6 +15,7 @@
   "type": "module",
   "exports": {
     ".": {
+      "@nkzw/source": "./src/index.tsx",
       "types": "./lib/index.d.mts",
       "default": "./lib/index.mjs"
     }
