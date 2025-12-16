@@ -7,30 +7,30 @@
     "type": "git",
     "url": "https://github.com/nkzw-tech/fate"
   },
-  "license": "MIT",
   "author": {
     "name": "Christoph Nakazawa",
     "email": "christoph.pojer@gmail.com"
   },
+  "license": "MIT",
   "type": "module",
+  "main": "./lib/index.mjs",
   "exports": {
     ".": {
-      "@nkzw/source": "./src/index.ts",
       "types": "./lib/index.d.mts",
+      "@nkzw/source": "./src/index.ts",
       "default": "./lib/index.mjs"
     },
     "./cli": {
-      "@nkzw/source": "./src/cli.ts",
       "types": "./lib/cli.d.mts",
+      "@nkzw/source": "./src/cli.ts",
       "default": "./lib/cli.mjs"
     },
     "./server": {
-      "@nkzw/source": "./src/server.ts",
       "types": "./lib/server.d.mts",
+      "@nkzw/source": "./src/server.ts",
       "default": "./lib/server.mjs"
     }
   },
-  "main": "./lib/index.mjs",
   "types": "./lib/index.d.mts",
   "bin": {
     "fate": "./lib/cli.mjs"
@@ -43,11 +43,11 @@
   },
   "dependencies": {
     "superjson": "^2.2.6",
-    "zod": "^4.1.13"
+    "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@trpc/client": "^11.7.2",
-    "@trpc/server": "^11.7.2"
+    "@trpc/client": "^11.8.0",
+    "@trpc/server": "^11.8.0"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0"

@@ -7,20 +7,20 @@
     "type": "git",
     "url": "https://github.com/nkzw-tech/fate"
   },
-  "license": "MIT",
   "author": {
     "name": "Christoph Nakazawa",
     "email": "christoph.pojer@gmail.com"
   },
+  "license": "MIT",
   "type": "module",
+  "main": "./lib/index.mjs",
   "exports": {
     ".": {
-      "@nkzw/source": "./src/index.tsx",
       "types": "./lib/index.d.mts",
+      "@nkzw/source": "./src/index.tsx",
       "default": "./lib/index.mjs"
     }
   },
-  "main": "./lib/index.mjs",
   "types": "./lib/index.d.mts",
   "bin": {
     "fate": "./lib/cli.mjs"
@@ -37,8 +37,8 @@
   "devDependencies": {
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1"
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "peerDependencies": {
     "react": "^19.2.0",
