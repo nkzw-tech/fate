@@ -2,11 +2,11 @@
   "name": "@nkzw/fate-client",
   "version": "0.0.0",
   "private": true,
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
   "repository": {
     "type": "git",
     "url": "git://github.com/nkzw-tech/fate.git"
   },
-  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
   "type": "module",
   "scripts": {
     "dev": "vite dev"
@@ -17,27 +17,27 @@
     "@nkzw/fate-server": "workspace:*",
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.2.4",
-    "@trpc/client": "^11.8.0",
-    "better-auth": "^1.4.7",
+    "@trpc/client": "^11.8.1",
+    "better-auth": "^1.4.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.561.0",
+    "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-error-boundary": "^6.0.0",
     "react-fate": "workspace:*",
-    "react-router": "^7.10.1",
+    "react-router": "^7.11.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
-    "@trpc/server": "^11.8.0",
-    "@types/node": "^25.0.2",
+    "@trpc/server": "^11.8.1",
+    "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "tailwindcss": "^4.1.18",
-    "vite": "8.0.0-beta.2"
+    "vite": "8.0.0-beta.5"
   },
   "browserslist": [
     ">0.2%",

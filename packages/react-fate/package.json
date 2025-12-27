@@ -3,17 +3,24 @@
   "version": "0.1.1",
   "description": "fate is a modern data client for React.",
   "homepage": "https://github.com/nkzw-tech/fate",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/nkzw-tech/fate"
-  },
+  "license": "MIT",
   "author": {
     "name": "Christoph Nakazawa",
     "email": "christoph.pojer@gmail.com"
   },
-  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nkzw-tech/fate"
+  },
+  "bin": {
+    "fate": "./lib/cli.mjs"
+  },
+  "files": [
+    "lib"
+  ],
   "type": "module",
   "main": "./lib/index.mjs",
+  "types": "./lib/index.d.mts",
   "exports": {
     ".": {
       "types": "./lib/index.d.mts",
@@ -21,13 +28,6 @@
       "default": "./lib/index.mjs"
     }
   },
-  "types": "./lib/index.d.mts",
-  "bin": {
-    "fate": "./lib/cli.mjs"
-  },
-  "files": [
-    "lib"
-  ],
   "scripts": {
     "build": "tsdown -d lib --target=node24 src/index.tsx src/cli.ts"
   },

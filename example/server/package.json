@@ -2,11 +2,11 @@
   "name": "@nkzw/fate-server",
   "version": "0.0.0",
   "private": true,
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
   "repository": {
     "type": "git",
     "url": "git://github.com/nkzw-tech/fate.git"
   },
-  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env src/index.tsx",
@@ -18,17 +18,17 @@
     "@nkzw/core": "^1.3.1",
     "@nkzw/define-env": "^1.1.0",
     "@nkzw/fate": "workspace:*",
-    "@prisma/adapter-pg": "^7.1.0",
-    "@prisma/client": "^7.1.0",
-    "@trpc/server": "^11.8.0",
-    "better-auth": "^1.4.7",
-    "hono": "^4.11.1",
+    "@prisma/adapter-pg": "^7.2.0",
+    "@prisma/client": "^7.2.0",
+    "@trpc/server": "^11.8.1",
+    "better-auth": "^1.4.9",
+    "hono": "^4.11.3",
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@types/node": "^25.0.2",
+    "@types/node": "^25.0.3",
     "nodemon": "^3.1.11",
-    "prisma": "^7.1.0"
+    "prisma": "^7.2.0"
   },
   "nodemonConfig": {
     "ext": "ts,tsx",
