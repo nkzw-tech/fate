@@ -29,7 +29,7 @@ export default defineConfig({
   sitemap: {
     hostname: 'https://fate.technology',
   },
-  srcExclude: ['docs/parts/**.', 'packages/**/README.md', 'scripts/**'],
+  srcExclude: ['docs/parts/**.', 'packages/**/README.md', '/README.md'],
   themeConfig: {
     footer: {
       copyright: `Copyright © 2025-present Nakazawa Tech`,
