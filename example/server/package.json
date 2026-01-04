@@ -21,9 +21,9 @@
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@trpc/server": "^11.8.1",
-    "better-auth": "^1.4.9",
+    "better-auth": "^1.4.10",
     "hono": "^4.11.3",
-    "zod": "^4.2.1"
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
