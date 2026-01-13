@@ -9,6 +9,9 @@ export type ResolvedArgsPayload = AnyRecord;
 
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
+type Bivariant<Fn extends (...args: Array<any>) => any> = {
+  bivarianceHack: Fn;
+}['bivarianceHack'];
 
 /**
  * Contract the fate client expects from a network transport. The transport is
@@ -57,13 +60,12 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
  */
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
-  (client: TRPCClient<AppRouter>) => (input: {
-    args?: ResolvedArgsPayload;
-    select: Array<string>;
-  }) => Promise<{
-    items: Array<{ cursor: string | undefined; node: unknown }>;
-    pagination: Pagination;
-  }>
+  (client: TRPCClient<AppRouter>) => Bivariant<
+    (input: any) => Promise<{
+      items: Array<{ cursor: string | undefined; node: unknown }>;
+      pagination: Pagination;
+    }>
+  >
 >;
 
 /**

@@ -1,4 +1,4 @@
-import type { TRPCProcedureBuilder } from '@trpc/server';
+import type { TRPCQueryProcedure } from '@trpc/server';
 import { z } from 'zod';
 import type { DataView } from './dataView.ts';
 import { isRecord } from '../record.ts';
@@ -50,7 +50,25 @@ type ArrayToConnectionOptions<TNode> = {
   getCursor?: (node: TNode) => ConnectionCursor;
 };
 
-type ProcedureLike<TContext> = TRPCProcedureBuilder<TContext, any, any, any, any, any, any, false>;
+type ProcedureLike = {
+  input: (schema: any) => {
+    query: (resolver: (options: any) => unknown) => unknown;
+  };
+};
+
+type ProcedureContext<TProcedure> = TProcedure extends {
+  input: (schema: any) => {
+    query: (resolver: (options: { ctx: infer TContext }) => unknown) => unknown;
+  };
+}
+  ? TContext
+  : unknown;
+
+type ConnectionProcedure<TInput, TOutput> = TRPCQueryProcedure<{
+  input: TInput;
+  meta: unknown;
+  output: TOutput;
+}>;
 
 type QueryFn<TContext, TItem, TInput extends ConnectionInput> = (options: {
   ctx: TContext;
@@ -267,9 +285,34 @@ export function toConnectionResult<Item extends AnyRecord>({
  * Wraps a tRPC procedure to handle cursor-based pagination with consistent
  * connection semantics.
  */
-export const withConnection =
-  <TContext>(procedure: ProcedureLike<TContext>) =>
-  <TItem, TNode = TItem, TAdditionalInput extends AdditionalInputSchema | undefined = undefined>({
+export function withConnection<TProcedure extends ProcedureLike>(
+  procedure: TProcedure,
+): <
+  TItem,
+  TNode = TItem,
+  TAdditionalInput extends AdditionalInputSchema | undefined = undefined,
+>(options: {
+  defaultSize?: number;
+  getCursor?: (node: TNode) => ConnectionCursor;
+  input?: TAdditionalInput;
+  map?: MapFn<
+    ProcedureContext<TProcedure>,
+    TItem,
+    TNode,
+    ConnectionInputWithAdditional<TAdditionalInput>
+  >;
+  query: QueryFn<
+    ProcedureContext<TProcedure>,
+    TItem,
+    ConnectionInputWithAdditional<TAdditionalInput>
+  >;
+}) => ConnectionProcedure<ConnectionInputWithAdditional<TAdditionalInput>, ConnectionResult<TNode>>;
+export function withConnection(procedure: ProcedureLike) {
+  return <
+    TItem,
+    TNode = TItem,
+    TAdditionalInput extends AdditionalInputSchema | undefined = undefined,
+  >({
     defaultSize = 20,
     getCursor = (node: TNode) => (node as { id: string }).id,
     input: additionalInput,
@@ -279,8 +322,17 @@ export const withConnection =
     defaultSize?: number;
     getCursor?: (node: TNode) => ConnectionCursor;
     input?: TAdditionalInput;
-    map?: MapFn<TContext, TItem, TNode, ConnectionInputWithAdditional<TAdditionalInput>>;
-    query: QueryFn<TContext, TItem, ConnectionInputWithAdditional<TAdditionalInput>>;
+    map?: MapFn<
+      ProcedureContext<ProcedureLike>,
+      TItem,
+      TNode,
+      ConnectionInputWithAdditional<TAdditionalInput>
+    >;
+    query: QueryFn<
+      ProcedureContext<ProcedureLike>,
+      TItem,
+      ConnectionInputWithAdditional<TAdditionalInput>
+    >;
   }) => {
     type Input = ConnectionInputWithAdditional<TAdditionalInput>;
 
@@ -292,7 +344,7 @@ export const withConnection =
 
     return procedure.input(inputSchema).query(async (resolverOptions: unknown) => {
       const { ctx, input } = resolverOptions as {
-        ctx: TContext;
+        ctx: ProcedureContext<ProcedureLike>;
         input: Input;
       };
 
@@ -334,5 +386,9 @@ export const withConnection =
           previousCursor: (isBackward ? hasMore : Boolean(cursor)) ? firstItem?.cursor : undefined,
         },
       } satisfies ConnectionResult<TNode>;
-    }) as ReturnType<ReturnType<ProcedureLike<TContext>['input']>['query']>;
+    }) as ConnectionProcedure<
+      ConnectionInputWithAdditional<TAdditionalInput>,
+      ConnectionResult<TNode>
+    >;
   };
+}
