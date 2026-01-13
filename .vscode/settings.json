@@ -20,11 +20,13 @@
   "[jsonc]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
+  "[markdown]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
   "typescript.preferences.importModuleSpecifierEnding": "js",
   "typescript.reportStyleChecksAsWarnings": false,
   "typescript.updateImportsOnFileMove.enabled": "always",
   "typescript.preferences.autoImportFileExcludePatterns": ["**/node_modules/vitest"],
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.experimental.useTsgo": true,
-  "oxc.fmt.experimental": true
+  "typescript.experimental.useTsgo": true
 }
