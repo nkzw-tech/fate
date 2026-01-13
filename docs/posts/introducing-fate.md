@@ -52,16 +52,12 @@ mutate({
   onSuccess: (list, newItem) => {
     cache.remove('posts');
     cache.remove('post', newItem.id);
-    return cache
-      .get('root-posts-list')
-      .map((item) => (item.id === newItem.id ? newItem : item));
+    return cache.get('root-posts-list').map((item) => (item.id === newItem.id ? newItem : item));
   },
   // Complex rollback logic.
   onError: () => {
     cache.restore(previousCacheState);
-    cache
-      .get('root-posts-list')
-      .map((item) => (item.id === oldItem.id ? oldItem : item));
+    cache.get('root-posts-list').map((item) => (item.id === oldItem.id ? oldItem : item));
   },
 });
 ```
@@ -159,11 +155,7 @@ const LikeButton = ({ post }) => {
   const [result, like] = useActionState(fate.actions.post.like, null);
 
   return (
-    <Button
-      action={() =>
-        like({ input: { id: post.id }, optimistic: { likes: post.likes + 1 } })
-      }
-    >
+    <Button action={() => like({ input: { id: post.id }, optimistic: { likes: post.likes + 1 } })}>
       {result?.error ? 'Oops!' : 'Like'}
     </Button>
   );

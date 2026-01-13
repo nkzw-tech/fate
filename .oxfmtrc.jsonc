@@ -4,6 +4,9 @@
   "experimentalSortImports": {
     "newlinesBetween": false,
   },
+  "experimentalSortPackageJson": {
+    "sortScripts": true,
+  },
   "ignorePatterns": [
     ".vitepress/cache",
     ".vitepress/dist",

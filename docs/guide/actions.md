@@ -31,10 +31,7 @@ If you are not using an async component library, you can use React's `useTransit
 const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
   const fate = useFateClient();
   const [, startTransition] = useTransition();
-  const [result, like, isPending] = useActionState(
-    fate.actions.post.like,
-    null,
-  );
+  const [result, like, isPending] = useActionState(fate.actions.post.like, null);
 
   return (
     <button
@@ -221,10 +218,7 @@ const [result, like] = useActionState(fate.actions.post.like, null);
 useEffect(() => {
   if (result?.error) {
     // Reset the action state after 3 seconds.
-    const timeout = setTimeout(
-      () => startTransition(() => like('reset')),
-      3000,
-    );
+    const timeout = setTimeout(() => startTransition(() => like('reset')), 3000);
     return () => clearTimeout(timeout);
   }
 }, [like, result]);

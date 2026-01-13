@@ -29,18 +29,9 @@ const PostView = view<Post>()({
 Now you can apply the `useListView` hook inside of your `PostCard` component to read the list of comments and load more comments when needed:
 
 ```tsx
-export function PostCard({
-  detail,
-  post: postRef,
-}: {
-  detail?: boolean;
-  post: ViewRef<'Post'>;
-}) {
+export function PostCard({ detail, post: postRef }: { detail?: boolean; post: ViewRef<'Post'> }) {
   const post = useView(PostView, postRef);
-  const [comments, loadNext] = useListView(
-    CommentConnectionView,
-    post.comments,
-  );
+  const [comments, loadNext] = useListView(CommentConnectionView, post.comments);
 
   return (
     <div>
