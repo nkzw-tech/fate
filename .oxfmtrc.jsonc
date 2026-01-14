@@ -4,6 +4,9 @@
   "experimentalSortImports": {
     "newlinesBetween": false,
   },
+  "experimentalTailwindcss": {
+    "stylesheet": "example/client/src/App.css",
+  },
   "experimentalSortPackageJson": {
     "sortScripts": true,
   },
