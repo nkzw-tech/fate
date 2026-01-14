@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig } from 'vitepress';
+import llmstxt from 'vitepress-plugin-llms';
 import apiItems from '../docs/api/typedoc-sidebar.json';
 import pkg from '../packages/fate/package.json' with { type: 'json' };
 import dunkel from './theme/dunkel.json';
@@ -98,4 +99,7 @@ export default defineConfig({
     ],
   },
   title: 'fate',
+  vite: {
+    plugins: [llmstxt({ workDir: 'docs' })],
+  },
 });
