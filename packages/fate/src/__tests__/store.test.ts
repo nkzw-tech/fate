@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
 import { Store } from '../store.ts';
 

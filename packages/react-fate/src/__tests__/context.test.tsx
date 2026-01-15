@@ -4,7 +4,7 @@
 
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import { useFateClient } from '../context.tsx';
 
 // @ts-expect-error React 🤷‍♂️

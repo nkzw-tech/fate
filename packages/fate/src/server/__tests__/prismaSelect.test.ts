@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import { prismaSelect } from '../prismaSelect.ts';
 
 test('prismaSelect applies pagination args to relation selections', () => {

@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, test, vi } from 'vitest';
+import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { getViewTag, SelectionOf, type View, type ViewData, type ViewRef } from '../types.ts';
 import { view } from '../view.ts';
 

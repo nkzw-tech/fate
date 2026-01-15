@@ -19,17 +19,17 @@
     "dev:server": "cd example/server && pnpm dev",
     "dev:setup": "(cd example/server && pnpm dev:setup)",
     "fate:generate": "node --conditions=development --no-warnings --loader ts-node/esm --env-file example/server/.env packages/fate/src/cli.ts generate @nkzw/fate-server/src/trpc/router.ts example/client/src/fate.ts",
-    "format": "oxfmt",
+    "format": "vite fmt",
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "lint": "eslint --cache .",
-    "lint:format": "oxfmt --check .",
+    "lint:format": "vite fmt --check .",
     "preinstall": "command -v git >/dev/null 2>&1 && git config core.hooksPath git-hooks || exit 0",
     "prisma": "cd example/server && pnpm prisma",
     "ship": "pnpm build && pnpm test && pnpm publish -r --access public",
     "test": "npm-run-all --parallel tsc:check vitest:run lint lint:format",
     "tsc": "pnpm tsgo",
     "tsc:check": "tsgo",
-    "vitest:run": "vitest run"
+    "vitest:run": "vite test run"
   },
   "devDependencies": {
     "@fontsource/fira-code": "^5.2.7",
@@ -48,21 +48,21 @@
     "happy-dom": "^20.1.0",
     "npm-run-all2": "^8.0.4",
     "oxc-minify": "^0.108.0",
-    "oxfmt": "^0.24.0",
     "prisma": "^7.2.0",
     "tailwindcss": "^4.1.18",
     "ts-node": "^10.9.2",
-    "tsdown": "0.20.0-beta.2",
     "typedoc": "^0.28.16",
     "typedoc-plugin-markdown": "^4.9.0",
     "typedoc-vitepress-theme": "^1.1.2",
-    "vite": "8.0.0-beta.5",
+    "vite": "catalog:",
     "vitepress": "2.0.0-alpha.15",
     "vitepress-plugin-llms": "^1.10.0",
-    "vitest": "^4.0.17"
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=10.0.0"
-  }
+  },
+  "packageManager": "pnpm@10.28.0"
 }

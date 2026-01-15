@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, test } from 'vitest';
+import { expect, expectTypeOf, test } from 'vite-plus/test';
 import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
 import { createResolver, dataView, Entity, list, resolver } from '../dataView.ts';

@@ -1,5 +1,5 @@
 import { initTRPC } from '@trpc/server';
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import { z } from 'zod';
 import { arrayToConnection, withConnection } from '../connection.ts';
 

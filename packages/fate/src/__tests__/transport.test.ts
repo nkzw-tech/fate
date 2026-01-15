@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import { createTRPCTransport } from '../transport.ts';
 
 test('passes selection when fetching by id', async () => {

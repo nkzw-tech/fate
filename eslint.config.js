@@ -53,7 +53,7 @@ export default [
             './example/server/scripts/**/*.tsx',
             '**/__tests__/**',
             '**/tsdown.config.js',
-            'vitest.config.ts',
+            'vite.config.ts',
           ],
           packageDir: findWorkspaces(import.meta.dirname),
         },

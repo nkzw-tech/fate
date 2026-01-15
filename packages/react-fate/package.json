@@ -29,7 +29,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown -d lib --target=node24 src/index.tsx src/cli.ts"
+    "build": "vite lib -d lib --target=node24 src/index.tsx src/cli.ts"
   },
   "dependencies": {
     "@nkzw/fate": "workspace:^"

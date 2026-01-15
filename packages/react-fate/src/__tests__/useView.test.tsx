@@ -5,7 +5,7 @@
 import { createClient, FateRoots, mutation, view, type Transport } from '@nkzw/fate';
 import { act, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
 import { useView } from '../useView.tsx';
 

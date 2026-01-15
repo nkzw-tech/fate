@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vite-plus/test';
 import type { AnyRecord } from '../types.ts';
 import { cloneArgs, hashArgs } from '../args.ts';
 

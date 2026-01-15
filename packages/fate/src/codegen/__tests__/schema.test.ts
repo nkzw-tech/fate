@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import { dataView, list } from '../../server/dataView.ts';
 import { createSchema } from '../schema.ts';
 

@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, test, vi } from 'vitest';
+import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
