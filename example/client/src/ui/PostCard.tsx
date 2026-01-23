@@ -57,7 +57,7 @@ const CommentInput = ({
   error,
   post,
 }: {
-  error?: Error;
+  error?: unknown;
   post: { commentCount: number; id: string };
 }) => {
   const fate = useFateClient();

@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "superjson": "^2.2.6",
-    "zod": "^4.3.5"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@trpc/client": "^11.8.1",
