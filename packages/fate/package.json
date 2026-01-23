@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/fate",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "fate is a modern data client for React.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "license": "MIT",
