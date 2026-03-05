@@ -1,6 +1,6 @@
 #!/usr/bin/env NODE_ENV=development node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env
-import randomEntry from '@nkzw/core/randomEntry.js';
 import { styleText } from 'node:util';
+import randomEntry from '@nkzw/core/randomEntry.js';
 import { auth } from '../lib/auth.tsx';
 import prisma from './prisma.tsx';
 

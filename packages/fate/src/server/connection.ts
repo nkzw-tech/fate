@@ -1,7 +1,7 @@
 import type { TRPCQueryProcedure } from '@trpc/server';
 import { z } from 'zod';
-import type { DataView } from './dataView.ts';
 import { isRecord } from '../record.ts';
+import type { DataView } from './dataView.ts';
 import { getScopedArgs } from './prismaSelect.ts';
 
 type ConnectionInput = z.infer<typeof connectionInput>;

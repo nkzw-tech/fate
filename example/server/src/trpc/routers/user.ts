@@ -1,8 +1,8 @@
 import { connectionArgs, createResolver } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
 import { auth } from '../../lib/auth.tsx';
+import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
 import { User, userDataView } from '../views.ts';
 

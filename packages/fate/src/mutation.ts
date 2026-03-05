@@ -1,6 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
+import { toEntityId } from './ref.ts';
+import { getSelectionPlan } from './selection.ts';
+import { List } from './store.ts';
 import type {
   AnyRecord,
   Entity,
@@ -15,9 +18,6 @@ import type {
   TypeConfig,
   View,
 } from './types.ts';
-import { toEntityId } from './ref.ts';
-import { getSelectionPlan } from './selection.ts';
-import { List } from './store.ts';
 import { MutationKind } from './types.ts';
 
 /**

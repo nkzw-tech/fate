@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vite-plus/test';
-import type { AnyRecord } from '../types.ts';
 import { cloneArgs, hashArgs } from '../args.ts';
+import type { AnyRecord } from '../types.ts';
 
 describe('cloneArgs', () => {
   test('clones nested arrays and objects', () => {

@@ -405,7 +405,6 @@ test('optimistic updates compose when mutations resolve out of order', async () 
   const Component = () => {
     const post = useView(PostView, postRef);
 
-    // eslint-disable-next-line react-hooks/globals
     triggerLike = () => {
       likePromise = client.mutations.like({
         input: { id: post.id },
@@ -414,7 +413,6 @@ test('optimistic updates compose when mutations resolve out of order', async () 
       });
     };
 
-    // eslint-disable-next-line react-hooks/globals
     triggerUnlike = () => {
       unlikePromise = client.mutations.unlike({
         input: { id: post.id },
