@@ -1,11 +1,11 @@
+import { join } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import reactCompiler from 'babel-plugin-react-compiler';
 import dotenv from 'dotenv';
-import { join } from 'node:path';
 import { defineConfig } from 'vite-plus';
 
-const root = process.cwd();
+const root = import.meta.dirname;
 const isDevelopment = process.env.NODE_ENV === 'development' || process.env.DEV;
 
 dotenv.config({

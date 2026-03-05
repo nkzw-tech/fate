@@ -28,7 +28,7 @@
   "postAttachCommand": "bash .devcontainer/start-dev.sh",
   "customizations": {
     "vscode": {
-      "extensions": ["esbenp.prettier-vscode", "dbaeumer.vscode-eslint"]
+      "extensions": ["oxc.oxc-vscode"]
     },
     "codespaces": {
       "openFiles": ["README.md"]

@@ -39,7 +39,7 @@
     }
   },
   "scripts": {
-    "build": "vite lib -d lib --target=node24 src/index.ts src/server.ts src/cli.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/cli.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",

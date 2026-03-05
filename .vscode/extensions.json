@@ -1,6 +1,5 @@
 {
   "recommendations": [
-    "dbaeumer.vscode-eslint",
     "oxc.oxc-vscode",
     "styled-components.vscode-styled-components",
     "sysoev.vscode-open-in-github",
