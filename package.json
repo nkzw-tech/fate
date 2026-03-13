@@ -46,7 +46,6 @@
     "happy-dom": "^20.3.7",
     "npm-run-all2": "^8.0.4",
     "oxc-minify": "^0.110.0",
-    "oxlint": "^1.51.0",
     "prisma": "^7.3.0",
     "tailwindcss": "^4.1.18",
     "ts-node": "^10.9.2",
