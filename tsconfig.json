@@ -18,7 +18,7 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "es2017",
-    "types": ["vite/client"]
+    "types": ["vite/client", "vitepress/client"]
   },
   "exclude": ["node_modules"],
   "include": ["**/*.ts", "**/*.tsx"],

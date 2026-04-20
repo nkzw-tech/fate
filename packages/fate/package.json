@@ -46,8 +46,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@trpc/client": "^11.8.1",
-    "@trpc/server": "^11.8.1"
+    "@trpc/client": "^11.16.0",
+    "@trpc/server": "^11.16.0"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0"

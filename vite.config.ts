@@ -52,6 +52,7 @@ export default defineConfig({
       'eslint-plugin-workspaces',
       { name: 'import-x-js', specifier: 'eslint-plugin-import-x' },
     ],
+    options: { typeAware: true, typeCheck: true },
     overrides: [
       {
         files: [

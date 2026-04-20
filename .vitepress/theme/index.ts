@@ -1,5 +1,4 @@
 import DefaultTheme from 'vitepress/theme';
-import '@fontsource/fira-code';
 import './docs.css';
 
 const listener = (event: DragEvent) => {
