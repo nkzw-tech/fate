@@ -91,4 +91,11 @@ export default defineConfig({
       'workspaces/no-relative-imports': 'error',
     },
   },
+  run: {
+    tasks: {
+      'test:all': {
+        command: 'vp check && vp test',
+      },
+    },
+  },
 });

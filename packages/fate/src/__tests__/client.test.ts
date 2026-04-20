@@ -240,6 +240,60 @@ test(`'readView' returns null for nullable view selections`, () => {
   expect(result.category).toBeNull();
 });
 
+test(`'readView' returns selected fields from plain nested objects`, () => {
+  type UserWithProfile = {
+    __typename: 'User';
+    id: string;
+    profile: {
+      bio: string;
+      location: string;
+    };
+  };
+
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ type: 'User' }],
+  });
+
+  const UserView = view<UserWithProfile>()({
+    id: true,
+    profile: {
+      bio: true,
+    },
+  });
+
+  const plan = getSelectionPlan(UserView, null);
+  client.write(
+    'User',
+    {
+      __typename: 'User',
+      id: 'user-1',
+      profile: {
+        bio: 'Likes apples',
+        location: 'Tokyo',
+      },
+    },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const userRef = client.ref<UserWithProfile>('User', 'user-1', UserView);
+  const result = unwrap(
+    client.readView<UserWithProfile, SelectionOf<typeof UserView>, typeof UserView>(
+      UserView,
+      userRef,
+    ),
+  );
+
+  expect(result.profile).toEqual({ bio: 'Likes apples' });
+});
+
 test(`'readView' returns view refs for list selections`, () => {
   const client = createClient({
     roots: {},
@@ -1171,13 +1225,14 @@ test('mutations insert records into root lists optimistically', async () => {
 
   const PostView = view<Post>()({ id: true, title: true });
   const PostConnectionView = {
-    args: { first: 1 },
     items: { cursor: true, node: PostView },
   };
 
-  await client.request({
-    posts: { args: { first: 1 }, list: PostConnectionView },
-  });
+  const request = {
+    posts: { list: PostConnectionView },
+  };
+
+  await client.request(request);
 
   const optimisticId = 'optimistic:post-2';
 
@@ -1187,14 +1242,16 @@ test('mutations insert records into root lists optimistically', async () => {
     view: PostView,
   });
 
-  expect(client.store.getList('posts')).toEqual([
+  const { posts: optimisticPosts } = client.getRequestResult(request);
+  expect(optimisticPosts.items.map(({ node }) => toEntityId('Post', node.id))).toEqual([
     toEntityId('Post', 'post-1'),
     toEntityId('Post', optimisticId),
   ]);
 
   await mutationPromise;
 
-  expect(client.store.getList('posts')).toEqual([
+  const { posts: resolvedPosts } = client.getRequestResult(request);
+  expect(resolvedPosts.items.map(({ node }) => toEntityId('Post', node.id))).toEqual([
     toEntityId('Post', 'post-1'),
     toEntityId('Post', 'post-2'),
   ]);
@@ -1234,17 +1291,16 @@ test('mutations can control root list insertion order', async () => {
 
   const PostView = view<Post>()({ id: true, title: true });
   const PostConnectionView = {
-    args: { first: 2 },
     items: { cursor: true, node: PostView },
   };
 
-  await client.request({
-    posts: { args: { first: 2 }, list: PostConnectionView },
-  });
+  const request = {
+    posts: { list: PostConnectionView },
+  };
 
-  const { posts: listBefore } = client.getRequestResult({
-    posts: { args: { first: 2 }, list: PostConnectionView },
-  });
+  await client.request(request);
+
+  const { posts: listBefore } = client.getRequestResult(request);
 
   expect(
     (listBefore as unknown as { items: Array<{ node: { id: string } }> }).items.map(
@@ -1259,12 +1315,16 @@ test('mutations can control root list insertion order', async () => {
     view: PostView,
   });
 
-  const idsAfter = client.store.getList('posts');
+  const { posts: listAfter } = client.getRequestResult(request);
+  const idsAfter = listAfter.items.map(({ node }) => toEntityId('Post', node.id));
   expect(idsAfter?.[0]).toBe(toEntityId('Post', 'optimistic:post-3'));
 
   await prependPromise;
 
-  const idsAfterResolution = client.store.getList('posts');
+  const { posts: listAfterResolution } = client.getRequestResult(request);
+  const idsAfterResolution = listAfterResolution.items.map(({ node }) =>
+    toEntityId('Post', node.id),
+  );
   expect(idsAfterResolution?.[0]).toBe(toEntityId('Post', 'post-3'));
 
   await client.mutations.createPost({
@@ -1274,7 +1334,8 @@ test('mutations can control root list insertion order', async () => {
     view: PostView,
   });
 
-  const finalIds = client.store.getList('posts');
+  const { posts: finalList } = client.getRequestResult(request);
+  const finalIds = finalList.items.map(({ node }) => toEntityId('Post', node.id));
   expect(finalIds).toContain(toEntityId('Post', 'post-3'));
   expect(finalIds).not.toContain(toEntityId('Post', 'optimistic:post-4'));
 });
@@ -1763,7 +1824,8 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
 
   expect(fetchList).toHaveBeenCalledWith('posts', new Set(['id', 'title']), { first: 1 });
   expect(metadata?.root).toBe(true);
-  expect(metadata?.key).toBe('posts');
+  expect(metadata?.key).toBeDefined();
+  expect(client.store.getListState(metadata!.key)?.ids).toEqual([toEntityId('Post', 'post-1')]);
   expect(metadata?.args).toEqual({ first: 1 });
   expect(posts.items.map(({ node }) => node?.id)).toEqual(['post-1']);
   expect(posts.pagination?.hasNext).toBe(true);
@@ -1777,6 +1839,354 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
 
   const updated = client.getRequestResult(request).posts;
   expect(updated.items.map(({ node }) => node?.id)).toEqual(['post-1', 'post-2']);
+});
+
+test(`'request' keys root connection cache by nested node view`, async () => {
+  type Post = { __typename: 'Post'; id: string; summary: string; title: string };
+
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [
+      {
+        cursor: 'cursor-1',
+        node: {
+          __typename: 'Post',
+          id: 'post-1',
+          summary: 'Short',
+          title: 'Full',
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { summary: 'scalar', title: 'scalar' }, type: 'Post' }],
+  });
+
+  const SummaryView = view<Post>()({ id: true, summary: true });
+  const FullView = view<Post>()({ id: true, title: true });
+
+  const summaryRequest = {
+    posts: {
+      args: { first: 1 },
+      list: {
+        items: { node: SummaryView },
+        pagination: { hasNext: true },
+      },
+    },
+  };
+  const fullRequest = {
+    posts: {
+      args: { first: 1 },
+      list: {
+        items: { node: FullView },
+        pagination: { hasNext: true },
+      },
+    },
+  };
+
+  const [, { posts }] = await Promise.all([
+    client.request<typeof summaryRequest>(summaryRequest),
+    client.request<typeof fullRequest>(fullRequest),
+  ]);
+
+  expect(fetchList).toHaveBeenCalledTimes(2);
+  expect(posts.items[0]?.node[ViewsTag]).toEqual(tagsFor(FullView));
+});
+
+test(`'request' refetches root lists when existing ids are missing requested fields`, async () => {
+  type Post = { __typename: 'Post'; id: string; summary: string; title: string };
+
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [
+        {
+          cursor: 'cursor-1',
+          node: { __typename: 'Post', id: 'post-1', summary: 'Short' },
+        },
+      ],
+      pagination: { hasNext: false, hasPrevious: false },
+    })
+    .mockResolvedValueOnce({
+      items: [
+        {
+          cursor: 'cursor-1',
+          node: { __typename: 'Post', id: 'post-1', title: 'Full' },
+        },
+      ],
+      pagination: { hasNext: false, hasPrevious: false },
+    });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { summary: 'scalar', title: 'scalar' }, type: 'Post' }],
+  });
+
+  const SummaryView = view<Post>()({ id: true, summary: true });
+  const TitleView = view<Post>()({ id: true, title: true });
+
+  await client.request({
+    posts: {
+      args: { first: 1 },
+      list: {
+        items: { node: SummaryView },
+      },
+    },
+  });
+
+  const { posts } = await client.request({
+    posts: {
+      args: { first: 1 },
+      list: {
+        items: { node: TitleView },
+      },
+    },
+  });
+
+  expect(fetchList).toHaveBeenCalledTimes(2);
+  expect(posts.items[0]?.node[ViewsTag]).toEqual(tagsFor(TitleView));
+});
+
+test(`'request' keeps root list results scoped by args`, async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const fetchList = vi.fn(async (_name, _select, args) => ({
+    items: [
+      {
+        cursor: `cursor-${String(args?.tag)}`,
+        node: {
+          __typename: 'Post',
+          id: `post-${String(args?.tag)}`,
+          title: String(args?.tag),
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  }));
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+    pagination: { hasNext: true },
+  };
+
+  const requestA = {
+    posts: {
+      args: { tag: 'A' },
+      list: PostConnectionView,
+    },
+  };
+  const requestB = {
+    posts: {
+      args: { tag: 'B' },
+      list: PostConnectionView,
+    },
+  };
+
+  const { posts: postsA } = await client.request<typeof requestA>(requestA);
+  const { posts: postsB } = await client.request<typeof requestB>(requestB);
+  const currentA = client.getRequestResult(requestA).posts;
+
+  const metadataA = (postsA as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+  const metadataB = (postsB as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+
+  expect(fetchList).toHaveBeenCalledTimes(2);
+  expect(postsA.items.map(({ node }) => node.id)).toEqual(['post-A']);
+  expect(postsB.items.map(({ node }) => node.id)).toEqual(['post-B']);
+  expect(currentA.items.map(({ node }) => node.id)).toEqual(['post-A']);
+  expect(metadataA.key).not.toBe(metadataB.key);
+});
+
+test(`'request' keeps cursor args in root list request cache keys`, async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-1', node: { __typename: 'Post', id: 'post-1', title: 'First' } }],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-1' },
+    })
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-2', node: { __typename: 'Post', id: 'post-2', title: 'Second' } }],
+      pagination: { hasNext: false, hasPrevious: true },
+    });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    args: { first: 1 },
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+  };
+
+  await client.request({
+    posts: {
+      list: PostConnectionView,
+    },
+  });
+
+  await client.request({
+    posts: {
+      args: { after: 'cursor-1' },
+      list: PostConnectionView,
+    },
+  });
+
+  expect(fetchList).toHaveBeenCalledTimes(2);
+  expect(fetchList).toHaveBeenLastCalledWith('posts', new Set(['id', 'title']), {
+    after: 'cursor-1',
+    first: 1,
+  });
+  expect(
+    client
+      .getRequestResult({ posts: { list: PostConnectionView } })
+      .posts.items.map(({ node }) => node.id),
+  ).toEqual(['post-1', 'post-2']);
+});
+
+test(`root pagination does not update other arg-scoped root lists`, async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+  type CreatePostInput = { title: string };
+
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-A1', node: { __typename: 'Post', id: 'post-A1', title: 'A1' } }],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-A1' },
+    })
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-B1', node: { __typename: 'Post', id: 'post-B1', title: 'B1' } }],
+      pagination: { hasNext: false, hasPrevious: false },
+    })
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-A2', node: { __typename: 'Post', id: 'post-A2', title: 'A2' } }],
+      pagination: { hasNext: false, hasPrevious: false },
+    });
+
+  const mutate = vi.fn().mockResolvedValue({
+    __typename: 'Post',
+    id: 'post-new',
+    title: 'New',
+  });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = { createPost: mutation<Post, CreatePostInput, Post>('Post') };
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    mutations,
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      mutate,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    args: { first: 1 },
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+    pagination: { hasNext: true, nextCursor: true },
+  };
+
+  const requestA = {
+    posts: {
+      args: { tag: 'A' },
+      list: PostConnectionView,
+    },
+  };
+  const requestB = {
+    posts: {
+      args: { tag: 'B' },
+      list: PostConnectionView,
+    },
+  };
+
+  const { posts: postsA } = await client.request<typeof requestA>(requestA);
+  await client.request<typeof requestB>(requestB);
+
+  const metadataA = (postsA as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+  await client.loadConnection(PostConnectionView, metadataA, { after: 'cursor-A1' });
+
+  expect(client.getRequestResult(requestA).posts.items.map(({ node }) => node.id)).toEqual([
+    'post-A1',
+    'post-A2',
+  ]);
+  expect(client.getRequestResult(requestB).posts.items.map(({ node }) => node.id)).toEqual([
+    'post-B1',
+  ]);
+
+  await client.mutations.createPost({
+    input: { title: 'New' },
+    optimistic: { id: 'post-new', title: 'New' },
+    view: PostView,
+  });
+
+  expect(client.getRequestResult(requestA).posts.items.map(({ node }) => node.id)).toEqual([
+    'post-A1',
+    'post-A2',
+  ]);
+  expect(client.getRequestResult(requestB).posts.items.map(({ node }) => node.id)).toEqual([
+    'post-B1',
+  ]);
 });
 
 test(`'request' refetches cached data when using 'store-and-network' mode`, async () => {
@@ -1899,6 +2309,31 @@ test(`'request' waits for a network response when using 'network' mode`, async (
   resolveFetch?.([{ __typename: 'Post', content: 'Banana', id: 'post-1' }]);
 
   expect(await promise).toBe(true);
+});
+
+test(`'request' retries cache-first requests after a rejection`, async () => {
+  type Post = { __typename: 'Post'; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('temporary'))
+    .mockResolvedValueOnce([{ __typename: 'Post', id: 'post-1' }]);
+
+  const client = createClient({
+    roots: { post: clientRoot('Post') },
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true });
+  const request = { post: { id: 'post-1', view: PostView } };
+
+  await expect(client.request(request)).rejects.toThrow('temporary');
+  await expect(client.request(request)).resolves.toEqual({
+    post: expect.objectContaining({ id: 'post-1' }),
+  });
+
+  expect(fetchById).toHaveBeenCalledTimes(2);
 });
 
 test(`'readView' returns list metadata when available`, () => {

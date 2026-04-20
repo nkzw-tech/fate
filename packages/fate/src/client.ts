@@ -114,12 +114,94 @@ const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
   }
 };
 
+const omitUndefinedValues = (record: AnyRecord): AnyRecord => {
+  const result: AnyRecord = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result;
+};
+
+const trackPromise = <T>(promise: Promise<T>): Promise<T> => {
+  const tracked = promise as Promise<T> & {
+    reason?: unknown;
+    status?: 'fulfilled' | 'pending' | 'rejected';
+    value?: T;
+  };
+
+  if (tracked.status) {
+    return tracked;
+  }
+
+  tracked.status = 'pending';
+  void promise.then(
+    (value) => {
+      tracked.status = 'fulfilled';
+      tracked.value = value;
+    },
+    (error) => {
+      tracked.status = 'rejected';
+      tracked.reason = error;
+    },
+  );
+  return tracked;
+};
+
 const serializeId = (value: string | number): string => `${typeof value}:${String(value)}`;
 
-const getViewSignature = (view: View<any, any>): string => {
-  const viewNames = getViewNames(view);
+const getViewSignature = (view: unknown): string => {
+  const viewNames = new Set<string>();
+  const seen = new Set<object>();
+
+  const collect = (value: unknown) => {
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      return;
+    }
+
+    seen.add(value);
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (isViewTag(key)) {
+        viewNames.add(key);
+      }
+
+      collect(entry);
+    }
+  };
+
+  collect(view);
+
   return viewNames.size ? [...viewNames].sort().join(',') : '';
 };
+
+const getRequestArgsSignature = (view: View<any, any>, args?: AnyRecord): string => {
+  const plan = getSelectionPlan(view, null);
+  const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
+  if (!argsPayload) {
+    return '';
+  }
+
+  return hashArgs(argsPayload);
+};
+
+const getRootListKey = (
+  name: string,
+  argsPayload: ResolvedArgsPayload | undefined,
+  plan: SelectionPlan,
+): string => {
+  if (!argsPayload) {
+    return name;
+  }
+
+  return getListKey('__root__', name, plan.args.get('')?.hash ?? hashArgs(argsPayload));
+};
+
+const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boolean =>
+  Boolean(
+    argsPayload && ('after' in argsPayload || 'before' in argsPayload || 'cursor' in argsPayload),
+  );
 
 const getRequestCacheKey = (request: Request) => {
   const parts: Array<string> = [];
@@ -145,13 +227,19 @@ const getRequestCacheKey = (request: Request) => {
 
     if (isQueryItem(item)) {
       parts.push(
-        `query:${name}:${getViewSignature(item.view)}:${item.args ? hashArgs(item.args) : ''}`,
+        `query:${name}:${getViewSignature(item.view)}:${getRequestArgsSignature(
+          item.view,
+          item.args,
+        )}`,
       );
       continue;
     }
 
     parts.push(
-      `list:${name}:${getViewSignature(item.list)}:${item.args ? hashArgs(item.args) : ''}`,
+      `list:${name}:${getViewSignature(item.list)}:${getRequestArgsSignature(
+        item.list,
+        item.args,
+      )}`,
     );
   }
 
@@ -756,7 +844,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         );
       }
 
-      const requestArgs = { ...connection.args, ...args };
+      const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
       const { argsPayload, plan } = this.resolveSelection(view, requestArgs);
       const { items, pagination } = await this.transport.fetchList(
         connection.field,
@@ -780,7 +868,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           plan,
           null,
           null,
-          'after',
+          'none',
         );
         incomingIds.push(id);
         incomingCursors.push(entry.cursor);
@@ -803,14 +891,16 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         { direction: isBackward ? 'backward' : 'forward', hasCursorArg },
       );
 
-      this.registerRootList(connection.type, connection.key);
+      if (!connection.args) {
+        this.registerRootList(connection.type, connection.key);
+      }
       this.store.setList(connection.key, nextListState);
 
       return nextListState;
     }
 
     const owner = parseEntityId(connection.owner);
-    const requestArgs = { ...connection.args, ...args };
+    const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
     if (requestArgs.id === undefined && owner.id) {
       requestArgs.id = owner.id;
     }
@@ -914,15 +1004,17 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     let promise: Promise<RequestResult<Roots, R>>;
     switch (mode) {
       case 'stale-while-revalidate':
-        promise = this.handleStoreAndNetworkRequest(request);
+        promise = trackPromise(this.handleStoreAndNetworkRequest(request));
         break;
       case 'cache-first':
       case 'network-only':
       default:
-        promise = this.executeRequest(
-          request,
-          mode === 'network-only' ? { fetchAll: true } : undefined,
-        ).then(() => this.getRequestResult(request));
+        promise = trackPromise(
+          this.executeRequest(
+            request,
+            mode === 'network-only' ? { fetchAll: true } : undefined,
+          ).then(() => this.getRequestResult(request)),
+        );
         break;
     }
 
@@ -933,6 +1025,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
 
     requests.set(mode, promise);
+    if (mode === 'cache-first') {
+      void promise.catch(() => this.releaseRequest(request, mode));
+    }
     return promise;
   }
 
@@ -971,6 +1066,22 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       throw new Error(`fate: Unknown root request '${name}'.`);
     }
     return root.type;
+  }
+
+  private hasRootListData(name: string, item: ListItem<View<any, any>>): boolean {
+    const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
+    const listState = this.store.getListState(getRootListKey(name, argsPayload, plan));
+    if (!listState) {
+      return false;
+    }
+
+    for (const id of listState.ids) {
+      if (this.store.missingForSelection(id, plan.paths).size > 0) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private async executeRequest(request: Request, options: { fetchAll?: boolean } = {}) {
@@ -1024,6 +1135,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
             promises.push(this.fetchQueryAndNormalize(name, item, plan, argsPayload));
           }
         } else {
+          const { argsPayload } = this.resolveSelection(item.list, item.args);
+          if (!fetchAll && !hasCursorArgs(argsPayload) && this.hasRootListData(name, item)) {
+            continue;
+          }
           promises.push(this.fetchListAndNormalize(name, item));
         }
       }
@@ -1068,7 +1183,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         continue;
       }
 
-      if (!this.store.getList(name)) {
+      if (!this.hasRootListData(name, item)) {
         return false;
       }
     }
@@ -1100,7 +1215,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         continue;
       }
 
-      const listState = this.store.getListState(name);
+      const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
+      const listKey = getRootListKey(name, argsPayload, plan);
+      const listState = this.store.getListState(listKey);
       const hasItems = item.list && typeof item.list === 'object' && 'items' in item.list;
       const nodeView = (
         hasItems && item.list.items ? ((item.list.items as AnyRecord).node ?? item.list) : item.list
@@ -1113,12 +1230,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           pagination: listState?.pagination,
         };
 
-        const { argsPayload } = this.resolveSelection(item.list, item.args);
-
         const metadata: ConnectionMetadata = {
           args: argsPayload,
           field: name,
-          key: name,
+          key: listKey,
           owner: name,
           procedure: `request.${name}`,
           root: true,
@@ -1195,6 +1310,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const type = this.getRootType(name);
     const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
     const { items, pagination } = await this.transport.fetchList(name, plan.paths, argsPayload);
+    const listKey = getRootListKey(name, argsPayload, plan);
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
     for (const entry of items) {
@@ -1202,12 +1318,22 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       ids.push(id);
       cursors.push(entry.cursor);
     }
-    this.registerRootList(type, name);
-    this.store.setList(name, {
-      cursors,
-      ids,
-      pagination,
-    });
+    if (!argsPayload) {
+      this.registerRootList(type, listKey);
+    }
+
+    const hasCursorArg = hasCursorArgs(argsPayload);
+    const isBackward = Boolean(
+      argsPayload?.before !== undefined || argsPayload?.last !== undefined,
+    );
+    const previous = this.store.getListState(listKey);
+    this.store.setList(
+      listKey,
+      this.mergeListState(previous, ids, cursors, pagination, {
+        direction: isBackward ? 'backward' : 'forward',
+        hasCursorArg,
+      }),
+    );
   }
 
   private resolveSelection(view: View<any, any>, args: AnyRecord | undefined) {
@@ -1736,7 +1862,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
               walk(nextSelection, relatedRecord, targetRecord as ViewResult, entityId, fieldPath);
             }
           } else {
-            walk(nextSelection, record, target[key] as ViewResult, entityId, fieldPath);
+            walk(nextSelection, value as AnyRecord, target[key] as ViewResult, entityId, fieldPath);
           }
         }
       }

@@ -22,6 +22,8 @@ type Post = {
   id: string;
 };
 
+const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 test('loads additional items when loadNext is invoked', async () => {
   const fetchById = vi.fn().mockResolvedValue([
     {
@@ -542,6 +544,8 @@ test('updates root list items after loading the next page', async () => {
         </Suspense>
       </FateClient>,
     );
+
+    await flushAsync();
   });
 
   expect(loadNextRef).not.toBeNull();
@@ -696,7 +700,7 @@ test('loads previous items when loadPrevious is invoked', async () => {
     'Post',
     ['post-1'],
     new Set(['comments.content', 'comments.id']),
-    { comments: { before: 'cursor-1', first: 1, id: 'post-1' } },
+    { comments: { before: 'cursor-1', id: 'post-1', last: 1 } },
   );
 
   expect(loadPreviousRef).toBeNull();
