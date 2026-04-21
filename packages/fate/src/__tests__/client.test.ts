@@ -1340,6 +1340,206 @@ test('mutations can control root list insertion order', async () => {
   expect(finalIds).not.toContain(toEntityId('Post', 'optimistic:post-4'));
 });
 
+test('pending root prepends preserve newest-first order while the leading edge is unresolved', async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const createPost = (id: string) =>
+    ({
+      __typename: 'Post',
+      id,
+      title: `Post ${id}`,
+    }) satisfies Post;
+
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [
+      { cursor: 'cursor-3', node: createPost('post-3') },
+      { cursor: 'cursor-4', node: createPost('post-4') },
+    ],
+    pagination: { hasNext: false, hasPrevious: true, previousCursor: 'cursor-3' },
+  });
+
+  const mutations = { createPost: mutation<Post, { title: string }, Post>('Post') };
+  const pendingResponses = [createPost('post-2'), createPost('post-1')];
+  const resolveMutations: Array<() => void> = [];
+  const mutate = vi.fn(() => {
+    const response = pendingResponses[resolveMutations.length]!;
+    const { promise, resolve } = Promise.withResolvers<Post>();
+    resolveMutations.push(() => resolve(response));
+    return promise;
+  }) as NonNullable<
+    Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']['mutate']
+  >;
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: { posts: clientRoot('Post') },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      mutate,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    items: { cursor: true, node: PostView },
+  };
+  const request = {
+    posts: { list: PostConnectionView },
+  };
+
+  await client.request(request);
+
+  const firstPromise = client.mutations.createPost({
+    input: { title: 'First pending prepend' },
+    insert: 'before',
+    optimistic: { id: 'optimistic:post-a', title: 'First pending prepend' },
+    view: PostView,
+  });
+  const secondPromise = client.mutations.createPost({
+    input: { title: 'Second pending prepend' },
+    insert: 'before',
+    optimistic: { id: 'optimistic:post-b', title: 'Second pending prepend' },
+    view: PostView,
+  });
+
+  const { posts } = client.getRequestResult(request);
+  expect(posts.items.map(({ node }) => node.id)).toEqual([
+    'optimistic:post-b',
+    'optimistic:post-a',
+    'post-3',
+    'post-4',
+  ]);
+
+  resolveMutations[1]?.();
+  await secondPromise;
+  resolveMutations[0]?.();
+  await firstPromise;
+});
+
+test('root list inserts stay attached to an unresolved trailing edge while more pages load', async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const createPost = (id: string) =>
+    ({
+      __typename: 'Post',
+      id,
+      title: `Post ${id}`,
+    }) satisfies Post;
+
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [
+        { cursor: 'cursor-1', node: createPost('post-1') },
+        { cursor: 'cursor-2', node: createPost('post-2') },
+      ],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-2' },
+    })
+    .mockResolvedValueOnce({
+      items: [
+        { cursor: 'cursor-3', node: createPost('post-3') },
+        { cursor: 'cursor-4', node: createPost('post-4') },
+      ],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-4' },
+    })
+    .mockResolvedValueOnce({
+      items: [
+        { cursor: 'cursor-5', node: createPost('post-5') },
+        { cursor: 'cursor-6', node: createPost('post-6') },
+        { cursor: 'cursor-7', node: createPost('post-7') },
+        { cursor: 'cursor-8', node: createPost('post-8') },
+        { cursor: 'cursor-9', node: createPost('post-9') },
+        { cursor: 'cursor-10', node: createPost('post-10') },
+      ],
+      pagination: { hasNext: false, hasPrevious: false, nextCursor: 'cursor-10' },
+    });
+
+  const mutate = vi.fn().mockResolvedValue(createPost('post-11'));
+  const mutations = { createPost: mutation<Post, { title: string }, Post>('Post') };
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: { posts: clientRoot('Post') },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      mutate,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+    pagination: {
+      hasNext: true,
+      nextCursor: true,
+    },
+  };
+
+  const request = {
+    posts: { list: PostConnectionView },
+  };
+
+  const { posts } = await client.request(request);
+  const metadata = (posts as AnyRecord)[ConnectionTag as any] as ConnectionMetadata | undefined;
+
+  const mutationPromise = client.mutations.createPost({
+    input: { title: 'Draft' },
+    optimistic: { id: 'optimistic:post-11', title: 'Draft' },
+    view: PostView,
+  });
+
+  expect(client.getRequestResult(request).posts.items.map(({ node }) => node?.id)).toEqual([
+    'post-1',
+    'post-2',
+    'optimistic:post-11',
+  ]);
+
+  await mutationPromise;
+
+  expect(client.getRequestResult(request).posts.items.map(({ node }) => node?.id)).toEqual([
+    'post-1',
+    'post-2',
+    'post-11',
+  ]);
+
+  await client.loadConnection(PostConnectionView, metadata!, { after: 'cursor-2', first: 2 });
+
+  expect(client.getRequestResult(request).posts.items.map(({ node }) => node?.id)).toEqual([
+    'post-1',
+    'post-2',
+    'post-3',
+    'post-4',
+    'post-11',
+  ]);
+
+  await client.loadConnection(PostConnectionView, metadata!, { after: 'cursor-4', first: 2 });
+
+  expect(client.getRequestResult(request).posts.items.map(({ node }) => node?.id)).toEqual([
+    'post-1',
+    'post-2',
+    'post-3',
+    'post-4',
+    'post-5',
+    'post-6',
+    'post-7',
+    'post-8',
+    'post-9',
+    'post-10',
+    'post-11',
+  ]);
+});
+
 test('does not fetch missing fields for optimistic records', async () => {
   type User = { __typename: 'User'; id: string; name: string };
   type Comment = {
@@ -2552,6 +2752,342 @@ test(`'loadConnection' scopes args to the connection field`, async () => {
   );
 });
 
+test('nested connection inserts stay attached to an unresolved trailing edge while more pages load', async () => {
+  type CreateCommentInput = { content: string; postId: string };
+  type CommentConnectionResult = {
+    items: Array<{ cursor?: string; node: { id: string } | null }>;
+    pagination?: { hasNext?: boolean; nextCursor?: string };
+  };
+
+  const createComment = (id: string) =>
+    ({
+      __typename: 'Comment',
+      author: null,
+      content: `Comment ${id}`,
+      id,
+    }) satisfies Comment;
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValueOnce([
+      {
+        __typename: 'Post',
+        comments: {
+          items: [
+            { cursor: 'cursor-3', node: createComment('comment-3') },
+            { cursor: 'cursor-4', node: createComment('comment-4') },
+          ],
+          pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-4' },
+        },
+        id: 'post-1',
+      },
+    ])
+    .mockResolvedValueOnce([
+      {
+        __typename: 'Post',
+        comments: {
+          items: [
+            { cursor: 'cursor-5', node: createComment('comment-5') },
+            { cursor: 'cursor-6', node: createComment('comment-6') },
+            { cursor: 'cursor-7', node: createComment('comment-7') },
+            { cursor: 'cursor-8', node: createComment('comment-8') },
+            { cursor: 'cursor-9', node: createComment('comment-9') },
+            { cursor: 'cursor-10', node: createComment('comment-10') },
+          ],
+          pagination: { hasNext: false, hasPrevious: false, nextCursor: 'cursor-10' },
+        },
+        id: 'post-1',
+      },
+    ]);
+
+  const mutate = vi.fn().mockResolvedValue({
+    __typename: 'Comment',
+    author: null,
+    content: 'Comment comment-11',
+    id: 'comment-11',
+    post: {
+      __typename: 'Post',
+      comments: [],
+      content: 'Post',
+      id: 'post-1',
+      likes: 0,
+    },
+  } satisfies Comment);
+
+  const mutations = {
+    addComment: mutation<Comment, CreateCommentInput, Comment>('Comment'),
+  };
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      fetchById,
+      mutate,
+    },
+    types: [
+      { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
+      { fields: { post: { type: 'Post' } }, type: 'Comment' },
+    ],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+    post: { id: true },
+  });
+
+  const CommentConnectionView = {
+    args: { first: 2 },
+    items: {
+      cursor: true,
+      node: CommentView,
+    },
+    pagination: {
+      hasNext: true,
+      nextCursor: true,
+    },
+  };
+
+  const PostView = view<Post>()({
+    comments: CommentConnectionView,
+    id: true,
+  });
+
+  const plan = getSelectionPlan(PostView, null);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          { cursor: 'cursor-1', node: createComment('comment-1') },
+          { cursor: 'cursor-2', node: createComment('comment-2') },
+        ],
+        pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-2' },
+      },
+      id: 'post-1',
+    },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+
+  const mutationPromise = client.mutations.addComment({
+    input: { content: 'Draft', postId: 'post-1' },
+    optimistic: {
+      author: null,
+      content: 'Draft',
+      id: 'optimistic:comment-11',
+      post: { id: 'post-1' },
+    },
+    view: CommentView,
+  });
+
+  let post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  let comments = post.comments as unknown as CommentConnectionResult;
+
+  expect(comments.items.map(({ node }) => node?.id)).toEqual([
+    'comment-1',
+    'comment-2',
+    'optimistic:comment-11',
+  ]);
+
+  await mutationPromise;
+
+  post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  comments = post.comments as unknown as CommentConnectionResult;
+  const metadata = (comments as unknown as AnyRecord)[ConnectionTag as any] as
+    | ConnectionMetadata
+    | undefined;
+
+  expect(comments.items.map(({ node }) => node?.id)).toEqual([
+    'comment-1',
+    'comment-2',
+    'comment-11',
+  ]);
+
+  await client.loadConnection(CommentConnectionView, metadata!, { after: 'cursor-2' });
+
+  post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  comments = post.comments as unknown as CommentConnectionResult;
+  expect(comments.items.map(({ node }) => node?.id)).toEqual([
+    'comment-1',
+    'comment-2',
+    'comment-3',
+    'comment-4',
+    'comment-11',
+  ]);
+
+  await client.loadConnection(CommentConnectionView, metadata!, { after: 'cursor-4' });
+
+  post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  comments = post.comments as unknown as CommentConnectionResult;
+  expect(comments.items.map(({ node }) => node?.id)).toEqual([
+    'comment-1',
+    'comment-2',
+    'comment-3',
+    'comment-4',
+    'comment-5',
+    'comment-6',
+    'comment-7',
+    'comment-8',
+    'comment-9',
+    'comment-10',
+    'comment-11',
+  ]);
+});
+
+test('pending optimistic nested prepends stay visible in plain list views', async () => {
+  type CreateCommentInput = { content: string; postId: string };
+
+  const createComment = (id: string) =>
+    ({
+      __typename: 'Comment',
+      author: null,
+      content: `Comment ${id}`,
+      id,
+    }) satisfies Comment;
+
+  const mutations = {
+    addComment: mutation<Comment, CreateCommentInput, Comment>('Comment'),
+  };
+  let resolveMutation: ((value: Comment) => void) | undefined;
+  const mutate = vi.fn(
+    () =>
+      new Promise<Comment>((resolve) => {
+        resolveMutation = resolve;
+      }),
+  ) as NonNullable<
+    Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']['mutate']
+  >;
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [
+      { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
+      { fields: { post: { type: 'Post' } }, type: 'Comment' },
+    ],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+    post: { id: true },
+  });
+  const CommentConnectionView = {
+    items: {
+      node: CommentView,
+    },
+    pagination: {
+      hasPrevious: true,
+      previousCursor: true,
+    },
+  };
+  const PostConnectionView = view<Post>()({
+    comments: CommentConnectionView,
+    id: true,
+  });
+  const PlainPostView = view<Post>()({
+    comments: view<Comment>()({
+      content: true,
+      id: true,
+    }),
+    id: true,
+  });
+
+  const plan = getSelectionPlan(PostConnectionView, null);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          { cursor: 'cursor-3', node: createComment('comment-3') },
+          { cursor: 'cursor-4', node: createComment('comment-4') },
+        ],
+        pagination: { hasNext: false, hasPrevious: true, previousCursor: 'cursor-3' },
+      },
+      id: 'post-1',
+    },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const postRef = client.ref<Post>('Post', 'post-1', PlainPostView);
+
+  const mutationPromise = client.mutations.addComment({
+    input: { content: 'Draft', postId: 'post-1' },
+    insert: 'before',
+    optimistic: {
+      author: null,
+      content: 'Draft',
+      id: 'optimistic:comment-2',
+      post: { id: 'post-1' },
+    },
+    view: CommentView,
+  });
+
+  let post = unwrap(
+    client.readView<Post, SelectionOf<typeof PlainPostView>, typeof PlainPostView>(
+      PlainPostView,
+      postRef,
+    ),
+  );
+  expect(post.comments.map((comment) => comment?.id)).toEqual([
+    'optimistic:comment-2',
+    'comment-3',
+    'comment-4',
+  ]);
+
+  resolveMutation?.({
+    __typename: 'Comment',
+    author: null,
+    content: 'Comment comment-2',
+    id: 'comment-2',
+    post: {
+      __typename: 'Post',
+      comments: [],
+      content: 'Post',
+      id: 'post-1',
+      likes: 0,
+    },
+  });
+  await mutationPromise;
+
+  post = unwrap(
+    client.readView<Post, SelectionOf<typeof PlainPostView>, typeof PlainPostView>(
+      PlainPostView,
+      postRef,
+    ),
+  );
+  expect(post.comments.map((comment) => comment?.id)).toEqual([
+    'comment-2',
+    'comment-3',
+    'comment-4',
+  ]);
+});
+
 test(`mutation results with arrays mark nested fields as fetched`, async () => {
   type CommentResult = { __typename: 'Comment'; content: string; id: string };
   type UpdatePostInput = { id: string };
@@ -2951,7 +3487,7 @@ test(`'linkParentLists' maintains list registrations for parent entities`, () =>
   expect(client.store.getList(getListKey(postId, 'comments'))).toEqual([commentId]);
 });
 
-test(`'linkParentLists' preserves pagination metadata across scoped lists`, () => {
+test(`'linkParentLists' keeps unresolved inserts pending across scoped lists`, () => {
   const client = createClient({
     roots: {},
     transport: {
@@ -3010,13 +3546,15 @@ test(`'linkParentLists' preserves pagination metadata across scoped lists`, () =
 
   const newCommentId = toEntityId('Comment', 'comment-2');
   expect(client.store.getListState(defaultListKey)).toEqual({
-    cursors: ['cursor-1', undefined],
-    ids: [existingCommentId, newCommentId],
+    cursors: ['cursor-1'],
+    ids: [existingCommentId],
     pagination,
+    pendingAfterIds: [newCommentId],
   });
   expect(client.store.getListState(scopedListKey)).toEqual({
-    cursors: ['cursor-1', undefined],
-    ids: [existingCommentId, newCommentId],
+    cursors: ['cursor-1'],
+    ids: [existingCommentId],
     pagination,
+    pendingAfterIds: [newCommentId],
   });
 });

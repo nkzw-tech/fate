@@ -196,7 +196,7 @@ export function wrapMutation<
           : null;
 
     const snapshots = new Map<string, Snapshot>();
-    const listSnapshots = deleteRecord ? new Map<string, List>() : undefined;
+    const listSnapshots = deleteRecord || optimisticRecord ? new Map<string, List>() : undefined;
     const optimisticSelection = optimisticRecord
       ? collectImplicitSelectedPaths(optimisticRecord)
       : undefined;
@@ -223,6 +223,7 @@ export function wrapMutation<
         null,
         null,
         insert,
+        listSnapshots,
       );
     }
 

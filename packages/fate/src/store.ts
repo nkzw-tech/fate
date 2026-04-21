@@ -15,6 +15,8 @@ export type List = Readonly<{
   cursors?: ReadonlyArray<string | undefined>;
   ids: ReadonlyArray<EntityId>;
   pagination?: Pagination;
+  pendingAfterIds?: ReadonlyArray<EntityId>;
+  pendingBeforeIds?: ReadonlyArray<EntityId>;
 }>;
 
 type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
@@ -220,6 +222,75 @@ export class Store {
     this.notifyListSubscribers(key);
   }
 
+  replaceListEntityId(previousId: EntityId, nextId: EntityId) {
+    for (const [key, list] of this.lists.entries()) {
+      let changed = false;
+
+      const ids: Array<EntityId> = [];
+      const cursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
+      const seenIds = new Set<EntityId>();
+      list.ids.forEach((id, index) => {
+        const resolved = id === previousId ? nextId : id;
+        if (resolved !== id) {
+          changed = true;
+        }
+        if (seenIds.has(resolved)) {
+          changed = true;
+          return;
+        }
+        seenIds.add(resolved);
+        ids.push(resolved);
+        if (cursors) {
+          cursors.push(list.cursors?.[index]);
+        }
+      });
+
+      const dedupe = (values: ReadonlyArray<EntityId> | undefined) => {
+        if (!values) {
+          return undefined;
+        }
+
+        let updated = false;
+        const seen = new Set<EntityId>();
+        const next: Array<EntityId> = [];
+        for (const value of values) {
+          const resolved = value === previousId ? nextId : value;
+          if (resolved !== value) {
+            updated = true;
+          }
+          if (seen.has(resolved)) {
+            updated = true;
+            continue;
+          }
+          seen.add(resolved);
+          next.push(resolved);
+        }
+
+        if (updated) {
+          changed = true;
+        }
+
+        return updated ? next : values;
+      };
+
+      const pendingBeforeIds = dedupe(list.pendingBeforeIds);
+      const pendingAfterIds = dedupe(list.pendingAfterIds);
+
+      if (!changed) {
+        continue;
+      }
+
+      const canonicalIds = new Set(ids);
+      this.setList(key, {
+        cursors,
+        ids,
+        pagination: list.pagination,
+        pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
+        pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
+      });
+    }
+  }
+
   restoreList(key: string, list?: List) {
     if (list == null) {
       this.lists.delete(key);
@@ -258,7 +329,9 @@ export class Store {
   ) {
     for (const [key, list] of this.lists.entries()) {
       const { ids } = list;
-      if (!ids.includes(targetId)) {
+      const hasPendingAfter = Boolean(list.pendingAfterIds?.includes(targetId));
+      const hasPendingBefore = Boolean(list.pendingBeforeIds?.includes(targetId));
+      if (!ids.includes(targetId) && !hasPendingAfter && !hasPendingBefore) {
         continue;
       }
 
@@ -285,6 +358,8 @@ export class Store {
         cursors,
         ids: entityIds,
         pagination: list.pagination,
+        pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
+        pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
       });
     }
 

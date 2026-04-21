@@ -92,6 +92,43 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
 
 const emptySet = new Set<string>();
 
+type ListEntry = Readonly<{ cursor?: string; id: EntityId }>;
+
+const dropCanonicalPendingIds = (
+  pendingIds: ReadonlyArray<EntityId> | undefined,
+  ids: ReadonlyArray<EntityId>,
+) => {
+  if (!pendingIds || pendingIds.length === 0) {
+    return undefined;
+  }
+
+  const canonicalIds = new Set(ids);
+  const next = pendingIds.filter((id) => !canonicalIds.has(id));
+  return next.length > 0 ? next : undefined;
+};
+
+const getListEntries = (listState: List | undefined): Array<ListEntry> => {
+  if (!listState) {
+    return [];
+  }
+
+  const entries: Array<ListEntry> = [];
+
+  for (const id of listState.pendingBeforeIds ?? []) {
+    entries.push({ id });
+  }
+
+  listState.ids.forEach((id, index) => {
+    entries.push({ cursor: listState.cursors?.[index], id });
+  });
+
+  for (const id of listState.pendingAfterIds ?? []) {
+    entries.push({ id });
+  }
+
+  return entries;
+};
+
 const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
   const path = key.split('.');
   let current: AnyRecord = target;
@@ -394,7 +431,77 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     lists.add(key);
   }
 
-  private insertIntoRootLists(type: string, entityId: EntityId, insert: InsertPosition) {
+  private snapshotList(key: string, listSnapshots: Map<string, List> | undefined) {
+    if (!listSnapshots || listSnapshots.has(key)) {
+      return;
+    }
+
+    const listState = this.store.getListState(key);
+    if (listState) {
+      listSnapshots.set(key, listState);
+    }
+  }
+
+  private applyListInsert(
+    listState: List,
+    entityId: EntityId,
+    insert: InsertPosition,
+  ): { list: List; pending: boolean } {
+    const pendingBeforeIds = listState.pendingBeforeIds ?? [];
+    const pendingAfterIds = listState.pendingAfterIds ?? [];
+    const hasEntity =
+      listState.ids.includes(entityId) ||
+      pendingBeforeIds.includes(entityId) ||
+      pendingAfterIds.includes(entityId);
+
+    if (hasEntity) {
+      return { list: listState, pending: false };
+    }
+
+    const shouldStayPending =
+      insert === 'before'
+        ? Boolean(listState.pagination?.hasPrevious)
+        : Boolean(listState.pagination?.hasNext);
+
+    if (shouldStayPending) {
+      return {
+        list:
+          insert === 'before'
+            ? {
+                ...listState,
+                pendingBeforeIds: [entityId, ...pendingBeforeIds],
+              }
+            : {
+                ...listState,
+                pendingAfterIds: [...pendingAfterIds, entityId],
+              },
+        pending: true,
+      };
+    }
+
+    const ids = insert === 'before' ? [entityId, ...listState.ids] : [...listState.ids, entityId];
+    const cursors = listState.cursors
+      ? insert === 'before'
+        ? [undefined, ...listState.cursors]
+        : [...listState.cursors, undefined]
+      : listState.cursors;
+
+    return {
+      list: {
+        ...listState,
+        cursors,
+        ids,
+      },
+      pending: false,
+    };
+  }
+
+  private insertIntoRootLists(
+    type: string,
+    entityId: EntityId,
+    insert: InsertPosition,
+    listSnapshots?: Map<string, List>,
+  ) {
     if (insert === 'none') {
       return;
     }
@@ -406,22 +513,17 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     for (const key of listNames) {
       const listState = this.store.getListState(key);
-      if (!listState || listState.ids.includes(entityId)) {
+      if (!listState) {
         continue;
       }
 
-      const ids = insert === 'before' ? [entityId, ...listState.ids] : [...listState.ids, entityId];
-      const cursors = listState.cursors
-        ? insert === 'before'
-          ? [undefined, ...listState.cursors]
-          : [...listState.cursors, undefined]
-        : listState.cursors;
+      const next = this.applyListInsert(listState, entityId, insert).list;
+      if (next === listState) {
+        continue;
+      }
 
-      this.store.setList(key, {
-        cursors,
-        ids,
-        pagination: listState.pagination,
-      });
+      this.snapshotList(key, listSnapshots);
+      this.store.setList(key, next);
     }
   }
 
@@ -474,8 +576,19 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     pathPrefix: string | null = null,
     blockedMask?: FieldMask | null,
     insert?: InsertPosition,
+    listSnapshots?: Map<string, List>,
   ) {
-    return this.writeEntity(type, data, select, snapshots, plan, pathPrefix, blockedMask, insert);
+    return this.writeEntity(
+      type,
+      data,
+      select,
+      snapshots,
+      plan,
+      pathPrefix,
+      blockedMask,
+      insert,
+      listSnapshots,
+    );
   }
 
   deleteRecord(
@@ -696,7 +809,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           }
         : undefined;
 
-    return { cursors, ids, pagination };
+    return {
+      cursors,
+      ids,
+      pagination,
+      pendingAfterIds: dropCanonicalPendingIds(previous?.pendingAfterIds, ids),
+      pendingBeforeIds: dropCanonicalPendingIds(previous?.pendingBeforeIds, ids),
+    };
   }
 
   registerPendingOptimisticMutation(entityId: EntityId, promise: Promise<unknown>) {
@@ -724,6 +843,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
   resolveOptimisticEntity(optimisticEntityId: EntityId, resolvedEntityId: EntityId) {
     this.optimisticEntityResolutions.set(optimisticEntityId, resolvedEntityId);
+    this.store.replaceListEntityId(optimisticEntityId, resolvedEntityId);
   }
 
   registerOptimisticUpdate(entityId: EntityId | null, select: ReadonlySet<string>): number | null {
@@ -1222,11 +1342,12 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       const nodeView = (
         hasItems && item.list.items ? ((item.list.items as AnyRecord).node ?? item.list) : item.list
       ) as View<any, any>;
-      const nodes = (listState?.ids ?? []).map((id: string) => this.rootListRef(id, nodeView));
+      const entries = getListEntries(listState);
+      const nodes = entries.map(({ id }) => this.rootListRef(id, nodeView));
 
       if (hasItems) {
         const connection: AnyRecord = {
-          items: nodes.map((node, index) => ({ cursor: listState?.cursors?.[index], node })),
+          items: nodes.map((node, index) => ({ cursor: entries[index]?.cursor, node })),
           pagination: listState?.pagination,
         };
 
@@ -1354,6 +1475,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     pathPrefix: string | null = null,
     blockedMask?: FieldMask | null,
     insert?: InsertPosition,
+    listSnapshots?: Map<string, List>,
   ): EntityId {
     const config = this.types.get(type);
     if (!config) {
@@ -1408,6 +1530,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
               plan,
               fieldPath,
               blockedMask,
+              undefined,
+              listSnapshots,
             );
           }
         } else if (
@@ -1505,6 +1629,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
                   plan,
                   fieldPath,
                   blockedMask,
+                  undefined,
+                  listSnapshots,
                 );
 
                 ids.push(childId);
@@ -1558,9 +1684,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     this.viewDataCache.invalidate(entityId);
     this.store.merge(entityId, result, select);
-    this.linkParentLists(type, entityId, result, snapshots, insert ?? 'after');
+    this.linkParentLists(type, entityId, result, snapshots, listSnapshots, insert ?? 'after');
     if (!pathPrefix && insert) {
-      this.insertIntoRootLists(type, entityId, insert);
+      this.insertIntoRootLists(type, entityId, insert, listSnapshots);
     }
     return entityId;
   }
@@ -1570,6 +1696,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     entityId: EntityId,
     record: AnyRecord,
     snapshots: Map<EntityId, Snapshot> | undefined,
+    listSnapshots: Map<string, List> | undefined,
     insert: InsertPosition,
   ) {
     if (insert === 'none') {
@@ -1610,54 +1737,50 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
       this.viewDataCache.invalidate(parentId);
 
-      const nextList =
-        insert === 'before'
-          ? [createNodeRef(entityId), ...current]
-          : [...current, createNodeRef(entityId)];
-
-      const ids = nextList
-        .map((item) => (isNodeRef(item) ? getNodeRefId(item) : null))
-        .filter((id): id is EntityId => id != null);
-
       const defaultListKey = getListKey(parentId, parent.field);
       const defaultListState = this.store.getListState(defaultListKey);
-      const nextDefaultCursors = defaultListState?.cursors
-        ? insert === 'before'
-          ? [undefined, ...defaultListState.cursors]
-          : [...defaultListState.cursors, undefined]
-        : defaultListState?.cursors;
+      let nextField = current;
+      if (defaultListState) {
+        const { list: nextDefaultListState, pending } = this.applyListInsert(
+          defaultListState,
+          entityId,
+          insert,
+        );
+        if (nextDefaultListState !== defaultListState) {
+          this.snapshotList(defaultListKey, listSnapshots);
+          this.store.setList(defaultListKey, nextDefaultListState);
+        }
 
-      this.store.setList(defaultListKey, {
-        cursors: nextDefaultCursors,
-        ids,
-        pagination: defaultListState?.pagination,
-      });
+        const nextFieldIds = pending
+          ? getListEntries(nextDefaultListState).map(({ id }) => id)
+          : nextDefaultListState.ids;
+        nextField = nextFieldIds.map((id) => createNodeRef(id));
+      } else {
+        const currentIds = current
+          .map((item) => (isNodeRef(item) ? getNodeRefId(item) : null))
+          .filter((id): id is EntityId => id != null);
+        const ids = insert === 'before' ? [entityId, ...currentIds] : [...currentIds, entityId];
+        const nextDefaultListState = { ids } satisfies List;
+        this.snapshotList(defaultListKey, listSnapshots);
+        this.store.setList(defaultListKey, nextDefaultListState);
+        nextField = nextDefaultListState.ids.map((id) => createNodeRef(id));
+      }
 
       const registeredLists = this.store
         .getListsForField(parentId, parent.field)
         .filter(([key]) => key !== defaultListKey);
 
       for (const [listKey, listState] of registeredLists) {
-        if (listState.ids.includes(entityId)) {
+        const nextListState = this.applyListInsert(listState, entityId, insert).list;
+        if (nextListState === listState) {
           continue;
         }
 
-        const listIds =
-          insert === 'before' ? [entityId, ...listState.ids] : [...listState.ids, entityId];
-        const listCursors = listState.cursors
-          ? insert === 'before'
-            ? [undefined, ...listState.cursors]
-            : [...listState.cursors, undefined]
-          : undefined;
-
-        this.store.setList(listKey, {
-          cursors: listCursors,
-          ids: listIds,
-          pagination: listState.pagination,
-        });
+        this.snapshotList(listKey, listSnapshots);
+        this.store.setList(listKey, nextListState);
       }
 
-      this.store.merge(parentId, { [parent.field]: nextList }, [parent.field]);
+      this.store.merge(parentId, { [parent.field]: nextField }, [parent.field]);
     }
   }
 
@@ -1731,15 +1854,21 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
               const fieldArgs = plan.args.get(fieldPath);
               const listKey = getListKey(parentId, key, fieldArgs?.hash);
               const listState = this.store.getListState(listKey);
-              const items = value.map((item, index) => {
-                const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
+              const entries = listState
+                ? getListEntries(listState)
+                : value.map((item) => ({
+                    cursor: undefined,
+                    id: isNodeRef(item) ? getNodeRefId(item) : (null as EntityId | null),
+                  }));
+              const items = entries.map((entry, index) => {
+                const entityId = entry.id;
 
                 if (!entityId) {
-                  const entry: AnyRecord = {
+                  const itemResult: AnyRecord = {
                     cursor: listState?.cursors?.[index],
                     node: null,
                   };
-                  return entry;
+                  return itemResult;
                 }
 
                 ids.add(entityId);
@@ -1751,14 +1880,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
                   walk(selection.node as AnyRecord, record, node, entityId, fieldPath);
                 }
 
-                const entry: AnyRecord = {
+                const itemResult: AnyRecord = {
                   node: record ? node : null,
                 };
 
                 if (selection.cursor === true) {
-                  entry.cursor = listState?.cursors?.[index];
+                  itemResult.cursor = entry.cursor;
                 }
-                return entry;
+                return itemResult;
               });
               const connection: AnyRecord = { items };
               if ('pagination' in nextSelection && nextSelection.pagination) {
