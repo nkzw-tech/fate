@@ -31,7 +31,7 @@ export default defineConfig({
       'example/client/dist/',
       'example/client/src/fate.ts',
       'example/client/src/translations/',
-      'example/server/dist',
+      'example/server-prisma/dist',
       'pnpm-lock.yaml',
     ],
     singleQuote: true,
@@ -44,8 +44,8 @@ export default defineConfig({
       'coverage',
       'dist',
       'example/client/src/fate.ts',
-      'example/server/src/prisma/pothos-types.ts',
-      'example/server/src/prisma/prisma-client/*',
+      'example/server-prisma/src/prisma/pothos-types.ts',
+      'example/server-prisma/src/prisma/prisma-client/*',
       'packages/**/lib',
     ],
     jsPlugins: [
@@ -56,9 +56,9 @@ export default defineConfig({
     overrides: [
       {
         files: [
-          'example/server/scripts/**/*.tsx',
-          'example/server/src/index.tsx',
-          'example/server/src/prisma/seed.tsx',
+          'example/server-prisma/scripts/**/*.tsx',
+          'example/server-prisma/src/index.tsx',
+          'example/server-prisma/src/prisma/seed.tsx',
           'packages/fate/src/cli.ts',
           'scripts/**',
           '**/__tests__/**',
@@ -78,8 +78,8 @@ export default defineConfig({
             './.vitepress/**',
             './oxlint.config.ts',
             './example/client/vite.config.ts',
-            './example/server/prisma.config.ts',
-            './example/server/scripts/**/*.tsx',
+            './example/server-prisma/prisma.config.ts',
+            './example/server-prisma/scripts/**/*.tsx',
             '**/__tests__/**',
             '**/tsdown.config.js',
             'vite.config.ts',

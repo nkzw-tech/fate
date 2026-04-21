@@ -6,7 +6,7 @@ coverage/
 dist/
 docs/api
 example/client/dist/
-example/server/src/prisma/prisma-client/
+example/server-prisma/src/prisma/prisma-client/
 packages/**/lib/
 packages/**/LICENSE
 packages/**/README.md

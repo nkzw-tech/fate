@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVER_ENV="$ROOT_DIR/example/server/.env"
+SERVER_ENV="$ROOT_DIR/example/server-prisma/.env"
 CLIENT_ENV="$ROOT_DIR/example/client/.env"
 
 POSTGRES_USER="${POSTGRES_USER:-postgres}"

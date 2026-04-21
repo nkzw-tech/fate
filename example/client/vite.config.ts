@@ -9,7 +9,7 @@ const root = import.meta.dirname;
 const isDevelopment = process.env.NODE_ENV === 'development' || process.env.DEV;
 
 dotenv.config({
-  path: join(root, '../server', isDevelopment ? '.env' : '.prod.env'),
+  path: join(root, '../server-prisma', isDevelopment ? '.env' : '.prod.env'),
   quiet: true,
 });
 

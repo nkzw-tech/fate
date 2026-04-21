@@ -38,7 +38,7 @@ _Thanks to [Ghostty's Contribution Guidelines](https://github.com/ghostty-org/gh
 You'll need Node.js 24+ and [Vite+](https://viteplus.dev/).
 
 - Run `vp install && vp run dev:setup`.
-- Set up a Postgres database locally and add the connection string to `example/server/.env` as `DATABASE_URL` or run `docker-compose up -d` to start postgres in a docker container.
+- Set up a Postgres database locally and add the connection string to `example/server-prisma/.env` as `DATABASE_URL` or run `docker-compose up -d` to start postgres in a docker container.
 - Postgres setup:
 
 ```SQL

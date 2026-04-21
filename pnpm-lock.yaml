@@ -26,7 +26,7 @@ importers:
         version: 2.0.0(eslint@9.39.3(jiti@2.6.1))
       '@nkzw/fate-server':
         specifier: workspace:*
-        version: link:example/server
+        version: link:example/server-prisma
       '@nkzw/find-workspaces':
         specifier: ^1.1.0
         version: 1.1.0
@@ -128,7 +128,7 @@ importers:
         version: 1.1.0
       '@nkzw/fate-server':
         specifier: workspace:*
-        version: link:../server
+        version: link:../server-prisma
       '@nkzw/stack':
         specifier: ^2.3.2
         version: 2.3.2(react@19.2.5)
@@ -197,7 +197,7 @@ importers:
         specifier: 'catalog:'
         version: 0.1.18(@opentelemetry/api@1.9.0)(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.0)(happy-dom@20.9.0)(jiti@2.6.1)(jsdom@11.12.0)(typescript@5.9.3)(yaml@2.8.3)))(@voidzero-dev/vite-plus-core@0.1.18(@types/node@25.6.0)(jiti@2.6.1)(typescript@5.9.3)(yaml@2.8.3))(happy-dom@20.9.0)(jiti@2.6.1)(jsdom@11.12.0)(typescript@5.9.3)(yaml@2.8.3)
 
-  example/server:
+  example/server-prisma:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.14
