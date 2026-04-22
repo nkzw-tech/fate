@@ -22,7 +22,7 @@
     "dev:setup": "(cd example/server-prisma && vp run dev:setup)",
     "fate:generate": "node --conditions=development --no-warnings --loader ts-node/esm --env-file example/server-prisma/.env packages/fate/src/cli.ts generate @nkzw/fate-server/src/trpc/router.ts example/client/src/fate.ts",
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
-    "preinstall": "command -v git >/dev/null 2>&1 && git config core.hooksPath git-hooks || exit 0",
+    "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",
     "ship": "vp run build:all && vp check && vp test && vp pm publish -r --access public"
   },

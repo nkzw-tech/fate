@@ -1,3 +1,4 @@
+.vite-hooks/_/
 .pnpm-debug.log
 .vitepress/cache
 **/node_modules/
