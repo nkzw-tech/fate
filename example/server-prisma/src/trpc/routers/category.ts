@@ -1,35 +1,33 @@
-import { byIdInput } from '@nkzw/fate/server';
+import {
+  byIdInput,
+  createExecutionPlan,
+  executeSourceByIds,
+  executeSourceConnection,
+} from '@nkzw/fate/server';
 import { createConnectionProcedure } from '../connection.ts';
-import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
+import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { categorySource } from '../views.ts';
 
 export const categoryRouter = router({
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executePrismaByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
       ctx,
       ids: input.ids,
-      plan: createPrismaPlan({
-        ctx,
-        input,
-        source: categorySource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: categorySource }),
+      registry: prismaRegistry,
+    }),
+  ),
   list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      return executePrismaConnection({
+    query: async ({ ctx, cursor, direction, input, skip, take }) =>
+      executeSourceConnection({
         ctx,
         cursor,
         direction,
-        plan: createPrismaPlan({
-          ctx,
-          input,
-          source: categorySource,
-        }),
+        plan: createExecutionPlan({ ...input, ctx, source: categorySource }),
+        registry: prismaRegistry,
         skip,
         take,
-      });
-    },
+      }),
   }),
 });

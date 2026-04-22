@@ -12,7 +12,7 @@ export const prismaConnectionArgs = ({
 }: {
   cursor?: string;
   direction: 'backward' | 'forward';
-  node: ExecutionPlanNode<unknown>;
+  node: ExecutionPlanNode<any, any>;
   skip?: number;
   take: number;
 }) => ({

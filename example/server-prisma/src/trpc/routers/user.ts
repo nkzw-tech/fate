@@ -1,9 +1,14 @@
-import { connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+import {
+  connectionArgs,
+  createExecutionPlan,
+  executeSourceById,
+  toPrismaSelect,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
 import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
-import { createPrismaPlan, executePrismaById } from '../executor.ts';
+import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { User, userSource } from '../views.ts';
 
@@ -58,14 +63,11 @@ export const userRouter = router({
         return null;
       }
 
-      return (await executePrismaById({
+      return (await executeSourceById({
         ctx,
         id: ctx.sessionUser.id,
-        plan: createPrismaPlan({
-          ctx,
-          input,
-          source: userSource,
-        }),
+        plan: createExecutionPlan({ ...input, ctx, source: userSource }),
+        registry: prismaRegistry,
       })) as User | null;
     }),
 });

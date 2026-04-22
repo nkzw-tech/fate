@@ -1,36 +1,34 @@
-import { byIdInput } from '@nkzw/fate/server';
+import {
+  byIdInput,
+  createExecutionPlan,
+  executeSourceByIds,
+  executeSourceConnection,
+} from '@nkzw/fate/server';
 import { createConnectionProcedure } from '../connection.ts';
-import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
+import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { eventSource } from '../views.ts';
 
 export const eventRouter = router({
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executePrismaByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
       ctx,
       ids: input.ids,
-      plan: createPrismaPlan({
-        ctx,
-        input,
-        source: eventSource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: eventSource }),
+      registry: prismaRegistry,
+    }),
+  ),
   list: createConnectionProcedure({
     defaultSize: 3,
-    query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      return executePrismaConnection({
+    query: async ({ ctx, cursor, direction, input, skip, take }) =>
+      executeSourceConnection({
         ctx,
         cursor,
         direction,
-        plan: createPrismaPlan({
-          ctx,
-          input,
-          source: eventSource,
-        }),
+        plan: createExecutionPlan({ ...input, ctx, source: eventSource }),
+        registry: prismaRegistry,
         skip,
         take,
-      });
-    },
+      }),
   }),
 });

@@ -31,6 +31,13 @@ export type {
   SourceOrderField,
   SourceRelation,
 } from './server/source.ts';
+export type {
+  SourceByIdHandler,
+  SourceByIdsHandler,
+  SourceConnectionHandler,
+  SourceExecutor,
+  SourceRegistry,
+} from './server/executor.ts';
 
 export {
   attachComputedState,
@@ -44,6 +51,12 @@ export {
   resolver,
 } from './server/dataView.ts';
 export { withConnection, connectionArgs } from './server/connection.ts';
+export {
+  createSourceRegistry,
+  executeSourceById,
+  executeSourceByIds,
+  executeSourceConnection,
+} from './server/executor.ts';
 export { byIdInput } from './server/input.ts';
 export { toPrismaSelect } from './server/prismaSelect.ts';
 export {

@@ -186,8 +186,21 @@ const buildNodeSelect = <Context>(node: ViewPlanNode<Context>): AnyRecord => {
   for (const [field, relation] of node.relations) {
     const relationSelect = buildNodeSelect(relation);
     const scopedArgs = relation.args;
+    const relationConfig =
+      'source' in node
+        ? (
+            node as AnyRecord & {
+              source?: {
+                relations?: Record<string, { kind?: 'many' | 'manyToMany' | 'one' }>;
+              };
+            }
+          ).source?.relations?.[field]
+        : undefined;
+    const isCollectionRelation = relationConfig
+      ? relationConfig.kind === 'many' || relationConfig.kind === 'manyToMany'
+      : false;
     const orderBy =
-      'orderBy' in relation
+      isCollectionRelation && 'orderBy' in relation
         ? toPrismaOrderBy(
             ((
               relation as AnyRecord & {

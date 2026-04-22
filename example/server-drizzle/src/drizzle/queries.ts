@@ -24,7 +24,7 @@ import {
 } from './schema.ts';
 
 type ItemRecord = Record<string, unknown>;
-type PlanNode = ExecutionPlanNode<unknown>;
+type PlanNode = ExecutionPlanNode<any, any>;
 
 type PaginationArgs = {
   after?: string;

@@ -1,9 +1,16 @@
-import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+import {
+  byIdInput,
+  connectionArgs,
+  createExecutionPlan,
+  executeSourceByIds,
+  executeSourceConnection,
+  toPrismaSelect,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
-import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
+import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import type { CommentItem } from '../views.ts';
 import { commentSource } from '../views.ts';
@@ -74,17 +81,14 @@ export const commentRouter = router({
         }),
       ) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executePrismaByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
       ctx,
       ids: input.ids,
-      plan: createPrismaPlan({
-        ctx,
-        input,
-        source: commentSource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
+      registry: prismaRegistry,
+    }),
+  ),
   delete: procedure
     .input(
       z.object({
@@ -148,12 +152,7 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const plan = createPrismaPlan({
-        ctx,
-        input,
-        source: commentSource,
-      });
-      return executePrismaConnection({
+      return executeSourceConnection({
         ctx,
         cursor,
         direction,
@@ -165,7 +164,8 @@ export const commentRouter = router({
             },
           },
         },
-        plan,
+        plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
+        registry: prismaRegistry,
         skip,
         take,
       });

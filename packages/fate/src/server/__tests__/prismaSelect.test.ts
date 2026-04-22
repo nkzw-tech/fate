@@ -6,10 +6,12 @@ import {
   createViewPlan,
   dataView,
   field,
+  list,
   resolver,
 } from '../dataView.ts';
 import { prismaSelect } from '../prismaSelect.ts';
 import { toPrismaSelect } from '../prismaSelect.ts';
+import { createExecutionPlan, defineSource, desc } from '../source.ts';
 
 test('prismaSelect applies pagination args to relation selections', () => {
   const select = prismaSelect(['comments.id'], { comments: { first: 2 } });
@@ -127,6 +129,74 @@ test('toPrismaSelect includes computed dependencies', () => {
     ),
   ).toEqual({
     _count: { select: { comments: true } },
+    id: true,
+  });
+});
+
+test('toPrismaSelect skips orderBy for singular relations', () => {
+  const userView = dataView<{ id: string; name: string }>('User')({
+    id: true,
+    name: true,
+  });
+  const commentView = dataView<{ id: string }>('Comment')({
+    id: true,
+  });
+  const postView = dataView<{
+    author?: { id: string; name: string } | null;
+    comments?: Array<{ id: string }>;
+    id: string;
+  }>('Post')({
+    author: userView,
+    comments: list(commentView),
+    id: true,
+  });
+
+  const userSource = defineSource(userView, {
+    id: 'id',
+  });
+  const commentSource = defineSource(commentView, {
+    id: 'id',
+    orderBy: [desc('id')],
+  });
+  const postSource = defineSource(postView, {
+    id: 'id',
+    relations: {
+      author: {
+        foreignKey: 'id',
+        kind: 'one',
+        localKey: 'authorId',
+        source: () => userSource,
+      },
+      comments: {
+        foreignKey: 'postId',
+        kind: 'many',
+        localKey: 'id',
+        orderBy: [desc('id')],
+        source: () => commentSource,
+      },
+    },
+  });
+
+  expect(
+    toPrismaSelect(
+      createExecutionPlan({
+        select: ['author.name', 'comments.id'],
+        source: postSource,
+      }),
+    ),
+  ).toEqual({
+    author: {
+      select: {
+        id: true,
+        name: true,
+      },
+    },
+    comments: {
+      orderBy: [{ id: 'desc' }],
+      select: {
+        id: true,
+      },
+    },
     id: true,
   });
 });

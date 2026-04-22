@@ -1,17 +1,15 @@
-import { byIdInput } from '@nkzw/fate/server';
-import { createDrizzlePlan, executeDrizzleByIds } from '../executor.ts';
+import { byIdInput, createExecutionPlan, executeSourceByIds } from '@nkzw/fate/server';
+import { drizzleRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { tagSource } from '../views.ts';
 
 export const tagRouter = router({
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executeDrizzleByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
+      ctx,
       ids: input.ids,
-      plan: createDrizzlePlan({
-        ctx,
-        input,
-        source: tagSource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: tagSource }),
+      registry: drizzleRegistry,
+    }),
+  ),
 });

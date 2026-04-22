@@ -1,16 +1,47 @@
-import { byIdInput, connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
+import {
+  byIdInput,
+  connectionArgs,
+  createExecutionPlan,
+  executeSourceById,
+  executeSourceByIds,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   type CommentItem,
   createCommentRecord,
   deleteCommentRecord,
+  fetchCommentById,
+  fetchPostById,
   searchCommentsConnection,
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
-import { createDrizzlePlan, executeDrizzleById, executeDrizzleByIds } from '../executor.ts';
+import { drizzleRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { commentSource, postSource } from '../views.ts';
+
+const hasNestedSelection = (select: Array<string>, field: string) =>
+  select.some((path) => path === field || path.startsWith(`${field}.`));
+
+const getNestedSelection = (select: Array<string>, field: string) =>
+  select.flatMap((path) => {
+    if (path === field) {
+      return [];
+    }
+
+    return path.startsWith(`${field}.`) ? [path.slice(field.length + 1)] : [];
+  });
+
+const getNestedArgs = (args: unknown, field: string): Record<string, unknown> | undefined => {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return undefined;
+  }
+
+  const value = (args as Record<string, unknown>)[field];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+};
 
 export const commentRouter = router({
   add: procedure
@@ -30,13 +61,15 @@ export const commentRouter = router({
         });
       }
 
-      const post = await executeDrizzleById({
+      const post = await executeSourceById({
+        ctx,
         id: input.postId,
-        plan: createDrizzlePlan({
+        plan: createExecutionPlan({
           ctx,
-          input: { select: ['id'] },
+          select: ['id'],
           source: postSource,
         }),
+        registry: drizzleRegistry,
       });
 
       if (!post) {
@@ -65,7 +98,12 @@ export const commentRouter = router({
         });
       }
 
-      const comment = await executeDrizzleById({ id: commentId, plan });
+      const comment = await executeSourceById({
+        ctx,
+        id: commentId,
+        plan,
+        registry: drizzleRegistry,
+      });
       if (!comment) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -75,16 +113,14 @@ export const commentRouter = router({
 
       return comment as CommentItem & { post?: { commentCount: number } };
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executeDrizzleByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
+      ctx,
       ids: input.ids,
-      plan: createDrizzlePlan({
-        ctx,
-        input,
-        source: commentSource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
+      registry: drizzleRegistry,
+    }),
+  ),
   delete: procedure
     .input(
       z.object({
@@ -100,7 +136,7 @@ export const commentRouter = router({
         source: commentSource,
       });
 
-      const comment = await executeDrizzleById({ id: input.id, plan });
+      const comment = await fetchCommentById(input.id, plan.root);
 
       if (!comment) {
         throw new TRPCError({
@@ -117,7 +153,22 @@ export const commentRouter = router({
       }
 
       await deleteCommentRecord(input.id);
-      return comment as CommentItem & { post?: { commentCount: number } };
+
+      if (comment.postId && hasNestedSelection(input.select, 'post')) {
+        const post = await fetchPostById(
+          comment.postId,
+          createExecutionPlan({
+            args: getNestedArgs(input.args, 'post'),
+            ctx,
+            select: getNestedSelection(input.select, 'post'),
+            source: postSource,
+          }).root,
+        );
+
+        comment.post = post;
+      }
+
+      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
   search: createConnectionProcedure({

@@ -1,4 +1,11 @@
-import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+import {
+  byIdInput,
+  connectionArgs,
+  createExecutionPlan,
+  executeSourceByIds,
+  executeSourceConnection,
+  toPrismaSelect,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
@@ -7,7 +14,7 @@ import type {
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
-import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
+import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { Post, postSource } from '../views.ts';
 
@@ -47,17 +54,14 @@ export const postRouter = router({
         }),
       )) as Post;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    return executePrismaByIds({
+  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
+    executeSourceByIds({
       ctx,
       ids: input.ids,
-      plan: createPrismaPlan({
-        ctx,
-        input,
-        source: postSource,
-      }),
-    });
-  }),
+      plan: createExecutionPlan({ ...input, ctx, source: postSource }),
+      registry: prismaRegistry,
+    }),
+  ),
   like: procedure
     .input(
       z.object({
@@ -119,20 +123,16 @@ export const postRouter = router({
       )) as Post;
     }),
   list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      return executePrismaConnection({
+    query: async ({ ctx, cursor, direction, input, skip, take }) =>
+      executeSourceConnection({
         ctx,
         cursor,
         direction,
-        plan: createPrismaPlan({
-          ctx,
-          input,
-          source: postSource,
-        }),
+        plan: createExecutionPlan({ ...input, ctx, source: postSource }),
+        registry: prismaRegistry,
         skip,
         take,
-      });
-    },
+      }),
   }),
   unlike: procedure
     .input(
