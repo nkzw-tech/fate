@@ -3,6 +3,9 @@ import { getScopedArgs, toPrismaArgs } from './queryArgs.ts';
 
 type AnyRecord = Record<string, unknown>;
 
+const toPrismaOrderBy = (orderBy: Array<{ direction: 'asc' | 'desc'; field: string }>) =>
+  orderBy.map((entry) => ({ [entry.field]: entry.direction }));
+
 /**
  * Builds a Prisma `select` object from flattened selection paths and optional
  * scoped args, always including the `id` field.
@@ -183,10 +186,27 @@ const buildNodeSelect = <Context>(node: ViewPlanNode<Context>): AnyRecord => {
   for (const [field, relation] of node.relations) {
     const relationSelect = buildNodeSelect(relation);
     const scopedArgs = relation.args;
+    const orderBy =
+      'orderBy' in relation
+        ? toPrismaOrderBy(
+            ((
+              relation as AnyRecord & {
+                orderBy?: Array<{ direction: 'asc' | 'desc'; field: string }>;
+              }
+            ).orderBy ?? []) as Array<{ direction: 'asc' | 'desc'; field: string }>,
+          )
+        : [];
     const next =
       scopedArgs && Object.keys(scopedArgs).length
-        ? { ...toPrismaArgs(scopedArgs), select: relationSelect }
-        : { select: relationSelect };
+        ? {
+            ...toPrismaArgs(scopedArgs),
+            ...(orderBy.length ? { orderBy } : null),
+            select: relationSelect,
+          }
+        : {
+            ...(orderBy.length ? { orderBy } : null),
+            select: relationSelect,
+          };
     select[field] = next;
   }
 

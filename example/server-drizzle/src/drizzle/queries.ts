@@ -3,7 +3,7 @@ import {
   type ConnectionResult,
   type ExecutionPlanNode,
 } from '@nkzw/fate/server';
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import db from './db.ts';
 import {
   category,
@@ -243,97 +243,132 @@ const fetchAttendingCountsByEventIds = async (eventIds: Array<string>) => {
   return new Map(rows.map((row) => [row.eventId, row.count]));
 };
 
-const dateIdCursorWhere = (
-  naturalOrder: 'asc' | 'desc',
+type ColumnMap = Record<string, any>;
+
+const postColumns = {
+  categoryId: post.categoryId,
+  createdAt: post.createdAt,
+  id: post.id,
+} satisfies ColumnMap;
+
+const categoryColumns = {
+  createdAt: category.createdAt,
+  id: category.id,
+} satisfies ColumnMap;
+
+const commentColumns = {
+  createdAt: comment.createdAt,
+  id: comment.id,
+  postId: comment.postId,
+} satisfies ColumnMap;
+
+const eventColumns = {
+  id: event.id,
+  startAt: event.startAt,
+} satisfies ColumnMap;
+
+const eventAttendeeColumns = {
+  createdAt: eventAttendee.createdAt,
+  eventId: eventAttendee.eventId,
+  id: eventAttendee.id,
+} satisfies ColumnMap;
+
+const compareColumn = (
   direction: 'backward' | 'forward',
-  cursorDate: Date,
-  cursorId: string,
-  dateColumn: any,
-  idColumn: any,
+  naturalDirection: 'asc' | 'desc',
+  column: any,
+  value: unknown,
 ) => {
-  const moveForward =
-    naturalOrder === 'asc'
-      ? or(
-          sql`${dateColumn} > ${cursorDate}`,
-          and(eq(dateColumn, cursorDate), sql`${idColumn} > ${cursorId}`),
-        )
-      : or(
-          sql`${dateColumn} < ${cursorDate}`,
-          and(eq(dateColumn, cursorDate), sql`${idColumn} < ${cursorId}`),
-        );
-
-  const moveBackward =
-    naturalOrder === 'asc'
-      ? or(
-          sql`${dateColumn} < ${cursorDate}`,
-          and(eq(dateColumn, cursorDate), sql`${idColumn} < ${cursorId}`),
-        )
-      : or(
-          sql`${dateColumn} > ${cursorDate}`,
-          and(eq(dateColumn, cursorDate), sql`${idColumn} > ${cursorId}`),
-        );
-
-  return direction === 'forward' ? moveForward : moveBackward;
+  const forward = naturalDirection === 'asc' ? gt(column, value) : lt(column, value);
+  const backward = naturalDirection === 'asc' ? lt(column, value) : gt(column, value);
+  return direction === 'forward' ? forward : backward;
 };
 
-const queryDateIdPage = async <TRow extends Record<string, unknown>>({
-  baseWhere,
-  cursor,
-  dateColumn,
+const buildCursorWhere = ({
+  columnMap,
+  cursorValues,
   direction,
-  idColumn,
-  naturalOrder,
+  node,
+}: {
+  columnMap: ColumnMap;
+  cursorValues: Record<string, unknown>;
+  direction: 'backward' | 'forward';
+  node: PlanNode;
+}) => {
+  const branches = node.orderBy.map((entry, index) => {
+    const column = columnMap[entry.field];
+    const compare = compareColumn(direction, entry.direction, column, cursorValues[entry.field]);
+    const equalities = node.orderBy
+      .slice(0, index)
+      .map((previous) => eq(columnMap[previous.field], cursorValues[previous.field]));
+
+    return equalities.length ? and(...equalities, compare) : compare;
+  });
+
+  return branches.length === 1 ? branches[0] : or(...branches);
+};
+
+const getQueryOrder = (direction: 'backward' | 'forward', node: PlanNode, columnMap: ColumnMap) =>
+  node.orderBy.map((entry) => {
+    const column = columnMap[entry.field];
+    return direction === 'forward'
+      ? entry.direction === 'asc'
+        ? asc(column)
+        : desc(column)
+      : entry.direction === 'asc'
+        ? desc(column)
+        : asc(column);
+  });
+
+const queryNodePage = async <TRow extends Record<string, unknown>>({
+  baseWhere,
+  columnMap,
+  cursor,
+  direction,
+  node,
   table,
   take,
 }: {
   baseWhere?: any;
+  columnMap: ColumnMap;
   cursor?: string;
-  dateColumn: any;
   direction: 'backward' | 'forward';
-  idColumn: any;
-  naturalOrder: 'asc' | 'desc';
+  node: PlanNode;
   table: any;
   take: number;
 }) => {
   let whereClause = baseWhere;
 
   if (cursor) {
+    const cursorSelection = Object.fromEntries(
+      node.orderBy.map((entry) => [entry.field, columnMap[entry.field]]),
+    );
     const [cursorRow] = await db
-      .select({
-        id: idColumn,
-        sort: dateColumn,
-      })
+      .select(cursorSelection)
       .from(table)
-      .where(baseWhere ? and(baseWhere, eq(idColumn, cursor)) : eq(idColumn, cursor))
+      .where(
+        baseWhere
+          ? and(baseWhere, eq(columnMap[node.source.id], cursor))
+          : eq(columnMap[node.source.id], cursor),
+      )
       .limit(1);
 
     if (cursorRow) {
-      const cursorWhere = dateIdCursorWhere(
-        naturalOrder,
+      const cursorWhere = buildCursorWhere({
+        columnMap,
+        cursorValues: cursorRow,
         direction,
-        cursorRow.sort,
-        cursorRow.id,
-        dateColumn,
-        idColumn,
-      );
+        node,
+      });
       whereClause = whereClause ? and(whereClause, cursorWhere) : cursorWhere;
     }
   }
-
-  const orderBy =
-    direction === 'forward'
-      ? naturalOrder === 'asc'
-        ? [asc(dateColumn), asc(idColumn)]
-        : [desc(dateColumn), desc(idColumn)]
-      : naturalOrder === 'asc'
-        ? [desc(dateColumn), desc(idColumn)]
-        : [asc(dateColumn), asc(idColumn)];
 
   const rows = (await db
     .select()
     .from(table)
     .where(whereClause)
-    .orderBy(...orderBy)
+    .orderBy(...getQueryOrder(direction, node, columnMap))
     .limit(take)) as Array<TRow>;
   return direction === 'backward' ? rows.reverse() : rows;
 };
@@ -376,18 +411,61 @@ const fetchCommentsConnectionForPost = async (
   const direction = getConnectionDirection(args);
   const pageSize = getConnectionSize(20, args);
   const cursor = direction === 'forward' ? args.after : args.before;
-  const rows = await queryDateIdPage<CommentRow>({
+  const rows = await queryNodePage<CommentRow>({
     baseWhere: eq(comment.postId, postId),
+    columnMap: commentColumns,
     cursor,
-    dateColumn: comment.createdAt,
     direction,
-    idColumn: comment.id,
-    naturalOrder: 'desc',
+    node,
     table: comment,
     take: pageSize + 1,
   });
 
   const hydrated = await hydrateComments(rows, node);
+  return buildConnection({ cursor, direction, items: hydrated, pageSize });
+};
+
+const fetchPostsConnectionForCategory = async (
+  categoryId: string,
+  node: PlanNode,
+): Promise<ConnectionResult<PostItem>> => {
+  const args = paginationArgs(node.args);
+  const direction = getConnectionDirection(args);
+  const pageSize = getConnectionSize(20, args);
+  const cursor = direction === 'forward' ? args.after : args.before;
+  const rows = await queryNodePage<PostRow>({
+    baseWhere: eq(post.categoryId, categoryId),
+    columnMap: postColumns,
+    cursor,
+    direction,
+    node,
+    table: post,
+    take: pageSize + 1,
+  });
+
+  const hydrated = await hydratePosts(rows, node);
+  return buildConnection({ cursor, direction, items: hydrated, pageSize });
+};
+
+const fetchAttendeesConnectionForEvent = async (
+  eventId: string,
+  node: PlanNode,
+): Promise<ConnectionResult<EventAttendeeItem>> => {
+  const args = paginationArgs(node.args);
+  const direction = getConnectionDirection(args);
+  const pageSize = getConnectionSize(20, args);
+  const cursor = direction === 'forward' ? args.after : args.before;
+  const rows = await queryNodePage<EventAttendeeRow>({
+    baseWhere: eq(eventAttendee.eventId, eventId),
+    columnMap: eventAttendeeColumns,
+    cursor,
+    direction,
+    node,
+    table: eventAttendee,
+    take: pageSize + 1,
+  });
+
+  const hydrated = await hydrateEventAttendees(rows, node);
   return buildConnection({ cursor, direction, items: hydrated, pageSize });
 };
 
@@ -445,7 +523,7 @@ const hydratePosts = async (rows: Array<PostRow>, node: PlanNode): Promise<Array
         .select()
         .from(comment)
         .where(inArray(comment.postId, postIds))
-        .orderBy(desc(comment.createdAt), desc(comment.id));
+        .orderBy(...getQueryOrder('forward', commentsNode, commentColumns));
       const hydrated = await hydrateComments(rows, commentsNode);
       const commentsByPostId = new Map<string, Array<CommentItem>>();
 
@@ -481,30 +559,43 @@ const hydrateCategories = async (
 
   const postsNode = relation(node, 'posts');
   if (postsNode) {
-    const rows = await db
-      .select()
-      .from(post)
-      .where(
-        inArray(
-          post.categoryId,
-          items.map((item) => item.id),
+    if (hasPagination(postsNode.args)) {
+      const connections = await Promise.all(
+        items.map(
+          async (item) =>
+            [item.id, await fetchPostsConnectionForCategory(item.id, postsNode)] as const,
         ),
-      )
-      .orderBy(desc(post.createdAt), desc(post.id));
-    const hydrated = await hydratePosts(rows, postsNode);
-    const postsByCategoryId = new Map<string, Array<PostItem>>();
-
-    for (const item of hydrated) {
-      if (!item.categoryId) {
-        continue;
+      );
+      const connectionByCategoryId = new Map(connections);
+      for (const item of items) {
+        (item as ItemRecord).posts = connectionByCategoryId.get(item.id);
       }
-      const entries = postsByCategoryId.get(item.categoryId) ?? [];
-      entries.push(item);
-      postsByCategoryId.set(item.categoryId, entries);
-    }
+    } else {
+      const rows = await db
+        .select()
+        .from(post)
+        .where(
+          inArray(
+            post.categoryId,
+            items.map((item) => item.id),
+          ),
+        )
+        .orderBy(...getQueryOrder('forward', postsNode, postColumns));
+      const hydrated = await hydratePosts(rows, postsNode);
+      const postsByCategoryId = new Map<string, Array<PostItem>>();
 
-    for (const item of items) {
-      item.posts = postsByCategoryId.get(item.id) ?? [];
+      for (const item of hydrated) {
+        if (!item.categoryId) {
+          continue;
+        }
+        const entries = postsByCategoryId.get(item.categoryId) ?? [];
+        entries.push(item);
+        postsByCategoryId.set(item.categoryId, entries);
+      }
+
+      for (const item of items) {
+        item.posts = postsByCategoryId.get(item.id) ?? [];
+      }
     }
   }
 
@@ -549,22 +640,35 @@ const hydrateEvents = async (rows: Array<EventRow>, node: PlanNode): Promise<Arr
 
   const attendeesNode = relation(node, 'attendees');
   if (attendeesNode) {
-    const rows = await db
-      .select()
-      .from(eventAttendee)
-      .where(inArray(eventAttendee.eventId, eventIds))
-      .orderBy(asc(eventAttendee.createdAt), asc(eventAttendee.id));
-    const hydrated = await hydrateEventAttendees(rows, attendeesNode);
-    const attendeesByEventId = new Map<string, Array<EventAttendeeItem>>();
+    if (hasPagination(attendeesNode.args)) {
+      const connections = await Promise.all(
+        items.map(
+          async (item) =>
+            [item.id, await fetchAttendeesConnectionForEvent(item.id, attendeesNode)] as const,
+        ),
+      );
+      const connectionByEventId = new Map(connections);
+      for (const item of items) {
+        (item as ItemRecord).attendees = connectionByEventId.get(item.id);
+      }
+    } else {
+      const rows = await db
+        .select()
+        .from(eventAttendee)
+        .where(inArray(eventAttendee.eventId, eventIds))
+        .orderBy(...getQueryOrder('forward', attendeesNode, eventAttendeeColumns));
+      const hydrated = await hydrateEventAttendees(rows, attendeesNode);
+      const attendeesByEventId = new Map<string, Array<EventAttendeeItem>>();
 
-    for (const item of hydrated) {
-      const entries = attendeesByEventId.get(item.eventId) ?? [];
-      entries.push(item);
-      attendeesByEventId.set(item.eventId, entries);
-    }
+      for (const item of hydrated) {
+        const entries = attendeesByEventId.get(item.eventId) ?? [];
+        entries.push(item);
+        attendeesByEventId.set(item.eventId, entries);
+      }
 
-    for (const item of items) {
-      item.attendees = attendeesByEventId.get(item.id) ?? [];
+      for (const item of items) {
+        item.attendees = attendeesByEventId.get(item.id) ?? [];
+      }
     }
   }
 
@@ -616,12 +720,11 @@ export const fetchPostsConnection = async ({
   node: PlanNode;
   take: number;
 }) => {
-  const rows = await queryDateIdPage<PostRow>({
+  const rows = await queryNodePage<PostRow>({
+    columnMap: postColumns,
     cursor,
-    dateColumn: post.createdAt,
     direction,
-    idColumn: post.id,
-    naturalOrder: 'desc',
+    node,
     table: post,
     take,
   });
@@ -651,12 +754,11 @@ export const fetchCategoriesConnection = async ({
   node: PlanNode;
   take: number;
 }) => {
-  const rows = await queryDateIdPage<CategoryRow>({
+  const rows = await queryNodePage<CategoryRow>({
+    columnMap: categoryColumns,
     cursor,
-    dateColumn: category.createdAt,
     direction,
-    idColumn: category.id,
-    naturalOrder: 'asc',
+    node,
     table: category,
     take,
   });
@@ -694,13 +796,12 @@ export const searchCommentsConnection = async ({
   take: number;
 }) => {
   const whereClause = ilike(comment.content, `%${query}%`);
-  const rows = await queryDateIdPage<CommentRow>({
+  const rows = await queryNodePage<CommentRow>({
     baseWhere: whereClause,
+    columnMap: commentColumns,
     cursor,
-    dateColumn: comment.createdAt,
     direction,
-    idColumn: comment.id,
-    naturalOrder: 'desc',
+    node,
     table: comment,
     take,
   });
@@ -735,12 +836,11 @@ export const fetchEventsConnection = async ({
   node: PlanNode;
   take: number;
 }) => {
-  const rows = await queryDateIdPage<EventRow>({
+  const rows = await queryNodePage<EventRow>({
+    columnMap: eventColumns,
     cursor,
-    dateColumn: event.startAt,
     direction,
-    idColumn: event.id,
-    naturalOrder: 'asc',
+    node,
     table: event,
     take,
   });

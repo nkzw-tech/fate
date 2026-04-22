@@ -2,6 +2,7 @@ import { byIdInput, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/serve
 import type { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
+import { prismaConnectionArgs } from '../source.ts';
 import { categorySource } from '../views.ts';
 
 export const categoryRouter = router({
@@ -27,15 +28,9 @@ export const categoryRouter = router({
       });
 
       const findOptions: CategoryFindManyArgs = {
-        orderBy: { createdAt: 'asc' },
+        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
         select: toPrismaSelect(plan),
-        take: direction === 'forward' ? take : -take,
       };
-
-      if (cursor) {
-        findOptions.cursor = { id: cursor };
-        findOptions.skip = skip;
-      }
 
       const items = await ctx.prisma.category.findMany(findOptions);
       return plan.resolveMany(direction === 'forward' ? items : items.reverse());

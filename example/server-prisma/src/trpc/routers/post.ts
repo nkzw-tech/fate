@@ -9,6 +9,7 @@ import type {
 } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
+import { prismaConnectionArgs } from '../source.ts';
 import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
@@ -128,15 +129,9 @@ export const postRouter = router({
         source: postSource,
       });
       const findOptions: PostFindManyArgs = {
-        orderBy: { createdAt: 'desc' },
+        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
         select: toPrismaSelect(plan),
-        take: direction === 'forward' ? take : -take,
       };
-
-      if (cursor) {
-        findOptions.cursor = { id: cursor };
-        findOptions.skip = skip;
-      }
 
       const items = await ctx.prisma.post.findMany(findOptions);
       return plan.resolveMany(direction === 'forward' ? items : items.reverse());

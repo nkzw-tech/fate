@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { CommentFindManyArgs, CommentSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
+import { prismaConnectionArgs } from '../source.ts';
 import type { CommentItem } from '../views.ts';
 import { commentSource } from '../views.ts';
 
@@ -155,9 +156,8 @@ export const commentRouter = router({
         source: commentSource,
       });
       const findOptions: CommentFindManyArgs = {
-        orderBy: { createdAt: 'desc' },
+        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
         select: toPrismaSelect(plan),
-        take: direction === 'forward' ? take : -take,
         where: {
           content: {
             contains: query,
@@ -165,11 +165,6 @@ export const commentRouter = router({
           },
         },
       };
-
-      if (cursor) {
-        findOptions.cursor = { id: cursor };
-        findOptions.skip = skip;
-      }
 
       const items = await ctx.prisma.comment.findMany(findOptions);
       return plan.resolveMany(direction === 'forward' ? items : items.reverse());
