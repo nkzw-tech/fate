@@ -5,6 +5,7 @@ import {
   type SourceDefinition,
   type SourceExecutor,
 } from '@nkzw/fate/server';
+import { attachConflictingComputedCounts } from './computedCounts.ts';
 import type { AppContext } from './context.ts';
 import { prismaConnectionArgs } from './source.ts';
 import {
@@ -19,6 +20,7 @@ import {
 type PrismaDelegate = {
   findMany: (args: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
   findUnique: (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  groupBy?: (args: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
 };
 
 type PrismaQueryExtra = Record<string, unknown>;
@@ -55,6 +57,23 @@ const getDelegate = (ctx: AppContext, source: RegisteredPrismaSource): PrismaDel
 
 type SourceItem = Record<string, unknown>;
 
+const attachComputedCounts = async ({
+  ctx,
+  items,
+  plan,
+}: {
+  ctx: AppContext;
+  items: Array<SourceItem>;
+  plan: ExecutionPlan<SourceItem, AppContext>;
+}) =>
+  attachConflictingComputedCounts({
+    ctx,
+    getDelegate: (context, source) => getDelegate(context, source as RegisteredPrismaSource),
+    items,
+    node: plan.root,
+    source: plan.source as SourceDefinition<SourceItem, unknown>,
+  });
+
 const findManyExecutor = (): SourceExecutor<
   AppContext,
   SourceItem,
@@ -73,10 +92,14 @@ const findManyExecutor = (): SourceExecutor<
     ids: Array<string>;
     plan: ExecutionPlan<SourceItem, AppContext>;
   }) =>
-    getDelegate(ctx, plan.source as RegisteredPrismaSource).findMany({
-      ...extra,
-      select: toPrismaSelect(plan),
-      where: { id: { in: ids } },
+    attachComputedCounts({
+      ctx,
+      items: await getDelegate(ctx, plan.source as RegisteredPrismaSource).findMany({
+        ...extra,
+        select: toPrismaSelect(plan),
+        where: { id: { in: ids } },
+      }),
+      plan,
     }),
   connection: async ({
     ctx,
@@ -100,8 +123,9 @@ const findManyExecutor = (): SourceExecutor<
       ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
       select: toPrismaSelect(plan),
     });
+    const hydrated = await attachComputedCounts({ ctx, items, plan });
 
-    return direction === 'backward' ? [...items].reverse() : items;
+    return direction === 'backward' ? [...hydrated].reverse() : hydrated;
   },
 });
 
@@ -123,11 +147,21 @@ const findUniqueExecutor = (): SourceExecutor<
     id: string;
     plan: ExecutionPlan<SourceItem, AppContext>;
   }) =>
-    getDelegate(ctx, plan.source as RegisteredPrismaSource).findUnique({
-      ...extra,
-      select: toPrismaSelect(plan),
-      where: { id },
-    }),
+    (
+      await attachComputedCounts({
+        ctx,
+        items: (
+          await Promise.all([
+            getDelegate(ctx, plan.source as RegisteredPrismaSource).findUnique({
+              ...extra,
+              select: toPrismaSelect(plan),
+              where: { id },
+            }),
+          ])
+        ).flatMap((item) => (item ? [item] : [])),
+        plan,
+      })
+    )[0] ?? null,
 });
 
 export const prismaRegistry = createSourceRegistry<AppContext>([
@@ -149,10 +183,14 @@ export const prismaRegistry = createSourceRegistry<AppContext>([
         ids: Array<string>;
         plan: ExecutionPlan<SourceItem, AppContext>;
       }) =>
-        getDelegate(ctx, plan.source as RegisteredPrismaSource).findMany({
-          ...extra,
-          select: toPrismaSelect(plan),
-          where: { id: { in: ids } },
+        attachComputedCounts({
+          ctx,
+          items: await getDelegate(ctx, plan.source as RegisteredPrismaSource).findMany({
+            ...extra,
+            select: toPrismaSelect(plan),
+            where: { id: { in: ids } },
+          }),
+          plan,
         }),
     },
   ],

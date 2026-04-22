@@ -133,6 +133,39 @@ test('toPrismaSelect includes computed dependencies', () => {
   });
 });
 
+test('toPrismaSelect skips conflicting filtered counts on the same relation', () => {
+  const eventView = dataView<{ id: string }>('Event')({
+    goingCount: computed<{ id: string }, number>({
+      needs: {
+        count: count('attendees', {
+          where: { status: 'GOING' },
+        }),
+      },
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+    }),
+    id: true,
+    waitlistCount: computed<{ id: string }, number>({
+      needs: {
+        count: count('attendees', {
+          where: { status: 'WAITLIST' },
+        }),
+      },
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+    }),
+  });
+
+  expect(
+    toPrismaSelect(
+      createViewPlan({
+        select: ['goingCount', 'waitlistCount'],
+        view: eventView,
+      }),
+    ),
+  ).toEqual({
+    id: true,
+  });
+});
+
 test('toPrismaSelect skips orderBy for singular relations', () => {
   const userView = dataView<{ id: string; name: string }>('User')({
     id: true,

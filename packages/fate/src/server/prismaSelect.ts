@@ -75,6 +75,50 @@ const mergeObject = (target: AnyRecord, source: AnyRecord) => {
   }
 };
 
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as AnyRecord).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+      .join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
+const getConflictingCountRelations = <Context>(node: ViewPlanNode<Context>): Set<string> => {
+  const signaturesByRelation = new Map<string, Set<string>>();
+
+  for (const computed of node.computeds.values()) {
+    if (!computed.needs) {
+      continue;
+    }
+
+    for (const need of Object.values(computed.needs)) {
+      if (need.kind !== 'count') {
+        continue;
+      }
+
+      const signatures = signaturesByRelation.get(need.relation) ?? new Set<string>();
+      signatures.add(stableStringify(need.where ?? null));
+      signaturesByRelation.set(need.relation, signatures);
+    }
+  }
+
+  return new Set(
+    [...signaturesByRelation.entries()]
+      .filter(([, signatures]) => signatures.size > 1)
+      .map(([relation]) => relation),
+  );
+};
+
 const ensureRelationSelect = (select: AnyRecord, path: string | null): AnyRecord => {
   if (!path) {
     return select;
@@ -122,6 +166,8 @@ const assignDependencyPath = (select: AnyRecord, path: string) => {
 };
 
 const applyComputedSelections = <Context>(node: ViewPlanNode<Context>, select: AnyRecord) => {
+  const conflictingCountRelations = getConflictingCountRelations(node);
+
   for (const computed of node.computeds.values()) {
     if (!computed.needs) {
       continue;
@@ -129,6 +175,10 @@ const applyComputedSelections = <Context>(node: ViewPlanNode<Context>, select: A
 
     for (const need of Object.values(computed.needs)) {
       if (need.kind === 'count') {
+        if (conflictingCountRelations.has(need.relation)) {
+          continue;
+        }
+
         const target = ensureRelationSelect(select, node.path);
         const existing = (target._count as AnyRecord | undefined) ?? { select: {} };
         target._count = existing;

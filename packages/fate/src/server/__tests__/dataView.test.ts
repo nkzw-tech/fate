@@ -2,7 +2,9 @@ import { expect, expectTypeOf, test } from 'vite-plus/test';
 import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
 import {
+  attachComputedState,
   computed,
+  count,
   createResolver,
   createViewPlan,
   dataView,
@@ -97,6 +99,44 @@ test('computed fields can resolve hidden source dependencies', async () => {
     email: 'jane@example.com',
     id: 'user-1',
     name: 'Jane',
+  });
+});
+
+test('computed fields can resolve conflicting relation counts from attached state', async () => {
+  const view = dataView<{ id: string }>('Event')({
+    goingCount: computed<{ id: string }, number>({
+      needs: {
+        count: count('attendees', {
+          where: { status: 'GOING' },
+        }),
+      },
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+    }),
+    id: true,
+    waitlistCount: computed<{ id: string }, number>({
+      needs: {
+        count: count('attendees', {
+          where: { status: 'WAITLIST' },
+        }),
+      },
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+    }),
+  });
+
+  const selection = createResolver({
+    select: ['goingCount', 'waitlistCount'],
+    view,
+  });
+  const item = attachComputedState(
+    attachComputedState({ id: 'event-1' }, 'goingCount', { count: 4 }),
+    'waitlistCount',
+    { count: 2 },
+  );
+
+  expect(await selection.resolve(item)).toEqual({
+    goingCount: 4,
+    id: 'event-1',
+    waitlistCount: 2,
   });
 });
 

@@ -531,6 +531,15 @@ const resolveNode = async <Item extends AnyRecord, Context>({
   const assign = (key: string, value: unknown) => {
     if (!result) {
       result = { ...item };
+      const state = getComputedState(item);
+      if (state) {
+        Object.defineProperty(result, computedStateKey, {
+          configurable: true,
+          enumerable: false,
+          value: state,
+          writable: true,
+        });
+      }
     }
     result[key] = value;
   };
