@@ -1,18 +1,18 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createViewPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   type CommentItem,
   createCommentRecord,
   deleteCommentRecord,
-  getCommentById,
-  getCommentsByIds,
-  getPostById,
+  fetchCommentById,
+  fetchCommentsByIds,
+  fetchPostById,
   searchCommentsConnection,
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { commentDataView } from '../views.ts';
+import { commentDataView, postDataView } from '../views.ts';
 
 export const commentRouter = router({
   add: procedure
@@ -32,7 +32,12 @@ export const commentRouter = router({
         });
       }
 
-      const post = await getPostById(input.postId);
+      const postPlan = createViewPlan({
+        ctx,
+        select: ['id'],
+        view: postDataView,
+      });
+      const post = await fetchPostById(input.postId, postPlan.root);
 
       if (!post) {
         throw new TRPCError({
@@ -41,34 +46,42 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: commentDataView,
       });
 
-      const comment = await createCommentRecord({
+      const commentId = await createCommentRecord({
         authorId: ctx.sessionUser.id,
         content: input.content,
         postId: input.postId,
       });
 
-      if (!comment) {
+      if (!commentId) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to create comment.',
         });
       }
 
-      return resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      const comment = await fetchCommentById(commentId, plan.root);
+      if (!comment) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+
+      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany } = createResolver({
+    const plan = createViewPlan({
       ...input,
       ctx,
       view: commentDataView,
     });
-    return resolveMany(await getCommentsByIds(input.ids));
+    return plan.resolveMany(await fetchCommentsByIds(input.ids, plan.root));
   }),
   delete: procedure
     .input(
@@ -79,7 +92,13 @@ export const commentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const comment = await getCommentById(input.id);
+      const plan = createViewPlan({
+        ...input,
+        ctx,
+        view: commentDataView,
+      });
+
+      const comment = await fetchCommentById(input.id, plan.root);
 
       if (!comment) {
         throw new TRPCError({
@@ -88,12 +107,6 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
-        ctx,
-        view: commentDataView,
-      });
-
       if (comment.authorId && comment.authorId !== ctx.sessionUser?.id) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -101,15 +114,8 @@ export const commentRouter = router({
         });
       }
 
-      const result = await deleteCommentRecord(input.id);
-      if (!result) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Comment not found',
-        });
-      }
-
-      return resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      await deleteCommentRecord(input.id);
+      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
   search: createConnectionProcedure({
@@ -127,13 +133,14 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const { resolveMany } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: commentDataView,
       });
-      const items = await searchCommentsConnection({ cursor, direction, query, take });
-      return resolveMany(items);
+      return plan.resolveMany(
+        await searchCommentsConnection({ cursor, direction, node: plan.root, query, take }),
+      );
     },
   }),
 });

@@ -1,7 +1,7 @@
 import { expect, expectTypeOf, test } from 'vite-plus/test';
 import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
-import { createResolver, dataView, Entity, list, resolver } from '../dataView.ts';
+import { createResolver, createViewPlan, dataView, Entity, list, resolver } from '../dataView.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -240,6 +240,104 @@ test('list fields are wrapped into connections recursively using scoped args', a
   expect(repliesConnection?.pagination?.hasPrevious).toBe(false);
 });
 
+test('prebuilt nested connections are preserved during resolution', async () => {
+  const authorView = dataView<AuthorItem>('Author')({
+    id: true,
+    name: true,
+  });
+
+  const commentView = dataView<CommentWithRepliesItem>('Comment')({
+    id: true,
+    replies: list(
+      dataView<ReplyItem>('Reply')({
+        author: authorView,
+        id: true,
+      }),
+    ),
+  });
+
+  const postView = dataView<PostWithDeepRelationsItem>('Post')({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const plan = createViewPlan({
+    select: ['comments.replies.author.name'],
+    view: postView,
+  });
+
+  const result = await plan.resolve({
+    comments: {
+      items: [
+        {
+          cursor: 'comment-1',
+          node: {
+            id: 'comment-1',
+            replies: {
+              items: [
+                {
+                  cursor: 'reply-1',
+                  node: {
+                    author: { id: 'author-1', name: 'Ada', secret: 'ignored' },
+                    id: 'reply-1',
+                  },
+                },
+              ],
+              pagination: {
+                hasNext: false,
+                hasPrevious: false,
+                nextCursor: 'reply-1',
+                previousCursor: undefined,
+              },
+            },
+          },
+        },
+      ],
+      pagination: {
+        hasNext: true,
+        hasPrevious: false,
+        nextCursor: 'comment-1',
+        previousCursor: undefined,
+      },
+    } as any,
+    id: 'post-1',
+  });
+
+  expect(result.comments).toEqual({
+    items: [
+      {
+        cursor: 'comment-1',
+        node: {
+          id: 'comment-1',
+          replies: {
+            items: [
+              {
+                cursor: 'reply-1',
+                node: {
+                  author: { id: 'author-1', name: 'Ada' },
+                  id: 'reply-1',
+                },
+              },
+            ],
+            pagination: {
+              hasNext: false,
+              hasPrevious: false,
+              nextCursor: 'reply-1',
+              previousCursor: undefined,
+            },
+          },
+        },
+      },
+    ],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'comment-1',
+      previousCursor: undefined,
+    },
+  });
+});
+
 type SessionContext = { sessionUserId?: string };
 
 type UserWithEmailItem = { email: string; id: string; name: string };
@@ -298,4 +396,55 @@ test('authorized resolvers can access context and return null when unauthorized'
 
   expectTypeOf<UserData['name']>().toEqualTypeOf<string>();
   expectTypeOf<UserData['email']>().toEqualTypeOf<string | null>();
+});
+
+test('createViewPlan exposes scoped args for nested relations', () => {
+  const authorView = dataView<AuthorItem>('Author')({
+    id: true,
+    name: true,
+  });
+
+  const replyView = dataView<ReplyItem>('Reply')({
+    author: authorView,
+    id: true,
+  });
+
+  const commentView = dataView<CommentWithRepliesItem>('Comment')({
+    id: true,
+    replies: list(replyView),
+  });
+
+  const postView = dataView<PostWithDeepRelationsItem>('Post')({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const plan = createViewPlan({
+    args: {
+      comments: {
+        first: 2,
+        replies: {
+          before: 'reply-2',
+          last: 1,
+        },
+      },
+    },
+    select: ['comments.replies.author.name'],
+    view: postView,
+  });
+
+  const commentsNode = plan.root.relations.get('comments');
+  const repliesNode = commentsNode?.relations.get('replies');
+
+  expect(commentsNode?.args).toEqual({
+    first: 2,
+    replies: {
+      before: 'reply-2',
+      last: 1,
+    },
+  });
+  expect(repliesNode?.args).toEqual({
+    before: 'reply-2',
+    last: 1,
+  });
 });

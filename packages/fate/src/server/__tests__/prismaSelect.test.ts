@@ -1,5 +1,7 @@
 import { expect, test } from 'vite-plus/test';
+import { createResolver, createViewPlan, dataView, resolver } from '../dataView.ts';
 import { prismaSelect } from '../prismaSelect.ts';
+import { toPrismaSelect } from '../prismaSelect.ts';
 
 test('prismaSelect applies pagination args to relation selections', () => {
   const select = prismaSelect(['comments.id'], { comments: { first: 2 } });
@@ -43,4 +45,34 @@ test('prismaSelect maps backward pagination args to Prisma options', () => {
     },
     id: true,
   });
+});
+
+test('toPrismaSelect matches createResolver output for view plans', () => {
+  type CategoryItem = {
+    _count?: { posts: number };
+    id: string;
+    postCount?: number;
+  };
+
+  const categoryView = dataView<CategoryItem>('Category')({
+    id: true,
+    postCount: resolver<CategoryItem>({
+      resolve: ({ _count }) => _count?.posts ?? 0,
+      select: () => ({
+        _count: { select: { posts: true } },
+      }),
+    }),
+  });
+
+  const plan = createViewPlan({
+    select: ['postCount'],
+    view: categoryView,
+  });
+
+  expect(toPrismaSelect(plan)).toEqual(
+    createResolver({
+      select: ['postCount'],
+      view: categoryView,
+    }).select,
+  );
 });

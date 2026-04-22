@@ -1,4 +1,4 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { connectionArgs, createViewPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { getUserById } from '../../drizzle/queries.ts';
@@ -27,7 +27,7 @@ export const userRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: userDataView,
@@ -46,7 +46,7 @@ export const userRouter = router({
         });
       }
 
-      return resolve(user);
+      return plan.resolve(user);
     }),
   viewer: procedure
     .input(
@@ -59,13 +59,13 @@ export const userRouter = router({
         return null;
       }
 
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: userDataView,
       });
 
       const user = await getUserById(ctx.sessionUser.id);
-      return user ? ((await resolve(user)) as User) : null;
+      return user ? ((await plan.resolve(user)) as User) : null;
     }),
 });

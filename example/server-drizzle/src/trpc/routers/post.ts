@@ -1,12 +1,12 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createViewPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   createPostRecord,
-  getPostById,
-  getPostsByIds,
+  fetchPostById,
+  fetchPostsByIds,
+  fetchPostsConnection,
   likePostRecord,
-  listPostsConnection,
   unlikePostRecord,
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
@@ -31,34 +31,42 @@ export const postRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: postDataView,
       });
 
-      const post = await createPostRecord({
+      const postId = await createPostRecord({
         authorId: ctx.sessionUser.id,
         content: input.content,
         title: input.title,
       });
 
-      if (!post) {
+      if (!postId) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to create post.',
         });
       }
 
-      return (await resolve(post)) as Post;
+      const post = await fetchPostById(postId, plan.root);
+      if (!post) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found.',
+        });
+      }
+
+      return (await plan.resolve(post)) as Post;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany } = createResolver({
+    const plan = createViewPlan({
       ...input,
       ctx,
       view: postDataView,
     });
-    return resolveMany(await getPostsByIds(input.ids));
+    return plan.resolveMany(await fetchPostsByIds(input.ids, plan.root));
   }),
   like: procedure
     .input(
@@ -88,7 +96,14 @@ export const postRouter = router({
         });
       }
 
-      const existing = await getPostById(input.id);
+      const existing = await fetchPostById(
+        input.id,
+        createViewPlan({
+          ctx,
+          select: ['id'],
+          view: postDataView,
+        }).root,
+      );
 
       if (!existing) {
         throw new TRPCError({
@@ -97,13 +112,21 @@ export const postRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: postDataView,
       });
 
-      const post = await likePostRecord(input.id);
+      const updated = await likePostRecord(input.id);
+      if (!updated) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found.',
+        });
+      }
+
+      const post = await fetchPostById(input.id, plan.root);
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -111,17 +134,18 @@ export const postRouter = router({
         });
       }
 
-      return (await resolve(post)) as Post;
+      return (await plan.resolve(post)) as Post;
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, take }) => {
-      const { resolveMany } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: postDataView,
       });
-      const items = await listPostsConnection({ cursor, direction, take });
-      return resolveMany(items);
+      return plan.resolveMany(
+        await fetchPostsConnection({ cursor, direction, node: plan.root, take }),
+      );
     },
   }),
   unlike: procedure
@@ -133,13 +157,21 @@ export const postRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { resolve } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: postDataView,
       });
 
-      const post = await unlikePostRecord(input.id);
+      const updated = await unlikePostRecord(input.id);
+      if (!updated) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found',
+        });
+      }
+
+      const post = await fetchPostById(input.id, plan.root);
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -147,6 +179,6 @@ export const postRouter = router({
         });
       }
 
-      return (await resolve(post)) as Post;
+      return (await plan.resolve(post)) as Post;
     }),
 });

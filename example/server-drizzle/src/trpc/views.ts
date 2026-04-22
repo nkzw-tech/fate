@@ -34,7 +34,7 @@ const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
   commentCount: resolver<PostItem, number>({
-    resolve: ({ comments }) => comments?.length ?? 0,
+    resolve: ({ commentCount }) => commentCount ?? 0,
   }),
   content: true,
   id: true,
@@ -65,7 +65,7 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   id: true,
   name: true,
   postCount: resolver<CategoryItem, number>({
-    resolve: ({ posts }) => posts?.length ?? 0,
+    resolve: ({ postCount }) => postCount ?? 0,
   }),
   posts: list(postDataView),
 });
@@ -80,8 +80,7 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 export const eventDataView = dataView<EventItem>('Event')({
   attendees: list(eventAttendeeDataView),
   attendingCount: resolver<EventItem, number>({
-    resolve: ({ attendees }) =>
-      attendees?.filter((attendee) => attendee.status === 'GOING').length ?? 0,
+    resolve: ({ attendingCount }) => attendingCount ?? 0,
   }),
   capacity: true,
   description: true,

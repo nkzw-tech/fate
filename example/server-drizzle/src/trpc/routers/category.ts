@@ -1,27 +1,28 @@
-import { byIdInput, createResolver } from '@nkzw/fate/server';
-import { getCategoriesByIds, listCategoriesConnection } from '../../drizzle/queries.ts';
+import { byIdInput, createViewPlan } from '@nkzw/fate/server';
+import { fetchCategoriesByIds, fetchCategoriesConnection } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
 import { categoryDataView } from '../views.ts';
 
 export const categoryRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany } = createResolver({
+    const plan = createViewPlan({
       ...input,
       ctx,
       view: categoryDataView,
     });
-    return resolveMany(await getCategoriesByIds(input.ids));
+    return plan.resolveMany(await fetchCategoriesByIds(input.ids, plan.root));
   }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, take }) => {
-      const { resolveMany } = createResolver({
+      const plan = createViewPlan({
         ...input,
         ctx,
         view: categoryDataView,
       });
-      const items = await listCategoriesConnection({ cursor, direction, take });
-      return resolveMany(items);
+      return plan.resolveMany(
+        await fetchCategoriesConnection({ cursor, direction, node: plan.root, take }),
+      );
     },
   }),
 });

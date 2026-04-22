@@ -2,7 +2,7 @@ import type { TRPCQueryProcedure } from '@trpc/server';
 import { z } from 'zod';
 import { isRecord } from '../record.ts';
 import type { DataView } from './dataView.ts';
-import { getScopedArgs } from './prismaSelect.ts';
+import { getScopedArgs } from './queryArgs.ts';
 
 type ConnectionInput = z.infer<typeof connectionInput>;
 
@@ -84,6 +84,13 @@ type MapFn<TContext, TItem, TNode, TInput extends ConnectionInput> = (options: {
   input: TInput;
   items: Array<TItem>;
 }) => Promise<Array<TNode>> | Array<TNode>;
+
+export const isConnectionResult = <TNode>(value: unknown): value is ConnectionResult<TNode> =>
+  isRecord(value) &&
+  Array.isArray(value.items) &&
+  isRecord(value.pagination) &&
+  typeof value.pagination.hasNext === 'boolean' &&
+  typeof value.pagination.hasPrevious === 'boolean';
 
 const args: z.ZodType<Record<string, unknown>> = z
   .object({})
@@ -245,6 +252,25 @@ export function toConnectionResult<Item extends AnyRecord>({
     const nextPath = path ? `${path}.${field}` : field;
 
     if (config.kind === 'list') {
+      if (isConnectionResult(current)) {
+        const wrappedItems = current.items.map((entry) => ({
+          ...entry,
+          node: toConnectionResult({
+            args,
+            item: entry.node as AnyRecord,
+            path: nextPath,
+            view: config,
+          }),
+        }));
+        const connection =
+          wrappedItems.some((entry, index) => entry.node !== current.items[index]?.node) ||
+          wrappedItems.length !== current.items.length
+            ? { ...current, items: wrappedItems }
+            : current;
+        result = assignIfChanged(result, field, connection, current);
+        continue;
+      }
+
       if (!Array.isArray(current)) {
         continue;
       }
