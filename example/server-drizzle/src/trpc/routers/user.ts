@@ -1,8 +1,8 @@
 import { connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { getUserById } from '../../drizzle/queries.ts';
 import { auth } from '../../lib/auth.tsx';
+import { createDrizzlePlan, executeDrizzleById } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { User, userSource } from '../views.ts';
 
@@ -38,7 +38,10 @@ export const userRouter = router({
         headers: ctx.headers,
       });
 
-      const user = await getUserById(ctx.sessionUser.id);
+      const user = await executeDrizzleById({
+        id: ctx.sessionUser.id,
+        plan,
+      });
       if (!user) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -46,7 +49,7 @@ export const userRouter = router({
         });
       }
 
-      return plan.resolve(user);
+      return user;
     }),
   viewer: procedure
     .input(
@@ -59,13 +62,13 @@ export const userRouter = router({
         return null;
       }
 
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: userSource,
-      });
-
-      const user = await getUserById(ctx.sessionUser.id);
-      return user ? ((await plan.resolve(user)) as User) : null;
+      return (await executeDrizzleById({
+        id: ctx.sessionUser.id,
+        plan: createDrizzlePlan({
+          ctx,
+          input,
+          source: userSource,
+        }),
+      })) as User | null;
     }),
 });

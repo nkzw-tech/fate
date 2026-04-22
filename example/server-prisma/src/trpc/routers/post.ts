@@ -2,14 +2,13 @@ import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
-  PostFindManyArgs,
   PostFindUniqueArgs,
   PostSelect,
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
+import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
 import { procedure, router } from '../init.ts';
-import { prismaConnectionArgs } from '../source.ts';
 import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
@@ -49,17 +48,15 @@ export const postRouter = router({
       )) as Post;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createExecutionPlan({
-      ...input,
+    return executePrismaByIds({
       ctx,
-      source: postSource,
+      ids: input.ids,
+      plan: createPrismaPlan({
+        ctx,
+        input,
+        source: postSource,
+      }),
     });
-    return plan.resolveMany(
-      await ctx.prisma.post.findMany({
-        select: toPrismaSelect(plan),
-        where: { id: { in: input.ids } },
-      } as PostFindManyArgs),
-    );
   }),
   like: procedure
     .input(
@@ -123,18 +120,18 @@ export const postRouter = router({
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const plan = createExecutionPlan({
-        ...input,
+      return executePrismaConnection({
         ctx,
-        source: postSource,
+        cursor,
+        direction,
+        plan: createPrismaPlan({
+          ctx,
+          input,
+          source: postSource,
+        }),
+        skip,
+        take,
       });
-      const findOptions: PostFindManyArgs = {
-        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
-        select: toPrismaSelect(plan),
-      };
-
-      const items = await ctx.prisma.post.findMany(findOptions);
-      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
     },
   }),
   unlike: procedure

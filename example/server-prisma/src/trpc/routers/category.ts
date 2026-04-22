@@ -1,39 +1,35 @@
-import { byIdInput, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
-import type { CategoryFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import { byIdInput } from '@nkzw/fate/server';
 import { createConnectionProcedure } from '../connection.ts';
+import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
 import { procedure, router } from '../init.ts';
-import { prismaConnectionArgs } from '../source.ts';
 import { categorySource } from '../views.ts';
 
 export const categoryRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createExecutionPlan({
-      ...input,
+    return executePrismaByIds({
       ctx,
-      source: categorySource,
+      ids: input.ids,
+      plan: createPrismaPlan({
+        ctx,
+        input,
+        source: categorySource,
+      }),
     });
-    return plan.resolveMany(
-      await ctx.prisma.category.findMany({
-        select: toPrismaSelect(plan),
-        where: { id: { in: input.ids } },
-      } as CategoryFindManyArgs),
-    );
   }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const plan = createExecutionPlan({
-        ...input,
+      return executePrismaConnection({
         ctx,
-        source: categorySource,
+        cursor,
+        direction,
+        plan: createPrismaPlan({
+          ctx,
+          input,
+          source: categorySource,
+        }),
+        skip,
+        take,
       });
-
-      const findOptions: CategoryFindManyArgs = {
-        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
-        select: toPrismaSelect(plan),
-      };
-
-      const items = await ctx.prisma.category.findMany(findOptions);
-      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
     },
   }),
 });

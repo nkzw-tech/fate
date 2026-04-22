@@ -1,15 +1,14 @@
 import { byIdInput, connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import {
-  createPostRecord,
-  fetchPostById,
-  fetchPostsByIds,
-  fetchPostsConnection,
-  likePostRecord,
-  unlikePostRecord,
-} from '../../drizzle/queries.ts';
+import { createPostRecord, likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
+import {
+  createDrizzlePlan,
+  executeDrizzleById,
+  executeDrizzleByIds,
+  executeDrizzleConnection,
+} from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { Post, postSource } from '../views.ts';
 
@@ -50,7 +49,7 @@ export const postRouter = router({
         });
       }
 
-      const post = await fetchPostById(postId, plan.root);
+      const post = await executeDrizzleById({ id: postId, plan });
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -58,15 +57,17 @@ export const postRouter = router({
         });
       }
 
-      return (await plan.resolve(post)) as Post;
+      return post as Post;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createExecutionPlan({
-      ...input,
-      ctx,
-      source: postSource,
+    return executeDrizzleByIds({
+      ids: input.ids,
+      plan: createDrizzlePlan({
+        ctx,
+        input,
+        source: postSource,
+      }),
     });
-    return plan.resolveMany(await fetchPostsByIds(input.ids, plan.root));
   }),
   like: procedure
     .input(
@@ -96,14 +97,14 @@ export const postRouter = router({
         });
       }
 
-      const existing = await fetchPostById(
-        input.id,
-        createExecutionPlan({
+      const existing = await executeDrizzleById({
+        id: input.id,
+        plan: createDrizzlePlan({
           ctx,
-          select: ['id'],
+          input: { select: ['id'] },
           source: postSource,
-        }).root,
-      );
+        }),
+      });
 
       if (!existing) {
         throw new TRPCError({
@@ -126,7 +127,7 @@ export const postRouter = router({
         });
       }
 
-      const post = await fetchPostById(input.id, plan.root);
+      const post = await executeDrizzleById({ id: input.id, plan });
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -134,18 +135,20 @@ export const postRouter = router({
         });
       }
 
-      return (await plan.resolve(post)) as Post;
+      return post as Post;
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, take }) => {
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: postSource,
+      return executeDrizzleConnection({
+        cursor,
+        direction,
+        plan: createDrizzlePlan({
+          ctx,
+          input,
+          source: postSource,
+        }),
+        take,
       });
-      return plan.resolveMany(
-        await fetchPostsConnection({ cursor, direction, node: plan.root, take }),
-      );
     },
   }),
   unlike: procedure
@@ -171,7 +174,7 @@ export const postRouter = router({
         });
       }
 
-      const post = await fetchPostById(input.id, plan.root);
+      const post = await executeDrizzleById({ id: input.id, plan });
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -179,6 +182,6 @@ export const postRouter = router({
         });
       }
 
-      return (await plan.resolve(post)) as Post;
+      return post as Post;
     }),
 });

@@ -5,12 +5,10 @@ import {
   type CommentItem,
   createCommentRecord,
   deleteCommentRecord,
-  fetchCommentById,
-  fetchCommentsByIds,
-  fetchPostById,
   searchCommentsConnection,
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
+import { createDrizzlePlan, executeDrizzleById, executeDrizzleByIds } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { commentSource, postSource } from '../views.ts';
 
@@ -32,12 +30,14 @@ export const commentRouter = router({
         });
       }
 
-      const postPlan = createExecutionPlan({
-        ctx,
-        select: ['id'],
-        source: postSource,
+      const post = await executeDrizzleById({
+        id: input.postId,
+        plan: createDrizzlePlan({
+          ctx,
+          input: { select: ['id'] },
+          source: postSource,
+        }),
       });
-      const post = await fetchPostById(input.postId, postPlan.root);
 
       if (!post) {
         throw new TRPCError({
@@ -65,7 +65,7 @@ export const commentRouter = router({
         });
       }
 
-      const comment = await fetchCommentById(commentId, plan.root);
+      const comment = await executeDrizzleById({ id: commentId, plan });
       if (!comment) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -73,15 +73,17 @@ export const commentRouter = router({
         });
       }
 
-      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      return comment as CommentItem & { post?: { commentCount: number } };
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createExecutionPlan({
-      ...input,
-      ctx,
-      source: commentSource,
+    return executeDrizzleByIds({
+      ids: input.ids,
+      plan: createDrizzlePlan({
+        ctx,
+        input,
+        source: commentSource,
+      }),
     });
-    return plan.resolveMany(await fetchCommentsByIds(input.ids, plan.root));
   }),
   delete: procedure
     .input(
@@ -98,7 +100,7 @@ export const commentRouter = router({
         source: commentSource,
       });
 
-      const comment = await fetchCommentById(input.id, plan.root);
+      const comment = await executeDrizzleById({ id: input.id, plan });
 
       if (!comment) {
         throw new TRPCError({
@@ -115,7 +117,7 @@ export const commentRouter = router({
       }
 
       await deleteCommentRecord(input.id);
-      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      return comment as CommentItem & { post?: { commentCount: number } };
     }),
 
   search: createConnectionProcedure({

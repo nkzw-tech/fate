@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
 import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
+import { createPrismaPlan, executePrismaById } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { User, userSource } from '../views.ts';
 
@@ -57,16 +58,14 @@ export const userRouter = router({
         return null;
       }
 
-      const plan = createExecutionPlan({
-        ...input,
+      return (await executePrismaById({
         ctx,
-        source: userSource,
-      });
-
-      const user = await ctx.prisma.user.findUnique({
-        select: toPrismaSelect(plan),
-        where: { id: ctx.sessionUser.id },
-      } as UserFindUniqueArgs);
-      return user ? ((await plan.resolve(user)) as User) : null;
+        id: ctx.sessionUser.id,
+        plan: createPrismaPlan({
+          ctx,
+          input,
+          source: userSource,
+        }),
+      })) as User | null;
     }),
 });

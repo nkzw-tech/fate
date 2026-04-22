@@ -1,10 +1,10 @@
 import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import type { CommentFindManyArgs, CommentSelect } from '../../prisma/prisma-client/models.ts';
+import type { CommentSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
+import { createPrismaPlan, executePrismaByIds, executePrismaConnection } from '../executor.ts';
 import { procedure, router } from '../init.ts';
-import { prismaConnectionArgs } from '../source.ts';
 import type { CommentItem } from '../views.ts';
 import { commentSource } from '../views.ts';
 
@@ -75,17 +75,15 @@ export const commentRouter = router({
       ) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createExecutionPlan({
-      ...input,
+    return executePrismaByIds({
       ctx,
-      source: commentSource,
+      ids: input.ids,
+      plan: createPrismaPlan({
+        ctx,
+        input,
+        source: commentSource,
+      }),
     });
-    return await plan.resolveMany(
-      await ctx.prisma.comment.findMany({
-        select: toPrismaSelect(plan),
-        where: { id: { in: input.ids } },
-      } as CommentFindManyArgs),
-    );
   }),
   delete: procedure
     .input(
@@ -150,24 +148,27 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const plan = createExecutionPlan({
-        ...input,
+      const plan = createPrismaPlan({
         ctx,
+        input,
         source: commentSource,
       });
-      const findOptions: CommentFindManyArgs = {
-        ...prismaConnectionArgs({ cursor, direction, node: plan.root, skip, take }),
-        select: toPrismaSelect(plan),
-        where: {
-          content: {
-            contains: query,
-            mode: 'insensitive',
+      return executePrismaConnection({
+        ctx,
+        cursor,
+        direction,
+        extra: {
+          where: {
+            content: {
+              contains: query,
+              mode: 'insensitive',
+            },
           },
         },
-      };
-
-      const items = await ctx.prisma.comment.findMany(findOptions);
-      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
+        plan,
+        skip,
+        take,
+      });
     },
   }),
 });
