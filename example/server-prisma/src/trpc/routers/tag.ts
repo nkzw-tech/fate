@@ -1,19 +1,19 @@
-import { byIdInput, createResolver } from '@nkzw/fate/server';
+import { byIdInput, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import type { TagFindManyArgs } from '../../prisma/prisma-client/models.ts';
 import { procedure, router } from '../init.ts';
-import { tagDataView } from '../views.ts';
+import { tagSource } from '../views.ts';
 
 export const tagRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: tagDataView,
+      source: tagSource,
     });
 
-    return await resolveMany(
+    return await plan.resolveMany(
       await ctx.prisma.tag.findMany({
-        select,
+        select: toPrismaSelect(plan),
         where: { id: { in: input.ids } },
       } as TagFindManyArgs),
     );

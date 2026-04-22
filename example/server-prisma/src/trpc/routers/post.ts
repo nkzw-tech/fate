@@ -1,4 +1,4 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
@@ -9,7 +9,7 @@ import type {
 } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { Post, postDataView } from '../views.ts';
+import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
   add: procedure
@@ -29,13 +29,14 @@ export const postRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
+      const select = toPrismaSelect(plan);
 
-      return (await resolve(
+      return (await plan.resolve(
         await ctx.prisma.post.create({
           data: {
             authorId: ctx.sessionUser.id,
@@ -47,14 +48,14 @@ export const postRouter = router({
       )) as Post;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: postDataView,
+      source: postSource,
     });
-    return resolveMany(
+    return plan.resolveMany(
       await ctx.prisma.post.findMany({
-        select,
+        select: toPrismaSelect(plan),
         where: { id: { in: input.ids } },
       } as PostFindManyArgs),
     );
@@ -100,13 +101,14 @@ export const postRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
+      const select = toPrismaSelect(plan);
 
-      return (await resolve(
+      return (await plan.resolve(
         await ctx.prisma.post.update({
           data: {
             likes: {
@@ -120,14 +122,14 @@ export const postRouter = router({
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const { resolveMany, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
       const findOptions: PostFindManyArgs = {
         orderBy: { createdAt: 'desc' },
-        select,
+        select: toPrismaSelect(plan),
         take: direction === 'forward' ? take : -take,
       };
 
@@ -137,7 +139,7 @@ export const postRouter = router({
       }
 
       const items = await ctx.prisma.post.findMany(findOptions);
-      return resolveMany(direction === 'forward' ? items : items.reverse());
+      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
     },
   }),
   unlike: procedure
@@ -150,11 +152,12 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
-        const { resolve, select } = createResolver({
+        const plan = createExecutionPlan({
           ...input,
           ctx,
-          view: postDataView,
+          source: postSource,
         });
+        const select = toPrismaSelect(plan);
         const existing = await tx.post.findUnique({
           select: {
             likes: true,
@@ -172,7 +175,7 @@ export const postRouter = router({
         }
 
         if (existing.likes <= 0) {
-          return (await resolve(
+          return (await plan.resolve(
             await tx.post.findUniqueOrThrow({
               select,
               where: { id: input.id },
@@ -180,7 +183,7 @@ export const postRouter = router({
           )) as Post;
         }
 
-        return (await resolve(
+        return (await plan.resolve(
           await tx.post.update({
             data: {
               likes: {

@@ -1,19 +1,19 @@
-import { byIdInput, createResolver } from '@nkzw/fate/server';
+import { byIdInput, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import type { EventSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { eventDataView } from '../views.ts';
+import { eventSource } from '../views.ts';
 
 export const eventRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: eventDataView,
+      source: eventSource,
     });
-    return resolveMany(
+    return plan.resolveMany(
       await ctx.prisma.event.findMany({
-        select: select as EventSelect,
+        select: toPrismaSelect(plan) as EventSelect,
         where: { id: { in: input.ids } },
       }),
     );
@@ -21,15 +21,15 @@ export const eventRouter = router({
   list: createConnectionProcedure({
     defaultSize: 3,
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const { resolveMany, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: eventDataView,
+        source: eventSource,
       });
 
       const items = await ctx.prisma.event.findMany({
         orderBy: { startAt: 'asc' },
-        select: select as EventSelect,
+        select: toPrismaSelect(plan) as EventSelect,
         take: direction === 'forward' ? take : -take,
         ...(cursor
           ? ({
@@ -39,7 +39,7 @@ export const eventRouter = router({
           : null),
       });
 
-      return resolveMany(direction === 'forward' ? items : items.reverse());
+      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
     },
   }),
 });

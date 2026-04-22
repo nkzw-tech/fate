@@ -1,4 +1,8 @@
-import type { ConnectionResult, ViewPlanNode } from '@nkzw/fate/server';
+import {
+  attachComputedState,
+  type ConnectionResult,
+  type ExecutionPlanNode,
+} from '@nkzw/fate/server';
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import db from './db.ts';
 import {
@@ -20,7 +24,7 @@ import {
 } from './schema.ts';
 
 type ItemRecord = Record<string, unknown>;
-type PlanNode = ViewPlanNode<unknown>;
+type PlanNode = ExecutionPlanNode<unknown>;
 
 type PaginationArgs = {
   after?: string;
@@ -39,14 +43,12 @@ export type PostItem = PostRow &
   ItemRecord & {
     author?: UserRow | null;
     category?: CategoryRow | null;
-    commentCount?: number;
     comments?: Array<CommentItem>;
     tags?: Array<TagRow>;
   };
 
 export type CategoryItem = CategoryRow &
   ItemRecord & {
-    postCount?: number;
     posts?: Array<PostItem>;
   };
 
@@ -58,11 +60,11 @@ export type EventAttendeeItem = EventAttendeeRow &
 export type EventItem = EventRow &
   ItemRecord & {
     attendees?: Array<EventAttendeeItem>;
-    attendingCount?: number;
     host?: UserRow | null;
   };
 
-const relation = (node: PlanNode, field: string) => node.relations.get(field);
+const relation = (node: PlanNode, field: string): PlanNode | undefined =>
+  node.relations.get(field) as PlanNode | undefined;
 
 const paginationArgs = (args?: Record<string, unknown>): PaginationArgs => ({
   after: typeof args?.after === 'string' ? args.after : undefined,
@@ -393,10 +395,12 @@ const hydratePosts = async (rows: Array<PostRow>, node: PlanNode): Promise<Array
   const items = rows.map((row) => ({ ...row }) as PostItem);
   const postIds = items.map((item) => item.id);
 
-  if (node.resolvers.has('commentCount')) {
+  if (node.computeds.has('commentCount')) {
     const counts = await fetchCommentCountsByPostIds(postIds);
     for (const item of items) {
-      item.commentCount = counts.get(item.id) ?? 0;
+      attachComputedState(item, 'commentCount', {
+        count: counts.get(item.id) ?? 0,
+      });
     }
   }
 
@@ -466,10 +470,12 @@ const hydrateCategories = async (
 ): Promise<Array<CategoryItem>> => {
   const items = rows.map((row) => ({ ...row }) as CategoryItem);
 
-  if (node.resolvers.has('postCount')) {
+  if (node.computeds.has('postCount')) {
     const counts = await fetchPostCountsByCategoryIds(items.map((item) => item.id));
     for (const item of items) {
-      item.postCount = counts.get(item.id) ?? 0;
+      attachComputedState(item, 'postCount', {
+        count: counts.get(item.id) ?? 0,
+      });
     }
   }
 
@@ -525,10 +531,12 @@ const hydrateEvents = async (rows: Array<EventRow>, node: PlanNode): Promise<Arr
   const items = rows.map((row) => ({ ...row }) as EventItem);
   const eventIds = items.map((item) => item.id);
 
-  if (node.resolvers.has('attendingCount')) {
+  if (node.computeds.has('attendingCount')) {
     const counts = await fetchAttendingCountsByEventIds(eventIds);
     for (const item of items) {
-      item.attendingCount = counts.get(item.id) ?? 0;
+      attachComputedState(item, 'attendingCount', {
+        count: counts.get(item.id) ?? 0,
+      });
     }
   }
 

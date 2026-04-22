@@ -5,6 +5,7 @@ import { toPrismaSelect } from './prismaSelect.ts';
 import { getScopedArgs } from './queryArgs.ts';
 
 const dataViewFieldsKey = Symbol('__fate__DataViewFields');
+const computedStateKey = Symbol('__fate__ComputedState');
 
 type ResolverSelect<Context> =
   | AnyRecord
@@ -22,6 +23,44 @@ type ResolverAuthorize<Item extends AnyRecord, Context> = Bivariant<
   (item: Item, context?: Context, args?: AnyRecord) => Promise<boolean> | boolean
 >;
 
+export type FieldNeed = {
+  kind: 'field';
+  path: string;
+};
+
+export type CountNeed = {
+  kind: 'count';
+  relation: string;
+  where?: AnyRecord;
+};
+
+export type ComputedNeed = CountNeed | FieldNeed;
+
+type ComputedDeps<Needs extends Record<string, ComputedNeed> | undefined> =
+  Needs extends Record<string, ComputedNeed>
+    ? {
+        [Key in keyof Needs]: Needs[Key] extends CountNeed
+          ? number
+          : Needs[Key] extends FieldNeed
+            ? unknown
+            : never;
+      }
+    : Record<string, unknown>;
+
+type ComputedResolve<
+  Item extends AnyRecord,
+  Result,
+  Needs extends Record<string, ComputedNeed> | undefined,
+  Context,
+> = Bivariant<
+  (
+    item: Item,
+    deps: ComputedDeps<Needs>,
+    context?: Context,
+    args?: AnyRecord,
+  ) => Promise<Result> | Result
+>;
+
 /**
  * Field configuration for selecting and resolving a computed value on the backend.
  */
@@ -32,7 +71,23 @@ export type ResolverField<Item extends AnyRecord, Result, Context> = {
   select?: ResolverSelect<Context>;
 };
 
-type DataField<Item extends AnyRecord> = true | DataView<AnyRecord> | ResolverField<Item, any, any>;
+export type ComputedField<
+  Item extends AnyRecord,
+  Result,
+  Context,
+  Needs extends Record<string, ComputedNeed> | undefined = Record<string, ComputedNeed>,
+> = {
+  authorize?: ResolverAuthorize<Item, Context>;
+  kind: 'computed';
+  needs?: Needs;
+  resolve: ComputedResolve<Item, Result, Needs, Context>;
+};
+
+type DataField<Item extends AnyRecord> =
+  | true
+  | ComputedField<Item, any, any, any>
+  | DataView<AnyRecord>
+  | ResolverField<Item, any, any>;
 
 /**
  * Recursively serializes resolver results for transport across the network.
@@ -104,6 +159,33 @@ export function resolver<Item extends AnyRecord, Result = unknown, Context = unk
   };
 }
 
+export const field = (path: string): FieldNeed => ({
+  kind: 'field',
+  path,
+});
+
+export const count = (relation: string, options?: { where?: AnyRecord }): CountNeed => ({
+  kind: 'count',
+  relation,
+  where: options?.where,
+});
+
+export function computed<
+  Item extends AnyRecord,
+  Result = unknown,
+  Context = unknown,
+  Needs extends Record<string, ComputedNeed> | undefined = Record<string, ComputedNeed>,
+>(config: {
+  authorize?: ResolverAuthorize<Item, Context>;
+  needs?: Needs;
+  resolve: ComputedResolve<Item, Result, Needs, Context>;
+}): ComputedField<Item, Result, Context, Needs> {
+  return {
+    kind: 'computed' as const,
+    ...config,
+  };
+}
+
 type NonNullish<T> = Exclude<T, null | undefined>;
 
 type WithNullish<Original, Value> = null extends Original
@@ -116,6 +198,13 @@ type WithNullish<Original, Value> = null extends Original
 
 type ResolverResult<Field> =
   Field extends ResolverField<AnyRecord, any, any>
+    ? Field['authorize'] extends ResolverAuthorize<any, any>
+      ? Awaited<ReturnType<Field['resolve']>> | null
+      : Awaited<ReturnType<Field['resolve']>>
+    : never;
+
+type ComputedResult<Field> =
+  Field extends ComputedField<AnyRecord, any, any, any>
     ? Field['authorize'] extends ResolverAuthorize<any, any>
       ? Awaited<ReturnType<Field['resolve']>> | null
       : Awaited<ReturnType<Field['resolve']>>
@@ -144,9 +233,11 @@ type RawFieldResult<
     ? Key extends keyof Item
       ? RelationResult<Item[Key], DataView<ChildItem>>
       : never
-    : Field extends ResolverField<Item, any, any>
-      ? ResolverResult<Field>
-      : never;
+    : Field extends ComputedField<Item, any, any, any>
+      ? ComputedResult<Field>
+      : Field extends ResolverField<Item, any, any>
+        ? ResolverResult<Field>
+        : never;
 
 type RawDataViewResult<V extends DataView<AnyRecord>> =
   V extends DataView<infer Item>
@@ -170,6 +261,7 @@ export type Entity<
 
 type SelectedViewNode<Context> = {
   args?: AnyRecord;
+  computeds: Map<string, ComputedField<AnyRecord, any, Context>>;
   path: string | null;
   relations: Map<string, SelectedViewNode<Context>>;
   resolvers: Map<string, ResolverField<AnyRecord, any, Context>>;
@@ -194,8 +286,80 @@ const isResolverField = <Item extends AnyRecord, Context>(
 ): field is ResolverField<Item, unknown, Context> =>
   Boolean(field) && typeof field === 'object' && 'kind' in field && field.kind === 'resolver';
 
+const isComputedField = <Item extends AnyRecord, Context>(
+  field: DataField<Item>,
+): field is ComputedField<Item, unknown, Context> =>
+  Boolean(field) && typeof field === 'object' && 'kind' in field && field.kind === 'computed';
+
 const isDataViewField = (field: DataField<AnyRecord>): field is DataView<AnyRecord> =>
   Boolean(field) && typeof field === 'object' && 'fields' in field;
+
+const getValueAtPath = (item: AnyRecord, path: string) => {
+  let current: unknown = item;
+
+  for (const segment of path.split('.')) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+
+  return current;
+};
+
+type ComputedState = Record<string, Record<string, unknown>>;
+
+const getComputedState = (item: AnyRecord): ComputedState | undefined =>
+  item[computedStateKey as unknown as keyof typeof item] as ComputedState | undefined;
+
+export const attachComputedState = <Item extends AnyRecord>(
+  item: Item,
+  field: string,
+  deps: Record<string, unknown>,
+): Item => {
+  const state = getComputedState(item) ?? {};
+  state[field] = {
+    ...(state[field] ?? {}),
+    ...deps,
+  };
+
+  Object.defineProperty(item, computedStateKey, {
+    configurable: true,
+    enumerable: false,
+    value: state,
+    writable: true,
+  });
+
+  return item;
+};
+
+const getComputedDeps = (
+  item: AnyRecord,
+  field: string,
+  needs?: Record<string, ComputedNeed>,
+): Record<string, unknown> => {
+  const attached = getComputedState(item)?.[field] ?? {};
+  const deps: Record<string, unknown> = { ...attached };
+
+  if (!needs) {
+    return deps;
+  }
+
+  for (const [name, need] of Object.entries(needs)) {
+    if (deps[name] !== undefined) {
+      continue;
+    }
+
+    if (need.kind === 'count') {
+      deps[name] = getValueAtPath(item, `_count.${need.relation}`) ?? 0;
+      continue;
+    }
+
+    deps[name] = getValueAtPath(item, need.path);
+  }
+
+  return deps;
+};
 
 const filterToViewFields = (
   item: unknown,
@@ -281,6 +445,7 @@ const createSelectedNode = <Context>(
   args?: AnyRecord,
 ): SelectedViewNode<Context> => ({
   args: path ? getScopedArgs(args, path) : args,
+  computeds: new Map(),
   path,
   relations: new Map(),
   resolvers: new Map(),
@@ -312,6 +477,14 @@ const assignPath = <Context>(
   if (isResolverField(field)) {
     if (rest.length === 0) {
       node.resolvers.set(segment, field);
+      selectedPaths.add(nextPath);
+    }
+    return;
+  }
+
+  if (isComputedField(field)) {
+    if (rest.length === 0) {
+      node.computeds.set(segment, field);
       selectedPaths.add(nextPath);
     }
     return;
@@ -379,6 +552,32 @@ const resolveNode = async <Item extends AnyRecord, Context>({
     }
 
     const value = await resolver.resolve(getItem(), resolverOptions.context, resolverOptions.args);
+
+    if (value !== undefined) {
+      assign(field, value);
+    }
+  }
+
+  for (const [field, computedField] of node.computeds) {
+    if (computedField.authorize) {
+      const authorized = await computedField.authorize(
+        getItem(),
+        resolverOptions.context,
+        resolverOptions.args,
+      );
+
+      if (!authorized) {
+        assign(field, null);
+        continue;
+      }
+    }
+
+    const value = await computedField.resolve(
+      getItem(),
+      getComputedDeps(getItem(), field, computedField.needs) as never,
+      resolverOptions.context,
+      resolverOptions.args,
+    );
 
     if (value !== undefined) {
       assign(field, value);

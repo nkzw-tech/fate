@@ -1,7 +1,17 @@
 import { expect, expectTypeOf, test } from 'vite-plus/test';
 import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
-import { createResolver, createViewPlan, dataView, Entity, list, resolver } from '../dataView.ts';
+import {
+  computed,
+  createResolver,
+  createViewPlan,
+  dataView,
+  Entity,
+  field,
+  list,
+  resolver,
+} from '../dataView.ts';
+import { asc, createExecutionPlan, defineSource, desc } from '../source.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -58,6 +68,36 @@ test('resolvers can add prisma selections and compute values', async () => {
 
   const item = await selection.resolve({ _count: { posts: 4 }, id: 'cat-1' });
   expect(item).toEqual({ id: 'cat-1', postCount: 4 });
+});
+
+test('computed fields can resolve hidden source dependencies', async () => {
+  const view = dataView<{ email: string; id: string; name: string }>('User')({
+    email: computed<{ email: string; id: string; name: string }, string>({
+      needs: {
+        email: field('email'),
+      },
+      resolve: (_item, deps) => deps.email as string,
+    }),
+    id: true,
+    name: true,
+  });
+
+  const selection = createResolver({
+    select: ['email', 'name'],
+    view,
+  });
+
+  const item = await selection.resolve({
+    email: 'jane@example.com',
+    id: 'user-1',
+    name: 'Jane',
+  });
+
+  expect(item).toEqual({
+    email: 'jane@example.com',
+    id: 'user-1',
+    name: 'Jane',
+  });
 });
 
 test('a view selection for a resolver has the correct type', async () => {
@@ -447,4 +487,47 @@ test('createViewPlan exposes scoped args for nested relations', () => {
     before: 'reply-2',
     last: 1,
   });
+});
+
+test('createExecutionPlan attaches source order metadata', () => {
+  const commentView = dataView<{ createdAt: Date; id: string }>('Comment')({
+    id: true,
+  });
+
+  const postView = dataView<{ comments?: Array<{ createdAt: Date; id: string }>; id: string }>(
+    'Post',
+  )({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const commentSource = defineSource(commentView, {
+    id: 'id',
+    orderBy: [desc('createdAt')],
+  });
+
+  const postSource = defineSource(postView, {
+    id: 'id',
+    orderBy: [asc('id')],
+    relations: {
+      comments: {
+        foreignKey: 'postId',
+        kind: 'many',
+        localKey: 'id',
+        orderBy: [desc('createdAt')],
+        source: () => commentSource,
+      },
+    },
+  });
+
+  const plan = createExecutionPlan({
+    select: ['comments.id'],
+    source: postSource,
+  });
+
+  expect(plan.root.orderBy).toEqual([{ direction: 'asc', field: 'id' }]);
+  expect((plan.root.relations.get('comments') as typeof plan.root | undefined)?.orderBy).toEqual([
+    { direction: 'desc', field: 'createdAt' },
+    { direction: 'asc', field: 'id' },
+  ]);
 });

@@ -1,4 +1,14 @@
-import { dataView, list, resolver, type Entity } from '@nkzw/fate/server';
+import {
+  asc,
+  computed,
+  count,
+  dataView,
+  defineSource,
+  desc,
+  field,
+  list,
+  type Entity,
+} from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,
@@ -39,9 +49,12 @@ export type EventItem = PrismaEvent & {
 };
 
 export const userDataView = dataView<PrismaUser>('User')({
-  email: resolver<PrismaUser, string | null, AppContext>({
+  email: computed<PrismaUser, string | null, AppContext>({
     authorize: ({ id }, context) => context?.sessionUser?.id === id,
-    resolve: ({ email }) => email,
+    needs: {
+      email: field('email'),
+    },
+    resolve: (_item, deps) => (deps.email as string | null) ?? null,
   }),
   id: true,
   name: true,
@@ -62,11 +75,11 @@ const categorySummaryDataView = dataView<PrismaCategory>('Category')({
 const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
-  commentCount: resolver<PostItem, number>({
-    resolve: ({ _count }) => _count?.comments ?? 0,
-    select: () => ({
-      _count: { select: { comments: true } },
-    }),
+  commentCount: computed<PostItem, number>({
+    needs: {
+      count: count('comments'),
+    },
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
   }),
   content: true,
   id: true,
@@ -96,11 +109,11 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
-  postCount: resolver<CategoryItem, number>({
-    resolve: ({ _count }) => _count?.posts ?? 0,
-    select: () => ({
-      _count: { select: { posts: true } },
-    }),
+  postCount: computed<CategoryItem, number>({
+    needs: {
+      count: count('posts'),
+    },
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
   }),
   posts: list(postDataView),
 });
@@ -114,17 +127,13 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 
 export const eventDataView = dataView<EventItem>('Event')({
   attendees: list(eventAttendeeDataView),
-  attendingCount: resolver<EventItem, number>({
-    resolve: ({ _count }) => _count?.attendees ?? 0,
-    select: () => ({
-      _count: {
-        select: {
-          attendees: {
-            where: { status: 'GOING' },
-          },
-        },
-      },
-    }),
+  attendingCount: computed<EventItem, number>({
+    needs: {
+      count: count('attendees', {
+        where: { status: 'GOING' },
+      }),
+    },
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
   }),
   capacity: true,
   description: true,
@@ -181,6 +190,153 @@ export type Event = Entity<
     host: User;
   }
 >;
+
+export const userSource = defineSource(userDataView, {
+  id: 'id',
+});
+
+export const tagSource = defineSource(tagDataView, {
+  id: 'id',
+  orderBy: [asc('name'), asc('id')],
+});
+
+export const categorySummarySource = defineSource(categorySummaryDataView, {
+  id: 'id',
+  orderBy: [asc('createdAt'), asc('id')],
+});
+
+export const postSummarySource = defineSource(postSummaryDataView, {
+  id: 'id',
+  orderBy: [desc('createdAt'), desc('id')],
+  relations: {
+    author: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'authorId',
+      source: () => userSource,
+    },
+    category: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'categoryId',
+      source: () => categorySummarySource,
+    },
+    tags: {
+      foreignKey: 'id',
+      kind: 'manyToMany',
+      localKey: 'id',
+      orderBy: [asc('name'), asc('id')],
+      source: () => tagSource,
+      through: {
+        foreignKey: 'tagId',
+        localKey: 'postId',
+      },
+    },
+  },
+});
+
+export const commentSource = defineSource(commentDataView, {
+  id: 'id',
+  orderBy: [desc('createdAt'), desc('id')],
+  relations: {
+    author: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'authorId',
+      source: () => userSource,
+    },
+    post: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'postId',
+      source: () => postSummarySource,
+    },
+  },
+});
+
+export const postSource = defineSource(postDataView, {
+  id: 'id',
+  orderBy: [desc('createdAt'), desc('id')],
+  relations: {
+    author: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'authorId',
+      source: () => userSource,
+    },
+    category: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'categoryId',
+      source: () => categorySummarySource,
+    },
+    comments: {
+      foreignKey: 'postId',
+      kind: 'many',
+      localKey: 'id',
+      orderBy: [desc('createdAt'), desc('id')],
+      source: () => commentSource,
+    },
+    tags: {
+      foreignKey: 'id',
+      kind: 'manyToMany',
+      localKey: 'id',
+      orderBy: [asc('name'), asc('id')],
+      source: () => tagSource,
+      through: {
+        foreignKey: 'tagId',
+        localKey: 'postId',
+      },
+    },
+  },
+});
+
+export const categorySource = defineSource(categoryDataView, {
+  id: 'id',
+  orderBy: [asc('createdAt'), asc('id')],
+  relations: {
+    posts: {
+      foreignKey: 'categoryId',
+      kind: 'many',
+      localKey: 'id',
+      orderBy: [desc('createdAt'), desc('id')],
+      source: () => postSource,
+    },
+  },
+});
+
+export const eventAttendeeSource = defineSource(eventAttendeeDataView, {
+  id: 'id',
+  orderBy: [asc('createdAt'), asc('id')],
+  relations: {
+    user: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'userId',
+      source: () => userSource,
+    },
+  },
+});
+
+export const eventSource = defineSource(eventDataView, {
+  id: 'id',
+  orderBy: [asc('startAt'), asc('id')],
+  relations: {
+    attendees: {
+      foreignKey: 'eventId',
+      kind: 'many',
+      localKey: 'id',
+      orderBy: [asc('createdAt'), asc('id')],
+      source: () => eventAttendeeSource,
+    },
+    host: {
+      foreignKey: 'id',
+      kind: 'one',
+      localKey: 'hostId',
+      source: () => userSource,
+    },
+  },
+});
 
 export const Root = {
   categories: list(categoryDataView),

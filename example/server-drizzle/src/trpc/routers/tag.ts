@@ -1,14 +1,14 @@
-import { byIdInput, createViewPlan } from '@nkzw/fate/server';
+import { byIdInput, createExecutionPlan } from '@nkzw/fate/server';
 import { getTagsByIds } from '../../drizzle/queries.ts';
 import { procedure, router } from '../init.ts';
-import { tagDataView } from '../views.ts';
+import { tagSource } from '../views.ts';
 
 export const tagRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createViewPlan({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: tagDataView,
+      source: tagSource,
     });
     return plan.resolveMany(await getTagsByIds(input.ids));
   }),

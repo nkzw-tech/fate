@@ -1,4 +1,4 @@
-import { byIdInput, connectionArgs, createViewPlan } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
@@ -12,7 +12,7 @@ import {
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { commentDataView, postDataView } from '../views.ts';
+import { commentSource, postSource } from '../views.ts';
 
 export const commentRouter = router({
   add: procedure
@@ -32,10 +32,10 @@ export const commentRouter = router({
         });
       }
 
-      const postPlan = createViewPlan({
+      const postPlan = createExecutionPlan({
         ctx,
         select: ['id'],
-        view: postDataView,
+        source: postSource,
       });
       const post = await fetchPostById(input.postId, postPlan.root);
 
@@ -46,10 +46,10 @@ export const commentRouter = router({
         });
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
 
       const commentId = await createCommentRecord({
@@ -76,10 +76,10 @@ export const commentRouter = router({
       return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createViewPlan({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: commentDataView,
+      source: commentSource,
     });
     return plan.resolveMany(await fetchCommentsByIds(input.ids, plan.root));
   }),
@@ -92,10 +92,10 @@ export const commentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
 
       const comment = await fetchCommentById(input.id, plan.root);
@@ -133,10 +133,10 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
       return plan.resolveMany(
         await searchCommentsConnection({ cursor, direction, node: plan.root, query, take }),

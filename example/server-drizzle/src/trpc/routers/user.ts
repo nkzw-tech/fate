@@ -1,10 +1,10 @@
-import { connectionArgs, createViewPlan } from '@nkzw/fate/server';
+import { connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { getUserById } from '../../drizzle/queries.ts';
 import { auth } from '../../lib/auth.tsx';
 import { procedure, router } from '../init.ts';
-import { User, userDataView } from '../views.ts';
+import { User, userSource } from '../views.ts';
 
 export const userRouter = router({
   update: procedure
@@ -27,10 +27,10 @@ export const userRouter = router({
         });
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: userDataView,
+        source: userSource,
       });
 
       await auth.api.updateUser({
@@ -59,10 +59,10 @@ export const userRouter = router({
         return null;
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: userDataView,
+        source: userSource,
       });
 
       const user = await getUserById(ctx.sessionUser.id);

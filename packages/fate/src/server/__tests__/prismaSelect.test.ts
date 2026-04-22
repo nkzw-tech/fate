@@ -1,5 +1,13 @@
 import { expect, test } from 'vite-plus/test';
-import { createResolver, createViewPlan, dataView, resolver } from '../dataView.ts';
+import {
+  computed,
+  count,
+  createResolver,
+  createViewPlan,
+  dataView,
+  field,
+  resolver,
+} from '../dataView.ts';
 import { prismaSelect } from '../prismaSelect.ts';
 import { toPrismaSelect } from '../prismaSelect.ts';
 
@@ -75,4 +83,50 @@ test('toPrismaSelect matches createResolver output for view plans', () => {
       view: categoryView,
     }).select,
   );
+});
+
+test('toPrismaSelect includes computed dependencies', () => {
+  const userView = dataView<{ email: string; id: string }>('User')({
+    email: computed<{ email: string; id: string }, string>({
+      needs: {
+        email: field('email'),
+      },
+      resolve: (_item, deps) => deps.email as string,
+    }),
+    id: true,
+  });
+
+  const postView = dataView<{ _count?: { comments: number }; id: string }>('Post')({
+    commentCount: computed<{ _count?: { comments: number }; id: string }, number>({
+      needs: {
+        count: count('comments'),
+      },
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+    }),
+    id: true,
+  });
+
+  expect(
+    toPrismaSelect(
+      createViewPlan({
+        select: ['email'],
+        view: userView,
+      }),
+    ),
+  ).toEqual({
+    email: true,
+    id: true,
+  });
+
+  expect(
+    toPrismaSelect(
+      createViewPlan({
+        select: ['commentCount'],
+        view: postView,
+      }),
+    ),
+  ).toEqual({
+    _count: { select: { comments: true } },
+    id: true,
+  });
 });

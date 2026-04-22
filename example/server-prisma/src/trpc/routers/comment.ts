@@ -1,11 +1,11 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentFindManyArgs, CommentSelect } from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
 import type { CommentItem } from '../views.ts';
-import { commentDataView } from '../views.ts';
+import { commentSource } from '../views.ts';
 
 const postSelection = {
   id: true,
@@ -55,13 +55,14 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
+      const select = toPrismaSelect(plan);
 
-      return resolve(
+      return plan.resolve(
         await ctx.prisma.comment.create({
           data: {
             authorId: ctx.sessionUser.id,
@@ -73,14 +74,14 @@ export const commentRouter = router({
       ) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: commentDataView,
+      source: commentSource,
     });
-    return await resolveMany(
+    return await plan.resolveMany(
       await ctx.prisma.comment.findMany({
-        select,
+        select: toPrismaSelect(plan),
         where: { id: { in: input.ids } },
       } as CommentFindManyArgs),
     );
@@ -106,11 +107,12 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
+      const select = toPrismaSelect(plan);
 
       let result = (await ctx.prisma.comment.delete({
         select: getCommentSelection(select),
@@ -129,7 +131,7 @@ export const commentRouter = router({
         };
       }
 
-      return resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      return plan.resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
   search: createConnectionProcedure({
@@ -147,14 +149,14 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const { resolveMany, select } = createResolver({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: commentDataView,
+        source: commentSource,
       });
       const findOptions: CommentFindManyArgs = {
         orderBy: { createdAt: 'desc' },
-        select,
+        select: toPrismaSelect(plan),
         take: direction === 'forward' ? take : -take,
         where: {
           content: {
@@ -170,7 +172,7 @@ export const commentRouter = router({
       }
 
       const items = await ctx.prisma.comment.findMany(findOptions);
-      return resolveMany(direction === 'forward' ? items : items.reverse());
+      return plan.resolveMany(direction === 'forward' ? items : items.reverse());
     },
   }),
 });

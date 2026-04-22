@@ -104,6 +104,47 @@ const ensureRelationSelect = (select: AnyRecord, path: string | null): AnyRecord
   return current;
 };
 
+const assignDependencyPath = (select: AnyRecord, path: string) => {
+  const segments = path.split('.');
+  let current = select;
+
+  for (const [index, segment] of segments.entries()) {
+    if (index === segments.length - 1) {
+      current[segment] = true;
+      continue;
+    }
+
+    current = ensureRelationSelect(current, segment);
+  }
+};
+
+const applyComputedSelections = <Context>(node: ViewPlanNode<Context>, select: AnyRecord) => {
+  for (const computed of node.computeds.values()) {
+    if (!computed.needs) {
+      continue;
+    }
+
+    for (const need of Object.values(computed.needs)) {
+      if (need.kind === 'count') {
+        const target = ensureRelationSelect(select, node.path);
+        const existing = (target._count as AnyRecord | undefined) ?? { select: {} };
+        target._count = existing;
+        const countSelect = (existing.select as AnyRecord | undefined) ?? {};
+        existing.select = countSelect;
+        countSelect[need.relation] = need.where ? { where: need.where } : true;
+        continue;
+      }
+
+      const target = ensureRelationSelect(select, node.path);
+      assignDependencyPath(target, need.path);
+    }
+  }
+
+  for (const relation of node.relations.values()) {
+    applyComputedSelections(relation, select);
+  }
+};
+
 const collectResolverSelections = <Context>(
   node: ViewPlanNode<Context>,
   select: AnyRecord,
@@ -156,6 +197,7 @@ export function toPrismaSelect<Item extends AnyRecord, Context = unknown>(
   plan: ViewPlan<Item, Context>,
 ): AnyRecord {
   const select = buildNodeSelect(plan.root);
+  applyComputedSelections(plan.root, select);
   collectResolverSelections(plan.root, select, plan.args, plan.ctx);
   return select;
 }

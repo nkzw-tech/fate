@@ -1,4 +1,4 @@
-import { byIdInput, connectionArgs, createViewPlan } from '@nkzw/fate/server';
+import { byIdInput, connectionArgs, createExecutionPlan } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../../drizzle/queries.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { Post, postDataView } from '../views.ts';
+import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
   add: procedure
@@ -31,10 +31,10 @@ export const postRouter = router({
         });
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
 
       const postId = await createPostRecord({
@@ -61,10 +61,10 @@ export const postRouter = router({
       return (await plan.resolve(post)) as Post;
     }),
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const plan = createViewPlan({
+    const plan = createExecutionPlan({
       ...input,
       ctx,
-      view: postDataView,
+      source: postSource,
     });
     return plan.resolveMany(await fetchPostsByIds(input.ids, plan.root));
   }),
@@ -98,10 +98,10 @@ export const postRouter = router({
 
       const existing = await fetchPostById(
         input.id,
-        createViewPlan({
+        createExecutionPlan({
           ctx,
           select: ['id'],
-          view: postDataView,
+          source: postSource,
         }).root,
       );
 
@@ -112,10 +112,10 @@ export const postRouter = router({
         });
       }
 
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
 
       const updated = await likePostRecord(input.id);
@@ -138,10 +138,10 @@ export const postRouter = router({
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, take }) => {
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
       return plan.resolveMany(
         await fetchPostsConnection({ cursor, direction, node: plan.root, take }),
@@ -157,10 +157,10 @@ export const postRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = createViewPlan({
+      const plan = createExecutionPlan({
         ...input,
         ctx,
-        view: postDataView,
+        source: postSource,
       });
 
       const updated = await unlikePostRecord(input.id);
