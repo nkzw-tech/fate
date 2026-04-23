@@ -293,10 +293,52 @@ export class Store {
 
   restoreList(key: string, list?: List) {
     if (list == null) {
-      this.lists.delete(key);
+      this.deleteList(key);
     } else {
       this.setList(key, list);
     }
+  }
+
+  collectGarbage(
+    markedRecords: ReadonlySet<EntityId>,
+    markedLists: ReadonlySet<string>,
+    options: { onRecordDeleted?: (id: EntityId) => void } = {},
+  ): { lists: Set<string>; records: Set<EntityId> } {
+    const records = new Set<EntityId>();
+    const lists = new Set<string>();
+
+    for (const id of this.records.keys()) {
+      if (markedRecords.has(id)) {
+        continue;
+      }
+
+      records.add(id);
+    }
+
+    for (const key of this.lists.keys()) {
+      if (markedLists.has(key)) {
+        continue;
+      }
+
+      lists.add(key);
+    }
+
+    for (const id of records) {
+      this.records.delete(id);
+      this.coverage.delete(id);
+      options.onRecordDeleted?.(id);
+    }
+
+    for (const key of lists) {
+      this.deleteList(key);
+    }
+
+    return { lists, records };
+  }
+
+  private deleteList(key: string) {
+    this.lists.delete(key);
+    this.notifyListSubscribers(key);
   }
 
   subscribeList(key: string, fn: () => void): () => void {

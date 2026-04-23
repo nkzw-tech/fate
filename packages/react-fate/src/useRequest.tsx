@@ -22,11 +22,15 @@ export function useRequest<R extends Request, O extends FateRoots = Roots>(
   const mode = options?.mode ?? 'cache-first';
 
   useEffect(() => {
-    if (mode === 'network-only' || mode === 'stale-while-revalidate') {
-      return () => {
+    const retained = client.retain(request);
+
+    return () => {
+      retained.dispose();
+
+      if (mode === 'network-only' || mode === 'stale-while-revalidate') {
         client.releaseRequest(request, mode);
-      };
-    }
+      }
+    };
   }, [client, mode, request]);
 
   return use(useDeferredValue(promise)) as unknown as RequestResult<O, R>;

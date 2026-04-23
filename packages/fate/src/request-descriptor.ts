@@ -46,17 +46,7 @@ const getViewSignature = (view: unknown): string => {
   return viewNames.size ? [...viewNames].sort().join(',') : '';
 };
 
-const getRequestArgsSignature = (view: View<any, any>, args?: AnyRecord): string => {
-  const plan = getSelectionPlan(view, null);
-  const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
-  if (!argsPayload) {
-    return '';
-  }
-
-  return hashArgs(argsPayload);
-};
-
-const getRootListKey = (
+const getRootDescriptorKey = (
   name: string,
   argsPayload: ResolvedArgsPayload | undefined,
   plan: SelectionPlan,
@@ -73,49 +63,6 @@ export const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boo
     argsPayload && ('after' in argsPayload || 'before' in argsPayload || 'cursor' in argsPayload),
   );
 
-export const getRequestCacheKey = (request: Request) => {
-  const parts: Array<string> = [];
-  const names = Object.keys(request).sort();
-
-  for (const name of names) {
-    const item = request[name];
-    if (!item) {
-      continue;
-    }
-
-    if (isNodeItem(item)) {
-      parts.push(`node:${name}:${getViewSignature(item.view)}:${item.id}`);
-      continue;
-    }
-
-    if (isNodesItem(item)) {
-      parts.push(
-        `node:${name}:${getViewSignature(item.view)}:${item.ids.map(serializeId).join(',')}`,
-      );
-      continue;
-    }
-
-    if (isQueryItem(item)) {
-      parts.push(
-        `query:${name}:${getViewSignature(item.view)}:${getRequestArgsSignature(
-          item.view,
-          item.args,
-        )}`,
-      );
-      continue;
-    }
-
-    parts.push(
-      `list:${name}:${getViewSignature(item.list)}:${getRequestArgsSignature(
-        item.list,
-        item.args,
-      )}`,
-    );
-  }
-
-  return parts.join('$');
-};
-
 export type NodeRequestDescriptor = Readonly<{
   ids: ReadonlyArray<string | number>;
   kind: 'node' | 'nodes';
@@ -123,6 +70,7 @@ export type NodeRequestDescriptor = Readonly<{
   plan: SelectionPlan;
   refViewNames: ReadonlySet<string>;
   type: string;
+  viewSignature: string;
 }>;
 
 export type QueryRequestDescriptor = Readonly<{
@@ -130,8 +78,10 @@ export type QueryRequestDescriptor = Readonly<{
   kind: 'query';
   name: string;
   plan: SelectionPlan;
+  queryKey: string;
   refViewNames: ReadonlySet<string>;
   type: string;
+  viewSignature: string;
 }>;
 
 export type ListRequestDescriptor = Readonly<{
@@ -143,6 +93,7 @@ export type ListRequestDescriptor = Readonly<{
   nodeRefViewNames: ReadonlySet<string>;
   plan: SelectionPlan;
   type: string;
+  viewSignature: string;
 }>;
 
 export type RequestItemDescriptor =
@@ -154,6 +105,50 @@ export type RequestDescriptor = Readonly<{
   items: ReadonlyArray<RequestItemDescriptor>;
   key: string;
 }>;
+
+export const getPaginationArgsInfo = (
+  argsPayload: ResolvedArgsPayload | undefined,
+): { direction: 'backward' | 'forward'; hasCursorArg: boolean } => ({
+  direction:
+    argsPayload?.before !== undefined || argsPayload?.last !== undefined ? 'backward' : 'forward',
+  hasCursorArg: hasCursorArgs(argsPayload),
+});
+
+const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): string => {
+  const parts: Array<string> = [];
+  const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const item of sorted) {
+    if (item.kind === 'node') {
+      parts.push(`node:${item.name}:${item.viewSignature}:${item.ids[0]}`);
+      continue;
+    }
+
+    if (item.kind === 'nodes') {
+      parts.push(`node:${item.name}:${item.viewSignature}:${item.ids.map(serializeId).join(',')}`);
+      continue;
+    }
+
+    if (item.kind === 'query') {
+      parts.push(
+        `query:${item.name}:${item.viewSignature}:${
+          item.argsPayload ? hashArgs(item.argsPayload) : ''
+        }`,
+      );
+      continue;
+    }
+
+    if (item.kind === 'list') {
+      parts.push(
+        `list:${item.name}:${item.viewSignature}:${
+          item.argsPayload ? hashArgs(item.argsPayload) : ''
+        }`,
+      );
+    }
+  }
+
+  return parts.join('$');
+};
 
 export const createRequestDescriptor = (
   request: Request,
@@ -172,6 +167,7 @@ export const createRequestDescriptor = (
         plan: getSelectionPlan(item.view, null),
         refViewNames: new Set(getViewNames(item.view)),
         type,
+        viewSignature: getViewSignature(item.view),
       });
       continue;
     }
@@ -184,24 +180,27 @@ export const createRequestDescriptor = (
         plan: getSelectionPlan(item.view, null),
         refViewNames: new Set(getViewNames(item.view)),
         type,
+        viewSignature: getViewSignature(item.view),
       });
       continue;
     }
 
     if (isQueryItem(item)) {
-      const { argsPayload, plan } = resolveSelection(item.view, item.args);
+      const { argsPayload, plan } = resolveSelectionPlan(item.view, item.args);
       items.push({
         argsPayload,
         kind: 'query',
         name,
         plan,
+        queryKey: getRootDescriptorKey(name, argsPayload, plan),
         refViewNames: getRootViewNames(item.view),
         type,
+        viewSignature: getViewSignature(item.view),
       });
       continue;
     }
 
-    const { argsPayload, plan } = resolveSelection(item.list, item.args);
+    const { argsPayload, plan } = resolveSelectionPlan(item.list, item.args);
     const hasItems = item.list && typeof item.list === 'object' && 'items' in item.list;
     const nodeView = (
       hasItems && item.list.items ? ((item.list.items as AnyRecord).node ?? item.list) : item.list
@@ -211,21 +210,22 @@ export const createRequestDescriptor = (
       argsPayload,
       hasItems,
       kind: 'list',
-      listKey: getRootListKey(name, argsPayload, plan),
+      listKey: getRootDescriptorKey(name, argsPayload, plan),
       name,
       nodeRefViewNames: getRootViewNames(nodeView),
       plan,
       type,
+      viewSignature: getViewSignature(item.list),
     });
   }
 
   return {
     items,
-    key: getRequestCacheKey(request),
+    key: getRequestDescriptorKey(items),
   };
 };
 
-const resolveSelection = (view: View<any, any>, args: AnyRecord | undefined) => {
+export const resolveSelectionPlan = (view: View<any, any>, args: AnyRecord | undefined) => {
   const plan = getSelectionPlan(view, null);
   const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
   if (argsPayload) {

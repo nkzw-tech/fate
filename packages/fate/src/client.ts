@@ -1,9 +1,4 @@
-import {
-  applyArgsPayloadToPlan,
-  combineArgsPayload,
-  resolvedArgsFromPlan,
-  scopeArgsPayload,
-} from './args.ts';
+import { combineArgsPayload, resolvedArgsFromPlan, scopeArgsPayload } from './args.ts';
 import ViewDataCache from './cache.ts';
 import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import {
@@ -16,6 +11,7 @@ import {
   wrapMutation,
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
+import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
 import createRef, {
   assignViewTag,
   createRefWithViewNames,
@@ -24,8 +20,8 @@ import createRef, {
 } from './ref.ts';
 import {
   createRequestDescriptor,
-  getRequestCacheKey,
-  hasCursorArgs,
+  getPaginationArgsInfo,
+  resolveSelectionPlan,
   type ListRequestDescriptor,
   type QueryRequestDescriptor,
   type RequestDescriptor,
@@ -79,6 +75,7 @@ export type RequestMode =
 export type RequestOptions = Readonly<{ mode?: RequestMode }>;
 
 type FateClientOptions<Roots extends FateRoots, Mutations extends FateMutations> = {
+  gcReleaseBufferSize?: number;
   mutations?: Mutations;
   roots: Roots;
   transport: Transport<MutationMapFromDefinitions<Mutations>>;
@@ -225,7 +222,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   >();
   private readonly rootRequests = new Map<string, EntityId>();
   private readonly stalledRequests = new Set<string>();
+  private gcPending = false;
+  private gcScheduled = false;
   readonly store = new Store();
+  private readonly operationLifetime: OperationLifetime;
   private readonly types: ReadonlyMap<string, TypeConfig>;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
   private readonly viewDataCache = new ViewDataCache();
@@ -238,6 +238,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     this.actions = Object.create(null) as MutationActionsFor<Mutations>;
     this.mutationMap = Object.create(null);
     this.mutations = Object.create(null) as MutationFunctionsFor<Mutations>;
+    this.operationLifetime = new OperationLifetime(options.gcReleaseBufferSize ?? 10);
     this.roots = options.roots;
     this.transport = options.transport;
     this.types = new Map(options.types.map((entity) => [entity.type, { getId, ...entity }]));
@@ -729,6 +730,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       if (current.size === 0) {
         this.pendingOptimisticMutations.delete(entityId);
       }
+
+      this.runPendingGarbageCollection();
     });
   }
 
@@ -774,6 +777,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         this.optimisticByEntity.delete(entry.entityId);
       }
     }
+
+    this.runPendingGarbageCollection();
   }
 
   getPendingOptimisticMask(
@@ -856,7 +861,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
 
       const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
-      const { argsPayload, plan } = this.resolveSelection(view, requestArgs);
+      const { argsPayload, plan } = resolveSelectionPlan(view, requestArgs);
       const { items, pagination } = await this.transport.fetchList(
         connection.field,
         plan.paths,
@@ -887,19 +892,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
       const previous = this.store.getListState(connection.key);
       const argsValue = args as AnyRecord | undefined;
-      const hasCursorArg = Boolean(
-        argsValue && ('after' in argsValue || 'before' in argsValue || 'cursor' in argsValue),
-      );
-      const isBackward = Boolean(
-        argsValue && (argsValue.before !== undefined || argsValue.last !== undefined),
-      );
+      const paginationArgs = getPaginationArgsInfo(argsValue);
 
       const nextListState = this.mergeListState(
         previous,
         incomingIds,
         incomingCursors,
         pagination,
-        { direction: isBackward ? 'backward' : 'forward', hasCursorArg },
+        paginationArgs,
       );
 
       if (!connection.args) {
@@ -916,7 +916,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       requestArgs.id = owner.id;
     }
 
-    const { argsPayload, plan } = this.resolveSelection(view, requestArgs);
+    const { argsPayload, plan } = resolveSelectionPlan(view, requestArgs);
     const nodeSelection = plan.paths;
     const scopedArgsPayload = argsPayload
       ? scopeArgsPayload(argsPayload, connection.field)
@@ -1006,17 +1006,22 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     options?: RequestOptions,
   ): Promise<RequestResult<Roots, R>> {
     const mode = options?.mode ?? 'cache-first';
-    const requestKey = getRequestCacheKey(request);
+    const descriptor = this.createRequestDescriptor(request);
+    const requestKey = descriptor.key;
     const existingRequest = this.requests.get(requestKey)?.get(mode);
     if (existingRequest) {
-      if (existingRequest.status === 'rejected' && mode === 'cache-first') {
+      if (
+        mode === 'cache-first' &&
+        (existingRequest.status === 'rejected' ||
+          (existingRequest.status === 'fulfilled' &&
+            !this.hasRequestData(existingRequest.descriptor)))
+      ) {
         this.executeRequestHandle(existingRequest, mode);
       }
 
       return existingRequest as unknown as Promise<RequestResult<Roots, R>>;
     }
 
-    const descriptor = createRequestDescriptor(request, (name) => this.getRootType(name));
     const handle = new FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>(
       descriptor,
       () => this.getRequestResultFromDescriptor(descriptor),
@@ -1035,7 +1040,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   }
 
   releaseRequest(request: Request, mode: RequestMode): void {
-    const requestKey = getRequestCacheKey(request);
+    const requestKey = this.createRequestDescriptor(request).key;
     const requests = this.requests.get(requestKey);
     if (!requests) {
       return;
@@ -1044,6 +1049,143 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     requests.delete(mode);
     if (requests.size === 0) {
       this.requests.delete(requestKey);
+    }
+  }
+
+  retain(request: Request): RetainHandle {
+    return this.operationLifetime.retain(this.createRequestDescriptor(request), () =>
+      this.scheduleGarbageCollection(),
+    );
+  }
+
+  private scheduleGarbageCollection() {
+    if (this.gcScheduled) {
+      return;
+    }
+
+    this.gcScheduled = true;
+    queueMicrotask(() => {
+      this.gcScheduled = false;
+      this.gc();
+    });
+  }
+
+  gc(): void {
+    if (this.hasActiveOptimisticUpdates()) {
+      this.gcPending = true;
+      return;
+    }
+
+    this.gcPending = false;
+
+    const markedLists = new Set<string>();
+    const markedRecords = new Set<EntityId>();
+    const queue: Array<EntityId> = [];
+
+    const markRecord = (entityId: EntityId | undefined) => {
+      if (!entityId || markedRecords.has(entityId)) {
+        return;
+      }
+
+      markedRecords.add(entityId);
+      queue.push(entityId);
+    };
+
+    const markList = (key: string) => {
+      markedLists.add(key);
+      const listState = this.store.getListState(key);
+      if (!listState) {
+        return;
+      }
+
+      for (const id of listState.pendingBeforeIds ?? []) {
+        markRecord(id);
+      }
+
+      for (const id of listState.ids) {
+        markRecord(id);
+      }
+
+      for (const id of listState.pendingAfterIds ?? []) {
+        markRecord(id);
+      }
+    };
+
+    for (const descriptor of this.operationLifetime.getDescriptors()) {
+      for (const item of descriptor.items) {
+        if (item.kind === 'node' || item.kind === 'nodes') {
+          for (const raw of item.ids) {
+            markRecord(toEntityId(item.type, raw));
+          }
+          continue;
+        }
+
+        if (item.kind === 'query') {
+          markRecord(this.rootRequests.get(item.queryKey));
+          continue;
+        }
+
+        if (item.kind === 'list') {
+          markList(item.listKey);
+        }
+      }
+    }
+
+    while (queue.length > 0) {
+      const entityId = queue.shift();
+      if (!entityId) {
+        continue;
+      }
+
+      const record = this.store.read(entityId);
+      if (!record) {
+        continue;
+      }
+
+      this.markRecordReferences(record, markRecord);
+
+      const { type } = parseEntityId(entityId);
+      const config = this.types.get(type);
+      if (!config?.fields) {
+        continue;
+      }
+
+      for (const [field, descriptor] of Object.entries(config.fields)) {
+        if (!descriptor || descriptor === 'scalar' || !('listOf' in descriptor)) {
+          continue;
+        }
+
+        for (const [listKey] of this.store.getListsForField(entityId, field)) {
+          markList(listKey);
+        }
+      }
+    }
+
+    const swept = this.store.collectGarbage(markedRecords, markedLists, {
+      onRecordDeleted: (id) => {
+        this.viewDataCache.invalidate(id);
+        this.clearStalledRequestsForEntity(id);
+      },
+    });
+
+    if (swept.records.size > 0) {
+      for (const [key, entityId] of this.rootRequests.entries()) {
+        if (swept.records.has(entityId)) {
+          this.rootRequests.delete(key);
+        }
+      }
+    }
+
+    if (swept.lists.size > 0) {
+      for (const [type, keys] of this.rootLists.entries()) {
+        for (const key of swept.lists) {
+          keys.delete(key);
+        }
+
+        if (keys.size === 0) {
+          this.rootLists.delete(type);
+        }
+      }
     }
   }
 
@@ -1069,6 +1211,54 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     handle.start(execution);
   }
 
+  private markRecordReferences(record: AnyRecord, markRecord: (entityId: EntityId) => void) {
+    const seen = new Set<object>();
+
+    const walk = (value: unknown) => {
+      if (isNodeRef(value)) {
+        markRecord(getNodeRefId(value));
+        return;
+      }
+
+      if (!value || typeof value !== 'object') {
+        return;
+      }
+
+      if (seen.has(value)) {
+        return;
+      }
+
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          walk(item);
+        }
+        return;
+      }
+
+      for (const child of Object.values(value as AnyRecord)) {
+        walk(child);
+      }
+    };
+
+    walk(record);
+  }
+
+  private hasActiveOptimisticUpdates(): boolean {
+    return (
+      this.optimisticMasks.size > 0 ||
+      this.optimisticByEntity.size > 0 ||
+      this.pendingOptimisticMutations.size > 0
+    );
+  }
+
+  private runPendingGarbageCollection() {
+    if (this.gcPending && !this.hasActiveOptimisticUpdates()) {
+      this.gc();
+    }
+  }
+
   private async handleStoreAndNetworkRequest<R extends Request>(
     request: RequestDescriptor,
   ): Promise<RequestResult<Roots, R>> {
@@ -1091,6 +1281,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       throw new Error(`fate: Unknown root request '${name}'.`);
     }
     return root.type;
+  }
+
+  private createRequestDescriptor(request: Request): RequestDescriptor {
+    return createRequestDescriptor(request, (name) => this.getRootType(name));
   }
 
   private hasRootListData(item: ListRequestDescriptor): boolean {
@@ -1146,7 +1340,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         }
       } else {
         if (item.kind === 'query') {
-          const entityId = this.rootRequests.get(item.name);
+          const entityId = this.rootRequests.get(item.queryKey);
           const missing = entityId
             ? this.store.missingForSelection(entityId, item.plan.paths)
             : item.plan.paths;
@@ -1160,7 +1354,11 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           continue;
         }
 
-        if (!fetchAll && !hasCursorArgs(item.argsPayload) && this.hasRootListData(item)) {
+        if (
+          !fetchAll &&
+          !getPaginationArgsInfo(item.argsPayload).hasCursorArg &&
+          this.hasRootListData(item)
+        ) {
           continue;
         }
         promises.push(this.fetchListAndNormalize(item));
@@ -1192,7 +1390,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
 
       if (item.kind === 'query') {
-        const entityId = this.rootRequests.get(item.name);
+        const entityId = this.rootRequests.get(item.queryKey);
         const missing = entityId
           ? this.store.missingForSelection(entityId, item.plan.paths)
           : item.plan.paths;
@@ -1215,7 +1413,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
   getRequestResult<R extends Request>(request: R): RequestResult<Roots, R> {
     return this.getRequestResultFromDescriptor(
-      createRequestDescriptor(request, (name) => this.getRootType(name)),
+      this.createRequestDescriptor(request),
     ) as RequestResult<Roots, R>;
   }
 
@@ -1237,7 +1435,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
 
       if (item.kind === 'query') {
-        const entityId = this.rootRequests.get(item.name);
+        const entityId = this.rootRequests.get(item.queryKey);
         if (entityId) {
           const { id } = parseEntityId(entityId);
           result[item.name] = createRefWithViewNames(item.type, id, item.refViewNames);
@@ -1320,7 +1518,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       undefined,
       item.plan,
     );
-    this.rootRequests.set(item.name, entityId);
+    this.rootRequests.set(item.queryKey, entityId);
   }
 
   private async fetchListAndNormalize(item: ListRequestDescriptor) {
@@ -1352,27 +1550,17 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       this.registerRootList(item.type, item.listKey);
     }
 
-    const hasCursorArg = hasCursorArgs(item.argsPayload);
-    const isBackward = Boolean(
-      item.argsPayload?.before !== undefined || item.argsPayload?.last !== undefined,
-    );
     const previous = this.store.getListState(item.listKey);
     this.store.setList(
       item.listKey,
-      this.mergeListState(previous, ids, cursors, pagination, {
-        direction: isBackward ? 'backward' : 'forward',
-        hasCursorArg,
-      }),
+      this.mergeListState(
+        previous,
+        ids,
+        cursors,
+        pagination,
+        getPaginationArgsInfo(item.argsPayload),
+      ),
     );
-  }
-
-  private resolveSelection(view: View<any, any>, args: AnyRecord | undefined) {
-    const plan = getSelectionPlan(view, null);
-    const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
-    if (argsPayload) {
-      applyArgsPayloadToPlan(plan, argsPayload);
-    }
-    return { argsPayload, plan };
   }
 
   private writeEntity(
@@ -1552,19 +1740,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
             const listKey = getListKey(entityId, key, fieldArgs?.hash);
             const previousList = this.store.getListState(listKey);
             const argsValue = fieldArgs?.value as AnyRecord | undefined;
-            const hasCursorArg = Boolean(
-              argsValue && ('after' in argsValue || 'before' in argsValue || 'cursor' in argsValue),
-            );
-            const isBackward = Boolean(
-              argsValue && (argsValue.before !== undefined || argsValue.last !== undefined),
-            );
 
             const nextListState = this.mergeListState(
               previousList,
               ids,
               cursors,
               connection.pagination as List['pagination'],
-              { direction: isBackward ? 'backward' : 'forward', hasCursorArg },
+              getPaginationArgsInfo(argsValue),
             );
 
             result[key] = nextListState.ids.map((id) => createNodeRef(id));

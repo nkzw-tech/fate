@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 
-import { createClient, clientRoot, view, ViewRef } from '@nkzw/fate';
+import { createClient, clientRoot, toEntityId, view, ViewRef } from '@nkzw/fate';
 import { act, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
@@ -69,6 +69,62 @@ test('releases network-only requests on unmount', async () => {
   });
 
   expect(releaseSpy).toHaveBeenCalledWith(request, 'network-only');
+});
+
+test('retains cache-first requests while mounted and disposes them on unmount', async () => {
+  const fetchById = vi.fn().mockResolvedValue([
+    {
+      __typename: 'Post',
+      content: 'Apple',
+      id: 'post-1',
+    },
+  ]);
+
+  const client = createClient({
+    gcReleaseBufferSize: 0,
+    roots: {
+      post: clientRoot('Post'),
+    },
+    transport: { fetchById },
+    types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const request = { post: { id: 'post-1', view: PostView } };
+  const postId = toEntityId('Post', 'post-1');
+
+  const Component = () => {
+    useRequest(request);
+    return <span>Post</span>;
+  };
+
+  const container = document.createElement('div');
+  const reactRoot = createRoot(container);
+
+  await act(async () => {
+    reactRoot.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+
+    await flushAsync();
+  });
+
+  expect(client.store.read(postId)).toMatchObject({ content: 'Apple' });
+
+  await act(async () => {
+    reactRoot.unmount();
+    await flushAsync();
+  });
+
+  expect(client.store.read(postId)).toBeUndefined();
 });
 
 test('supports requesting a single node through `byId` calls', async () => {
