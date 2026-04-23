@@ -220,7 +220,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     string,
     Map<RequestMode, FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>>
   >();
-  private readonly rootRequests = new Map<string, EntityId>();
+  private readonly rootRequests = new Map<string, EntityId | null>();
   private readonly stalledRequests = new Set<string>();
   private gcPending = false;
   private gcScheduled = false;
@@ -1082,7 +1082,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const markedRecords = new Set<EntityId>();
     const queue: Array<EntityId> = [];
 
-    const markRecord = (entityId: EntityId | undefined) => {
+    const markRecord = (entityId: EntityId | null | undefined) => {
       if (!entityId || markedRecords.has(entityId)) {
         return;
       }
@@ -1170,7 +1170,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     if (swept.records.size > 0) {
       for (const [key, entityId] of this.rootRequests.entries()) {
-        if (swept.records.has(entityId)) {
+        if (entityId && swept.records.has(entityId)) {
           this.rootRequests.delete(key);
         }
       }
@@ -1340,12 +1340,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         }
       } else {
         if (item.kind === 'query') {
+          const hasResult = this.rootRequests.has(item.queryKey);
           const entityId = this.rootRequests.get(item.queryKey);
-          const missing = entityId
-            ? this.store.missingForSelection(entityId, item.plan.paths)
-            : item.plan.paths;
+          const missing =
+            hasResult && entityId
+              ? this.store.missingForSelection(entityId, item.plan.paths)
+              : item.plan.paths;
 
-          if (fetchAll || missing.size > 0) {
+          if (fetchAll || !hasResult || (entityId && missing.size > 0)) {
             promises.push(this.fetchQueryAndNormalize(item));
           }
         }
@@ -1390,11 +1392,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
 
       if (item.kind === 'query') {
+        const hasResult = this.rootRequests.has(item.queryKey);
         const entityId = this.rootRequests.get(item.queryKey);
-        const missing = entityId
-          ? this.store.missingForSelection(entityId, item.plan.paths)
-          : item.plan.paths;
-        if (missing.size > 0) {
+        const missing =
+          hasResult && entityId
+            ? this.store.missingForSelection(entityId, item.plan.paths)
+            : item.plan.paths;
+        if (!hasResult || (entityId && missing.size > 0)) {
           return false;
         }
         continue;
@@ -1508,6 +1512,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     const record = await this.transport.fetchQuery(item.name, item.plan.paths, item.argsPayload);
     if (!record || typeof record !== 'object') {
+      this.rootRequests.set(item.queryKey, null);
       return;
     }
 

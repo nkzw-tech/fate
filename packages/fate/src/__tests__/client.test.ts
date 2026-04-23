@@ -1858,6 +1858,37 @@ test(`'request' fetches root queries via the transport`, async () => {
   expect(user.name).toBe('Kiwi');
 });
 
+test(`'request' caches null root query results`, async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+
+  const fetchQuery = vi.fn().mockResolvedValue(null);
+
+  const client = createClient({
+    roots: { viewer: clientRoot<User | null, 'User'>('User') },
+    transport: {
+      fetchById: vi.fn(),
+      fetchQuery,
+    },
+    types: [{ type: 'User' }],
+  });
+
+  const UserView = view<User>()({
+    id: true,
+    name: true,
+  });
+
+  const request = {
+    viewer: {
+      view: UserView,
+    },
+  };
+
+  await expect(client.request(request)).resolves.toEqual({ viewer: null });
+  await expect(client.request(request)).resolves.toEqual({ viewer: null });
+
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+});
+
 test(`'request' fetches view selections via the transport`, async () => {
   const fetchById = vi
     .fn()
