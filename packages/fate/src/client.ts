@@ -1,7 +1,6 @@
 import {
   applyArgsPayloadToPlan,
   combineArgsPayload,
-  hashArgs,
   resolvedArgsFromPlan,
   scopeArgsPayload,
 } from './args.ts';
@@ -17,16 +16,27 @@ import {
   wrapMutation,
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
-import createRef, { assignViewTag, parseEntityId, toEntityId } from './ref.ts';
+import createRef, {
+  assignViewTag,
+  createRefWithViewNames,
+  parseEntityId,
+  toEntityId,
+} from './ref.ts';
+import {
+  createRequestDescriptor,
+  getRequestCacheKey,
+  hasCursorArgs,
+  type ListRequestDescriptor,
+  type QueryRequestDescriptor,
+  type RequestDescriptor,
+} from './request-descriptor.ts';
+import FateRequestPromise from './request-promise.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import { getListKey, List, Store } from './store.ts';
-import { ResolvedArgsPayload, Transport } from './transport.ts';
+import { Transport } from './transport.ts';
 import {
   ConnectionMetadata,
   ConnectionTag,
-  isNodeItem,
-  isNodesItem,
-  isQueryItem,
   isViewTag,
   ViewResult,
   ViewsTag,
@@ -34,11 +44,9 @@ import {
   type Entity,
   type EntityId,
   type FateThenable,
-  type ListItem,
   type MutationIdentifier,
   type MutationMapFromDefinitions,
   type Pagination,
-  type QueryItem,
   type Request,
   type RequestResult,
   type Selection,
@@ -129,6 +137,11 @@ const getListEntries = (listState: List | undefined): Array<ListEntry> => {
   return entries;
 };
 
+const rootListRefWithViewNames = (entityId: EntityId, viewNames: ReadonlySet<string>) => {
+  const { id, type } = parseEntityId(entityId);
+  return createRefWithViewNames(type, id, viewNames);
+};
+
 const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
   const path = key.split('.');
   let current: AnyRecord = target;
@@ -159,128 +172,6 @@ const omitUndefinedValues = (record: AnyRecord): AnyRecord => {
     }
   }
   return result;
-};
-
-const trackPromise = <T>(promise: Promise<T>): Promise<T> => {
-  const tracked = promise as Promise<T> & {
-    reason?: unknown;
-    status?: 'fulfilled' | 'pending' | 'rejected';
-    value?: T;
-  };
-
-  if (tracked.status) {
-    return tracked;
-  }
-
-  tracked.status = 'pending';
-  void promise.then(
-    (value) => {
-      tracked.status = 'fulfilled';
-      tracked.value = value;
-    },
-    (error) => {
-      tracked.status = 'rejected';
-      tracked.reason = error;
-    },
-  );
-  return tracked;
-};
-
-const serializeId = (value: string | number): string => `${typeof value}:${String(value)}`;
-
-const getViewSignature = (view: unknown): string => {
-  const viewNames = new Set<string>();
-  const seen = new Set<object>();
-
-  const collect = (value: unknown) => {
-    if (!value || typeof value !== 'object' || seen.has(value)) {
-      return;
-    }
-
-    seen.add(value);
-
-    for (const [key, entry] of Object.entries(value)) {
-      if (isViewTag(key)) {
-        viewNames.add(key);
-      }
-
-      collect(entry);
-    }
-  };
-
-  collect(view);
-
-  return viewNames.size ? [...viewNames].sort().join(',') : '';
-};
-
-const getRequestArgsSignature = (view: View<any, any>, args?: AnyRecord): string => {
-  const plan = getSelectionPlan(view, null);
-  const argsPayload = combineArgsPayload(args, resolvedArgsFromPlan(plan));
-  if (!argsPayload) {
-    return '';
-  }
-
-  return hashArgs(argsPayload);
-};
-
-const getRootListKey = (
-  name: string,
-  argsPayload: ResolvedArgsPayload | undefined,
-  plan: SelectionPlan,
-): string => {
-  if (!argsPayload) {
-    return name;
-  }
-
-  return getListKey('__root__', name, plan.args.get('')?.hash ?? hashArgs(argsPayload));
-};
-
-const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boolean =>
-  Boolean(
-    argsPayload && ('after' in argsPayload || 'before' in argsPayload || 'cursor' in argsPayload),
-  );
-
-const getRequestCacheKey = (request: Request) => {
-  const parts: Array<string> = [];
-  const names = Object.keys(request).sort();
-
-  for (const name of names) {
-    const item = request[name];
-    if (!item) {
-      continue;
-    }
-
-    if (isNodeItem(item)) {
-      parts.push(`node:${name}:${getViewSignature(item.view)}:${item.id}`);
-      continue;
-    }
-
-    if (isNodesItem(item)) {
-      parts.push(
-        `node:${name}:${getViewSignature(item.view)}:${item.ids.map(serializeId).join(',')}`,
-      );
-      continue;
-    }
-
-    if (isQueryItem(item)) {
-      parts.push(
-        `query:${name}:${getViewSignature(item.view)}:${getRequestArgsSignature(
-          item.view,
-          item.args,
-        )}`,
-      );
-      continue;
-    }
-
-    parts.push(
-      `list:${name}:${getViewSignature(item.list)}:${getRequestArgsSignature(
-        item.list,
-        item.args,
-      )}`,
-    );
-  }
-
-  return parts.join('$');
 };
 
 const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string, Set<string>> => {
@@ -330,7 +221,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   private optimisticTokenCounter = 0;
   private readonly requests = new Map<
     string,
-    Map<RequestMode, Promise<RequestResult<Roots, Request>>>
+    Map<RequestMode, FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>>
   >();
   private readonly rootRequests = new Map<string, EntityId>();
   private readonly stalledRequests = new Set<string>();
@@ -1118,25 +1009,18 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const requestKey = getRequestCacheKey(request);
     const existingRequest = this.requests.get(requestKey)?.get(mode);
     if (existingRequest) {
-      return existingRequest as Promise<RequestResult<Roots, R>>;
+      if (existingRequest.status === 'rejected' && mode === 'cache-first') {
+        this.executeRequestHandle(existingRequest, mode);
+      }
+
+      return existingRequest as unknown as Promise<RequestResult<Roots, R>>;
     }
 
-    let promise: Promise<RequestResult<Roots, R>>;
-    switch (mode) {
-      case 'stale-while-revalidate':
-        promise = trackPromise(this.handleStoreAndNetworkRequest(request));
-        break;
-      case 'cache-first':
-      case 'network-only':
-      default:
-        promise = trackPromise(
-          this.executeRequest(
-            request,
-            mode === 'network-only' ? { fetchAll: true } : undefined,
-          ).then(() => this.getRequestResult(request)),
-        );
-        break;
-    }
+    const descriptor = createRequestDescriptor(request, (name) => this.getRootType(name));
+    const handle = new FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>(
+      descriptor,
+      () => this.getRequestResultFromDescriptor(descriptor),
+    );
 
     let requests = this.requests.get(requestKey);
     if (!requests) {
@@ -1144,11 +1028,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       this.requests.set(requestKey, requests);
     }
 
-    requests.set(mode, promise);
-    if (mode === 'cache-first') {
-      void promise.catch(() => this.releaseRequest(request, mode));
-    }
-    return promise;
+    requests.set(mode, handle);
+    this.executeRequestHandle(handle, mode);
+
+    return handle as unknown as Promise<RequestResult<Roots, R>>;
   }
 
   releaseRequest(request: Request, mode: RequestMode): void {
@@ -1164,16 +1047,38 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
   }
 
+  private executeRequestHandle(
+    handle: FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>,
+    mode: RequestMode,
+  ) {
+    let execution: Promise<RequestResult<Roots, Request>>;
+    switch (mode) {
+      case 'stale-while-revalidate':
+        execution = this.handleStoreAndNetworkRequest(handle.descriptor);
+        break;
+      case 'cache-first':
+      case 'network-only':
+      default:
+        execution = this.executeRequest(
+          handle.descriptor,
+          mode === 'network-only' ? { fetchAll: true } : undefined,
+        ).then(() => this.getRequestResultFromDescriptor(handle.descriptor));
+        break;
+    }
+
+    handle.start(execution);
+  }
+
   private async handleStoreAndNetworkRequest<R extends Request>(
-    request: R,
+    request: RequestDescriptor,
   ): Promise<RequestResult<Roots, R>> {
     const hasData = this.hasRequestData(request);
     if (!hasData) {
       await this.executeRequest(request, { fetchAll: true });
-      return this.getRequestResult(request);
+      return this.getRequestResultFromDescriptor(request) as RequestResult<Roots, R>;
     }
 
-    const result = this.getRequestResult(request);
+    const result = this.getRequestResultFromDescriptor(request) as RequestResult<Roots, R>;
     this.executeRequest(request, { fetchAll: true }).catch(() => {
       /* empty */
     });
@@ -1188,15 +1093,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     return root.type;
   }
 
-  private hasRootListData(name: string, item: ListItem<View<any, any>>): boolean {
-    const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
-    const listState = this.store.getListState(getRootListKey(name, argsPayload, plan));
+  private hasRootListData(item: ListRequestDescriptor): boolean {
+    const listState = this.store.getListState(item.listKey);
     if (!listState) {
       return false;
     }
 
     for (const id of listState.ids) {
-      if (this.store.missingForSelection(id, plan.paths).size > 0) {
+      if (this.store.missingForSelection(id, item.plan.paths).size > 0) {
         return false;
       }
     }
@@ -1204,7 +1108,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     return true;
   }
 
-  private async executeRequest(request: Request, options: { fetchAll?: boolean } = {}) {
+  private async executeRequest(request: RequestDescriptor, options: { fetchAll?: boolean } = {}) {
     const fetchAll = options.fetchAll ?? false;
     type GroupKey = string;
     const groups = new Map<
@@ -1218,49 +1122,48 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     >();
 
     const promises: Array<Promise<void>> = [];
-    for (const [name, item] of Object.entries(request)) {
-      const type = this.getRootType(name);
-      const isNode = isNodeItem(item);
-      if (isNode || isNodesItem(item)) {
-        const plan = getSelectionPlan(item.view, null);
-        const fields = plan.paths;
+    for (const item of request.items) {
+      if (item.kind === 'node' || item.kind === 'nodes') {
+        const fields = item.plan.paths;
         const fieldsSignature = [...fields].slice().sort().join(',');
-        const argsSignature = [...plan.args.entries()]
+        const argsSignature = [...item.plan.args.entries()]
           .map(([path, entry]) => `${path}:${entry.hash}`)
           .sort()
           .join(',');
-        const groupKey = `${type}#${fieldsSignature}|${argsSignature}`;
+        const groupKey = `${item.type}#${fieldsSignature}|${argsSignature}`;
         let group = groups.get(groupKey);
         if (!group) {
-          group = { fields, ids: [], plan, type };
+          group = { fields, ids: [], plan: item.plan, type: item.type };
           groups.set(groupKey, group);
         }
 
-        for (const raw of isNode ? [item.id] : item.ids) {
-          const entityId = toEntityId(type, raw);
+        for (const raw of item.ids) {
+          const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
           if (fetchAll || missing.size > 0) {
             group.ids.push(raw);
           }
         }
       } else {
-        if (isQueryItem(item)) {
-          const { argsPayload, plan } = this.resolveSelection(item.view, item.args);
-          const entityId = this.rootRequests.get(name);
+        if (item.kind === 'query') {
+          const entityId = this.rootRequests.get(item.name);
           const missing = entityId
-            ? this.store.missingForSelection(entityId, plan.paths)
-            : plan.paths;
+            ? this.store.missingForSelection(entityId, item.plan.paths)
+            : item.plan.paths;
 
           if (fetchAll || missing.size > 0) {
-            promises.push(this.fetchQueryAndNormalize(name, item, plan, argsPayload));
+            promises.push(this.fetchQueryAndNormalize(item));
           }
-        } else {
-          const { argsPayload } = this.resolveSelection(item.list, item.args);
-          if (!fetchAll && !hasCursorArgs(argsPayload) && this.hasRootListData(name, item)) {
-            continue;
-          }
-          promises.push(this.fetchListAndNormalize(name, item));
         }
+
+        if (item.kind !== 'list') {
+          continue;
+        }
+
+        if (!fetchAll && !hasCursorArgs(item.argsPayload) && this.hasRootListData(item)) {
+          continue;
+        }
+        promises.push(this.fetchListAndNormalize(item));
       }
     }
 
@@ -1274,15 +1177,12 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     ]);
   }
 
-  private hasRequestData(request: Request): boolean {
-    for (const [name, item] of Object.entries(request)) {
-      const isNode = isNodeItem(item);
-      const type = this.getRootType(name);
-      if (isNode || isNodesItem(item)) {
-        const plan = getSelectionPlan(item.view, null);
-        const fields = plan.paths;
-        for (const raw of isNode ? [item.id] : item.ids) {
-          const entityId = toEntityId(type, raw);
+  private hasRequestData(request: RequestDescriptor): boolean {
+    for (const item of request.items) {
+      if (item.kind === 'node' || item.kind === 'nodes') {
+        const fields = item.plan.paths;
+        for (const raw of item.ids) {
+          const entityId = toEntityId(item.type, raw);
           const missing = this.store.missingForSelection(entityId, fields);
           if (missing.size > 0) {
             return false;
@@ -1291,19 +1191,22 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         continue;
       }
 
-      if (isQueryItem(item)) {
-        const { plan } = this.resolveSelection(item.view, item.args);
-        const entityId = this.rootRequests.get(name);
+      if (item.kind === 'query') {
+        const entityId = this.rootRequests.get(item.name);
         const missing = entityId
-          ? this.store.missingForSelection(entityId, plan.paths)
-          : plan.paths;
+          ? this.store.missingForSelection(entityId, item.plan.paths)
+          : item.plan.paths;
         if (missing.size > 0) {
           return false;
         }
         continue;
       }
 
-      if (!this.hasRootListData(name, item)) {
+      if (item.kind !== 'list') {
+        continue;
+      }
+
+      if (!this.hasRootListData(item)) {
         return false;
       }
     }
@@ -1311,54 +1214,61 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   }
 
   getRequestResult<R extends Request>(request: R): RequestResult<Roots, R> {
+    return this.getRequestResultFromDescriptor(
+      createRequestDescriptor(request, (name) => this.getRootType(name)),
+    ) as RequestResult<Roots, R>;
+  }
+
+  private getRequestResultFromDescriptor(
+    request: RequestDescriptor,
+  ): RequestResult<Roots, Request> {
     const result: AnyRecord = {};
-    for (const [name, item] of Object.entries(request)) {
-      const type = this.getRootType(name);
-      if (isNodeItem(item)) {
-        result[name] = this.ref(type, item.id, item.view);
+    for (const item of request.items) {
+      if (item.kind === 'node') {
+        result[item.name] = createRefWithViewNames(item.type, item.ids[0], item.refViewNames);
         continue;
       }
 
-      if (isNodesItem(item)) {
-        result[name] = item.ids.map((id) => this.ref(type, id, item.view));
+      if (item.kind === 'nodes') {
+        result[item.name] = item.ids.map((id) =>
+          createRefWithViewNames(item.type, id, item.refViewNames),
+        );
         continue;
       }
 
-      if (isQueryItem(item)) {
-        const entityId = this.rootRequests.get(name);
+      if (item.kind === 'query') {
+        const entityId = this.rootRequests.get(item.name);
         if (entityId) {
           const { id } = parseEntityId(entityId);
-          result[name] = createRef(type, id, item.view, { root: true });
+          result[item.name] = createRefWithViewNames(item.type, id, item.refViewNames);
         } else {
-          result[name] = null;
+          result[item.name] = null;
         }
         continue;
       }
 
-      const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
-      const listKey = getRootListKey(name, argsPayload, plan);
-      const listState = this.store.getListState(listKey);
-      const hasItems = item.list && typeof item.list === 'object' && 'items' in item.list;
-      const nodeView = (
-        hasItems && item.list.items ? ((item.list.items as AnyRecord).node ?? item.list) : item.list
-      ) as View<any, any>;
-      const entries = getListEntries(listState);
-      const nodes = entries.map(({ id }) => this.rootListRef(id, nodeView));
+      if (item.kind !== 'list') {
+        continue;
+      }
 
-      if (hasItems) {
+      const listState = this.store.getListState(item.listKey);
+      const entries = getListEntries(listState);
+      const nodes = entries.map(({ id }) => rootListRefWithViewNames(id, item.nodeRefViewNames));
+
+      if (item.hasItems) {
         const connection: AnyRecord = {
           items: nodes.map((node, index) => ({ cursor: entries[index]?.cursor, node })),
           pagination: listState?.pagination,
         };
 
         const metadata: ConnectionMetadata = {
-          args: argsPayload,
-          field: name,
-          key: listKey,
-          owner: name,
-          procedure: `request.${name}`,
+          args: item.argsPayload,
+          field: item.name,
+          key: item.listKey,
+          owner: item.name,
+          procedure: `request.${item.name}`,
           root: true,
-          type,
+          type: item.type,
         };
 
         Object.defineProperty(connection, ConnectionTag, {
@@ -1368,13 +1278,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           writable: false,
         });
 
-        result[name] = connection;
+        result[item.name] = connection;
         continue;
       }
 
-      result[name] = nodes;
+      result[item.name] = nodes;
     }
-    return result as RequestResult<Roots, R>;
+    return result as RequestResult<Roots, Request>;
   }
 
   private async fetchByIdAndNormalize(
@@ -1391,65 +1301,64 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
   }
 
-  private async fetchQueryAndNormalize<T extends Entity, S extends Selection<T>>(
-    name: string,
-    item: QueryItem<View<T, S>>,
-    plan: SelectionPlan,
-    argsPayload: ResolvedArgsPayload | undefined,
-  ) {
+  private async fetchQueryAndNormalize(item: QueryRequestDescriptor) {
     if (!this.transport.fetchQuery) {
       throw new Error(
-        `fate: transport does not support queries. Please add support for 'fetchQuery' in your transport for '${name}'.`,
+        `fate: transport does not support queries. Please add support for 'fetchQuery' in your transport for '${item.name}'.`,
       );
     }
 
-    const record = await this.transport.fetchQuery(name, plan.paths, argsPayload);
+    const record = await this.transport.fetchQuery(item.name, item.plan.paths, item.argsPayload);
     if (!record || typeof record !== 'object') {
       return;
     }
 
     const entityId = this.writeEntity(
-      this.getRootType(name),
+      item.type,
       record as AnyRecord,
-      plan.paths,
+      item.plan.paths,
       undefined,
-      plan,
+      item.plan,
     );
-    this.rootRequests.set(name, entityId);
+    this.rootRequests.set(item.name, entityId);
   }
 
-  private async fetchListAndNormalize<T extends Entity, S extends Selection<T>>(
-    name: string,
-    item: ListItem<View<T, S>>,
-  ) {
+  private async fetchListAndNormalize(item: ListRequestDescriptor) {
     if (!this.transport.fetchList) {
       throw new Error(
-        `fate: 'transport.fetchList' is not configured but request includes a list for key '${name}'.`,
+        `fate: 'transport.fetchList' is not configured but request includes a list for key '${item.name}'.`,
       );
     }
 
-    const type = this.getRootType(name);
-    const { argsPayload, plan } = this.resolveSelection(item.list, item.args);
-    const { items, pagination } = await this.transport.fetchList(name, plan.paths, argsPayload);
-    const listKey = getRootListKey(name, argsPayload, plan);
+    const { items, pagination } = await this.transport.fetchList(
+      item.name,
+      item.plan.paths,
+      item.argsPayload,
+    );
     const ids: Array<EntityId> = [];
     const cursors: Array<string | undefined> = [];
     for (const entry of items) {
-      const id = this.writeEntity(type, entry.node as AnyRecord, plan.paths, undefined, plan);
+      const id = this.writeEntity(
+        item.type,
+        entry.node as AnyRecord,
+        item.plan.paths,
+        undefined,
+        item.plan,
+      );
       ids.push(id);
       cursors.push(entry.cursor);
     }
-    if (!argsPayload) {
-      this.registerRootList(type, listKey);
+    if (!item.argsPayload) {
+      this.registerRootList(item.type, item.listKey);
     }
 
-    const hasCursorArg = hasCursorArgs(argsPayload);
+    const hasCursorArg = hasCursorArgs(item.argsPayload);
     const isBackward = Boolean(
-      argsPayload?.before !== undefined || argsPayload?.last !== undefined,
+      item.argsPayload?.before !== undefined || item.argsPayload?.last !== undefined,
     );
-    const previous = this.store.getListState(listKey);
+    const previous = this.store.getListState(item.listKey);
     this.store.setList(
-      listKey,
+      item.listKey,
       this.mergeListState(previous, ids, cursors, pagination, {
         direction: isBackward ? 'backward' : 'forward',
         hasCursorArg,

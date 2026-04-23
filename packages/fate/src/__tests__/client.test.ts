@@ -2527,13 +2527,63 @@ test(`'request' retries cache-first requests after a rejection`, async () => {
 
   const PostView = view<Post>()({ id: true });
   const request = { post: { id: 'post-1', view: PostView } };
+  const firstRequest = client.request(request);
 
-  await expect(client.request(request)).rejects.toThrow('temporary');
-  await expect(client.request(request)).resolves.toEqual({
+  await expect(firstRequest).rejects.toThrow('temporary');
+
+  const retriedRequest = client.request(request);
+  expect(retriedRequest).toBe(firstRequest);
+
+  await expect(retriedRequest).resolves.toEqual({
     post: expect.objectContaining({ id: 'post-1' }),
   });
 
   expect(fetchById).toHaveBeenCalledTimes(2);
+});
+
+test(`'request' reuses the same handle after cache-first fulfillment`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValue([{ __typename: 'Post', content: 'Apple', id: 'post-1' }]);
+
+  const client = createClient({
+    roots: { post: clientRoot('Post') },
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const request = Object.freeze({
+    post: Object.freeze({
+      id: 'post-1',
+      view: PostView,
+    }),
+  });
+
+  const firstRequest = client.request(request);
+
+  await expect(firstRequest).resolves.toEqual({
+    post: expect.objectContaining({ id: 'post-1' }),
+  });
+
+  const secondRequest = client.request(request);
+  expect(secondRequest).toBe(firstRequest);
+
+  const requests = (client as unknown as { requests: Map<string, Map<string, unknown>> }).requests;
+  expect(requests.size).toBe(1);
+  expect([...requests.values()][0]?.get('cache-first')).toBe(firstRequest);
+
+  await expect(secondRequest).resolves.toEqual({
+    post: expect.objectContaining({ id: 'post-1' }),
+  });
+
+  expect(fetchById).toHaveBeenCalledTimes(1);
 });
 
 test(`'readView' returns list metadata when available`, () => {

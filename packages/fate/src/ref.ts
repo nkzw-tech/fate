@@ -36,7 +36,7 @@ export function assignViewTag(target: AnyRecord, value: ReadonlySet<string>) {
   });
 }
 
-const getRootViewNames = (view: View<any, any>) => {
+export const getRootViewNames = (view: View<any, any>) => {
   const names = new Set<string>(getViewNames(view));
   const payloads = getViewPayloads(view, null);
   for (const payload of payloads) {
@@ -46,6 +46,16 @@ const getRootViewNames = (view: View<any, any>) => {
   }
   return names;
 };
+
+export function createRefWithViewNames<TName extends string>(
+  __typename: TName,
+  id: string | number,
+  names: ReadonlySet<string>,
+): ViewRef<TName> {
+  const ref = { __typename, id };
+  assignViewTag(ref, names);
+  return Object.freeze(ref) as ViewRef<TName>;
+}
 
 /**
  * Creates an immutable `ViewRef` for an entity, tagging it with all views from
@@ -57,10 +67,6 @@ export default function createRef<T extends Entity, S extends Selection<T>, V ex
   view: V,
   options?: { root?: boolean },
 ): ViewRef<T['__typename']> {
-  const ref = { __typename, id };
-
   const names = options?.root ? getRootViewNames(view) : getViewNames(view);
-  assignViewTag(ref, names);
-
-  return Object.freeze(ref) as ViewRef<T['__typename']>;
+  return createRefWithViewNames(__typename, id, names) as ViewRef<T['__typename']>;
 }
