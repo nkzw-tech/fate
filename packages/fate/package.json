@@ -41,10 +41,15 @@
       "types": "./lib/server/drizzle.d.mts",
       "@nkzw/source": "./src/server/drizzle.ts",
       "default": "./lib/server/drizzle.mjs"
+    },
+    "./server/prisma": {
+      "types": "./lib/server/prisma.d.mts",
+      "@nkzw/source": "./src/server/prisma.ts",
+      "default": "./lib/server/prisma.mjs"
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/server/drizzle.ts src/cli.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/cli.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",

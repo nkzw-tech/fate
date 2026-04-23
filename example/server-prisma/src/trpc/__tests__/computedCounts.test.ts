@@ -1,6 +1,6 @@
 import { computed, count, createExecutionPlan, dataView, defineSource } from '@nkzw/fate/server';
+import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
 import { expect, test, vi } from 'vite-plus/test';
-import { attachConflictingComputedCounts } from '../computedCounts.ts';
 import type { AppContext } from '../context.ts';
 
 test('hydrates conflicting filtered counts for the same Prisma relation', async () => {
@@ -59,18 +59,28 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
     sessionUser: null,
   } as unknown as AppContext;
   const plan = createExecutionPlan({
+    ctx,
     select: ['goingCount', 'waitlistCount'],
     source: eventSource,
   });
-  const items = await attachConflictingComputedCounts({
-    ctx,
-    getDelegate: (_ctx, source) =>
-      (source === attendeeSource ? { groupBy } : {}) as unknown as {
-        groupBy?: (args: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
+  const runtime = createPrismaSourceRuntime<AppContext>({
+    sources: [
+      {
+        delegate: () => ({
+          findMany: async () => [{ id: 'event-1' }, { id: 'event-2' }],
+        }),
+        source: eventSource,
       },
-    items: [{ id: 'event-1' }, { id: 'event-2' }],
-    node: plan.root,
-    source: eventSource,
+      {
+        delegate: () => ({ groupBy }),
+        source: attendeeSource,
+      },
+    ],
+  });
+  const items = await runtime.fetchByIds({
+    ctx,
+    ids: ['event-1', 'event-2'],
+    plan,
   });
 
   expect(groupBy).toHaveBeenCalledTimes(2);
