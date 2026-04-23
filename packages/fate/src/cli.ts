@@ -2,7 +2,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { styleText } from 'node:util';
-import { createSchema } from './codegen/schema.ts';
+import { createSchema, isDataView } from './codegen/schema.ts';
 
 const root = process.cwd();
 const [, , command, moduleName, targetFile] = process.argv;
@@ -55,8 +55,12 @@ const indentBlock = (value: string, spaces: number) =>
 const generate = async () => {
   console.log(styleText('bold', `Generating fate client…\n`));
 
-  const { appRouter, Root, ...dataViews } = await import(moduleName);
-  const { roots, types } = createSchema(Object.values(dataViews), Root ?? {});
+  const moduleExports = await import(moduleName);
+  const { appRouter, Root } = moduleExports;
+  const { roots, types } = createSchema(
+    Object.values(moduleExports).filter(isDataView),
+    Root ?? {},
+  );
   const routerRecord = appRouter._def?.record ?? {};
 
   const mutationEntries: Array<{

@@ -1,6 +1,7 @@
 import type { DataView } from '../server/dataView.ts';
 
 type AnyRecord = Record<string, unknown>;
+type AnyDataView = DataView<any>;
 
 type RelationDescriptor = { listOf: string } | { type: string };
 
@@ -9,8 +10,12 @@ type FateTypeConfig = {
   type: string;
 };
 
-const isDataViewField = (field: unknown): field is DataView<AnyRecord> =>
-  Boolean(field) && typeof field === 'object' && 'fields' in (field as AnyRecord);
+export const isDataView = (value: unknown): value is AnyDataView =>
+  Boolean(value) &&
+  typeof value === 'object' &&
+  typeof (value as { typeName?: unknown }).typeName === 'string' &&
+  Boolean((value as { fields?: unknown }).fields) &&
+  typeof (value as { fields?: unknown }).fields === 'object';
 
 type RootConfig =
   | DataView<AnyRecord>
@@ -60,7 +65,7 @@ export const createSchema = (
     const fields: FateTypeConfig['fields'] = existing?.fields ?? {};
 
     for (const [field, child] of Object.entries(canonicalView.fields)) {
-      if (isDataViewField(child)) {
+      if (isDataView(child)) {
         const relationType = ensureType(child);
         fields[field] = child.kind === 'list' ? { listOf: relationType } : { type: relationType };
       }
@@ -97,11 +102,12 @@ export const createSchema = (
   for (const [name, root] of Object.entries(roots)) {
     const config = 'fields' in root ? { view: root } : root;
     const view = config.view;
-    const type = ensureType(view);
 
     if (!view.typeName) {
       throw new Error(`Root "${name}" is missing a data view.`);
     }
+
+    const type = ensureType(view);
 
     const router = config.router ?? view.typeName[0]?.toLowerCase() + view.typeName.slice(1);
 

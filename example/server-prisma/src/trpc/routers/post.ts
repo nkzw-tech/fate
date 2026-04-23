@@ -1,11 +1,4 @@
-import {
-  byIdInput,
-  connectionArgs,
-  createExecutionPlan,
-  executeSourceByIds,
-  executeSourceConnection,
-  toPrismaSelect,
-} from '@nkzw/fate/server';
+import { connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
@@ -13,12 +6,12 @@ import type {
   PostSelect,
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
-import { createConnectionProcedure } from '../connection.ts';
-import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
+import { sourceProcedures } from '../sourceRouter.ts';
 import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
+  ...sourceProcedures(postSource),
   add: procedure
     .input(
       z.object({
@@ -54,14 +47,6 @@ export const postRouter = router({
         }),
       )) as Post;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
-    executeSourceByIds({
-      ctx,
-      ids: input.ids,
-      plan: createExecutionPlan({ ...input, ctx, source: postSource }),
-      registry: prismaRegistry,
-    }),
-  ),
   like: procedure
     .input(
       z.object({
@@ -122,18 +107,6 @@ export const postRouter = router({
         } as PostUpdateArgs),
       )) as Post;
     }),
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) =>
-      executeSourceConnection({
-        ctx,
-        cursor,
-        direction,
-        plan: createExecutionPlan({ ...input, ctx, source: postSource }),
-        registry: prismaRegistry,
-        skip,
-        take,
-      }),
-  }),
   unlike: procedure
     .input(
       z.object({

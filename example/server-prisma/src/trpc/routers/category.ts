@@ -1,33 +1,5 @@
-import {
-  byIdInput,
-  createExecutionPlan,
-  executeSourceByIds,
-  executeSourceConnection,
-} from '@nkzw/fate/server';
-import { createConnectionProcedure } from '../connection.ts';
-import { prismaRegistry } from '../executor.ts';
-import { procedure, router } from '../init.ts';
+import { router } from '../init.ts';
+import { sourceProcedures } from '../sourceRouter.ts';
 import { categorySource } from '../views.ts';
 
-export const categoryRouter = router({
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
-    executeSourceByIds({
-      ctx,
-      ids: input.ids,
-      plan: createExecutionPlan({ ...input, ctx, source: categorySource }),
-      registry: prismaRegistry,
-    }),
-  ),
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) =>
-      executeSourceConnection({
-        ctx,
-        cursor,
-        direction,
-        plan: createExecutionPlan({ ...input, ctx, source: categorySource }),
-        registry: prismaRegistry,
-        skip,
-        take,
-      }),
-  }),
-});
+export const categoryRouter = router(sourceProcedures(categorySource));

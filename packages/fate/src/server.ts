@@ -59,6 +59,7 @@ export {
 } from './server/executor.ts';
 export { byIdInput } from './server/input.ts';
 export { toPrismaSelect } from './server/prismaSelect.ts';
+export { createSourceProcedureFactory, createSourceProcedures } from './server/sourceRouter.ts';
 export {
   asc,
   createExecutionPlan,

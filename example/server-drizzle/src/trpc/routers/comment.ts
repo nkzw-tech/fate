@@ -1,9 +1,7 @@
 import {
-  byIdInput,
   connectionArgs,
   createExecutionPlan,
   executeSourceById,
-  executeSourceByIds,
   executeSourceConnection,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
@@ -16,9 +14,9 @@ import {
   deleteCommentRecord,
 } from '../../drizzle/queries.ts';
 import { comment } from '../../drizzle/schema.ts';
-import { createConnectionProcedure } from '../connection.ts';
 import { drizzleRegistry, drizzleRuntime } from '../executor.ts';
 import { procedure, router } from '../init.ts';
+import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
 import { commentSource, postSource } from '../views.ts';
 
 const hasNestedSelection = (select: Array<string>, field: string) =>
@@ -45,6 +43,10 @@ const getNestedArgs = (args: unknown, field: string): Record<string, unknown> | 
 };
 
 export const commentRouter = router({
+  ...sourceProcedures({
+    list: false,
+    source: commentSource,
+  }),
   add: procedure
     .input(
       z.object({
@@ -114,14 +116,6 @@ export const commentRouter = router({
 
       return comment as CommentItem & { post?: { commentCount: number } };
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
-    executeSourceByIds({
-      ctx,
-      ids: input.ids,
-      plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
-      registry: drizzleRegistry,
-    }),
-  ),
   delete: procedure
     .input(
       z.object({

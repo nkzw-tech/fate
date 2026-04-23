@@ -1,20 +1,14 @@
-import {
-  byIdInput,
-  connectionArgs,
-  createExecutionPlan,
-  executeSourceById,
-  executeSourceByIds,
-  executeSourceConnection,
-} from '@nkzw/fate/server';
+import { connectionArgs, createExecutionPlan, executeSourceById } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { createPostRecord, likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
-import { createConnectionProcedure } from '../connection.ts';
 import { drizzleRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
+import { sourceProcedures } from '../sourceRouter.ts';
 import { Post, postSource } from '../views.ts';
 
 export const postRouter = router({
+  ...sourceProcedures(postSource),
   add: procedure
     .input(
       z.object({
@@ -66,14 +60,6 @@ export const postRouter = router({
 
       return post as Post;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
-    executeSourceByIds({
-      ctx,
-      ids: input.ids,
-      plan: createExecutionPlan({ ...input, ctx, source: postSource }),
-      registry: drizzleRegistry,
-    }),
-  ),
   like: procedure
     .input(
       z.object({
@@ -149,17 +135,6 @@ export const postRouter = router({
 
       return post as Post;
     }),
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, take }) =>
-      executeSourceConnection({
-        ctx,
-        cursor,
-        direction,
-        plan: createExecutionPlan({ ...input, ctx, source: postSource }),
-        registry: drizzleRegistry,
-        take,
-      }),
-  }),
   unlike: procedure
     .input(
       z.object({

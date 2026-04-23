@@ -1,17 +1,15 @@
 import {
-  byIdInput,
   connectionArgs,
   createExecutionPlan,
-  executeSourceByIds,
   executeSourceConnection,
   toPrismaSelect,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentSelect } from '../../prisma/prisma-client/models.ts';
-import { createConnectionProcedure } from '../connection.ts';
 import { prismaRegistry } from '../executor.ts';
 import { procedure, router } from '../init.ts';
+import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
 import type { CommentItem } from '../views.ts';
 import { commentSource } from '../views.ts';
 
@@ -33,6 +31,10 @@ const getCommentSelection = (select: Record<string, unknown>) => {
 };
 
 export const commentRouter = router({
+  ...sourceProcedures({
+    list: false,
+    source: commentSource,
+  }),
   add: procedure
     .input(
       z.object({
@@ -81,14 +83,6 @@ export const commentRouter = router({
         }),
       ) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) =>
-    executeSourceByIds({
-      ctx,
-      ids: input.ids,
-      plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
-      registry: prismaRegistry,
-    }),
-  ),
   delete: procedure
     .input(
       z.object({
