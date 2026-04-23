@@ -245,9 +245,6 @@ importers:
       nodemon:
         specifier: ^3.1.14
         version: 3.1.14
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
 
   example/server-prisma:
     dependencies:
