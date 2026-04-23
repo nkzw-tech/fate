@@ -14,8 +14,10 @@ import {
   fetchPostById,
   fetchPostsByIds,
   fetchPostsConnection,
-  getTagsByIds,
-  getUserById,
+  fetchTagById,
+  fetchTagsByIds,
+  fetchUserById,
+  fetchUsersByIds,
 } from '../drizzle/queries.ts';
 import type { AppContext } from './context.ts';
 import {
@@ -104,23 +106,15 @@ export const drizzleRegistry = createSourceRegistry<AppContext>([
   [
     tagSource as SourceDefinition<SourceItem, unknown>,
     connectionExecutor({
-      byId: async (id) => (await getTagsByIds([id]))[0] ?? null,
-      byIds: async (ids) => getTagsByIds(ids),
+      byId: async (id, plan) => fetchTagById(id, plan.root),
+      byIds: async (ids, plan) => fetchTagsByIds(ids, plan.root),
     }),
   ],
   [
     userSource as SourceDefinition<SourceItem, unknown>,
     connectionExecutor({
-      byId: async (id) => getUserById(id),
-      byIds: async (ids) =>
-        (
-          await Promise.all(
-            ids.map(async (id) => {
-              const user = await getUserById(id);
-              return user ? [user] : [];
-            }),
-          )
-        ).flat(),
+      byId: async (id, plan) => fetchUserById(id, plan.root),
+      byIds: async (ids, plan) => fetchUsersByIds(ids, plan.root),
     }),
   ],
 ]);

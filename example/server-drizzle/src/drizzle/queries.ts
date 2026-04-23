@@ -1,7 +1,10 @@
 import {
   attachComputedState,
+  type ComputedNeed,
   type ConnectionResult,
   type ExecutionPlanNode,
+  type SourceDefinition,
+  type SourceRelation,
 } from '@nkzw/fate/server';
 import { and, asc, desc, eq, gt, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import db from './db.ts';
@@ -25,12 +28,28 @@ import {
 
 type ItemRecord = Record<string, unknown>;
 type PlanNode = ExecutionPlanNode<any, any>;
+type Source = SourceDefinition<ItemRecord, unknown>;
+type Relation = SourceRelation<ItemRecord, unknown>;
+type ColumnMap = Record<string, any>;
 
 type PaginationArgs = {
   after?: string;
   before?: string;
   first?: number;
   last?: number;
+};
+
+type SourceTableConfig = {
+  columns: ColumnMap;
+  manyToMany?: Record<
+    string,
+    {
+      foreignColumn: any;
+      localColumn: any;
+      table: any;
+    }
+  >;
+  table: any;
 };
 
 export type CommentItem = CommentRow &
@@ -63,8 +82,115 @@ export type EventItem = EventRow &
     host?: UserRow | null;
   };
 
-const relation = (node: PlanNode, field: string): PlanNode | undefined =>
-  node.relations.get(field) as PlanNode | undefined;
+const sourceConfigs = {
+  Category: {
+    columns: {
+      createdAt: category.createdAt,
+      description: category.description,
+      id: category.id,
+      name: category.name,
+    },
+    table: category,
+  },
+  Comment: {
+    columns: {
+      authorId: comment.authorId,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      id: comment.id,
+      postId: comment.postId,
+    },
+    table: comment,
+  },
+  Event: {
+    columns: {
+      capacity: event.capacity,
+      createdAt: event.createdAt,
+      description: event.description,
+      endAt: event.endAt,
+      hostId: event.hostId,
+      id: event.id,
+      livestreamUrl: event.livestreamUrl,
+      location: event.location,
+      name: event.name,
+      startAt: event.startAt,
+      topics: event.topics,
+      type: event.type,
+      updatedAt: event.updatedAt,
+    },
+    table: event,
+  },
+  EventAttendee: {
+    columns: {
+      createdAt: eventAttendee.createdAt,
+      eventId: eventAttendee.eventId,
+      id: eventAttendee.id,
+      notes: eventAttendee.notes,
+      status: eventAttendee.status,
+      userId: eventAttendee.userId,
+    },
+    table: eventAttendee,
+  },
+  Post: {
+    columns: {
+      authorId: post.authorId,
+      categoryId: post.categoryId,
+      content: post.content,
+      createdAt: post.createdAt,
+      id: post.id,
+      likes: post.likes,
+      title: post.title,
+      updatedAt: post.updatedAt,
+    },
+    manyToMany: {
+      tags: {
+        foreignColumn: postToTag.tagId,
+        localColumn: postToTag.postId,
+        table: postToTag,
+      },
+    },
+    table: post,
+  },
+  Tag: {
+    columns: {
+      createdAt: tag.createdAt,
+      description: tag.description,
+      id: tag.id,
+      name: tag.name,
+    },
+    table: tag,
+  },
+  User: {
+    columns: {
+      banExpires: user.banExpires,
+      banned: user.banned,
+      banReason: user.banReason,
+      createdAt: user.createdAt,
+      displayUsername: user.displayUsername,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      id: user.id,
+      image: user.image,
+      name: user.name,
+      password: user.password,
+      role: user.role,
+      updatedAt: user.updatedAt,
+      username: user.username,
+    },
+    table: user,
+  },
+} satisfies Record<string, SourceTableConfig>;
+
+const resolveSource = (source: Source | (() => Source)): Source =>
+  typeof source === 'function' ? source() : source;
+
+const getSourceConfig = (source: Source): SourceTableConfig => {
+  const config = sourceConfigs[source.view.typeName as keyof typeof sourceConfigs];
+  if (!config) {
+    throw new Error(`No Drizzle table registered for source ${source.view.typeName}.`);
+  }
+  return config;
+};
 
 const paginationArgs = (args?: Record<string, unknown>): PaginationArgs => ({
   after: typeof args?.after === 'string' ? args.after : undefined,
@@ -124,154 +250,81 @@ const buildConnection = <TNode extends { id: string }>({
   };
 };
 
-const mapById = <T extends { id: string }>(items: Array<T>) =>
-  new Map(items.map((item) => [item.id, item]));
+const mapByField = <T extends ItemRecord>(items: Array<T>, field: string) =>
+  new Map(items.map((item) => [item[field], item]));
 
 const reorderByIds = <T extends { id: string }>(ids: Array<string>, items: Array<T>) => {
-  const itemsById = mapById(items);
+  const itemsById = mapByField(items, 'id');
   return ids.flatMap((id) => {
     const item = itemsById.get(id);
-    return item ? [item] : [];
+    return item ? [item as T] : [];
   });
 };
 
-const fetchUsersByIds = async (ids: Array<string>) => {
-  if (!ids.length) {
-    return new Map<string, UserRow>();
+const getColumn = (config: SourceTableConfig, field: string) => {
+  const column = config.columns[field];
+  if (!column) {
+    throw new Error(`No Drizzle column registered for field ${field}.`);
   }
-
-  const rows = await db
-    .select()
-    .from(user)
-    .where(inArray(user.id, [...new Set(ids)]));
-  return mapById(rows);
+  return column;
 };
 
-const fetchCategoryRowsByIds = async (ids: Array<string>) => {
-  if (!ids.length) {
-    return new Map<string, CategoryRow>();
+const addColumnField = (fields: Set<string>, field: string) => {
+  if (!field || field === 'cursor') {
+    return;
   }
-
-  const rows = await db
-    .select()
-    .from(category)
-    .where(inArray(category.id, [...new Set(ids)]));
-  return mapById(rows);
+  fields.add(field);
 };
 
-const fetchTagsByPostIds = async (postIds: Array<string>) => {
-  if (!postIds.length) {
-    return new Map<string, Array<TagRow>>();
+const addNeedColumns = (fields: Set<string>, needs?: Record<string, ComputedNeed>) => {
+  if (!needs) {
+    return;
   }
 
-  const rows = await db
-    .select({
-      postId: postToTag.postId,
-      tag,
-    })
-    .from(postToTag)
-    .innerJoin(tag, eq(postToTag.tagId, tag.id))
-    .where(inArray(postToTag.postId, [...new Set(postIds)]))
-    .orderBy(asc(tag.name), asc(tag.id));
-
-  const tagsByPostId = new Map<string, Array<TagRow>>();
-
-  for (const row of rows) {
-    const items = tagsByPostId.get(row.postId) ?? [];
-    items.push(row.tag);
-    tagsByPostId.set(row.postId, items);
+  for (const need of Object.values(needs)) {
+    if (need.kind === 'field') {
+      const [field] = need.path.split('.');
+      addColumnField(fields, field);
+    }
   }
-
-  return tagsByPostId;
 };
 
-const fetchCommentCountsByPostIds = async (postIds: Array<string>) => {
-  if (!postIds.length) {
-    return new Map<string, number>();
+const getRequiredFields = (node: PlanNode, extraFields: Array<string> = []) => {
+  const fields = new Set<string>(extraFields);
+  addColumnField(fields, node.source.id);
+
+  for (const field of node.selectedFields) {
+    addColumnField(fields, field);
   }
 
-  const rows = await db
-    .select({
-      count: sql<number>`count(*)`.mapWith(Number),
-      postId: comment.postId,
-    })
-    .from(comment)
-    .where(inArray(comment.postId, [...new Set(postIds)]))
-    .groupBy(comment.postId);
-
-  return new Map(rows.map((row) => [row.postId, row.count]));
-};
-
-const fetchPostCountsByCategoryIds = async (categoryIds: Array<string>) => {
-  if (!categoryIds.length) {
-    return new Map<string, number>();
+  for (const order of node.orderBy) {
+    addColumnField(fields, order.field);
   }
 
-  const rows = await db
-    .select({
-      categoryId: post.categoryId,
-      count: sql<number>`count(*)`.mapWith(Number),
-    })
-    .from(post)
-    .where(inArray(post.categoryId, [...new Set(categoryIds)]))
-    .groupBy(post.categoryId);
-
-  return new Map(
-    rows.flatMap((row) => (row.categoryId ? [[row.categoryId, row.count] as const] : [])),
-  );
-};
-
-const fetchAttendingCountsByEventIds = async (eventIds: Array<string>) => {
-  if (!eventIds.length) {
-    return new Map<string, number>();
+  for (const computed of node.computeds.values()) {
+    addNeedColumns(fields, computed.needs);
   }
 
-  const rows = await db
-    .select({
-      count: sql<number>`count(*)`.mapWith(Number),
-      eventId: eventAttendee.eventId,
-    })
-    .from(eventAttendee)
-    .where(
-      and(
-        inArray(eventAttendee.eventId, [...new Set(eventIds)]),
-        eq(eventAttendee.status, 'GOING'),
-      ),
-    )
-    .groupBy(eventAttendee.eventId);
+  for (const [field] of node.relations) {
+    const sourceRelation = node.source.relations?.[field];
+    if (sourceRelation) {
+      addColumnField(fields, sourceRelation.localKey);
+    }
+  }
 
-  return new Map(rows.map((row) => [row.eventId, row.count]));
+  return fields;
 };
 
-type ColumnMap = Record<string, any>;
+const buildSelection = (node: PlanNode, extraFields: Array<string> = []) => {
+  const config = getSourceConfig(node.source);
+  const selection: Record<string, any> = {};
 
-const postColumns = {
-  categoryId: post.categoryId,
-  createdAt: post.createdAt,
-  id: post.id,
-} satisfies ColumnMap;
+  for (const field of getRequiredFields(node, extraFields)) {
+    selection[field] = getColumn(config, field);
+  }
 
-const categoryColumns = {
-  createdAt: category.createdAt,
-  id: category.id,
-} satisfies ColumnMap;
-
-const commentColumns = {
-  createdAt: comment.createdAt,
-  id: comment.id,
-  postId: comment.postId,
-} satisfies ColumnMap;
-
-const eventColumns = {
-  id: event.id,
-  startAt: event.startAt,
-} satisfies ColumnMap;
-
-const eventAttendeeColumns = {
-  createdAt: eventAttendee.createdAt,
-  eventId: eventAttendee.eventId,
-  id: eventAttendee.id,
-} satisfies ColumnMap;
+  return selection;
+};
 
 const compareColumn = (
   direction: 'backward' | 'forward',
@@ -296,11 +349,16 @@ const buildCursorWhere = ({
   node: PlanNode;
 }) => {
   const branches = node.orderBy.map((entry, index) => {
-    const column = columnMap[entry.field];
+    const column = getColumn({ columns: columnMap, table: null }, entry.field);
     const compare = compareColumn(direction, entry.direction, column, cursorValues[entry.field]);
     const equalities = node.orderBy
       .slice(0, index)
-      .map((previous) => eq(columnMap[previous.field], cursorValues[previous.field]));
+      .map((previous) =>
+        eq(
+          getColumn({ columns: columnMap, table: null }, previous.field),
+          cursorValues[previous.field],
+        ),
+      );
 
     return equalities.length ? and(...equalities, compare) : compare;
   });
@@ -310,7 +368,7 @@ const buildCursorWhere = ({
 
 const getQueryOrder = (direction: 'backward' | 'forward', node: PlanNode, columnMap: ColumnMap) =>
   node.orderBy.map((entry) => {
-    const column = columnMap[entry.field];
+    const column = getColumn({ columns: columnMap, table: null }, entry.field);
     return direction === 'forward'
       ? entry.direction === 'asc'
         ? asc(column)
@@ -320,42 +378,67 @@ const getQueryOrder = (direction: 'backward' | 'forward', node: PlanNode, column
         : asc(column);
   });
 
-const queryNodePage = async <TRow extends Record<string, unknown>>({
+const whereFromObject = (columns: ColumnMap, where?: ItemRecord) => {
+  if (!where || Object.keys(where).length === 0) {
+    return undefined;
+  }
+
+  const conditions = Object.entries(where).map(([field, value]) =>
+    eq(getColumn({ columns, table: null }, field), value),
+  );
+  return conditions.length === 1 ? conditions[0] : and(...conditions);
+};
+
+const queryRows = async ({
+  extraFields,
+  node,
+  where,
+}: {
+  extraFields?: Array<string>;
+  node: PlanNode;
+  where?: any;
+}) => {
+  const config = getSourceConfig(node.source);
+  return (await db
+    .select(buildSelection(node, extraFields))
+    .from(config.table)
+    .where(where)
+    .orderBy(...getQueryOrder('forward', node, config.columns))) as Array<ItemRecord>;
+};
+
+const queryNodePage = async ({
   baseWhere,
-  columnMap,
   cursor,
   direction,
   node,
-  table,
   take,
 }: {
   baseWhere?: any;
-  columnMap: ColumnMap;
   cursor?: string;
   direction: 'backward' | 'forward';
   node: PlanNode;
-  table: any;
   take: number;
 }) => {
+  const config = getSourceConfig(node.source);
   let whereClause = baseWhere;
 
   if (cursor) {
     const cursorSelection = Object.fromEntries(
-      node.orderBy.map((entry) => [entry.field, columnMap[entry.field]]),
+      node.orderBy.map((entry) => [entry.field, getColumn(config, entry.field)]),
     );
     const [cursorRow] = await db
       .select(cursorSelection)
-      .from(table)
+      .from(config.table)
       .where(
         baseWhere
-          ? and(baseWhere, eq(columnMap[node.source.id], cursor))
-          : eq(columnMap[node.source.id], cursor),
+          ? and(baseWhere, eq(getColumn(config, node.source.id), cursor))
+          : eq(getColumn(config, node.source.id), cursor),
       )
       .limit(1);
 
     if (cursorRow) {
       const cursorWhere = buildCursorWhere({
-        columnMap,
+        columnMap: config.columns,
         cursorValues: cursorRow,
         direction,
         node,
@@ -365,349 +448,316 @@ const queryNodePage = async <TRow extends Record<string, unknown>>({
   }
 
   const rows = (await db
-    .select()
-    .from(table)
+    .select(buildSelection(node))
+    .from(config.table)
     .where(whereClause)
-    .orderBy(...getQueryOrder(direction, node, columnMap))
-    .limit(take)) as Array<TRow>;
+    .orderBy(...getQueryOrder(direction, node, config.columns))
+    .limit(take)) as Array<ItemRecord>;
   return direction === 'backward' ? rows.reverse() : rows;
 };
 
-const hydrateComments = async (
-  rows: Array<CommentRow>,
-  node: PlanNode,
-): Promise<Array<CommentItem>> => {
-  const items = rows.map((row) => ({ ...row }) as CommentItem);
-
-  if (relation(node, 'author')) {
-    const authors = await fetchUsersByIds(
-      items.flatMap((item) => (item.authorId ? [item.authorId] : [])),
-    );
-    for (const item of items) {
-      item.author = item.authorId ? (authors.get(item.authorId) ?? null) : null;
-    }
+const attachComputedCounts = async (items: Array<ItemRecord>, node: PlanNode) => {
+  if (items.length === 0) {
+    return;
   }
 
-  const postNode = relation(node, 'post');
-  if (postNode) {
-    const posts = await fetchPostsByIds(
-      items.flatMap((item) => [item.postId]),
-      postNode,
-    );
-    const postsById = mapById(posts);
-    for (const item of items) {
-      item.post = postsById.get(item.postId) ?? null;
+  for (const [field, computed] of node.computeds) {
+    if (!computed.needs) {
+      continue;
+    }
+
+    for (const [needName, need] of Object.entries(computed.needs)) {
+      if (need.kind !== 'count') {
+        continue;
+      }
+
+      const sourceRelation = node.source.relations?.[need.relation];
+      if (!sourceRelation || sourceRelation.kind !== 'many') {
+        throw new Error(
+          `Computed count ${node.source.view.typeName}.${field} requires a 'many' relation named ${need.relation}.`,
+        );
+      }
+
+      const childSource = resolveSource(sourceRelation.source);
+      const childConfig = getSourceConfig(childSource);
+      const parentKeys = [
+        ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+      ];
+      const where = and(
+        inArray(getColumn(childConfig, sourceRelation.foreignKey), parentKeys),
+        whereFromObject(childConfig.columns, need.where),
+      );
+      const rows = await db
+        .select({
+          count: sql<number>`count(*)`.mapWith(Number),
+          parentKey: getColumn(childConfig, sourceRelation.foreignKey),
+        })
+        .from(childConfig.table)
+        .where(where)
+        .groupBy(getColumn(childConfig, sourceRelation.foreignKey));
+      const counts = new Map(rows.map((row) => [row.parentKey, row.count]));
+
+      for (const item of items) {
+        attachComputedState(item, field, {
+          [needName]: counts.get(item[sourceRelation.localKey]) ?? 0,
+        });
+      }
     }
   }
-
-  return items;
 };
 
-const fetchCommentsConnectionForPost = async (
-  postId: string,
-  node: PlanNode,
-): Promise<ConnectionResult<CommentItem>> => {
-  const args = paginationArgs(node.args);
+const fetchManyRelation = async ({
+  items,
+  relationNode,
+  sourceRelation,
+}: {
+  items: Array<ItemRecord>;
+  relationNode: PlanNode;
+  sourceRelation: Relation;
+}) => {
+  const childSource = resolveSource(sourceRelation.source);
+  const childConfig = getSourceConfig(childSource);
+  const parentKeys = [
+    ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+  ];
+
+  if (parentKeys.length === 0) {
+    return new Map<unknown, Array<ItemRecord>>();
+  }
+
+  const rows = await queryRows({
+    extraFields: [sourceRelation.foreignKey],
+    node: relationNode,
+    where: inArray(getColumn(childConfig, sourceRelation.foreignKey), parentKeys),
+  });
+  const hydrated = await hydrateRows(rows, relationNode);
+  const byParentKey = new Map<unknown, Array<ItemRecord>>();
+
+  for (const item of hydrated) {
+    const key = item[sourceRelation.foreignKey];
+    const entries = byParentKey.get(key) ?? [];
+    entries.push(item);
+    byParentKey.set(key, entries);
+  }
+
+  return byParentKey;
+};
+
+const fetchManyConnection = async (
+  parentKey: unknown,
+  relationNode: PlanNode,
+  sourceRelation: Relation,
+): Promise<ConnectionResult<ItemRecord>> => {
+  const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+  const args = paginationArgs(relationNode.args);
   const direction = getConnectionDirection(args);
   const pageSize = getConnectionSize(20, args);
   const cursor = direction === 'forward' ? args.after : args.before;
-  const rows = await queryNodePage<CommentRow>({
-    baseWhere: eq(comment.postId, postId),
-    columnMap: commentColumns,
+  const rows = await queryNodePage({
+    baseWhere: eq(getColumn(childConfig, sourceRelation.foreignKey), parentKey),
     cursor,
     direction,
-    node,
-    table: comment,
+    node: relationNode,
     take: pageSize + 1,
   });
-
-  const hydrated = await hydrateComments(rows, node);
-  return buildConnection({ cursor, direction, items: hydrated, pageSize });
-};
-
-const fetchPostsConnectionForCategory = async (
-  categoryId: string,
-  node: PlanNode,
-): Promise<ConnectionResult<PostItem>> => {
-  const args = paginationArgs(node.args);
-  const direction = getConnectionDirection(args);
-  const pageSize = getConnectionSize(20, args);
-  const cursor = direction === 'forward' ? args.after : args.before;
-  const rows = await queryNodePage<PostRow>({
-    baseWhere: eq(post.categoryId, categoryId),
-    columnMap: postColumns,
+  const hydrated = await hydrateRows(rows, relationNode);
+  return buildConnection({
     cursor,
     direction,
-    node,
-    table: post,
-    take: pageSize + 1,
+    items: hydrated as Array<ItemRecord & { id: string }>,
+    pageSize,
   });
-
-  const hydrated = await hydratePosts(rows, node);
-  return buildConnection({ cursor, direction, items: hydrated, pageSize });
 };
 
-const fetchAttendeesConnectionForEvent = async (
-  eventId: string,
-  node: PlanNode,
-): Promise<ConnectionResult<EventAttendeeItem>> => {
-  const args = paginationArgs(node.args);
-  const direction = getConnectionDirection(args);
-  const pageSize = getConnectionSize(20, args);
-  const cursor = direction === 'forward' ? args.after : args.before;
-  const rows = await queryNodePage<EventAttendeeRow>({
-    baseWhere: eq(eventAttendee.eventId, eventId),
-    columnMap: eventAttendeeColumns,
-    cursor,
-    direction,
-    node,
-    table: eventAttendee,
-    take: pageSize + 1,
-  });
+const fetchManyToManyRelation = async ({
+  items,
+  node,
+  relationField,
+  relationNode,
+  sourceRelation,
+}: {
+  items: Array<ItemRecord>;
+  node: PlanNode;
+  relationField: string;
+  relationNode: PlanNode;
+  sourceRelation: Relation;
+}) => {
+  const parentConfig = getSourceConfig(node.source);
+  const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+  const through = parentConfig.manyToMany?.[relationField];
 
-  const hydrated = await hydrateEventAttendees(rows, node);
-  return buildConnection({ cursor, direction, items: hydrated, pageSize });
-};
-
-const hydratePosts = async (rows: Array<PostRow>, node: PlanNode): Promise<Array<PostItem>> => {
-  const items = rows.map((row) => ({ ...row }) as PostItem);
-  const postIds = items.map((item) => item.id);
-
-  if (node.computeds.has('commentCount')) {
-    const counts = await fetchCommentCountsByPostIds(postIds);
-    for (const item of items) {
-      attachComputedState(item, 'commentCount', {
-        count: counts.get(item.id) ?? 0,
-      });
-    }
-  }
-
-  if (relation(node, 'author')) {
-    const authors = await fetchUsersByIds(items.map((item) => item.authorId));
-    for (const item of items) {
-      item.author = authors.get(item.authorId) ?? null;
-    }
-  }
-
-  if (relation(node, 'category')) {
-    const categories = await fetchCategoryRowsByIds(
-      items.flatMap((item) => (item.categoryId ? [item.categoryId] : [])),
+  if (!through) {
+    throw new Error(
+      `No Drizzle many-to-many table registered for ${node.source.view.typeName}.${relationField}.`,
     );
-    for (const item of items) {
-      item.category = item.categoryId ? (categories.get(item.categoryId) ?? null) : null;
-    }
   }
 
-  if (relation(node, 'tags')) {
-    const tagsByPostId = await fetchTagsByPostIds(postIds);
-    for (const item of items) {
-      item.tags = tagsByPostId.get(item.id) ?? [];
-    }
+  const parentKeys = [
+    ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+  ];
+  if (parentKeys.length === 0) {
+    return new Map<unknown, Array<ItemRecord>>();
   }
 
-  const commentsNode = relation(node, 'comments');
-  if (commentsNode) {
-    if (hasPagination(commentsNode.args)) {
-      const connections = await Promise.all(
-        items.map(
-          async (item) =>
-            [item.id, await fetchCommentsConnectionForPost(item.id, commentsNode)] as const,
-        ),
-      );
-      const connectionByPostId = new Map(connections);
-      for (const item of items) {
-        (item as ItemRecord).comments = connectionByPostId.get(item.id);
-      }
-    } else {
-      const rows = await db
-        .select()
-        .from(comment)
-        .where(inArray(comment.postId, postIds))
-        .orderBy(...getQueryOrder('forward', commentsNode, commentColumns));
-      const hydrated = await hydrateComments(rows, commentsNode);
-      const commentsByPostId = new Map<string, Array<CommentItem>>();
+  const rows = (await db
+    .select({
+      ...buildSelection(relationNode),
+      parentKey: through.localColumn,
+    })
+    .from(through.table)
+    .innerJoin(
+      childConfig.table,
+      eq(through.foreignColumn, getColumn(childConfig, sourceRelation.foreignKey)),
+    )
+    .where(inArray(through.localColumn, parentKeys))
+    .orderBy(...getQueryOrder('forward', relationNode, childConfig.columns))) as Array<
+    ItemRecord & { parentKey: unknown }
+  >;
+  const hydrated = await hydrateRows(rows, relationNode);
+  const byParentKey = new Map<unknown, Array<ItemRecord>>();
 
-      for (const item of hydrated) {
-        const entries = commentsByPostId.get(item.postId) ?? [];
-        entries.push(item);
-        commentsByPostId.set(item.postId, entries);
-      }
-
-      for (const item of items) {
-        item.comments = commentsByPostId.get(item.id) ?? [];
-      }
-    }
+  for (const item of hydrated) {
+    const entries = byParentKey.get(item.parentKey) ?? [];
+    entries.push(item);
+    byParentKey.set(item.parentKey, entries);
   }
 
-  return items;
+  return byParentKey;
 };
 
-const hydrateCategories = async (
-  rows: Array<CategoryRow>,
-  node: PlanNode,
-): Promise<Array<CategoryItem>> => {
-  const items = rows.map((row) => ({ ...row }) as CategoryItem);
+const hydrateRows = async (rows: Array<ItemRecord>, node: PlanNode): Promise<Array<ItemRecord>> => {
+  const items = rows.map((row) => ({ ...row }));
 
-  if (node.computeds.has('postCount')) {
-    const counts = await fetchPostCountsByCategoryIds(items.map((item) => item.id));
-    for (const item of items) {
-      attachComputedState(item, 'postCount', {
-        count: counts.get(item.id) ?? 0,
+  await attachComputedCounts(items, node);
+
+  for (const [field, relationNode] of node.relations) {
+    const sourceRelation = node.source.relations?.[field];
+    if (!sourceRelation) {
+      continue;
+    }
+
+    if (sourceRelation.kind === 'one') {
+      const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+      const childKeys = [
+        ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+      ];
+      const childRows = childKeys.length
+        ? await queryRows({
+            node: relationNode,
+            where: inArray(getColumn(childConfig, sourceRelation.foreignKey), childKeys),
+          })
+        : [];
+      const children = await hydrateRows(childRows, relationNode);
+      const childByKey = mapByField(children, sourceRelation.foreignKey);
+
+      for (const item of items) {
+        const localKey = item[sourceRelation.localKey];
+        item[field] = localKey
+          ? ((childByKey.get(localKey) as ItemRecord | undefined) ?? null)
+          : null;
+      }
+      continue;
+    }
+
+    if (sourceRelation.kind === 'manyToMany') {
+      const byParentKey = await fetchManyToManyRelation({
+        items,
+        node,
+        relationField: field,
+        relationNode,
+        sourceRelation,
       });
-    }
-  }
 
-  const postsNode = relation(node, 'posts');
-  if (postsNode) {
-    if (hasPagination(postsNode.args)) {
+      for (const item of items) {
+        item[field] = byParentKey.get(item[sourceRelation.localKey]) ?? [];
+      }
+      continue;
+    }
+
+    if (hasPagination(relationNode.args)) {
       const connections = await Promise.all(
         items.map(
           async (item) =>
-            [item.id, await fetchPostsConnectionForCategory(item.id, postsNode)] as const,
+            [
+              item[sourceRelation.localKey],
+              await fetchManyConnection(
+                item[sourceRelation.localKey],
+                relationNode,
+                sourceRelation,
+              ),
+            ] as const,
         ),
       );
-      const connectionByCategoryId = new Map(connections);
-      for (const item of items) {
-        (item as ItemRecord).posts = connectionByCategoryId.get(item.id);
-      }
-    } else {
-      const rows = await db
-        .select()
-        .from(post)
-        .where(
-          inArray(
-            post.categoryId,
-            items.map((item) => item.id),
-          ),
-        )
-        .orderBy(...getQueryOrder('forward', postsNode, postColumns));
-      const hydrated = await hydratePosts(rows, postsNode);
-      const postsByCategoryId = new Map<string, Array<PostItem>>();
-
-      for (const item of hydrated) {
-        if (!item.categoryId) {
-          continue;
-        }
-        const entries = postsByCategoryId.get(item.categoryId) ?? [];
-        entries.push(item);
-        postsByCategoryId.set(item.categoryId, entries);
-      }
+      const connectionByParentKey = new Map(connections);
 
       for (const item of items) {
-        item.posts = postsByCategoryId.get(item.id) ?? [];
+        item[field] = connectionByParentKey.get(item[sourceRelation.localKey]);
       }
+      continue;
+    }
+
+    const byParentKey = await fetchManyRelation({
+      items,
+      relationNode,
+      sourceRelation,
+    });
+
+    for (const item of items) {
+      item[field] = byParentKey.get(item[sourceRelation.localKey]) ?? [];
     }
   }
 
   return items;
 };
 
-const hydrateEventAttendees = async (
-  rows: Array<EventAttendeeRow>,
-  node: PlanNode,
-): Promise<Array<EventAttendeeItem>> => {
-  const items = rows.map((row) => ({ ...row }) as EventAttendeeItem);
-
-  if (relation(node, 'user')) {
-    const users = await fetchUsersByIds(items.map((item) => item.userId));
-    for (const item of items) {
-      item.user = users.get(item.userId) ?? null;
-    }
-  }
-
-  return items;
-};
-
-const hydrateEvents = async (rows: Array<EventRow>, node: PlanNode): Promise<Array<EventItem>> => {
-  const items = rows.map((row) => ({ ...row }) as EventItem);
-  const eventIds = items.map((item) => item.id);
-
-  if (node.computeds.has('attendingCount')) {
-    const counts = await fetchAttendingCountsByEventIds(eventIds);
-    for (const item of items) {
-      attachComputedState(item, 'attendingCount', {
-        count: counts.get(item.id) ?? 0,
-      });
-    }
-  }
-
-  if (relation(node, 'host')) {
-    const users = await fetchUsersByIds(items.map((item) => item.hostId));
-    for (const item of items) {
-      item.host = users.get(item.hostId) ?? null;
-    }
-  }
-
-  const attendeesNode = relation(node, 'attendees');
-  if (attendeesNode) {
-    if (hasPagination(attendeesNode.args)) {
-      const connections = await Promise.all(
-        items.map(
-          async (item) =>
-            [item.id, await fetchAttendeesConnectionForEvent(item.id, attendeesNode)] as const,
-        ),
-      );
-      const connectionByEventId = new Map(connections);
-      for (const item of items) {
-        (item as ItemRecord).attendees = connectionByEventId.get(item.id);
-      }
-    } else {
-      const rows = await db
-        .select()
-        .from(eventAttendee)
-        .where(inArray(eventAttendee.eventId, eventIds))
-        .orderBy(...getQueryOrder('forward', attendeesNode, eventAttendeeColumns));
-      const hydrated = await hydrateEventAttendees(rows, attendeesNode);
-      const attendeesByEventId = new Map<string, Array<EventAttendeeItem>>();
-
-      for (const item of hydrated) {
-        const entries = attendeesByEventId.get(item.eventId) ?? [];
-        entries.push(item);
-        attendeesByEventId.set(item.eventId, entries);
-      }
-
-      for (const item of items) {
-        item.attendees = attendeesByEventId.get(item.id) ?? [];
-      }
-    }
-  }
-
-  return items;
-};
-
-export const getUserById = async (id: string) => {
-  const users = await fetchUsersByIds([id]);
-  return users.get(id) ?? null;
-};
-
-export const getTagsByIds = async (ids: Array<string>) => {
+const fetchByIds = async (ids: Array<string>, node: PlanNode, extraFields: Array<string> = []) => {
   if (!ids.length) {
     return [];
   }
 
-  const rows = await db
-    .select()
-    .from(tag)
-    .where(inArray(tag.id, [...new Set(ids)]));
-  return reorderByIds(ids, rows);
+  const config = getSourceConfig(node.source);
+  const rows = await queryRows({
+    extraFields,
+    node,
+    where: inArray(getColumn(config, node.source.id), [...new Set(ids)]),
+  });
+  return reorderByIds(ids, (await hydrateRows(rows, node)) as Array<ItemRecord & { id: string }>);
 };
 
-export const fetchPostsByIds = async (ids: Array<string>, node: PlanNode) => {
-  if (!ids.length) {
-    return [];
-  }
+const fetchById = async (id: string, node: PlanNode, extraFields: Array<string> = []) =>
+  (await fetchByIds([id], node, extraFields))[0] ?? null;
 
-  const rows = await db
-    .select()
-    .from(post)
-    .where(inArray(post.id, [...new Set(ids)]));
-  return reorderByIds(ids, await hydratePosts(rows, node));
-};
+const fetchConnection = async ({
+  cursor,
+  direction,
+  node,
+  take,
+  where,
+}: {
+  cursor?: string;
+  direction: 'backward' | 'forward';
+  node: PlanNode;
+  take: number;
+  where?: any;
+}) => hydrateRows(await queryNodePage({ baseWhere: where, cursor, direction, node, take }), node);
 
-export const fetchPostById = async (id: string, node: PlanNode) => {
-  const posts = await fetchPostsByIds([id], node);
-  return posts[0] ?? null;
-};
+export const fetchUsersByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node) as Promise<Array<UserRow & ItemRecord>>;
+
+export const fetchUserById = async (id: string, node: PlanNode) =>
+  fetchById(id, node) as Promise<(UserRow & ItemRecord) | null>;
+
+export const fetchTagsByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node) as Promise<Array<TagRow>>;
+
+export const fetchTagById = async (id: string, node: PlanNode) =>
+  fetchById(id, node) as Promise<TagRow | null>;
+
+export const fetchPostsByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node) as Promise<Array<PostItem>>;
+
+export const fetchPostById = async (id: string, node: PlanNode) =>
+  fetchById(id, node) as Promise<PostItem | null>;
 
 export const fetchPostsConnection = async ({
   cursor,
@@ -719,29 +769,10 @@ export const fetchPostsConnection = async ({
   direction: 'backward' | 'forward';
   node: PlanNode;
   take: number;
-}) => {
-  const rows = await queryNodePage<PostRow>({
-    columnMap: postColumns,
-    cursor,
-    direction,
-    node,
-    table: post,
-    take,
-  });
-  return hydratePosts(rows, node);
-};
+}) => fetchConnection({ cursor, direction, node, take });
 
-export const fetchCategoriesByIds = async (ids: Array<string>, node: PlanNode) => {
-  if (!ids.length) {
-    return [];
-  }
-
-  const rows = await db
-    .select()
-    .from(category)
-    .where(inArray(category.id, [...new Set(ids)]));
-  return reorderByIds(ids, await hydrateCategories(rows, node));
-};
+export const fetchCategoriesByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node) as Promise<Array<CategoryItem>>;
 
 export const fetchCategoriesConnection = async ({
   cursor,
@@ -753,34 +784,13 @@ export const fetchCategoriesConnection = async ({
   direction: 'backward' | 'forward';
   node: PlanNode;
   take: number;
-}) => {
-  const rows = await queryNodePage<CategoryRow>({
-    columnMap: categoryColumns,
-    cursor,
-    direction,
-    node,
-    table: category,
-    take,
-  });
-  return hydrateCategories(rows, node);
-};
+}) => fetchConnection({ cursor, direction, node, take });
 
-export const fetchCommentsByIds = async (ids: Array<string>, node: PlanNode) => {
-  if (!ids.length) {
-    return [];
-  }
+export const fetchCommentsByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node, ['authorId', 'postId']) as Promise<Array<CommentItem>>;
 
-  const rows = await db
-    .select()
-    .from(comment)
-    .where(inArray(comment.id, [...new Set(ids)]));
-  return reorderByIds(ids, await hydrateComments(rows, node));
-};
-
-export const fetchCommentById = async (id: string, node: PlanNode) => {
-  const comments = await fetchCommentsByIds([id], node);
-  return comments[0] ?? null;
-};
+export const fetchCommentById = async (id: string, node: PlanNode) =>
+  fetchById(id, node, ['authorId', 'postId']) as Promise<CommentItem | null>;
 
 export const searchCommentsConnection = async ({
   cursor,
@@ -794,36 +804,20 @@ export const searchCommentsConnection = async ({
   node: PlanNode;
   query: string;
   take: number;
-}) => {
-  const whereClause = ilike(comment.content, `%${query}%`);
-  const rows = await queryNodePage<CommentRow>({
-    baseWhere: whereClause,
-    columnMap: commentColumns,
+}) =>
+  fetchConnection({
     cursor,
     direction,
     node,
-    table: comment,
     take,
+    where: ilike(comment.content, `%${query}%`),
   });
-  return hydrateComments(rows, node);
-};
 
-export const fetchEventsByIds = async (ids: Array<string>, node: PlanNode) => {
-  if (!ids.length) {
-    return [];
-  }
+export const fetchEventsByIds = async (ids: Array<string>, node: PlanNode) =>
+  fetchByIds(ids, node) as Promise<Array<EventItem>>;
 
-  const rows = await db
-    .select()
-    .from(event)
-    .where(inArray(event.id, [...new Set(ids)]));
-  return reorderByIds(ids, await hydrateEvents(rows, node));
-};
-
-export const fetchEventById = async (id: string, node: PlanNode) => {
-  const events = await fetchEventsByIds([id], node);
-  return events[0] ?? null;
-};
+export const fetchEventById = async (id: string, node: PlanNode) =>
+  fetchById(id, node) as Promise<EventItem | null>;
 
 export const fetchEventsConnection = async ({
   cursor,
@@ -835,17 +829,7 @@ export const fetchEventsConnection = async ({
   direction: 'backward' | 'forward';
   node: PlanNode;
   take: number;
-}) => {
-  const rows = await queryNodePage<EventRow>({
-    columnMap: eventColumns,
-    cursor,
-    direction,
-    node,
-    table: event,
-    take,
-  });
-  return hydrateEvents(rows, node);
-};
+}) => fetchConnection({ cursor, direction, node, take });
 
 export const createPostRecord = async ({
   authorId,
