@@ -9,34 +9,48 @@ type RouterInputs = inferRouterInputs<AppRouter>;
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 
 const mutations = {
-  'comment.add': mutation<Comment, RouterInputs['comment']['add'], RouterOutputs['comment']['add']>(
-    'Comment',
-  ),
+  'comment.add': mutation<
+    Comment,
+    RouterInputs['comment']['add'],
+    RouterOutputs['comment']['add']
+  >('Comment'),
   'comment.delete': mutation<
     Comment,
     RouterInputs['comment']['delete'],
     RouterOutputs['comment']['delete']
   >('Comment'),
-  'post.add': mutation<Post, RouterInputs['post']['add'], RouterOutputs['post']['add']>('Post'),
-  'post.like': mutation<Post, RouterInputs['post']['like'], RouterOutputs['post']['like']>('Post'),
-  'post.unlike': mutation<Post, RouterInputs['post']['unlike'], RouterOutputs['post']['unlike']>(
-    'Post',
-  ),
-  'user.update': mutation<User, RouterInputs['user']['update'], RouterOutputs['user']['update']>(
-    'User',
-  ),
+  'post.add': mutation<
+    Post,
+    RouterInputs['post']['add'],
+    RouterOutputs['post']['add']
+  >('Post'),
+  'post.like': mutation<
+    Post,
+    RouterInputs['post']['like'],
+    RouterOutputs['post']['like']
+  >('Post'),
+  'post.unlike': mutation<
+    Post,
+    RouterInputs['post']['unlike'],
+    RouterOutputs['post']['unlike']
+  >('Post'),
+  'user.update': mutation<
+    User,
+    RouterInputs['user']['update'],
+    RouterOutputs['user']['update']
+  >('User'),
 } as const;
 
 const roots = {
-  categories: clientRoot<RouterOutputs['category']['list'], 'Category'>('Category'),
-  category: clientRoot<RouterOutputs['category']['byId'], 'Category'>('Category'),
-  comment: clientRoot<RouterOutputs['comment']['byId'], 'Comment'>('Comment'),
-  commentSearch: clientRoot<RouterOutputs['comment']['search'], 'Comment'>('Comment'),
-  event: clientRoot<RouterOutputs['event']['byId'], 'Event'>('Event'),
-  events: clientRoot<RouterOutputs['event']['list'], 'Event'>('Event'),
-  post: clientRoot<RouterOutputs['post']['byId'], 'Post'>('Post'),
-  posts: clientRoot<RouterOutputs['post']['list'], 'Post'>('Post'),
-  viewer: clientRoot<RouterOutputs['user']['viewer'], 'User'>('User'),
+  'categories': clientRoot<RouterOutputs['category']['list'], 'Category'>('Category'),
+  'category': clientRoot<RouterOutputs['category']['byId'], 'Category'>('Category'),
+  'comment': clientRoot<RouterOutputs['comment']['byId'], 'Comment'>('Comment'),
+  'commentSearch': clientRoot<RouterOutputs['comment']['search'], 'Comment'>('Comment'),
+  'event': clientRoot<RouterOutputs['event']['byId'], 'Event'>('Event'),
+  'events': clientRoot<RouterOutputs['event']['list'], 'Event'>('Event'),
+  'post': clientRoot<RouterOutputs['post']['byId'], 'Post'>('Post'),
+  'posts': clientRoot<RouterOutputs['post']['list'], 'Post'>('Post'),
+  'viewer': clientRoot<RouterOutputs['user']['viewer'], 'User'>('User'),
 } as const;
 
 type GeneratedClientMutations = typeof mutations;
@@ -66,70 +80,46 @@ export const createFateClient = (options: {
     roots,
     transport: createTRPCTransport<AppRouter, typeof trpcMutations>({
       byId: {
-        Category:
-          (client: TRPCClientType) =>
-          ({
+        Category: (client: TRPCClientType) => ({
+          args,
+          ids,
+          select,
+        }: { args?: Record<string, unknown>; ids: Array<string | number>; select: Array<string> }) =>
+          client.category.byId.query({
             args,
-            ids,
+            ids: ids.map(String),
             select,
-          }: {
-            args?: Record<string, unknown>;
-            ids: Array<string | number>;
-            select: Array<string>;
-          }) =>
-            client.category.byId.query({
-              args,
-              ids: ids.map(String),
-              select,
-            }),
-        Comment:
-          (client: TRPCClientType) =>
-          ({
+          }),
+        Comment: (client: TRPCClientType) => ({
+          args,
+          ids,
+          select,
+        }: { args?: Record<string, unknown>; ids: Array<string | number>; select: Array<string> }) =>
+          client.comment.byId.query({
             args,
-            ids,
+            ids: ids.map(String),
             select,
-          }: {
-            args?: Record<string, unknown>;
-            ids: Array<string | number>;
-            select: Array<string>;
-          }) =>
-            client.comment.byId.query({
-              args,
-              ids: ids.map(String),
-              select,
-            }),
-        Event:
-          (client: TRPCClientType) =>
-          ({
+          }),
+        Event: (client: TRPCClientType) => ({
+          args,
+          ids,
+          select,
+        }: { args?: Record<string, unknown>; ids: Array<string | number>; select: Array<string> }) =>
+          client.event.byId.query({
             args,
-            ids,
+            ids: ids.map(String),
             select,
-          }: {
-            args?: Record<string, unknown>;
-            ids: Array<string | number>;
-            select: Array<string>;
-          }) =>
-            client.event.byId.query({
-              args,
-              ids: ids.map(String),
-              select,
-            }),
-        Post:
-          (client: TRPCClientType) =>
-          ({
+          }),
+        Post: (client: TRPCClientType) => ({
+          args,
+          ids,
+          select,
+        }: { args?: Record<string, unknown>; ids: Array<string | number>; select: Array<string> }) =>
+          client.post.byId.query({
             args,
-            ids,
+            ids: ids.map(String),
             select,
-          }: {
-            args?: Record<string, unknown>;
-            ids: Array<string | number>;
-            select: Array<string>;
-          }) =>
-            client.post.byId.query({
-              args,
-              ids: ids.map(String),
-              select,
-            }),
+          }),
       },
       client: trpcClient,
       queries: {
@@ -144,47 +134,47 @@ export const createFateClient = (options: {
       mutations: trpcMutations,
     }),
     types: [
-      {
-        type: 'User',
-      },
-      {
-        fields: {
-          author: { type: 'User' },
-          post: { type: 'Post' },
+        {
+          type: 'User',
         },
-        type: 'Comment',
-      },
-      {
-        type: 'Tag',
-      },
-      {
-        fields: {
-          author: { type: 'User' },
-          category: { type: 'Category' },
-          comments: { listOf: 'Comment' },
-          tags: { listOf: 'Tag' },
+        {
+          fields: {
+            author: { type: 'User' },
+            post: { type: 'Post' },
+          },
+          type: 'Comment',
         },
-        type: 'Post',
-      },
-      {
-        fields: {
-          posts: { listOf: 'Post' },
+        {
+          type: 'Tag',
         },
-        type: 'Category',
-      },
-      {
-        fields: {
-          user: { type: 'User' },
+        {
+          fields: {
+            author: { type: 'User' },
+            category: { type: 'Category' },
+            comments: { listOf: 'Comment' },
+            tags: { listOf: 'Tag' },
+          },
+          type: 'Post',
         },
-        type: 'EventAttendee',
-      },
-      {
-        fields: {
-          attendees: { listOf: 'EventAttendee' },
-          host: { type: 'User' },
+        {
+          fields: {
+            posts: { listOf: 'Post' },
+          },
+          type: 'Category',
         },
-        type: 'Event',
-      },
-    ],
+        {
+          fields: {
+            user: { type: 'User' },
+          },
+          type: 'EventAttendee',
+        },
+        {
+          fields: {
+            attendees: { listOf: 'EventAttendee' },
+            host: { type: 'User' },
+          },
+          type: 'Event',
+        },
+      ],
   });
 };
