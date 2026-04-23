@@ -1,0 +1,724 @@
+import { and, asc, desc, eq, getTableColumns, gt, inArray, lt, or, sql } from 'drizzle-orm';
+import type { AnyRecord } from '../types.ts';
+import type { ConnectionResult } from './connection.ts';
+import { attachComputedState, type ComputedNeed } from './dataView.ts';
+import { createSourceRegistry, type SourceRegistry } from './executor.ts';
+import type {
+  ExecutionPlan,
+  ExecutionPlanNode,
+  SourceDefinition,
+  SourceRelation,
+} from './source.ts';
+
+type Source = SourceDefinition<AnyRecord, unknown>;
+type Relation = SourceRelation<AnyRecord, unknown>;
+type ColumnMap = Record<string, any>;
+
+type DrizzleDatabase = {
+  select: (fields?: Record<string, any>) => any;
+};
+
+export type DrizzleQueryExtra = {
+  extraFields?: Array<string>;
+  where?: unknown;
+};
+
+export type DrizzleManyToManyConfig = {
+  foreignColumn: any;
+  localColumn: any;
+  table: any;
+};
+
+export type DrizzleSourceConfig<Item extends AnyRecord = AnyRecord> = {
+  columns?: ColumnMap;
+  manyToMany?: Record<string, DrizzleManyToManyConfig>;
+  source: SourceDefinition<Item, unknown>;
+  table: any;
+};
+
+export type DrizzleSourceRuntime<Context> = {
+  fetchById: <Item extends AnyRecord = AnyRecord>({
+    extra,
+    id,
+    plan,
+  }: {
+    extra?: DrizzleQueryExtra;
+    id: string;
+    plan: ExecutionPlan<Item, Context>;
+  }) => Promise<Item | null>;
+  fetchByIds: <Item extends AnyRecord = AnyRecord>({
+    extra,
+    ids,
+    plan,
+  }: {
+    extra?: DrizzleQueryExtra;
+    ids: Array<string>;
+    plan: ExecutionPlan<Item, Context>;
+  }) => Promise<Array<Item>>;
+  fetchConnection: <Item extends AnyRecord = AnyRecord>({
+    cursor,
+    direction,
+    extra,
+    plan,
+    take,
+  }: {
+    cursor?: string;
+    direction: 'backward' | 'forward';
+    extra?: DrizzleQueryExtra;
+    plan: ExecutionPlan<Item, Context>;
+    take: number;
+  }) => Promise<Array<Item>>;
+  registry: SourceRegistry<Context>;
+};
+
+type RegisteredSourceConfig = DrizzleSourceConfig<AnyRecord> & {
+  columns: ColumnMap;
+};
+
+type PaginationArgs = {
+  after?: string;
+  before?: string;
+  first?: number;
+  last?: number;
+};
+
+const resolveSource = (source: Source | (() => Source)): Source =>
+  typeof source === 'function' ? source() : source;
+
+const getColumn = (columns: ColumnMap, field: string) => {
+  const column = columns[field];
+  if (!column) {
+    throw new Error(`No Drizzle column registered for field ${field}.`);
+  }
+  return column;
+};
+
+const paginationArgs = (args?: Record<string, unknown>): PaginationArgs => ({
+  after: typeof args?.after === 'string' ? args.after : undefined,
+  before: typeof args?.before === 'string' ? args.before : undefined,
+  first: typeof args?.first === 'number' ? args.first : undefined,
+  last: typeof args?.last === 'number' ? args.last : undefined,
+});
+
+const hasPagination = (args?: Record<string, unknown>) => {
+  const value = paginationArgs(args);
+  return (
+    value.after !== undefined ||
+    value.before !== undefined ||
+    value.first !== undefined ||
+    value.last !== undefined
+  );
+};
+
+const getConnectionDirection = (args?: Record<string, unknown>) =>
+  args?.before !== undefined || typeof args?.last === 'number' ? 'backward' : 'forward';
+
+const getConnectionSize = (fallback: number, args?: Record<string, unknown>) =>
+  (typeof args?.first === 'number' ? args.first : undefined) ??
+  (typeof args?.last === 'number' ? args.last : undefined) ??
+  fallback;
+
+const buildConnection = <TNode extends { id: string }>({
+  cursor,
+  direction,
+  items,
+  pageSize,
+}: {
+  cursor?: string;
+  direction: 'backward' | 'forward';
+  items: Array<TNode>;
+  pageSize: number;
+}): ConnectionResult<TNode> => {
+  const hasMore = items.length > pageSize;
+  const limitedItems = direction === 'forward' ? items.slice(0, pageSize) : items.slice(-pageSize);
+  const connectionItems = limitedItems.map((node) => ({
+    cursor: node.id,
+    node,
+  }));
+  const firstItem = connectionItems[0];
+  const lastItem = connectionItems.at(-1);
+
+  return {
+    items: connectionItems,
+    pagination: {
+      hasNext: direction === 'backward' ? Boolean(cursor) : hasMore,
+      hasPrevious: direction === 'backward' ? hasMore : Boolean(cursor),
+      nextCursor: lastItem?.cursor,
+      previousCursor: (direction === 'backward' ? hasMore : Boolean(cursor))
+        ? firstItem?.cursor
+        : undefined,
+    },
+  };
+};
+
+const mapByField = <T extends AnyRecord>(items: Array<T>, field: string) =>
+  new Map(items.map((item) => [item[field], item]));
+
+const reorderByIds = <T extends { id: string }>(ids: Array<string>, items: Array<T>) => {
+  const itemsById = mapByField(items, 'id');
+  return ids.flatMap((id) => {
+    const item = itemsById.get(id);
+    return item ? [item as T] : [];
+  });
+};
+
+const addColumnField = (fields: Set<string>, field: string) => {
+  if (!field || field === 'cursor') {
+    return;
+  }
+  fields.add(field);
+};
+
+const addNeedColumns = (fields: Set<string>, needs?: Record<string, ComputedNeed>) => {
+  if (!needs) {
+    return;
+  }
+
+  for (const need of Object.values(needs)) {
+    if (need.kind === 'field') {
+      const [field] = need.path.split('.');
+      addColumnField(fields, field);
+    }
+  }
+};
+
+const getRequiredFields = (node: ExecutionPlanNode<any, any>, extraFields: Array<string> = []) => {
+  const fields = new Set<string>(extraFields);
+  addColumnField(fields, node.source.id);
+
+  for (const field of node.selectedFields) {
+    addColumnField(fields, field);
+  }
+
+  for (const order of node.orderBy) {
+    addColumnField(fields, order.field);
+  }
+
+  for (const computed of node.computeds.values()) {
+    addNeedColumns(fields, computed.needs);
+  }
+
+  for (const [field] of node.relations) {
+    const sourceRelation = node.source.relations?.[field];
+    if (sourceRelation) {
+      addColumnField(fields, sourceRelation.localKey);
+    }
+  }
+
+  return fields;
+};
+
+const compareColumn = (
+  direction: 'backward' | 'forward',
+  naturalDirection: 'asc' | 'desc',
+  column: any,
+  value: unknown,
+) => {
+  const forward = naturalDirection === 'asc' ? gt(column, value) : lt(column, value);
+  const backward = naturalDirection === 'asc' ? lt(column, value) : gt(column, value);
+  return direction === 'forward' ? forward : backward;
+};
+
+const buildCursorWhere = ({
+  columns,
+  cursorValues,
+  direction,
+  node,
+}: {
+  columns: ColumnMap;
+  cursorValues: Record<string, unknown>;
+  direction: 'backward' | 'forward';
+  node: ExecutionPlanNode<any, any>;
+}) => {
+  const branches = node.orderBy.map((entry, index) => {
+    const column = getColumn(columns, entry.field);
+    const compare = compareColumn(direction, entry.direction, column, cursorValues[entry.field]);
+    const equalities = node.orderBy
+      .slice(0, index)
+      .map((previous) => eq(getColumn(columns, previous.field), cursorValues[previous.field]));
+
+    return equalities.length ? and(...equalities, compare) : compare;
+  });
+
+  return branches.length === 1 ? branches[0] : or(...branches);
+};
+
+const getQueryOrder = (
+  direction: 'backward' | 'forward',
+  node: ExecutionPlanNode<any, any>,
+  columns: ColumnMap,
+) =>
+  node.orderBy.map((entry) => {
+    const column = getColumn(columns, entry.field);
+    return direction === 'forward'
+      ? entry.direction === 'asc'
+        ? asc(column)
+        : desc(column)
+      : entry.direction === 'asc'
+        ? desc(column)
+        : asc(column);
+  });
+
+const whereFromObject = (columns: ColumnMap, where?: AnyRecord) => {
+  if (!where || Object.keys(where).length === 0) {
+    return undefined;
+  }
+
+  const conditions = Object.entries(where).map(([field, value]) =>
+    eq(getColumn(columns, field), value),
+  );
+  return conditions.length === 1 ? conditions[0] : and(...conditions);
+};
+
+const toRegisteredConfig = (config: DrizzleSourceConfig<AnyRecord>): RegisteredSourceConfig => ({
+  ...config,
+  columns: config.columns ?? getTableColumns(config.table),
+});
+
+export function createDrizzleSourceRuntime<Context>({
+  db,
+  sources,
+}: {
+  db: DrizzleDatabase;
+  sources: Array<DrizzleSourceConfig<AnyRecord>>;
+}): DrizzleSourceRuntime<Context> {
+  const sourceConfigs = new Map<Source, RegisteredSourceConfig>(
+    sources.map((source) => [source.source as Source, toRegisteredConfig(source)]),
+  );
+
+  const getSourceConfig = (source: Source): RegisteredSourceConfig => {
+    const config = sourceConfigs.get(source);
+    if (!config) {
+      throw new Error(`No Drizzle table registered for source ${source.view.typeName}.`);
+    }
+    return config;
+  };
+
+  const buildSelection = (node: ExecutionPlanNode<any, any>, extraFields: Array<string> = []) => {
+    const config = getSourceConfig(node.source);
+    const selection: Record<string, any> = {};
+
+    for (const field of getRequiredFields(node, extraFields)) {
+      selection[field] = getColumn(config.columns, field);
+    }
+
+    return selection;
+  };
+
+  const queryRows = async ({
+    extraFields,
+    node,
+    where,
+  }: {
+    extraFields?: Array<string>;
+    node: ExecutionPlanNode<any, any>;
+    where?: any;
+  }) => {
+    const config = getSourceConfig(node.source);
+    return (await db
+      .select(buildSelection(node, extraFields))
+      .from(config.table)
+      .where(where)
+      .orderBy(...getQueryOrder('forward', node, config.columns))) as Array<AnyRecord>;
+  };
+
+  const queryNodePage = async ({
+    baseWhere,
+    cursor,
+    direction,
+    node,
+    take,
+  }: {
+    baseWhere?: any;
+    cursor?: string;
+    direction: 'backward' | 'forward';
+    node: ExecutionPlanNode<any, any>;
+    take: number;
+  }) => {
+    const config = getSourceConfig(node.source);
+    let whereClause = baseWhere;
+
+    if (cursor) {
+      const cursorSelection = Object.fromEntries(
+        node.orderBy.map((entry) => [entry.field, getColumn(config.columns, entry.field)]),
+      );
+      const [cursorRow] = await db
+        .select(cursorSelection)
+        .from(config.table)
+        .where(
+          baseWhere
+            ? and(baseWhere, eq(getColumn(config.columns, node.source.id), cursor))
+            : eq(getColumn(config.columns, node.source.id), cursor),
+        )
+        .limit(1);
+
+      if (cursorRow) {
+        const cursorWhere = buildCursorWhere({
+          columns: config.columns,
+          cursorValues: cursorRow,
+          direction,
+          node,
+        });
+        whereClause = whereClause ? and(whereClause, cursorWhere) : cursorWhere;
+      }
+    }
+
+    const rows = (await db
+      .select(buildSelection(node))
+      .from(config.table)
+      .where(whereClause)
+      .orderBy(...getQueryOrder(direction, node, config.columns))
+      .limit(take)) as Array<AnyRecord>;
+    return direction === 'backward' ? rows.reverse() : rows;
+  };
+
+  const attachComputedCounts = async (
+    items: Array<AnyRecord>,
+    node: ExecutionPlanNode<any, any>,
+  ) => {
+    if (items.length === 0) {
+      return;
+    }
+
+    for (const [field, computed] of node.computeds) {
+      if (!computed.needs) {
+        continue;
+      }
+
+      for (const [needName, need] of Object.entries(computed.needs)) {
+        if (need.kind !== 'count') {
+          continue;
+        }
+
+        const sourceRelation = node.source.relations?.[need.relation];
+        if (!sourceRelation || sourceRelation.kind !== 'many') {
+          throw new Error(
+            `Computed count ${node.source.view.typeName}.${field} requires a 'many' relation named ${need.relation}.`,
+          );
+        }
+
+        const childSource = resolveSource(sourceRelation.source);
+        const childConfig = getSourceConfig(childSource);
+        const parentKeys = [
+          ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+        ];
+        const where = and(
+          inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
+          whereFromObject(childConfig.columns, need.where),
+        );
+        const rows = await db
+          .select({
+            count: sql<number>`count(*)`.mapWith(Number),
+            parentKey: getColumn(childConfig.columns, sourceRelation.foreignKey),
+          })
+          .from(childConfig.table)
+          .where(where)
+          .groupBy(getColumn(childConfig.columns, sourceRelation.foreignKey));
+        const counts = new Map(rows.map((row: AnyRecord) => [row.parentKey, row.count]));
+
+        for (const item of items) {
+          attachComputedState(item, field, {
+            [needName]: counts.get(item[sourceRelation.localKey]) ?? 0,
+          });
+        }
+      }
+    }
+  };
+
+  const fetchManyRelation = async ({
+    items,
+    relationNode,
+    sourceRelation,
+  }: {
+    items: Array<AnyRecord>;
+    relationNode: ExecutionPlanNode<any, any>;
+    sourceRelation: Relation;
+  }) => {
+    const childSource = resolveSource(sourceRelation.source);
+    const childConfig = getSourceConfig(childSource);
+    const parentKeys = [
+      ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+    ];
+
+    if (parentKeys.length === 0) {
+      return new Map<unknown, Array<AnyRecord>>();
+    }
+
+    const rows = await queryRows({
+      extraFields: [sourceRelation.foreignKey],
+      node: relationNode,
+      where: inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
+    });
+    const hydrated = await hydrateRows(rows, relationNode);
+    const byParentKey = new Map<unknown, Array<AnyRecord>>();
+
+    for (const item of hydrated) {
+      const key = item[sourceRelation.foreignKey];
+      const entries = byParentKey.get(key) ?? [];
+      entries.push(item);
+      byParentKey.set(key, entries);
+    }
+
+    return byParentKey;
+  };
+
+  const fetchManyConnection = async (
+    parentKey: unknown,
+    relationNode: ExecutionPlanNode<any, any>,
+    sourceRelation: Relation,
+  ): Promise<ConnectionResult<AnyRecord>> => {
+    const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+    const args = paginationArgs(relationNode.args);
+    const direction = getConnectionDirection(args);
+    const pageSize = getConnectionSize(20, args);
+    const cursor = direction === 'forward' ? args.after : args.before;
+    const rows = await queryNodePage({
+      baseWhere: eq(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKey),
+      cursor,
+      direction,
+      node: relationNode,
+      take: pageSize + 1,
+    });
+    const hydrated = await hydrateRows(rows, relationNode);
+    return buildConnection({
+      cursor,
+      direction,
+      items: hydrated as Array<AnyRecord & { id: string }>,
+      pageSize,
+    });
+  };
+
+  const fetchManyToManyRelation = async ({
+    items,
+    node,
+    relationField,
+    relationNode,
+    sourceRelation,
+  }: {
+    items: Array<AnyRecord>;
+    node: ExecutionPlanNode<any, any>;
+    relationField: string;
+    relationNode: ExecutionPlanNode<any, any>;
+    sourceRelation: Relation;
+  }) => {
+    const parentConfig = getSourceConfig(node.source);
+    const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+    const through = parentConfig.manyToMany?.[relationField];
+
+    if (!through) {
+      throw new Error(
+        `No Drizzle many-to-many table registered for ${node.source.view.typeName}.${relationField}.`,
+      );
+    }
+
+    const parentKeys = [
+      ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+    ];
+    if (parentKeys.length === 0) {
+      return new Map<unknown, Array<AnyRecord>>();
+    }
+
+    const rows = (await db
+      .select({
+        ...buildSelection(relationNode),
+        parentKey: through.localColumn,
+      })
+      .from(through.table)
+      .innerJoin(
+        childConfig.table,
+        eq(through.foreignColumn, getColumn(childConfig.columns, sourceRelation.foreignKey)),
+      )
+      .where(inArray(through.localColumn, parentKeys))
+      .orderBy(...getQueryOrder('forward', relationNode, childConfig.columns))) as Array<
+      AnyRecord & { parentKey: unknown }
+    >;
+    const hydrated = await hydrateRows(rows, relationNode);
+    const byParentKey = new Map<unknown, Array<AnyRecord>>();
+
+    for (const item of hydrated) {
+      const entries = byParentKey.get(item.parentKey) ?? [];
+      entries.push(item);
+      byParentKey.set(item.parentKey, entries);
+    }
+
+    return byParentKey;
+  };
+
+  const hydrateRows = async (
+    rows: Array<AnyRecord>,
+    node: ExecutionPlanNode<any, any>,
+  ): Promise<Array<AnyRecord>> => {
+    const items = rows.map((row) => ({ ...row }));
+
+    await attachComputedCounts(items, node);
+
+    for (const [field, relationNode] of node.relations) {
+      const sourceRelation = node.source.relations?.[field];
+      if (!sourceRelation) {
+        continue;
+      }
+
+      if (sourceRelation.kind === 'one') {
+        const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+        const childKeys = [
+          ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
+        ];
+        const childRows = childKeys.length
+          ? await queryRows({
+              node: relationNode,
+              where: inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), childKeys),
+            })
+          : [];
+        const children = await hydrateRows(childRows, relationNode);
+        const childByKey = mapByField(children, sourceRelation.foreignKey);
+
+        for (const item of items) {
+          const localKey = item[sourceRelation.localKey];
+          item[field] = localKey
+            ? ((childByKey.get(localKey) as AnyRecord | undefined) ?? null)
+            : null;
+        }
+        continue;
+      }
+
+      if (sourceRelation.kind === 'manyToMany') {
+        const byParentKey = await fetchManyToManyRelation({
+          items,
+          node,
+          relationField: field,
+          relationNode,
+          sourceRelation,
+        });
+
+        for (const item of items) {
+          item[field] = byParentKey.get(item[sourceRelation.localKey]) ?? [];
+        }
+        continue;
+      }
+
+      if (hasPagination(relationNode.args)) {
+        const connections = await Promise.all(
+          items.map(
+            async (item) =>
+              [
+                item[sourceRelation.localKey],
+                await fetchManyConnection(
+                  item[sourceRelation.localKey],
+                  relationNode,
+                  sourceRelation,
+                ),
+              ] as const,
+          ),
+        );
+        const connectionByParentKey = new Map(connections);
+
+        for (const item of items) {
+          item[field] = connectionByParentKey.get(item[sourceRelation.localKey]);
+        }
+        continue;
+      }
+
+      const byParentKey = await fetchManyRelation({
+        items,
+        relationNode,
+        sourceRelation,
+      });
+
+      for (const item of items) {
+        item[field] = byParentKey.get(item[sourceRelation.localKey]) ?? [];
+      }
+    }
+
+    return items;
+  };
+
+  const fetchByIds = async <Item extends AnyRecord>({
+    extra,
+    ids,
+    plan,
+  }: {
+    extra?: DrizzleQueryExtra;
+    ids: Array<string>;
+    plan: ExecutionPlan<Item, Context>;
+  }) => {
+    if (!ids.length) {
+      return [];
+    }
+
+    const config = getSourceConfig(plan.source as Source);
+    const rows = await queryRows({
+      extraFields: extra?.extraFields,
+      node: plan.root,
+      where: inArray(getColumn(config.columns, plan.source.id), [...new Set(ids)]),
+    });
+    return reorderByIds(
+      ids,
+      (await hydrateRows(rows, plan.root)) as Array<AnyRecord & { id: string }>,
+    ) as Array<Item>;
+  };
+
+  const fetchById = async <Item extends AnyRecord>({
+    extra,
+    id,
+    plan,
+  }: {
+    extra?: DrizzleQueryExtra;
+    id: string;
+    plan: ExecutionPlan<Item, Context>;
+  }) => (await fetchByIds({ extra, ids: [id], plan }))[0] ?? null;
+
+  const fetchConnection = async <Item extends AnyRecord>({
+    cursor,
+    direction,
+    extra,
+    plan,
+    take,
+  }: {
+    cursor?: string;
+    direction: 'backward' | 'forward';
+    extra?: DrizzleQueryExtra;
+    plan: ExecutionPlan<Item, Context>;
+    take: number;
+  }) =>
+    hydrateRows(
+      await queryNodePage({
+        baseWhere: extra?.where,
+        cursor,
+        direction,
+        node: plan.root,
+        take,
+      }),
+      plan.root,
+    ) as Promise<Array<Item>>;
+
+  const registry = createSourceRegistry<Context>(
+    sources.map((source) => [
+      source.source as Source,
+      {
+        byId: ({ extra, id, plan }) =>
+          fetchById({ extra: extra as DrizzleQueryExtra | undefined, id, plan }),
+        byIds: ({ extra, ids, plan }) =>
+          fetchByIds({ extra: extra as DrizzleQueryExtra | undefined, ids, plan }),
+        connection: ({ cursor, direction, extra, plan, take }) =>
+          fetchConnection({
+            cursor,
+            direction,
+            extra: extra as DrizzleQueryExtra | undefined,
+            plan,
+            take,
+          }),
+      },
+    ]),
+  );
+
+  return {
+    fetchById,
+    fetchByIds,
+    fetchConnection,
+    registry,
+  };
+}
+
+export const createDrizzleSourceRegistry = <Context>(
+  options: Parameters<typeof createDrizzleSourceRuntime<Context>>[0],
+) => createDrizzleSourceRuntime<Context>(options).registry;

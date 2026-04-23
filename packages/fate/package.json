@@ -36,10 +36,15 @@
       "types": "./lib/server.d.mts",
       "@nkzw/source": "./src/server.ts",
       "default": "./lib/server.mjs"
+    },
+    "./server/drizzle": {
+      "types": "./lib/server/drizzle.d.mts",
+      "@nkzw/source": "./src/server/drizzle.ts",
+      "default": "./lib/server/drizzle.mjs"
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/cli.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/server/drizzle.ts src/cli.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",
@@ -47,9 +52,16 @@
   },
   "devDependencies": {
     "@trpc/client": "^11.16.0",
-    "@trpc/server": "^11.16.0"
+    "@trpc/server": "^11.16.0",
+    "drizzle-orm": "^0.45.2"
   },
   "peerDependencies": {
-    "@trpc/client": "^11.6.0"
+    "@trpc/client": "^11.6.0",
+    "drizzle-orm": "^0.45.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   }
 }

@@ -4,19 +4,20 @@ import {
   createExecutionPlan,
   executeSourceById,
   executeSourceByIds,
+  executeSourceConnection,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
+import { ilike } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type CommentItem,
+  type PostItem,
   createCommentRecord,
   deleteCommentRecord,
-  fetchCommentById,
-  fetchPostById,
-  searchCommentsConnection,
 } from '../../drizzle/queries.ts';
+import { comment } from '../../drizzle/schema.ts';
 import { createConnectionProcedure } from '../connection.ts';
-import { drizzleRegistry } from '../executor.ts';
+import { drizzleRegistry, drizzleRuntime } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { commentSource, postSource } from '../views.ts';
 
@@ -136,7 +137,11 @@ export const commentRouter = router({
         source: commentSource,
       });
 
-      const comment = await fetchCommentById(input.id, plan.root);
+      const comment = await drizzleRuntime.fetchById<CommentItem>({
+        extra: { extraFields: ['authorId', 'postId'] },
+        id: input.id,
+        plan,
+      });
 
       if (!comment) {
         throw new TRPCError({
@@ -155,15 +160,15 @@ export const commentRouter = router({
       await deleteCommentRecord(input.id);
 
       if (comment.postId && hasNestedSelection(input.select, 'post')) {
-        const post = await fetchPostById(
-          comment.postId,
-          createExecutionPlan({
+        const post = await drizzleRuntime.fetchById<PostItem>({
+          id: comment.postId,
+          plan: createExecutionPlan({
             args: getNestedArgs(input.args, 'post'),
             ctx,
             select: getNestedSelection(input.select, 'post'),
             source: postSource,
-          }).root,
-        );
+          }),
+        });
 
         comment.post = post;
       }
@@ -186,14 +191,21 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const plan = createExecutionPlan({
-        ...input,
+      return executeSourceConnection({
         ctx,
-        source: commentSource,
+        cursor,
+        direction,
+        extra: {
+          where: ilike(comment.content, `%${query}%`),
+        },
+        plan: createExecutionPlan({
+          ...input,
+          ctx,
+          source: commentSource,
+        }),
+        registry: drizzleRegistry,
+        take,
       });
-      return plan.resolveMany(
-        await searchCommentsConnection({ cursor, direction, node: plan.root, query, take }),
-      );
     },
   }),
 });
