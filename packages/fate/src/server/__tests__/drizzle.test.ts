@@ -4,6 +4,71 @@ import { dataView, list } from '../dataView.ts';
 import { createDrizzleSourceRuntime } from '../drizzle.ts';
 import { createExecutionPlan, defineSource } from '../source.ts';
 
+test('Drizzle runtime can resolve the database from request context', async () => {
+  const userTable = pgTable('User', {
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+  });
+  const userView = dataView<{ id: string; name: string }>('User')({
+    id: true,
+    name: true,
+  });
+  const userSource = defineSource(userView, {
+    id: 'id',
+  });
+  const ctx = { tenant: 'tenant-1' };
+  const contexts: Array<typeof ctx> = [];
+  const db = (currentContext: typeof ctx) => {
+    contexts.push(currentContext);
+
+    return {
+      select: () => ({
+        from: () => {
+          const builder = {
+            orderBy: () => [
+              {
+                id: currentContext.tenant,
+                name: 'Ada',
+              },
+            ],
+            where: () => builder,
+          };
+
+          return builder;
+        },
+      }),
+    };
+  };
+  const runtime = createDrizzleSourceRuntime({
+    db,
+    sources: [
+      {
+        source: userSource,
+        table: userTable,
+      },
+    ],
+  });
+  const plan = createExecutionPlan({
+    ctx,
+    select: ['name'],
+    source: userSource,
+  });
+
+  const items = await runtime.fetchByIds({
+    ctx,
+    ids: ['tenant-1'],
+    plan,
+  });
+
+  expect(contexts).toEqual([ctx]);
+  expect(await plan.resolveMany(items)).toEqual([
+    {
+      id: 'tenant-1',
+      name: 'Ada',
+    },
+  ]);
+});
+
 test('Drizzle many-to-many relations infer join columns from source through keys', async () => {
   const postTable = pgTable('Post', {
     id: text('id').notNull(),

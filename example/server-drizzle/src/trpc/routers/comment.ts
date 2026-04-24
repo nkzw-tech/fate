@@ -103,6 +103,7 @@ export const commentRouter = router({
       });
 
       const comment = await drizzleRuntime.fetchById<CommentItem>({
+        ctx,
         extra: { extraFields: ['authorId', 'postId'] },
         id: input.id,
         plan,
@@ -126,6 +127,7 @@ export const commentRouter = router({
 
       if (comment.postId && hasNestedSelection(input.select, 'post')) {
         const post = await drizzleRuntime.fetchById<PostItem>({
+          ctx,
           id: comment.postId,
           plan: createNestedExecutionPlan({
             ctx,

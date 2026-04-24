@@ -32,6 +32,8 @@ type DrizzleDatabase = {
   select: (fields?: Record<string, unknown>) => any;
 };
 
+type DrizzleDatabaseInput<Context> = DrizzleDatabase | ((ctx: Context) => DrizzleDatabase);
+
 export type DrizzleQueryExtra = {
   extraFields?: Array<string>;
   where?: SQLWrapper;
@@ -66,30 +68,36 @@ export type DrizzleSourceConfig<
 
 export type DrizzleSourceRuntime<Context> = {
   fetchById: <Item extends AnyRecord = AnyRecord>({
+    ctx,
     extra,
     id,
     plan,
   }: {
+    ctx?: Context;
     extra?: DrizzleQueryExtra;
     id: string;
     plan: ExecutionPlan<Item, Context>;
   }) => Promise<Item | null>;
   fetchByIds: <Item extends AnyRecord = AnyRecord>({
+    ctx,
     extra,
     ids,
     plan,
   }: {
+    ctx?: Context;
     extra?: DrizzleQueryExtra;
     ids: Array<string>;
     plan: ExecutionPlan<Item, Context>;
   }) => Promise<Array<Item>>;
   fetchConnection: <Item extends AnyRecord = AnyRecord>({
+    ctx,
     cursor,
     direction,
     extra,
     plan,
     take,
   }: {
+    ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: DrizzleQueryExtra;
@@ -353,7 +361,7 @@ export function createDrizzleSourceRuntime<Context>({
   db,
   sources,
 }: {
-  db: DrizzleDatabase;
+  db: DrizzleDatabaseInput<Context>;
   sources: Array<DrizzleSourceConfig<AnyRecord>>;
 }): DrizzleSourceRuntime<Context> {
   const sourceConfigs = new Map<Source, RegisteredSourceConfig>(
@@ -368,6 +376,14 @@ export function createDrizzleSourceRuntime<Context>({
     return config;
   };
 
+  const getDb = (ctx?: Context) => {
+    if (typeof db === 'function') {
+      return db(ctx as Context);
+    }
+
+    return db;
+  };
+
   const buildSelection = (node: ExecutionPlanNode<any, any>, extraFields: Array<string> = []) => {
     const config = getSourceConfig(node.source);
     const selection: Record<string, any> = {};
@@ -380,16 +396,18 @@ export function createDrizzleSourceRuntime<Context>({
   };
 
   const queryRows = async ({
+    ctx,
     extraFields,
     node,
     where,
   }: {
+    ctx?: Context;
     extraFields?: Array<string>;
     node: ExecutionPlanNode<any, any>;
     where?: any;
   }) => {
     const config = getSourceConfig(node.source);
-    return (await db
+    return (await getDb(ctx)
       .select(buildSelection(node, extraFields))
       .from(config.table)
       .where(where)
@@ -398,25 +416,28 @@ export function createDrizzleSourceRuntime<Context>({
 
   const queryNodePage = async ({
     baseWhere,
+    ctx,
     cursor,
     direction,
     node,
     take,
   }: {
     baseWhere?: any;
+    ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
     node: ExecutionPlanNode<any, any>;
     take: number;
   }) => {
     const config = getSourceConfig(node.source);
+    const currentDb = getDb(ctx);
     let whereClause = baseWhere;
 
     if (cursor) {
       const cursorSelection = Object.fromEntries(
         node.orderBy.map((entry) => [entry.field, getColumn(config.columns, entry.field)]),
       );
-      const [cursorRow] = await db
+      const [cursorRow] = await currentDb
         .select(cursorSelection)
         .from(config.table)
         .where(
@@ -437,7 +458,7 @@ export function createDrizzleSourceRuntime<Context>({
       }
     }
 
-    const rows = (await db
+    const rows = (await currentDb
       .select(buildSelection(node))
       .from(config.table)
       .where(whereClause)
@@ -449,6 +470,7 @@ export function createDrizzleSourceRuntime<Context>({
   const attachComputedCounts = async (
     items: Array<AnyRecord>,
     node: ExecutionPlanNode<any, any>,
+    ctx?: Context,
   ) => {
     if (items.length === 0) {
       return;
@@ -481,7 +503,7 @@ export function createDrizzleSourceRuntime<Context>({
           inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
           whereFromObject(childConfig.columns, need.where),
         );
-        const rows = await db
+        const rows = await getDb(ctx)
           .select({
             count: sql<number>`count(*)`.mapWith(Number),
             parentKey: getColumn(childConfig.columns, sourceRelation.foreignKey),
@@ -501,10 +523,12 @@ export function createDrizzleSourceRuntime<Context>({
   };
 
   const fetchManyRelation = async ({
+    ctx,
     items,
     relationNode,
     sourceRelation,
   }: {
+    ctx?: Context;
     items: Array<AnyRecord>;
     relationNode: ExecutionPlanNode<any, any>;
     sourceRelation: Relation;
@@ -518,11 +542,12 @@ export function createDrizzleSourceRuntime<Context>({
     }
 
     const rows = await queryRows({
+      ctx,
       extraFields: [sourceRelation.foreignKey],
       node: relationNode,
       where: inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
     });
-    const hydrated = await hydrateRows(rows, relationNode);
+    const hydrated = await hydrateRows(rows, relationNode, ctx);
     const byParentKey = new Map<unknown, Array<AnyRecord>>();
 
     for (const item of hydrated) {
@@ -539,6 +564,7 @@ export function createDrizzleSourceRuntime<Context>({
     parentKey: unknown,
     relationNode: ExecutionPlanNode<any, any>,
     sourceRelation: Relation,
+    ctx?: Context,
   ): Promise<ConnectionResult<AnyRecord>> => {
     const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
     const args = paginationArgs(relationNode.args);
@@ -557,12 +583,13 @@ export function createDrizzleSourceRuntime<Context>({
 
     const rows = await queryNodePage({
       baseWhere: eq(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKey),
+      ctx,
       cursor,
       direction,
       node: relationNode,
       take: pageSize + 1,
     });
-    const hydrated = await hydrateRows(rows, relationNode);
+    const hydrated = await hydrateRows(rows, relationNode, ctx);
     return buildConnection({
       cursor,
       direction,
@@ -572,6 +599,7 @@ export function createDrizzleSourceRuntime<Context>({
   };
 
   const queryManyToManyPage = async ({
+    ctx,
     cursor,
     direction,
     node,
@@ -580,6 +608,7 @@ export function createDrizzleSourceRuntime<Context>({
     take,
     through,
   }: {
+    ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
     node: ExecutionPlanNode<any, any>;
@@ -589,13 +618,14 @@ export function createDrizzleSourceRuntime<Context>({
     through: RegisteredManyToManyConfig;
   }) => {
     const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+    const currentDb = getDb(ctx);
     let whereClause: any = eq(through.localColumn, parentKey);
 
     if (cursor) {
       const cursorSelection = Object.fromEntries(
         node.orderBy.map((entry) => [entry.field, getColumn(childConfig.columns, entry.field)]),
       );
-      const [cursorRow] = await db
+      const [cursorRow] = await currentDb
         .select(cursorSelection)
         .from(through.table)
         .innerJoin(
@@ -623,7 +653,7 @@ export function createDrizzleSourceRuntime<Context>({
       }
     }
 
-    const rows = (await db
+    const rows = (await currentDb
       .select({
         ...buildSelection(node),
         parentKey: through.localColumn,
@@ -645,6 +675,7 @@ export function createDrizzleSourceRuntime<Context>({
     relationNode: ExecutionPlanNode<any, any>,
     sourceRelation: Relation,
     through: RegisteredManyToManyConfig,
+    ctx?: Context,
   ): Promise<ConnectionResult<AnyRecord>> => {
     const args = paginationArgs(relationNode.args);
     const direction = getConnectionDirection(args);
@@ -661,6 +692,7 @@ export function createDrizzleSourceRuntime<Context>({
     }
 
     const rows = await queryManyToManyPage({
+      ctx,
       cursor,
       direction,
       node: relationNode,
@@ -669,7 +701,7 @@ export function createDrizzleSourceRuntime<Context>({
       take: pageSize + 1,
       through,
     });
-    const hydrated = await hydrateRows(rows, relationNode);
+    const hydrated = await hydrateRows(rows, relationNode, ctx);
     return buildConnection({
       cursor,
       direction,
@@ -679,12 +711,14 @@ export function createDrizzleSourceRuntime<Context>({
   };
 
   const fetchManyToManyRelation = async ({
+    ctx,
     items,
     node,
     relationField,
     relationNode,
     sourceRelation,
   }: {
+    ctx?: Context;
     items: Array<AnyRecord>;
     node: ExecutionPlanNode<any, any>;
     relationField: string;
@@ -712,7 +746,7 @@ export function createDrizzleSourceRuntime<Context>({
       return new Map<unknown, Array<AnyRecord>>();
     }
 
-    const rows = (await db
+    const rows = (await getDb(ctx)
       .select({
         ...buildSelection(relationNode),
         parentKey: through.localColumn,
@@ -726,7 +760,7 @@ export function createDrizzleSourceRuntime<Context>({
       .orderBy(...getQueryOrder('forward', relationNode, childConfig.columns))) as Array<
       AnyRecord & { parentKey: unknown }
     >;
-    const hydrated = await hydrateRows(rows, relationNode);
+    const hydrated = await hydrateRows(rows, relationNode, ctx);
     const byParentKey = new Map<unknown, Array<AnyRecord>>();
 
     for (const item of hydrated) {
@@ -741,10 +775,11 @@ export function createDrizzleSourceRuntime<Context>({
   const hydrateRows = async (
     rows: Array<AnyRecord>,
     node: ExecutionPlanNode<any, any>,
+    ctx?: Context,
   ): Promise<Array<AnyRecord>> => {
     const items = rows.map((row) => ({ ...row }));
 
-    await attachComputedCounts(items, node);
+    await attachComputedCounts(items, node, ctx);
 
     for (const [field, relationNode] of node.relations) {
       const sourceRelation = node.source.relations?.[field];
@@ -757,11 +792,12 @@ export function createDrizzleSourceRuntime<Context>({
         const childKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
         const childRows = childKeys.length
           ? await queryRows({
+              ctx,
               node: relationNode,
               where: inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), childKeys),
             })
           : [];
-        const children = await hydrateRows(childRows, relationNode);
+        const children = await hydrateRows(childRows, relationNode, ctx);
         const childByKey = mapByField(children, sourceRelation.foreignKey);
 
         for (const item of items) {
@@ -802,6 +838,7 @@ export function createDrizzleSourceRuntime<Context>({
                     relationNode,
                     sourceRelation,
                     through,
+                    ctx,
                   ),
                 ] as const,
             ),
@@ -815,6 +852,7 @@ export function createDrizzleSourceRuntime<Context>({
         }
 
         const byParentKey = await fetchManyToManyRelation({
+          ctx,
           items,
           node,
           relationField: field,
@@ -838,6 +876,7 @@ export function createDrizzleSourceRuntime<Context>({
                   item[sourceRelation.localKey],
                   relationNode,
                   sourceRelation,
+                  ctx,
                 ),
               ] as const,
           ),
@@ -851,6 +890,7 @@ export function createDrizzleSourceRuntime<Context>({
       }
 
       const byParentKey = await fetchManyRelation({
+        ctx,
         items,
         relationNode,
         sourceRelation,
@@ -865,10 +905,12 @@ export function createDrizzleSourceRuntime<Context>({
   };
 
   const fetchByIds = async <Item extends AnyRecord>({
+    ctx,
     extra,
     ids,
     plan,
   }: {
+    ctx?: Context;
     extra?: DrizzleQueryExtra;
     ids: Array<string>;
     plan: ExecutionPlan<Item, Context>;
@@ -879,33 +921,38 @@ export function createDrizzleSourceRuntime<Context>({
 
     const config = getSourceConfig(plan.source as Source);
     const rows = await queryRows({
+      ctx,
       extraFields: extra?.extraFields,
       node: plan.root,
       where: inArray(getColumn(config.columns, plan.source.id), [...new Set(ids)]),
     });
     return reorderByIds(
       ids,
-      (await hydrateRows(rows, plan.root)) as Array<AnyRecord & { id: string }>,
+      (await hydrateRows(rows, plan.root, ctx)) as Array<AnyRecord & { id: string }>,
     ) as Array<Item>;
   };
 
   const fetchById = async <Item extends AnyRecord>({
+    ctx,
     extra,
     id,
     plan,
   }: {
+    ctx?: Context;
     extra?: DrizzleQueryExtra;
     id: string;
     plan: ExecutionPlan<Item, Context>;
-  }) => (await fetchByIds({ extra, ids: [id], plan }))[0] ?? null;
+  }) => (await fetchByIds({ ctx, extra, ids: [id], plan }))[0] ?? null;
 
   const fetchConnection = async <Item extends AnyRecord>({
+    ctx,
     cursor,
     direction,
     extra,
     plan,
     take,
   }: {
+    ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: DrizzleQueryExtra;
@@ -915,24 +962,27 @@ export function createDrizzleSourceRuntime<Context>({
     hydrateRows(
       await queryNodePage({
         baseWhere: extra?.where,
+        ctx,
         cursor,
         direction,
         node: plan.root,
         take,
       }),
       plan.root,
+      ctx,
     ) as Promise<Array<Item>>;
 
   const registry = createSourceRegistry<Context>(
     sources.map((source) => [
       source.source as Source,
       {
-        byId: ({ extra, id, plan }) =>
-          fetchById({ extra: extra as DrizzleQueryExtra | undefined, id, plan }),
-        byIds: ({ extra, ids, plan }) =>
-          fetchByIds({ extra: extra as DrizzleQueryExtra | undefined, ids, plan }),
-        connection: ({ cursor, direction, extra, plan, take }) =>
+        byId: ({ ctx, extra, id, plan }) =>
+          fetchById({ ctx, extra: extra as DrizzleQueryExtra | undefined, id, plan }),
+        byIds: ({ ctx, extra, ids, plan }) =>
+          fetchByIds({ ctx, extra: extra as DrizzleQueryExtra | undefined, ids, plan }),
+        connection: ({ ctx, cursor, direction, extra, plan, take }) =>
           fetchConnection({
+            ctx,
             cursor,
             direction,
             extra: extra as DrizzleQueryExtra | undefined,
