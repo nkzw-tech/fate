@@ -12,6 +12,10 @@ type EmptyTransportMutations = Record<never, MutationShape>;
 type Bivariant<Fn extends (...args: Array<any>) => any> = {
   bivarianceHack: Fn;
 }['bivarianceHack'];
+type TRPCListResult = {
+  items: Array<{ cursor?: string; node?: unknown }>;
+  pagination: Pagination;
+};
 
 /**
  * Contract the fate client expects from a network transport. The transport is
@@ -52,7 +56,7 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
     args?: ResolvedArgsPayload;
     ids: Array<string | number>;
     select: Array<string>;
-  }) => Promise<Array<unknown>>
+  }) => Promise<unknown>
 >;
 
 /**
@@ -60,12 +64,7 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
  */
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
-  (client: TRPCClient<AppRouter>) => Bivariant<
-    (input: any) => Promise<{
-      items: Array<{ cursor: string | undefined; node: unknown }>;
-      pagination: Pagination;
-    }>
-  >
+  (client: TRPCClient<AppRouter>) => Bivariant<(input: any) => Promise<TRPCListResult>>
 >;
 
 /**
@@ -127,11 +126,11 @@ export function createTRPCTransport<
       if (!resolver) {
         throw new Error(`fate(trpc): No 'byId' resolver configured for entity type '${type}'.`);
       }
-      return await resolver(client)({
+      return (await resolver(client)({
         args,
         ids,
         select: [...select],
-      });
+      })) as Array<unknown>;
     },
     async fetchList(procedure, select, args) {
       if (!lists) {
@@ -141,10 +140,13 @@ export function createTRPCTransport<
       if (!resolver) {
         throw new Error(`fate(trpc): Missing list resolver for procedure "${procedure}"`);
       }
-      return resolver(client)({
+      return (await resolver(client)({
         args,
         select: [...select],
-      });
+      })) as {
+        items: Array<{ cursor: string | undefined; node: unknown }>;
+        pagination: Pagination;
+      };
     },
     async fetchQuery(procedure, select, args) {
       if (!queries) {

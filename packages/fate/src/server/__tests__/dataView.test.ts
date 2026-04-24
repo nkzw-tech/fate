@@ -1,7 +1,19 @@
 import { expect, expectTypeOf, test } from 'vite-plus/test';
 import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
-import { createResolver, dataView, Entity, list, resolver } from '../dataView.ts';
+import {
+  attachComputedState,
+  computed,
+  count,
+  createResolver,
+  createViewPlan,
+  dataView,
+  Entity,
+  field,
+  list,
+  resolver,
+} from '../dataView.ts';
+import { collectDataViewConfigs, createSourceDefinitions, createSourcePlan } from '../source.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -58,6 +70,74 @@ test('resolvers can add prisma selections and compute values', async () => {
 
   const item = await selection.resolve({ _count: { posts: 4 }, id: 'cat-1' });
   expect(item).toEqual({ id: 'cat-1', postCount: 4 });
+});
+
+test('computed fields can resolve hidden source dependencies', async () => {
+  const view = dataView<{ email: string; id: string; name: string }>('User')({
+    email: computed<{ email: string; id: string; name: string }, string>({
+      resolve: (_item, deps) => deps.email as string,
+      select: {
+        email: field('email'),
+      },
+    }),
+    id: true,
+    name: true,
+  });
+
+  const selection = createResolver({
+    select: ['email', 'name'],
+    view,
+  });
+
+  const item = await selection.resolve({
+    email: 'jane@example.com',
+    id: 'user-1',
+    name: 'Jane',
+  });
+
+  expect(item).toEqual({
+    email: 'jane@example.com',
+    id: 'user-1',
+    name: 'Jane',
+  });
+});
+
+test('computed fields can resolve conflicting relation counts from attached state', async () => {
+  const view = dataView<{ id: string }>('Event')({
+    goingCount: computed<{ id: string }, number>({
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
+        count: count('attendees', {
+          where: { status: 'GOING' },
+        }),
+      },
+    }),
+    id: true,
+    waitlistCount: computed<{ id: string }, number>({
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
+        count: count('attendees', {
+          where: { status: 'WAITLIST' },
+        }),
+      },
+    }),
+  });
+
+  const selection = createResolver({
+    select: ['goingCount', 'waitlistCount'],
+    view,
+  });
+  const item = attachComputedState(
+    attachComputedState({ id: 'event-1' }, 'goingCount', { count: 4 }),
+    'waitlistCount',
+    { count: 2 },
+  );
+
+  expect(await selection.resolve(item)).toEqual({
+    goingCount: 4,
+    id: 'event-1',
+    waitlistCount: 2,
+  });
 });
 
 test('a view selection for a resolver has the correct type', async () => {
@@ -240,6 +320,104 @@ test('list fields are wrapped into connections recursively using scoped args', a
   expect(repliesConnection?.pagination?.hasPrevious).toBe(false);
 });
 
+test('prebuilt nested connections are preserved during resolution', async () => {
+  const authorView = dataView<AuthorItem>('Author')({
+    id: true,
+    name: true,
+  });
+
+  const commentView = dataView<CommentWithRepliesItem>('Comment')({
+    id: true,
+    replies: list(
+      dataView<ReplyItem>('Reply')({
+        author: authorView,
+        id: true,
+      }),
+    ),
+  });
+
+  const postView = dataView<PostWithDeepRelationsItem>('Post')({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const plan = createViewPlan({
+    select: ['comments.replies.author.name'],
+    view: postView,
+  });
+
+  const result = await plan.resolve({
+    comments: {
+      items: [
+        {
+          cursor: 'comment-1',
+          node: {
+            id: 'comment-1',
+            replies: {
+              items: [
+                {
+                  cursor: 'reply-1',
+                  node: {
+                    author: { id: 'author-1', name: 'Ada', secret: 'ignored' },
+                    id: 'reply-1',
+                  },
+                },
+              ],
+              pagination: {
+                hasNext: false,
+                hasPrevious: false,
+                nextCursor: 'reply-1',
+                previousCursor: undefined,
+              },
+            },
+          },
+        },
+      ],
+      pagination: {
+        hasNext: true,
+        hasPrevious: false,
+        nextCursor: 'comment-1',
+        previousCursor: undefined,
+      },
+    } as any,
+    id: 'post-1',
+  });
+
+  expect(result.comments).toEqual({
+    items: [
+      {
+        cursor: 'comment-1',
+        node: {
+          id: 'comment-1',
+          replies: {
+            items: [
+              {
+                cursor: 'reply-1',
+                node: {
+                  author: { id: 'author-1', name: 'Ada' },
+                  id: 'reply-1',
+                },
+              },
+            ],
+            pagination: {
+              hasNext: false,
+              hasPrevious: false,
+              nextCursor: 'reply-1',
+              previousCursor: undefined,
+            },
+          },
+        },
+      },
+    ],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'comment-1',
+      previousCursor: undefined,
+    },
+  });
+});
+
 type SessionContext = { sessionUserId?: string };
 
 type UserWithEmailItem = { email: string; id: string; name: string };
@@ -298,4 +476,113 @@ test('authorized resolvers can access context and return null when unauthorized'
 
   expectTypeOf<UserData['name']>().toEqualTypeOf<string>();
   expectTypeOf<UserData['email']>().toEqualTypeOf<string | null>();
+});
+
+test('createViewPlan exposes scoped args for nested relations', () => {
+  const authorView = dataView<AuthorItem>('Author')({
+    id: true,
+    name: true,
+  });
+
+  const replyView = dataView<ReplyItem>('Reply')({
+    author: authorView,
+    id: true,
+  });
+
+  const commentView = dataView<CommentWithRepliesItem>('Comment')({
+    id: true,
+    replies: list(replyView),
+  });
+
+  const postView = dataView<PostWithDeepRelationsItem>('Post')({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const plan = createViewPlan({
+    args: {
+      comments: {
+        first: 2,
+        replies: {
+          before: 'reply-2',
+          last: 1,
+        },
+      },
+    },
+    select: ['comments.replies.author.name'],
+    view: postView,
+  });
+
+  const commentsNode = plan.root.relations.get('comments');
+  const repliesNode = commentsNode?.relations.get('replies');
+
+  expect(commentsNode?.args).toEqual({
+    first: 2,
+    replies: {
+      before: 'reply-2',
+      last: 1,
+    },
+  });
+  expect(repliesNode?.args).toEqual({
+    before: 'reply-2',
+    last: 1,
+  });
+});
+
+test('createSourcePlan attaches source order metadata', () => {
+  const commentView = dataView<{ createdAt: Date; id: string }>('Comment')({
+    id: true,
+  });
+
+  const postView = dataView<{ comments?: Array<{ createdAt: Date; id: string }>; id: string }>(
+    'Post',
+  )({
+    comments: list(commentView),
+    id: true,
+  });
+
+  const [, postSource] = createSourceDefinitions([
+    {
+      orderBy: [{ direction: 'desc', field: 'createdAt' }],
+      view: commentView,
+    },
+    {
+      orderBy: [{ direction: 'asc', field: 'id' }],
+      relations: {
+        comments: {
+          foreignKey: 'postId',
+          localKey: 'id',
+          orderBy: [{ direction: 'desc', field: 'createdAt' }],
+        },
+      },
+      view: postView,
+    },
+  ]);
+
+  const plan = createSourcePlan({
+    select: ['comments.id'],
+    source: postSource,
+  });
+
+  expect(plan.root.orderBy).toEqual([{ direction: 'asc', field: 'id' }]);
+  expect((plan.root.relations.get('comments') as typeof plan.root | undefined)?.orderBy).toEqual([
+    { direction: 'desc', field: 'createdAt' },
+    { direction: 'asc', field: 'id' },
+  ]);
+});
+
+test('collectDataViewConfigs reads list order defaults', () => {
+  const postView = dataView<{ createdAt: Date; id: string }>('Post')({
+    id: true,
+  });
+
+  const [config] = collectDataViewConfigs({
+    posts: list(postView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  });
+
+  expect(config?.orderBy).toEqual([
+    { direction: 'desc', field: 'createdAt' },
+    { direction: 'desc', field: 'id' },
+  ]);
+  expect(config?.view).toBe(postView);
 });

@@ -405,17 +405,17 @@ try {
 
   let index = 0;
   for (const content of comments) {
-    const post = createdPosts[index % createdPosts.length];
+    const postId = createdPosts[index % createdPosts.length];
     const author = randomEntry(seededUsers);
 
-    if (!post) {
+    if (!postId) {
       throw new Error('Failed to create seeded post.');
     }
 
     await db.insert(comment).values({
       authorId: author?.id,
       content,
-      postId: post.id,
+      postId,
     });
 
     index++;

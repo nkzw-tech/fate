@@ -91,6 +91,50 @@ test('merges additional input options', async () => {
   );
 });
 
+test('allows initial backward pagination with last', async () => {
+  const query = vi.fn(async () => [
+    { id: 'comment-1' },
+    { id: 'comment-2' },
+    { id: 'comment-3' },
+    { id: 'comment-4' },
+  ]);
+  const list = createConnectionProcedure({ query });
+  const appRouter = router({ list });
+  const caller = appRouter.createCaller({
+    headers: {},
+    prisma: {} as never,
+    sessionUser: null,
+  });
+
+  await expect(
+    caller.list({
+      args: { last: 3 },
+      select: [],
+    }),
+  ).resolves.toEqual({
+    items: [
+      { cursor: 'comment-2', node: { id: 'comment-2' } },
+      { cursor: 'comment-3', node: { id: 'comment-3' } },
+      { cursor: 'comment-4', node: { id: 'comment-4' } },
+    ],
+    pagination: {
+      hasNext: false,
+      hasPrevious: true,
+      nextCursor: 'comment-4',
+      previousCursor: 'comment-2',
+    },
+  });
+
+  expect(query).toHaveBeenCalledWith(
+    expect.objectContaining({
+      cursor: undefined,
+      direction: 'backward',
+      skip: undefined,
+      take: 4,
+    }),
+  );
+});
+
 test('derives pagination from provided args', () => {
   const result = arrayToConnection([{ id: 'comment-1' }, { id: 'comment-2' }], {
     args: { first: 1 },

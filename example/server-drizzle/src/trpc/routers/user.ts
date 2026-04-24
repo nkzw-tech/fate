@@ -1,9 +1,8 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { connectionArgs } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { getUserById } from '../../drizzle/queries.ts';
 import { auth } from '../../lib/auth.tsx';
-import { procedure, router } from '../init.ts';
+import { fate, procedure, router } from '../init.ts';
 import { User, userDataView } from '../views.ts';
 
 export const userRouter = router({
@@ -27,18 +26,17 @@ export const userRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
-        ctx,
-        view: userDataView,
-      });
-
       await auth.api.updateUser({
         body: { name: input.name },
         headers: ctx.headers,
       });
 
-      const user = await getUserById(ctx.sessionUser.id);
+      const user = await fate.resolveById({
+        ctx,
+        id: ctx.sessionUser.id,
+        input,
+        view: userDataView,
+      });
       if (!user) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -46,7 +44,7 @@ export const userRouter = router({
         });
       }
 
-      return resolve(user);
+      return user;
     }),
   viewer: procedure
     .input(
@@ -59,13 +57,11 @@ export const userRouter = router({
         return null;
       }
 
-      const { resolve } = createResolver({
-        ...input,
+      return (await fate.resolveById({
         ctx,
+        id: ctx.sessionUser.id,
+        input,
         view: userDataView,
-      });
-
-      const user = await getUserById(ctx.sessionUser.id);
-      return user ? ((await resolve(user)) as User) : null;
+      })) as User | null;
     }),
 });

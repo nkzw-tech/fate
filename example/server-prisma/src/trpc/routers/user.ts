@@ -1,9 +1,9 @@
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { connectionArgs, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
 import type { UserFindUniqueArgs } from '../../prisma/prisma-client/models.ts';
-import { procedure, router } from '../init.ts';
+import { fate, procedure, router } from '../init.ts';
 import { User, userDataView } from '../views.ts';
 
 export const userRouter = router({
@@ -27,18 +27,19 @@ export const userRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = fate.createPlan({
         ...input,
         ctx,
         view: userDataView,
       });
+      const select = toPrismaSelect(plan);
 
       await auth.api.updateUser({
         body: { name: input.name },
         headers: ctx.headers,
       });
 
-      return resolve(
+      return plan.resolve(
         await ctx.prisma.user.findUniqueOrThrow({
           select,
           where: { id: ctx.sessionUser.id },
@@ -56,16 +57,11 @@ export const userRouter = router({
         return null;
       }
 
-      const { resolve, select } = createResolver({
-        ...input,
+      return (await fate.resolveById({
         ctx,
+        id: ctx.sessionUser.id,
+        input,
         view: userDataView,
-      });
-
-      const user = await ctx.prisma.user.findUnique({
-        select,
-        where: { id: ctx.sessionUser.id },
-      } as UserFindUniqueArgs);
-      return user ? ((await resolve(user)) as User) : null;
+      })) as User | null;
     }),
 });

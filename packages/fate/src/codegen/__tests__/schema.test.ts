@@ -1,6 +1,6 @@
 import { expect, test } from 'vite-plus/test';
 import { dataView, list } from '../../server/dataView.ts';
-import { createSchema } from '../schema.ts';
+import { createSchema, isDataView } from '../schema.ts';
 
 type User = { id: string; name: string };
 type Comment = { author: User; id: string; replies: Array<Comment> };
@@ -131,4 +131,29 @@ test('derives root type from lists when byId is missing', () => {
   expect(roots).toEqual({
     userProfile: { kind: 'list', procedure: 'list', router: 'userProfile', type: 'UserProfile' },
   });
+});
+
+test('identifies data views among mixed runtime exports', () => {
+  const userView = dataView<User>('User')({
+    id: true,
+    name: true,
+  });
+
+  const moduleExports = {
+    Root: { viewer: userView },
+    userDataView: userView,
+    userSource: { id: 'id', view: userView },
+  };
+
+  const { roots, types } = createSchema(
+    Object.values(moduleExports as Record<string, unknown>).filter(isDataView),
+    {
+      viewer: userView,
+    },
+  );
+
+  expect(roots).toEqual({
+    viewer: { kind: 'query', procedure: 'viewer', router: 'user', type: 'User' },
+  });
+  expect(types).toEqual([{ type: 'User' }]);
 });

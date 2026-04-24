@@ -1,19 +1,12 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { connectionArgs } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import {
-  createPostRecord,
-  getPostById,
-  getPostsByIds,
-  likePostRecord,
-  listPostsConnection,
-  unlikePostRecord,
-} from '../../drizzle/queries.ts';
-import { createConnectionProcedure } from '../connection.ts';
-import { procedure, router } from '../init.ts';
+import { createPostRecord, likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
+import { fate, procedure, router } from '../init.ts';
 import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
+  ...fate.procedures(postDataView),
   add: procedure
     .input(
       z.object({
@@ -31,35 +24,34 @@ export const postRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-
-      const post = await createPostRecord({
+      const postId = await createPostRecord({
         authorId: ctx.sessionUser.id,
         content: input.content,
         title: input.title,
       });
 
-      if (!post) {
+      if (!postId) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to create post.',
         });
       }
 
-      return (await resolve(post)) as Post;
+      const post = await fate.resolveById({
+        ctx,
+        id: postId,
+        input,
+        view: postDataView,
+      });
+      if (!post) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found.',
+        });
+      }
+
+      return post as Post;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany } = createResolver({
-      ...input,
-      ctx,
-      view: postDataView,
-    });
-    return resolveMany(await getPostsByIds(input.ids));
-  }),
   like: procedure
     .input(
       z.object({
@@ -88,7 +80,12 @@ export const postRouter = router({
         });
       }
 
-      const existing = await getPostById(input.id);
+      const existing = await fate.resolveById({
+        ctx,
+        id: input.id,
+        input: { select: ['id'] },
+        view: postDataView,
+      });
 
       if (!existing) {
         throw new TRPCError({
@@ -97,13 +94,20 @@ export const postRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
+      const updated = await likePostRecord(input.id);
+      if (!updated) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found.',
+        });
+      }
+
+      const post = await fate.resolveById({
         ctx,
+        id: input.id,
+        input,
         view: postDataView,
       });
-
-      const post = await likePostRecord(input.id);
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -111,19 +115,8 @@ export const postRouter = router({
         });
       }
 
-      return (await resolve(post)) as Post;
+      return post as Post;
     }),
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, take }) => {
-      const { resolveMany } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-      const items = await listPostsConnection({ cursor, direction, take });
-      return resolveMany(items);
-    },
-  }),
   unlike: procedure
     .input(
       z.object({
@@ -133,13 +126,20 @@ export const postRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { resolve } = createResolver({
-        ...input,
+      const updated = await unlikePostRecord(input.id);
+      if (!updated) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Post not found',
+        });
+      }
+
+      const post = await fate.resolveById({
         ctx,
+        id: input.id,
+        input,
         view: postDataView,
       });
-
-      const post = await unlikePostRecord(input.id);
       if (!post) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -147,6 +147,6 @@ export const postRouter = router({
         });
       }
 
-      return (await resolve(post)) as Post;
+      return post as Post;
     }),
 });

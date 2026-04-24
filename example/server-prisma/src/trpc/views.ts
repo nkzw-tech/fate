@@ -1,4 +1,4 @@
-import { dataView, list, resolver, type Entity } from '@nkzw/fate/server';
+import { computed, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,
@@ -39,9 +39,12 @@ export type EventItem = PrismaEvent & {
 };
 
 export const userDataView = dataView<PrismaUser>('User')({
-  email: resolver<PrismaUser, string | null, AppContext>({
+  email: computed<PrismaUser, string | null, AppContext>({
     authorize: ({ id }, context) => context?.sessionUser?.id === id,
-    resolve: ({ email }) => email,
+    resolve: (_item, deps) => (deps.email as string | null) ?? null,
+    select: {
+      email: field('email'),
+    },
   }),
   id: true,
   name: true,
@@ -54,7 +57,7 @@ export const tagDataView = dataView<PrismaTag>('Tag')({
   name: true,
 });
 
-const categorySummaryDataView = dataView<PrismaCategory>('Category')({
+export const categorySummaryDataView = dataView<PrismaCategory>('Category')({
   id: true,
   name: true,
 });
@@ -62,11 +65,11 @@ const categorySummaryDataView = dataView<PrismaCategory>('Category')({
 const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
-  commentCount: resolver<PostItem, number>({
-    resolve: ({ _count }) => _count?.comments ?? 0,
-    select: () => ({
-      _count: { select: { comments: true } },
-    }),
+  commentCount: computed<PostItem, number>({
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
+    select: {
+      count: count('comments'),
+    },
   }),
   content: true,
   id: true,
@@ -74,7 +77,7 @@ const basePost = {
   title: true,
 } as const;
 
-const postSummaryDataView = dataView<PostItem>('Post')({
+export const postSummaryDataView = dataView<PostItem>('Post')({
   ...basePost,
   tags: list(tagDataView),
 });
@@ -88,7 +91,7 @@ export const commentDataView = dataView<CommentItem>('Comment')({
 
 export const postDataView = dataView<PostItem>('Post')({
   ...basePost,
-  comments: list(commentDataView),
+  comments: list(commentDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   tags: list(tagDataView),
 });
 
@@ -96,11 +99,11 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
-  postCount: resolver<CategoryItem, number>({
-    resolve: ({ _count }) => _count?.posts ?? 0,
-    select: () => ({
-      _count: { select: { posts: true } },
-    }),
+  postCount: computed<CategoryItem, number>({
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
+    select: {
+      count: count('posts'),
+    },
   }),
   posts: list(postDataView),
 });
@@ -113,18 +116,14 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 });
 
 export const eventDataView = dataView<EventItem>('Event')({
-  attendees: list(eventAttendeeDataView),
-  attendingCount: resolver<EventItem, number>({
-    resolve: ({ _count }) => _count?.attendees ?? 0,
-    select: () => ({
-      _count: {
-        select: {
-          attendees: {
-            where: { status: 'GOING' },
-          },
-        },
-      },
-    }),
+  attendees: list(eventAttendeeDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
+  attendingCount: computed<EventItem, number>({
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
+    select: {
+      count: count('attendees', {
+        where: { status: 'GOING' },
+      }),
+    },
   }),
   capacity: true,
   description: true,
@@ -183,9 +182,12 @@ export type Event = Entity<
 >;
 
 export const Root = {
-  categories: list(categoryDataView),
-  commentSearch: { procedure: 'search', view: list(commentDataView) },
-  events: list(eventDataView),
-  posts: list(postDataView),
+  categories: list(categoryDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
+  commentSearch: {
+    procedure: 'search',
+    view: list(commentDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  },
+  events: list(eventDataView, { orderBy: [{ startAt: 'asc' }, { id: 'asc' }] }),
+  posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
   viewer: userDataView,
 };

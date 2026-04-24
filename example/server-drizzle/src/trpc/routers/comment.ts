@@ -1,20 +1,27 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import {
+  connectionArgs,
+  getNestedSelection,
+  getScopedArgs,
+  hasNestedSelection,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
+import { ilike } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type CommentItem,
+  type PostItem,
   createCommentRecord,
   deleteCommentRecord,
-  getCommentById,
-  getCommentsByIds,
-  getPostById,
-  searchCommentsConnection,
 } from '../../drizzle/queries.ts';
-import { createConnectionProcedure } from '../connection.ts';
-import { procedure, router } from '../init.ts';
-import { commentDataView } from '../views.ts';
+import { comment } from '../../drizzle/schema.ts';
+import { fate, procedure, router } from '../init.ts';
+import { commentDataView, postDataView } from '../views.ts';
 
 export const commentRouter = router({
+  ...fate.procedures({
+    list: false,
+    view: commentDataView,
+  }),
   add: procedure
     .input(
       z.object({
@@ -32,7 +39,12 @@ export const commentRouter = router({
         });
       }
 
-      const post = await getPostById(input.postId);
+      const post = await fate.resolveById({
+        ctx,
+        id: input.postId,
+        input: { select: ['id'] },
+        view: postDataView,
+      });
 
       if (!post) {
         throw new TRPCError({
@@ -41,35 +53,34 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
-        ctx,
-        view: commentDataView,
-      });
-
-      const comment = await createCommentRecord({
+      const commentId = await createCommentRecord({
         authorId: ctx.sessionUser.id,
         content: input.content,
         postId: input.postId,
       });
 
-      if (!comment) {
+      if (!commentId) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to create comment.',
         });
       }
 
-      return resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      const comment = await fate.resolveById({
+        ctx,
+        id: commentId,
+        input,
+        view: commentDataView,
+      });
+      if (!comment) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+
+      return comment as CommentItem & { post?: { commentCount: number } };
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany } = createResolver({
-      ...input,
-      ctx,
-      view: commentDataView,
-    });
-    return resolveMany(await getCommentsByIds(input.ids));
-  }),
   delete: procedure
     .input(
       z.object({
@@ -79,7 +90,18 @@ export const commentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const comment = await getCommentById(input.id);
+      const plan = fate.createPlan({
+        ...input,
+        ctx,
+        view: commentDataView,
+      });
+
+      const comment = await fate.fetchById<CommentItem>({
+        ctx,
+        extra: { extraFields: ['authorId', 'postId'] },
+        id: input.id,
+        plan,
+      });
 
       if (!comment) {
         throw new TRPCError({
@@ -88,12 +110,6 @@ export const commentRouter = router({
         });
       }
 
-      const { resolve } = createResolver({
-        ...input,
-        ctx,
-        view: commentDataView,
-      });
-
       if (comment.authorId && comment.authorId !== ctx.sessionUser?.id) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -101,18 +117,27 @@ export const commentRouter = router({
         });
       }
 
-      const result = await deleteCommentRecord(input.id);
-      if (!result) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Comment not found',
+      await deleteCommentRecord(input.id);
+
+      if (comment.postId && hasNestedSelection(input.select, 'post')) {
+        const post = await fate.fetchById<PostItem>({
+          ctx,
+          id: comment.postId,
+          plan: fate.createPlan({
+            args: getScopedArgs(input.args, 'post'),
+            ctx,
+            select: getNestedSelection(input.select, 'post'),
+            view: postDataView,
+          }),
         });
+
+        comment.post = post;
       }
 
-      return resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
-  search: createConnectionProcedure({
+  search: fate.connection({
     input: z.object({
       query: z.string().min(1, 'Search query is required'),
     }),
@@ -127,13 +152,17 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      const { resolveMany } = createResolver({
-        ...input,
+      return fate.resolveConnection({
         ctx,
+        cursor,
+        direction,
+        extra: {
+          where: ilike(comment.content, `%${query}%`),
+        },
+        input,
+        take,
         view: commentDataView,
       });
-      const items = await searchCommentsConnection({ cursor, direction, query, take });
-      return resolveMany(items);
     },
   }),
 });

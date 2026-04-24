@@ -1,17 +1,16 @@
-import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
+import { connectionArgs, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
-  PostFindManyArgs,
   PostFindUniqueArgs,
   PostSelect,
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
-import { createConnectionProcedure } from '../connection.ts';
-import { procedure, router } from '../init.ts';
+import { fate, procedure, router } from '../init.ts';
 import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
+  ...fate.procedures(postDataView),
   add: procedure
     .input(
       z.object({
@@ -29,13 +28,14 @@ export const postRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = fate.createPlan({
         ...input,
         ctx,
         view: postDataView,
       });
+      const select = toPrismaSelect(plan);
 
-      return (await resolve(
+      return (await plan.resolve(
         await ctx.prisma.post.create({
           data: {
             authorId: ctx.sessionUser.id,
@@ -46,19 +46,6 @@ export const postRouter = router({
         }),
       )) as Post;
     }),
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
-      ...input,
-      ctx,
-      view: postDataView,
-    });
-    return resolveMany(
-      await ctx.prisma.post.findMany({
-        select,
-        where: { id: { in: input.ids } },
-      } as PostFindManyArgs),
-    );
-  }),
   like: procedure
     .input(
       z.object({
@@ -100,13 +87,14 @@ export const postRouter = router({
         });
       }
 
-      const { resolve, select } = createResolver({
+      const plan = fate.createPlan({
         ...input,
         ctx,
         view: postDataView,
       });
+      const select = toPrismaSelect(plan);
 
-      return (await resolve(
+      return (await plan.resolve(
         await ctx.prisma.post.update({
           data: {
             likes: {
@@ -118,28 +106,6 @@ export const postRouter = router({
         } as PostUpdateArgs),
       )) as Post;
     }),
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-      const findOptions: PostFindManyArgs = {
-        orderBy: { createdAt: 'desc' },
-        select,
-        take: direction === 'forward' ? take : -take,
-      };
-
-      if (cursor) {
-        findOptions.cursor = { id: cursor };
-        findOptions.skip = skip;
-      }
-
-      const items = await ctx.prisma.post.findMany(findOptions);
-      return resolveMany(direction === 'forward' ? items : items.reverse());
-    },
-  }),
   unlike: procedure
     .input(
       z.object({
@@ -150,11 +116,12 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
-        const { resolve, select } = createResolver({
+        const plan = fate.createPlan({
           ...input,
           ctx,
           view: postDataView,
         });
+        const select = toPrismaSelect(plan);
         const existing = await tx.post.findUnique({
           select: {
             likes: true,
@@ -172,7 +139,7 @@ export const postRouter = router({
         }
 
         if (existing.likes <= 0) {
-          return (await resolve(
+          return (await plan.resolve(
             await tx.post.findUniqueOrThrow({
               select,
               where: { id: input.id },
@@ -180,7 +147,7 @@ export const postRouter = router({
           )) as Post;
         }
 
-        return (await resolve(
+        return (await plan.resolve(
           await tx.post.update({
             data: {
               likes: {

@@ -4,6 +4,8 @@
   "entryPoints": [
     "packages/fate/src/index.ts",
     "packages/fate/src/server.ts",
+    "packages/fate/src/server/drizzle.ts",
+    "packages/fate/src/server/prisma.ts",
     "packages/react-fate/src/index.tsx"
   ],
   "excludeExternals": true,
