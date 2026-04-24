@@ -1,5 +1,5 @@
-import { computed, count, createExecutionPlan, dataView, defineSource } from '@nkzw/fate/server';
-import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+import { computed, count, createSourcePlan, dataView, defineSource } from '@nkzw/fate/server';
+import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
 import { expect, test, vi } from 'vite-plus/test';
 import type { AppContext } from '../context.ts';
 
@@ -58,12 +58,12 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
     },
     sessionUser: null,
   } as unknown as AppContext;
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     ctx,
     select: ['goingCount', 'waitlistCount'],
     source: eventSource,
   });
-  const runtime = createPrismaSourceRuntime<AppContext>({
+  const adapter = createPrismaSourceAdapter<AppContext>({
     sources: [
       {
         delegate: () => ({
@@ -77,7 +77,7 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
       },
     ],
   });
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ctx,
     ids: ['event-1', 'event-2'],
     plan,

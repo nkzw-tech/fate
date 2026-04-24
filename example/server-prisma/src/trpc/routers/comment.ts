@@ -1,7 +1,7 @@
 import {
   connectionArgs,
-  createExecutionPlan,
-  executeSourceConnection,
+  createSourcePlan,
+  resolveSourceConnection,
   toPrismaSelect,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
@@ -65,7 +65,7 @@ export const commentRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: commentSource,
@@ -104,7 +104,7 @@ export const commentRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: commentSource,
@@ -146,7 +146,7 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      return executeSourceConnection({
+      return resolveSourceConnection({
         ctx,
         cursor,
         direction,
@@ -158,9 +158,10 @@ export const commentRouter = router({
             },
           },
         },
-        plan: createExecutionPlan({ ...input, ctx, source: commentSource }),
+        input,
         registry: prismaRegistry,
         skip,
+        source: commentSource,
         take,
       });
     },

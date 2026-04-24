@@ -1,4 +1,4 @@
-import { createDrizzleSourceRuntime } from '@nkzw/fate/server/drizzle';
+import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
 import db from '../drizzle/db.ts';
 import {
   category,
@@ -23,7 +23,7 @@ import {
   userSource,
 } from './views.ts';
 
-export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
   db,
   sources: [
     {
@@ -71,4 +71,4 @@ export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
   ],
 });
 
-export const drizzleRegistry = drizzleRuntime.registry;
+export const drizzleRegistry = drizzleAdapter.registry;

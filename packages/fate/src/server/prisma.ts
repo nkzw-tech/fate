@@ -2,7 +2,7 @@
  * The fate Prisma source adapter.
  *
  * @example
- * import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+ * import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
  *
  * @module @nkzw/fate/server/prisma
  */
@@ -11,7 +11,7 @@ import type { AnyRecord } from '../types.ts';
 import { attachComputedState } from './dataView.ts';
 import { createSourceRegistry, type SourceRegistry } from './executor.ts';
 import { toPrismaSelect } from './prismaSelect.ts';
-import type { ExecutionPlan, ExecutionPlanNode, SourceDefinition, SourceOrder } from './source.ts';
+import type { SourcePlan, SourcePlanNode, SourceDefinition, SourceOrder } from './source.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 
@@ -28,7 +28,7 @@ export type PrismaSourceConfig<Context, Item extends AnyRecord = AnyRecord> = {
   source: SourceDefinition<Item, unknown>;
 };
 
-export type PrismaSourceRuntime<Context> = {
+export type PrismaSourceAdapter<Context> = {
   fetchById: <Item extends AnyRecord = AnyRecord>({
     ctx,
     extra,
@@ -38,7 +38,7 @@ export type PrismaSourceRuntime<Context> = {
     ctx: Context;
     extra?: PrismaQueryExtra;
     id: string;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => Promise<Item | null>;
   fetchByIds: <Item extends AnyRecord = AnyRecord>({
     ctx,
@@ -49,7 +49,7 @@ export type PrismaSourceRuntime<Context> = {
     ctx: Context;
     extra?: PrismaQueryExtra;
     ids: Array<string>;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => Promise<Array<Item>>;
   fetchConnection: <Item extends AnyRecord = AnyRecord>({
     ctx,
@@ -64,7 +64,7 @@ export type PrismaSourceRuntime<Context> = {
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: PrismaQueryExtra;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
     skip?: number;
     take: number;
   }) => Promise<Array<Item>>;
@@ -111,7 +111,7 @@ export const prismaConnectionArgs = ({
 }: {
   cursor?: string;
   direction: 'backward' | 'forward';
-  node: ExecutionPlanNode<any, any>;
+  node: SourcePlanNode<any, any>;
   skip?: number;
   take: number;
 }) => ({
@@ -126,7 +126,7 @@ export const prismaConnectionArgs = ({
 });
 
 const getConflictingCountRequests = <Context>(
-  node: ExecutionPlanNode<Context>,
+  node: SourcePlanNode<Context>,
 ): Map<string, Array<CountRequest>> => {
   const signaturesByRelation = new Map<string, Set<string>>();
   const requestsByRelation = new Map<string, Array<CountRequest>>();
@@ -159,11 +159,11 @@ const getConflictingCountRequests = <Context>(
   );
 };
 
-export function createPrismaSourceRuntime<Context>({
+export function createPrismaSourceAdapter<Context>({
   sources,
 }: {
   sources: Array<PrismaSourceConfig<Context, AnyRecord>>;
-}): PrismaSourceRuntime<Context> {
+}): PrismaSourceAdapter<Context> {
   const delegates = new Map<Source, (ctx: Context) => PrismaDelegate>(
     sources.map((source) => [
       source.source as Source,
@@ -223,7 +223,7 @@ export function createPrismaSourceRuntime<Context>({
   }: {
     ctx: Context;
     items: Array<AnyRecord>;
-    node: ExecutionPlanNode<Context>;
+    node: SourcePlanNode<Context>;
     source: Source;
   }): Promise<Array<AnyRecord>> => {
     if (items.length === 0) {
@@ -313,7 +313,7 @@ export function createPrismaSourceRuntime<Context>({
   }: {
     ctx: Context;
     items: Array<AnyRecord>;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) =>
     attachConflictingComputedCounts({
       ctx,
@@ -331,7 +331,7 @@ export function createPrismaSourceRuntime<Context>({
     ctx: Context;
     extra?: PrismaQueryExtra;
     ids: Array<string>;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => {
     const delegate = getDelegate(ctx, plan.source as Source);
 
@@ -359,7 +359,7 @@ export function createPrismaSourceRuntime<Context>({
     ctx: Context;
     extra?: PrismaQueryExtra;
     id: string;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => {
     const delegate = getDelegate(ctx, plan.source as Source);
 
@@ -399,7 +399,7 @@ export function createPrismaSourceRuntime<Context>({
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: PrismaQueryExtra;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
     skip?: number;
     take: number;
   }) => {
@@ -453,5 +453,5 @@ export function createPrismaSourceRuntime<Context>({
 }
 
 export const createPrismaSourceRegistry = <Context>(
-  options: Parameters<typeof createPrismaSourceRuntime<Context>>[0],
-) => createPrismaSourceRuntime<Context>(options).registry;
+  options: Parameters<typeof createPrismaSourceAdapter<Context>>[0],
+) => createPrismaSourceAdapter<Context>(options).registry;

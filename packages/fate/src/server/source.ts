@@ -15,12 +15,56 @@ export type SourceReference<Item extends AnyRecord = AnyRecord, Adapter = unknow
   | SourceDefinition<Item, Adapter>
   | (() => SourceDefinition<Item, Adapter>);
 
-export type SourceRelation<Item extends AnyRecord = AnyRecord, Adapter = unknown> = {
+type SourceRelationBase<Item extends AnyRecord = AnyRecord, Adapter = unknown> = {
   foreignKey: string;
-  kind: 'many' | 'manyToMany' | 'one';
   localKey: string;
-  orderBy?: SourceOrder;
   source: SourceReference<Item, Adapter>;
+};
+
+export type SourceRelation<
+  Item extends AnyRecord = AnyRecord,
+  Adapter = unknown,
+> = SourceRelationBase<Item, Adapter> &
+  (
+    | {
+        kind: 'one';
+        orderBy?: never;
+        through?: never;
+      }
+    | {
+        kind: 'many';
+        orderBy?: SourceOrder;
+        through?: never;
+      }
+    | {
+        kind: 'manyToMany';
+        orderBy?: SourceOrder;
+        through?: {
+          foreignKey: string;
+          localKey: string;
+        };
+      }
+  );
+
+type SourceRelationKeyConfig = {
+  foreignKey: string;
+  localKey: string;
+};
+
+type OneSourceRelationConfig = SourceRelationKeyConfig & {
+  orderBy?: never;
+  through?: never;
+};
+
+type OrderedSourceRelationConfig = SourceRelationKeyConfig & {
+  orderBy?: SourceOrder;
+};
+
+type ManySourceRelationConfig = OrderedSourceRelationConfig & {
+  through?: never;
+};
+
+type ManyToManySourceRelationConfig = OrderedSourceRelationConfig & {
   through?: {
     foreignKey: string;
     localKey: string;
@@ -35,18 +79,18 @@ export type SourceDefinition<Item extends AnyRecord = AnyRecord, Adapter = unkno
   view: DataView<Item>;
 };
 
-export type ExecutionPlanNode<Context = unknown, Adapter = unknown> = ViewPlanNode<Context> & {
+export type SourcePlanNode<Context = unknown, Adapter = unknown> = ViewPlanNode<Context> & {
   orderBy: SourceOrder;
-  relations: Map<string, ExecutionPlanNode<Context, Adapter>>;
+  relations: Map<string, SourcePlanNode<Context, Adapter>>;
   source: SourceDefinition<AnyRecord, Adapter>;
 };
 
-export type ExecutionPlan<
+export type SourcePlan<
   Item extends AnyRecord = AnyRecord,
   Context = unknown,
   Adapter = unknown,
 > = Omit<ViewPlan<Item, Context>, 'root'> & {
-  root: ExecutionPlanNode<Context, Adapter>;
+  root: SourcePlanNode<Context, Adapter>;
   source: SourceDefinition<Item, Adapter>;
 };
 
@@ -70,14 +114,9 @@ export function defineSource<Item extends AnyRecord, Adapter = unknown>(
   };
 }
 
-type SourceRelationConfig<Item extends AnyRecord = AnyRecord, Adapter = unknown> = Omit<
-  SourceRelation<Item, Adapter>,
-  'kind' | 'source'
->;
-
 export const one = <Item extends AnyRecord, Adapter = unknown>(
   source: SourceReference<Item, Adapter>,
-  config: SourceRelationConfig<Item, Adapter>,
+  config: OneSourceRelationConfig,
 ): SourceRelation<Item, Adapter> => ({
   ...config,
   kind: 'one',
@@ -86,7 +125,7 @@ export const one = <Item extends AnyRecord, Adapter = unknown>(
 
 export const many = <Item extends AnyRecord, Adapter = unknown>(
   source: SourceReference<Item, Adapter>,
-  config: SourceRelationConfig<Item, Adapter>,
+  config: ManySourceRelationConfig,
 ): SourceRelation<Item, Adapter> => ({
   ...config,
   kind: 'many',
@@ -95,7 +134,7 @@ export const many = <Item extends AnyRecord, Adapter = unknown>(
 
 export const manyToMany = <Item extends AnyRecord, Adapter = unknown>(
   source: SourceReference<Item, Adapter>,
-  config: SourceRelationConfig<Item, Adapter>,
+  config: ManyToManySourceRelationConfig,
 ): SourceRelation<Item, Adapter> => ({
   ...config,
   kind: 'manyToMany',
@@ -157,8 +196,8 @@ const attachSourceNode = <Context, Adapter = unknown>(
   node: ViewPlanNode<Context>,
   source: SourceDefinition<AnyRecord, Adapter>,
   overrideOrder?: SourceOrder,
-): ExecutionPlanNode<Context, Adapter> => {
-  const relations = new Map<string, ExecutionPlanNode<Context, Adapter>>();
+): SourcePlanNode<Context, Adapter> => {
+  const relations = new Map<string, SourcePlanNode<Context, Adapter>>();
 
   for (const [field, relationNode] of node.relations) {
     const relation = source.relations?.[field];
@@ -178,7 +217,7 @@ const attachSourceNode = <Context, Adapter = unknown>(
   };
 };
 
-export function createExecutionPlan<Item extends AnyRecord, Context = unknown, Adapter = unknown>({
+export function createSourcePlan<Item extends AnyRecord, Context = unknown, Adapter = unknown>({
   args,
   ctx,
   select,
@@ -200,10 +239,10 @@ export function createExecutionPlan<Item extends AnyRecord, Context = unknown, A
     ...plan,
     root: attachSourceNode(plan.root, source),
     source,
-  } satisfies ExecutionPlan<Item, Context, Adapter>;
+  } satisfies SourcePlan<Item, Context, Adapter>;
 }
 
-export function createNestedExecutionPlan<
+export function createNestedSourcePlan<
   Item extends AnyRecord,
   Context = unknown,
   Adapter = unknown,
@@ -221,7 +260,7 @@ export function createNestedExecutionPlan<
   };
   source: SourceDefinition<Item, Adapter>;
 }) {
-  return createExecutionPlan({
+  return createSourcePlan({
     ...getNestedSourceInput(input, field),
     ctx,
     source,

@@ -1,4 +1,4 @@
-import { connectionArgs, createExecutionPlan, executeSourceById } from '@nkzw/fate/server';
+import { connectionArgs, resolveSourceById } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
@@ -27,22 +27,17 @@ export const userRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: userSource,
-      });
-
       await auth.api.updateUser({
         body: { name: input.name },
         headers: ctx.headers,
       });
 
-      const user = await executeSourceById({
+      const user = await resolveSourceById({
         ctx,
         id: ctx.sessionUser.id,
-        plan,
+        input,
         registry: drizzleRegistry,
+        source: userSource,
       });
       if (!user) {
         throw new TRPCError({
@@ -64,11 +59,12 @@ export const userRouter = router({
         return null;
       }
 
-      return (await executeSourceById({
+      return (await resolveSourceById({
         ctx,
         id: ctx.sessionUser.id,
-        plan: createExecutionPlan({ ...input, ctx, source: userSource }),
+        input,
         registry: drizzleRegistry,
+        source: userSource,
       })) as User | null;
     }),
 });

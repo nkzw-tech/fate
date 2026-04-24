@@ -1,4 +1,4 @@
-import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
 import type { AppContext } from './context.ts';
 import {
   categorySource,
@@ -9,7 +9,7 @@ import {
   userSource,
 } from './views.ts';
 
-export const prismaRuntime = createPrismaSourceRuntime<AppContext>({
+export const prismaAdapter = createPrismaSourceAdapter<AppContext>({
   sources: [
     {
       delegate: (ctx) => ctx.prisma.category,
@@ -38,4 +38,4 @@ export const prismaRuntime = createPrismaSourceRuntime<AppContext>({
   ],
 });
 
-export const prismaRegistry = prismaRuntime.registry;
+export const prismaRegistry = prismaAdapter.registry;

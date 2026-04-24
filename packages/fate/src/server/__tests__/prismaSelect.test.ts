@@ -11,7 +11,7 @@ import {
 } from '../dataView.ts';
 import { prismaSelect } from '../prismaSelect.ts';
 import { toPrismaSelect } from '../prismaSelect.ts';
-import { createExecutionPlan, defineSource, desc } from '../source.ts';
+import { createSourcePlan, defineSource, desc } from '../source.ts';
 
 test('prismaSelect applies pagination args to relation selections', () => {
   const select = prismaSelect(['comments.id'], { comments: { first: 2 } });
@@ -212,7 +212,7 @@ test('toPrismaSelect skips orderBy for singular relations', () => {
 
   expect(
     toPrismaSelect(
-      createExecutionPlan({
+      createSourcePlan({
         select: ['author.name', 'comments.id'],
         source: postSource,
       }),

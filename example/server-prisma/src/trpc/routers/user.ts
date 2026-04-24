@@ -1,7 +1,7 @@
 import {
   connectionArgs,
-  createExecutionPlan,
-  executeSourceById,
+  createSourcePlan,
+  resolveSourceById,
   toPrismaSelect,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
@@ -33,7 +33,7 @@ export const userRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: userSource,
@@ -63,11 +63,12 @@ export const userRouter = router({
         return null;
       }
 
-      return (await executeSourceById({
+      return (await resolveSourceById({
         ctx,
         id: ctx.sessionUser.id,
-        plan: createExecutionPlan({ ...input, ctx, source: userSource }),
+        input,
         registry: prismaRegistry,
+        source: userSource,
       })) as User | null;
     }),
 });

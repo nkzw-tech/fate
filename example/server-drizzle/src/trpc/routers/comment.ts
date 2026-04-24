@@ -1,9 +1,7 @@
 import {
-  hasNestedSelection,
   connectionArgs,
-  createExecutionPlan,
-  createNestedExecutionPlan,
-  executeSourceConnection,
+  createSourcePlan,
+  resolveSourceConnection,
   refetchSourceById,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
@@ -16,10 +14,50 @@ import {
   deleteCommentRecord,
 } from '../../drizzle/queries.ts';
 import { comment } from '../../drizzle/schema.ts';
-import { drizzleRegistry, drizzleRuntime } from '../executor.ts';
+import { drizzleRegistry, drizzleAdapter } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
 import { commentSource, postSource } from '../views.ts';
+
+type AnyRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is AnyRecord =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const hasNestedSelection = (select: Iterable<string>, field: string) => {
+  for (const path of select) {
+    if (path === field || path.startsWith(`${field}.`)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const getNestedSelection = (select: Iterable<string>, field: string): Array<string> => {
+  const nested: Array<string> = [];
+  for (const path of select) {
+    if (path.startsWith(`${field}.`)) {
+      nested.push(path.slice(field.length + 1));
+    }
+  }
+  return nested;
+};
+
+const getScopedArgs = (args: AnyRecord | undefined, path: string): AnyRecord | undefined => {
+  if (!args) {
+    return undefined;
+  }
+
+  let current: unknown = args;
+  for (const segment of path.split('.')) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+
+  return isRecord(current) ? current : undefined;
+};
 
 export const commentRouter = router({
   ...sourceProcedures({
@@ -96,13 +134,13 @@ export const commentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: commentSource,
       });
 
-      const comment = await drizzleRuntime.fetchById<CommentItem>({
+      const comment = await drizzleAdapter.fetchById<CommentItem>({
         ctx,
         extra: { extraFields: ['authorId', 'postId'] },
         id: input.id,
@@ -126,13 +164,13 @@ export const commentRouter = router({
       await deleteCommentRecord(input.id);
 
       if (comment.postId && hasNestedSelection(input.select, 'post')) {
-        const post = await drizzleRuntime.fetchById<PostItem>({
+        const post = await drizzleAdapter.fetchById<PostItem>({
           ctx,
           id: comment.postId,
-          plan: createNestedExecutionPlan({
+          plan: createSourcePlan({
+            args: getScopedArgs(input.args, 'post'),
             ctx,
-            field: 'post',
-            input,
+            select: getNestedSelection(input.select, 'post'),
             source: postSource,
           }),
         });
@@ -158,19 +196,16 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      return executeSourceConnection({
+      return resolveSourceConnection({
         ctx,
         cursor,
         direction,
         extra: {
           where: ilike(comment.content, `%${query}%`),
         },
-        plan: createExecutionPlan({
-          ...input,
-          ctx,
-          source: commentSource,
-        }),
+        input,
         registry: drizzleRegistry,
+        source: commentSource,
         take,
       });
     },

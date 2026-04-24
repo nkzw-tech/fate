@@ -1,9 +1,9 @@
 import type { AnyTRPCProcedure } from '@trpc/server';
 import type { AnyRecord } from '../types.ts';
 import type { SourceRegistry } from './executor.ts';
-import { executeSourceByIds, executeSourceConnection } from './executor.ts';
+import { resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import { byIdInput } from './input.ts';
-import { createExecutionPlan, type SourceDefinition } from './source.ts';
+import type { SourceDefinition } from './source.ts';
 
 type ProcedureLike = {
   input: (schema: any) => {
@@ -139,11 +139,12 @@ export function createSourceProcedures<
           select: Array<string>;
         };
       }) =>
-        executeSourceByIds({
+        resolveSourceByIds({
           ctx,
           ids: input.ids,
-          plan: createExecutionPlan({ ...input, ctx, source }),
+          input,
           registry,
+          source,
         }),
     );
   }
@@ -159,13 +160,14 @@ export function createSourceProcedures<
     procedures.list = createConnectionProcedure({
       defaultSize: listConfig?.defaultSize,
       query: async ({ ctx, cursor, direction, input, skip, take }) =>
-        executeSourceConnection({
+        resolveSourceConnection({
           ctx: ctx as Context,
           cursor,
           direction,
-          plan: createExecutionPlan({ ...input, ctx: ctx as Context, source }),
+          input,
           registry,
           skip,
+          source,
           take,
         }),
     });
@@ -178,7 +180,7 @@ export function createSourceProcedures<
  * Binds the app-specific tRPC pieces once and returns a compact helper for
  * source procedures.
  */
-export function createSourceProcedureFactory<
+export function bindSourceProcedures<
   Context,
   Procedure extends ProcedureLike,
   ConnectionProcedure extends ConnectionProcedureLike | undefined =

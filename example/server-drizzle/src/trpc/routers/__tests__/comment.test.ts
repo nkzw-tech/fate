@@ -12,10 +12,10 @@ vi.mock('../../../drizzle/queries.ts', () => ({
 }));
 
 vi.mock('../../executor.ts', () => ({
-  drizzleRegistry,
-  drizzleRuntime: {
+  drizzleAdapter: {
     fetchById,
   },
+  drizzleRegistry,
 }));
 import { router } from '../../init.ts';
 import { postSource } from '../../views.ts';

@@ -2,7 +2,7 @@
  * The fate Drizzle source adapter.
  *
  * @example
- * import { createDrizzleSourceRuntime } from '@nkzw/fate/server/drizzle';
+ * import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
  *
  * @module @nkzw/fate/server/drizzle
  */
@@ -25,12 +25,7 @@ import type { AnyRecord } from '../types.ts';
 import type { ConnectionResult } from './connection.ts';
 import { attachComputedState, type ComputedNeed } from './dataView.ts';
 import { createSourceRegistry, type SourceRegistry } from './executor.ts';
-import type {
-  ExecutionPlan,
-  ExecutionPlanNode,
-  SourceDefinition,
-  SourceRelation,
-} from './source.ts';
+import type { SourcePlan, SourcePlanNode, SourceDefinition, SourceRelation } from './source.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 type Relation = SourceRelation<AnyRecord, unknown>;
@@ -75,7 +70,7 @@ export type DrizzleSourceConfig<
   table: TTable;
 };
 
-export type DrizzleSourceRuntime<Context> = {
+export type DrizzleSourceAdapter<Context> = {
   fetchById: <Item extends AnyRecord = AnyRecord>({
     ctx,
     extra,
@@ -85,7 +80,7 @@ export type DrizzleSourceRuntime<Context> = {
     ctx?: Context;
     extra?: DrizzleQueryExtra;
     id: string;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => Promise<Item | null>;
   fetchByIds: <Item extends AnyRecord = AnyRecord>({
     ctx,
@@ -96,7 +91,7 @@ export type DrizzleSourceRuntime<Context> = {
     ctx?: Context;
     extra?: DrizzleQueryExtra;
     ids: Array<string>;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => Promise<Array<Item>>;
   fetchConnection: <Item extends AnyRecord = AnyRecord>({
     ctx,
@@ -110,7 +105,7 @@ export type DrizzleSourceRuntime<Context> = {
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: DrizzleQueryExtra;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
     take: number;
   }) => Promise<Array<Item>>;
   registry: SourceRegistry<Context>;
@@ -237,7 +232,7 @@ const addNeedColumns = (fields: Set<string>, needs?: Record<string, ComputedNeed
   }
 };
 
-const getRequiredFields = (node: ExecutionPlanNode<any, any>, extraFields: Array<string> = []) => {
+const getRequiredFields = (node: SourcePlanNode<any, any>, extraFields: Array<string> = []) => {
   const fields = new Set<string>(extraFields);
   addColumnField(fields, node.source.id);
 
@@ -283,7 +278,7 @@ const buildCursorWhere = ({
   columns: ColumnMap;
   cursorValues: Record<string, unknown>;
   direction: 'backward' | 'forward';
-  node: ExecutionPlanNode<any, any>;
+  node: SourcePlanNode<any, any>;
 }) => {
   const branches = node.orderBy.map((entry, index) => {
     const column = getColumn(columns, entry.field);
@@ -300,7 +295,7 @@ const buildCursorWhere = ({
 
 const getQueryOrder = (
   direction: 'backward' | 'forward',
-  node: ExecutionPlanNode<any, any>,
+  node: SourcePlanNode<any, any>,
   columns: ColumnMap,
 ) =>
   node.orderBy.map((entry) => {
@@ -366,13 +361,13 @@ const resolveManyToManyConfig = ({
   };
 };
 
-export function createDrizzleSourceRuntime<Context>({
+export function createDrizzleSourceAdapter<Context>({
   db,
   sources,
 }: {
   db: DrizzleDatabaseInput<Context>;
   sources: Array<DrizzleSourceConfig<AnyRecord>>;
-}): DrizzleSourceRuntime<Context> {
+}): DrizzleSourceAdapter<Context> {
   const sourceConfigs = new Map<Source, RegisteredSourceConfig>(
     sources.map((source) => [source.source as Source, toRegisteredConfig(source)]),
   );
@@ -393,7 +388,7 @@ export function createDrizzleSourceRuntime<Context>({
     return db;
   };
 
-  const buildSelection = (node: ExecutionPlanNode<any, any>, extraFields: Array<string> = []) => {
+  const buildSelection = (node: SourcePlanNode<any, any>, extraFields: Array<string> = []) => {
     const config = getSourceConfig(node.source);
     const selection: Record<string, any> = {};
 
@@ -412,7 +407,7 @@ export function createDrizzleSourceRuntime<Context>({
   }: {
     ctx?: Context;
     extraFields?: Array<string>;
-    node: ExecutionPlanNode<any, any>;
+    node: SourcePlanNode<any, any>;
     where?: any;
   }) => {
     const config = getSourceConfig(node.source);
@@ -435,7 +430,7 @@ export function createDrizzleSourceRuntime<Context>({
     ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
-    node: ExecutionPlanNode<any, any>;
+    node: SourcePlanNode<any, any>;
     take: number;
   }) => {
     const config = getSourceConfig(node.source);
@@ -478,7 +473,7 @@ export function createDrizzleSourceRuntime<Context>({
 
   const attachComputedCounts = async (
     items: Array<AnyRecord>,
-    node: ExecutionPlanNode<any, any>,
+    node: SourcePlanNode<any, any>,
     ctx?: Context,
   ) => {
     if (items.length === 0) {
@@ -539,7 +534,7 @@ export function createDrizzleSourceRuntime<Context>({
   }: {
     ctx?: Context;
     items: Array<AnyRecord>;
-    relationNode: ExecutionPlanNode<any, any>;
+    relationNode: SourcePlanNode<any, any>;
     sourceRelation: Relation;
   }) => {
     const childSource = resolveSource(sourceRelation.source);
@@ -571,7 +566,7 @@ export function createDrizzleSourceRuntime<Context>({
 
   const fetchManyConnection = async (
     parentKey: unknown,
-    relationNode: ExecutionPlanNode<any, any>,
+    relationNode: SourcePlanNode<any, any>,
     sourceRelation: Relation,
     ctx?: Context,
   ): Promise<ConnectionResult<AnyRecord>> => {
@@ -620,7 +615,7 @@ export function createDrizzleSourceRuntime<Context>({
     ctx?: Context;
     cursor?: string;
     direction: 'backward' | 'forward';
-    node: ExecutionPlanNode<any, any>;
+    node: SourcePlanNode<any, any>;
     parentKey: unknown;
     sourceRelation: Relation;
     take: number;
@@ -681,7 +676,7 @@ export function createDrizzleSourceRuntime<Context>({
 
   const fetchManyToManyConnection = async (
     parentKey: unknown,
-    relationNode: ExecutionPlanNode<any, any>,
+    relationNode: SourcePlanNode<any, any>,
     sourceRelation: Relation,
     through: RegisteredManyToManyConfig,
     ctx?: Context,
@@ -729,9 +724,9 @@ export function createDrizzleSourceRuntime<Context>({
   }: {
     ctx?: Context;
     items: Array<AnyRecord>;
-    node: ExecutionPlanNode<any, any>;
+    node: SourcePlanNode<any, any>;
     relationField: string;
-    relationNode: ExecutionPlanNode<any, any>;
+    relationNode: SourcePlanNode<any, any>;
     sourceRelation: Relation;
   }) => {
     const parentConfig = getSourceConfig(node.source);
@@ -783,7 +778,7 @@ export function createDrizzleSourceRuntime<Context>({
 
   const hydrateRows = async (
     rows: Array<AnyRecord>,
-    node: ExecutionPlanNode<any, any>,
+    node: SourcePlanNode<any, any>,
     ctx?: Context,
   ): Promise<Array<AnyRecord>> => {
     const items = rows.map((row) => ({ ...row }));
@@ -922,7 +917,7 @@ export function createDrizzleSourceRuntime<Context>({
     ctx?: Context;
     extra?: DrizzleQueryExtra;
     ids: Array<string>;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => {
     if (!ids.length) {
       return [];
@@ -950,7 +945,7 @@ export function createDrizzleSourceRuntime<Context>({
     ctx?: Context;
     extra?: DrizzleQueryExtra;
     id: string;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
   }) => (await fetchByIds({ ctx, extra, ids: [id], plan }))[0] ?? null;
 
   const fetchConnection = async <Item extends AnyRecord>({
@@ -965,7 +960,7 @@ export function createDrizzleSourceRuntime<Context>({
     cursor?: string;
     direction: 'backward' | 'forward';
     extra?: DrizzleQueryExtra;
-    plan: ExecutionPlan<Item, Context>;
+    plan: SourcePlan<Item, Context>;
     take: number;
   }) =>
     hydrateRows(
@@ -1011,5 +1006,5 @@ export function createDrizzleSourceRuntime<Context>({
 }
 
 export const createDrizzleSourceRegistry = <Context>(
-  options: Parameters<typeof createDrizzleSourceRuntime<Context>>[0],
-) => createDrizzleSourceRuntime<Context>(options).registry;
+  options: Parameters<typeof createDrizzleSourceAdapter<Context>>[0],
+) => createDrizzleSourceAdapter<Context>(options).registry;

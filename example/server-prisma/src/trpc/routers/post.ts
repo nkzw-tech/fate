@@ -1,4 +1,4 @@
-import { connectionArgs, createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+import { connectionArgs, createSourcePlan, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
@@ -29,7 +29,7 @@ export const postRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: postSource,
@@ -88,7 +88,7 @@ export const postRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
+      const plan = createSourcePlan({
         ...input,
         ctx,
         source: postSource,
@@ -117,7 +117,7 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
-        const plan = createExecutionPlan({
+        const plan = createSourcePlan({
           ...input,
           ctx,
           source: postSource,

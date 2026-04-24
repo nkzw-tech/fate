@@ -1,5 +1,5 @@
 import type { AnyRecord } from '../types.ts';
-import { createExecutionPlan, type ExecutionPlan, type SourceDefinition } from './source.ts';
+import { createSourcePlan, type SourcePlan, type SourceDefinition } from './source.ts';
 
 export type SourceConnectionHandler<
   Context,
@@ -10,7 +10,7 @@ export type SourceConnectionHandler<
   cursor?: string;
   direction: 'backward' | 'forward';
   extra?: Extra;
-  plan: ExecutionPlan<Item, Context>;
+  plan: SourcePlan<Item, Context>;
   skip?: number;
   take: number;
 }) => Promise<Array<Item>>;
@@ -23,7 +23,7 @@ export type SourceByIdHandler<
   ctx: Context;
   extra?: Extra;
   id: string;
-  plan: ExecutionPlan<Item, Context>;
+  plan: SourcePlan<Item, Context>;
 }) => Promise<Item | null>;
 
 export type SourceByIdsHandler<
@@ -34,7 +34,7 @@ export type SourceByIdsHandler<
   ctx: Context;
   extra?: Extra;
   ids: Array<string>;
-  plan: ExecutionPlan<Item, Context>;
+  plan: SourcePlan<Item, Context>;
 }) => Promise<Array<Item>>;
 
 export type SourceExecutor<
@@ -64,7 +64,7 @@ const getSourceExecutor = <Context, Item extends AnyRecord>({
   plan,
   registry,
 }: {
-  plan: ExecutionPlan<Item, Context>;
+  plan: SourcePlan<Item, Context>;
   registry: SourceRegistry<Context>;
 }) => {
   const executor = registry.get(plan.source as SourceDefinition<AnyRecord, unknown>);
@@ -76,21 +76,40 @@ const getSourceExecutor = <Context, Item extends AnyRecord>({
   return executor;
 };
 
-export const executeSourceByIds = async <Context, Item extends AnyRecord>({
+const createPlan = <Context, Item extends AnyRecord>({
+  ctx,
+  input,
+  source,
+}: {
+  ctx: Context;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
+  source: SourceDefinition<Item, unknown>;
+}) => createSourcePlan({ ...input, ctx, source });
+
+export const resolveSourceByIds = async <Context, Item extends AnyRecord>({
   ctx,
   extra,
   ids,
-  plan,
+  input,
   registry,
+  source,
 }: {
   ctx: Context;
   extra?: unknown;
   ids: Array<string>;
-  plan: ExecutionPlan<Item, Context>;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
   registry: SourceRegistry<Context>;
+  source: SourceDefinition<Item, unknown>;
 }) => {
+  const plan = createPlan({ ctx, input, source });
   const executor = getSourceExecutor({ plan, registry });
-  const planRecord = plan as ExecutionPlan<AnyRecord, Context>;
+  const planRecord = plan as SourcePlan<AnyRecord, Context>;
 
   if (executor.byIds) {
     return plan.resolveMany(await executor.byIds({ ctx, extra, ids, plan: planRecord }));
@@ -106,21 +125,27 @@ export const executeSourceByIds = async <Context, Item extends AnyRecord>({
   return plan.resolveMany(items.flatMap((item) => (item ? [item] : [])));
 };
 
-export const executeSourceById = async <Context, Item extends AnyRecord>({
+export const resolveSourceById = async <Context, Item extends AnyRecord>({
   ctx,
   extra,
   id,
-  plan,
+  input,
   registry,
+  source,
 }: {
   ctx: Context;
   extra?: unknown;
   id: string;
-  plan: ExecutionPlan<Item, Context>;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
   registry: SourceRegistry<Context>;
+  source: SourceDefinition<Item, unknown>;
 }) => {
+  const plan = createPlan({ ctx, input, source });
   const executor = getSourceExecutor({ plan, registry });
-  const planRecord = plan as ExecutionPlan<AnyRecord, Context>;
+  const planRecord = plan as SourcePlan<AnyRecord, Context>;
 
   if (executor.byId) {
     const item = await executor.byId({ ctx, extra, id, plan: planRecord });
@@ -135,27 +160,33 @@ export const executeSourceById = async <Context, Item extends AnyRecord>({
   return items[0] ? plan.resolve(items[0] as Item) : null;
 };
 
-export const executeSourceConnection = async <Context, Item extends AnyRecord>({
+export const resolveSourceConnection = async <Context, Item extends AnyRecord>({
   ctx,
   cursor,
   direction,
   extra,
-  plan,
+  input,
   registry,
   skip,
+  source,
   take,
 }: {
   ctx: Context;
   cursor?: string;
   direction: 'backward' | 'forward';
   extra?: unknown;
-  plan: ExecutionPlan<Item, Context>;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
   registry: SourceRegistry<Context>;
   skip?: number;
+  source: SourceDefinition<Item, unknown>;
   take: number;
 }) => {
+  const plan = createPlan({ ctx, input, source });
   const executor = getSourceExecutor({ plan, registry });
-  const planRecord = plan as ExecutionPlan<AnyRecord, Context>;
+  const planRecord = plan as SourcePlan<AnyRecord, Context>;
 
   if (!executor.connection) {
     throw new Error(`Source ${plan.source.view.typeName} does not support connection execution.`);
@@ -192,10 +223,11 @@ export const refetchSourceById = async <Context, Item extends AnyRecord>({
   registry: SourceRegistry<Context>;
   source: SourceDefinition<Item, unknown>;
 }) =>
-  executeSourceById({
+  resolveSourceById({
     ctx,
     extra,
     id,
-    plan: createExecutionPlan({ ...input, ctx, source }),
+    input,
     registry,
+    source,
   });

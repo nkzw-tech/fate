@@ -13,7 +13,7 @@ import {
   list,
   resolver,
 } from '../dataView.ts';
-import { asc, createExecutionPlan, defineSource, desc } from '../source.ts';
+import { asc, createSourcePlan, defineSource, desc } from '../source.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -529,7 +529,7 @@ test('createViewPlan exposes scoped args for nested relations', () => {
   });
 });
 
-test('createExecutionPlan attaches source order metadata', () => {
+test('createSourcePlan attaches source order metadata', () => {
   const commentView = dataView<{ createdAt: Date; id: string }>('Comment')({
     id: true,
   });
@@ -560,7 +560,7 @@ test('createExecutionPlan attaches source order metadata', () => {
     },
   });
 
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     select: ['comments.id'],
     source: postSource,
   });

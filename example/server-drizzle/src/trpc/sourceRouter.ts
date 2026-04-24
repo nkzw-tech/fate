@@ -1,10 +1,10 @@
-import { createSourceProcedureFactory } from '@nkzw/fate/server';
+import { bindSourceProcedures } from '@nkzw/fate/server';
 import { createConnectionProcedure } from './connection.ts';
 import type { AppContext } from './context.ts';
 import { drizzleRegistry } from './executor.ts';
 import { procedure } from './init.ts';
 
-export const sourceProcedures = createSourceProcedureFactory<
+export const sourceProcedures = bindSourceProcedures<
   AppContext,
   typeof procedure,
   typeof createConnectionProcedure

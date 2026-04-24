@@ -1,8 +1,8 @@
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { expect, test } from 'vite-plus/test';
 import { dataView, list } from '../dataView.ts';
-import { createDrizzleSourceRuntime } from '../drizzle.ts';
-import { createExecutionPlan, defineSource } from '../source.ts';
+import { createDrizzleSourceAdapter } from '../drizzle.ts';
+import { createSourcePlan, defineSource } from '../source.ts';
 
 test('Drizzle runtime can resolve the database from request context', async () => {
   const userTable = pgTable('User', {
@@ -39,7 +39,7 @@ test('Drizzle runtime can resolve the database from request context', async () =
       }),
     };
   };
-  const runtime = createDrizzleSourceRuntime({
+  const adapter = createDrizzleSourceAdapter({
     db,
     sources: [
       {
@@ -48,13 +48,13 @@ test('Drizzle runtime can resolve the database from request context', async () =
       },
     ],
   });
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     ctx,
     select: ['name'],
     source: userSource,
   });
 
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ctx,
     ids: ['tenant-1'],
     plan,
@@ -133,7 +133,7 @@ test('Drizzle many-to-many relations infer join columns from source through keys
     }),
   };
 
-  const runtime = createDrizzleSourceRuntime({
+  const adapter = createDrizzleSourceAdapter({
     db,
     sources: [
       {
@@ -149,12 +149,12 @@ test('Drizzle many-to-many relations infer join columns from source through keys
       },
     ],
   });
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     select: ['tags.name'],
     source: postSource,
   });
 
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ids: ['post-1'],
     plan,
   });
@@ -240,7 +240,7 @@ test('Drizzle many relations preserve falsy relation keys', async () => {
       },
     }),
   };
-  const runtime = createDrizzleSourceRuntime({
+  const adapter = createDrizzleSourceAdapter({
     db,
     sources: [
       {
@@ -253,12 +253,12 @@ test('Drizzle many relations preserve falsy relation keys', async () => {
       },
     ],
   });
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     select: ['comments.content'],
     source: postSource,
   });
 
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ids: [''],
     plan,
   });
@@ -344,7 +344,7 @@ test('Drizzle one relations preserve falsy relation keys', async () => {
       },
     }),
   };
-  const runtime = createDrizzleSourceRuntime({
+  const adapter = createDrizzleSourceAdapter({
     db,
     sources: [
       {
@@ -357,12 +357,12 @@ test('Drizzle one relations preserve falsy relation keys', async () => {
       },
     ],
   });
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     select: ['author.name'],
     source: commentSource,
   });
 
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ids: ['comment-1'],
     plan,
   });
@@ -450,7 +450,7 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
       },
     }),
   };
-  const runtime = createDrizzleSourceRuntime({
+  const adapter = createDrizzleSourceAdapter({
     db,
     sources: [
       {
@@ -466,7 +466,7 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
       },
     ],
   });
-  const plan = createExecutionPlan({
+  const plan = createSourcePlan({
     args: {
       tags: {
         first: 1,
@@ -476,7 +476,7 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
     source: postSource,
   });
 
-  const items = await runtime.fetchByIds({
+  const items = await adapter.fetchByIds({
     ids: ['post-1'],
     plan,
   });

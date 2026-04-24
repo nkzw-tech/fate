@@ -175,18 +175,18 @@ The `id` field is used for object identity and cursor pagination. `orderBy` cont
 
 ## Database Adapters
 
-The Prisma and Drizzle adapters both turn source definitions into a `SourceRegistry`. This registry is what fate's generic tRPC helpers call for `byId`, `byIds`, and paginated `list` execution.
+The Prisma and Drizzle adapters both turn source definitions into a `SourceRegistry`. This registry is what fate's generic tRPC helpers use to resolve `byId`, `byIds`, and paginated `list` requests.
 
 ### Prisma
 
-Use `createPrismaSourceRuntime` from `@nkzw/fate/server/prisma` and connect each source to a Prisma delegate. The delegate receives your tRPC context so it can use `ctx.prisma`, a transaction client, or any request-scoped Prisma client:
+Use `createPrismaSourceAdapter` from `@nkzw/fate/server/prisma` and connect each source to a Prisma delegate. The delegate receives your tRPC context so it can use `ctx.prisma`, a transaction client, or any request-scoped Prisma client:
 
 ```tsx
-import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
 import type { AppContext } from './context.ts';
 import { commentSource, postSource, userSource } from './views.ts';
 
-export const prismaRuntime = createPrismaSourceRuntime<AppContext>({
+export const prismaAdapter = createPrismaSourceAdapter<AppContext>({
   sources: [
     {
       delegate: (ctx) => ctx.prisma.comment,
@@ -203,17 +203,17 @@ export const prismaRuntime = createPrismaSourceRuntime<AppContext>({
   ],
 });
 
-export const prismaRegistry = prismaRuntime.registry;
+export const prismaRegistry = prismaAdapter.registry;
 ```
 
 The Prisma adapter translates a source execution plan into Prisma `select`, `where`, `orderBy`, `cursor`, `skip`, and `take` options. It also hydrates computed `count(...)` dependencies using Prisma `groupBy` when needed.
 
-For custom Prisma queries and mutations, you can still use the lower-level `createExecutionPlan` and `toPrismaSelect` helpers:
+For custom Prisma queries and mutations, you can still use the lower-level `createSourcePlan` and `toPrismaSelect` helpers:
 
 ```tsx
-import { createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+import { createSourcePlan, toPrismaSelect } from '@nkzw/fate/server';
 
-const plan = createExecutionPlan({
+const plan = createSourcePlan({
   ...input,
   ctx,
   source: postSource,
@@ -234,16 +234,16 @@ return plan.resolve(post);
 
 ### Drizzle
 
-Use `createDrizzleSourceRuntime` from `@nkzw/fate/server/drizzle` and connect each source to a Drizzle table. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
+Use `createDrizzleSourceAdapter` from `@nkzw/fate/server/drizzle` and connect each source to a Drizzle table. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
 
 ```tsx
-import { createDrizzleSourceRuntime } from '@nkzw/fate/server/drizzle';
+import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
 import db from '../drizzle/db.ts';
 import { comment, post, postToTag, tag, user } from '../drizzle/schema.ts';
 import type { AppContext } from './context.ts';
 import { commentSource, postSource, tagSource, userSource } from './views.ts';
 
-export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
   db,
   sources: [
     {
@@ -268,13 +268,13 @@ export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
   ],
 });
 
-export const drizzleRegistry = drizzleRuntime.registry;
+export const drizzleRegistry = drizzleAdapter.registry;
 ```
 
 If your database lives on the request context, pass a function instead:
 
 ```tsx
-export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
   db: (ctx) => ctx.db,
   sources,
 });
@@ -299,7 +299,7 @@ export const postSource = defineSource(postDataView, {
   },
 });
 
-export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
   db,
   sources: [
     {
@@ -357,16 +357,16 @@ return post;
 
 ## tRPC Source Procedures
 
-Once you have a registry, use `createSourceProcedureFactory` to build standard `byId` and `list` procedures for each source:
+Once you have a registry, use `bindSourceProcedures` to build standard `byId` and `list` procedures for each source:
 
 ```tsx
-import { createSourceProcedureFactory } from '@nkzw/fate/server';
+import { bindSourceProcedures } from '@nkzw/fate/server';
 import { createConnectionProcedure } from './connection.ts';
 import type { AppContext } from './context.ts';
 import { prismaRegistry } from './executor.ts';
 import { procedure } from './init.ts';
 
-export const sourceProcedures = createSourceProcedureFactory<
+export const sourceProcedures = bindSourceProcedures<
   AppContext,
   typeof procedure,
   typeof createConnectionProcedure
@@ -380,7 +380,7 @@ export const sourceProcedures = createSourceProcedureFactory<
 For Drizzle, pass `drizzleRegistry` instead:
 
 ```tsx
-export const sourceProcedures = createSourceProcedureFactory<
+export const sourceProcedures = bindSourceProcedures<
   AppContext,
   typeof procedure,
   typeof createConnectionProcedure
@@ -416,7 +416,7 @@ export const commentRouter = router({
 
 ## Custom Queries
 
-You can add custom root queries next to source procedures. Define the root in `Root`, implement a matching tRPC procedure, and call `executeSourceConnection` with the source registry:
+You can add custom root queries next to source procedures. Define the root in `Root`, implement a matching tRPC procedure, and call `resolveSourceConnection` with the source registry:
 
 ```tsx
 export const Root = {
@@ -425,7 +425,7 @@ export const Root = {
 ```
 
 ```tsx
-import { createExecutionPlan, executeSourceConnection } from '@nkzw/fate/server';
+import { resolveSourceConnection } from '@nkzw/fate/server';
 import { ilike } from 'drizzle-orm';
 
 export const commentRouter = router({
@@ -438,19 +438,16 @@ export const commentRouter = router({
       query: z.string().min(1, 'Search query is required'),
     }),
     query: ({ ctx, cursor, direction, input, take }) =>
-      executeSourceConnection({
+      resolveSourceConnection({
         ctx,
         cursor,
         direction,
         extra: {
           where: ilike(comment.content, `%${input.args.query}%`),
         },
-        plan: createExecutionPlan({
-          ...input,
-          ctx,
-          source: commentSource,
-        }),
+        input,
         registry: drizzleRegistry,
+        source: commentSource,
         take,
       }),
   }),
