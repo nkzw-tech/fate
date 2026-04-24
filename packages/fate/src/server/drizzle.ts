@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, getTableColumns, gt, inArray, lt, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  inArray,
+  isTable,
+  lt,
+  or,
+  sql,
+} from 'drizzle-orm';
+import type { AnyColumn, SQLWrapper, Table } from 'drizzle-orm';
 import type { AnyRecord } from '../types.ts';
 import type { ConnectionResult } from './connection.ts';
 import { attachComputedState, type ComputedNeed } from './dataView.ts';
@@ -12,28 +25,43 @@ import type {
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 type Relation = SourceRelation<AnyRecord, unknown>;
-type ColumnMap = Record<string, any>;
+type ColumnMap = Record<string, AnyColumn>;
+type DrizzleTable = Table;
 
 type DrizzleDatabase = {
-  select: (fields?: Record<string, any>) => any;
+  select: (fields?: Record<string, unknown>) => any;
 };
 
 export type DrizzleQueryExtra = {
   extraFields?: Array<string>;
-  where?: unknown;
+  where?: SQLWrapper;
 };
 
-export type DrizzleManyToManyConfig = {
-  foreignColumn: any;
-  localColumn: any;
-  table: any;
-};
+type DrizzleManyToManyColumns =
+  | {
+      foreignColumn: AnyColumn;
+      localColumn: AnyColumn;
+    }
+  | {
+      foreignColumn?: never;
+      localColumn?: never;
+    };
 
-export type DrizzleSourceConfig<Item extends AnyRecord = AnyRecord> = {
+export type DrizzleManyToManyConfig = DrizzleManyToManyColumns & {
   columns?: ColumnMap;
-  manyToMany?: Record<string, DrizzleManyToManyConfig>;
+  table: DrizzleTable;
+};
+
+export type DrizzleManyToManyInput = DrizzleManyToManyConfig | DrizzleTable;
+
+export type DrizzleSourceConfig<
+  Item extends AnyRecord = AnyRecord,
+  TTable extends DrizzleTable = DrizzleTable,
+> = {
+  columns?: ColumnMap;
+  manyToMany?: Record<string, DrizzleManyToManyInput>;
   source: SourceDefinition<Item, unknown>;
-  table: any;
+  table: TTable;
 };
 
 export type DrizzleSourceRuntime<Context> = {
@@ -73,6 +101,12 @@ export type DrizzleSourceRuntime<Context> = {
 
 type RegisteredSourceConfig = DrizzleSourceConfig<AnyRecord> & {
   columns: ColumnMap;
+};
+
+type RegisteredManyToManyConfig = {
+  foreignColumn: AnyColumn;
+  localColumn: AnyColumn;
+  table: DrizzleTable;
 };
 
 type PaginationArgs = {
@@ -274,6 +308,42 @@ const toRegisteredConfig = (config: DrizzleSourceConfig<AnyRecord>): RegisteredS
   ...config,
   columns: config.columns ?? getTableColumns(config.table),
 });
+
+const resolveManyToManyConfig = ({
+  field,
+  source,
+  sourceRelation,
+  through: throughInput,
+}: {
+  field: string;
+  source: Source;
+  sourceRelation: Relation;
+  through: DrizzleManyToManyInput;
+}): RegisteredManyToManyConfig => {
+  const through = isTable(throughInput) ? { table: throughInput } : throughInput;
+
+  if (through.localColumn && through.foreignColumn) {
+    return {
+      foreignColumn: through.foreignColumn,
+      localColumn: through.localColumn,
+      table: through.table,
+    };
+  }
+
+  if (!sourceRelation.through) {
+    throw new Error(
+      `Drizzle many-to-many relation ${source.view.typeName}.${field} requires source relation 'through' keys or explicit join columns.`,
+    );
+  }
+
+  const throughColumns = through.columns ?? getTableColumns(through.table);
+
+  return {
+    foreignColumn: getColumn(throughColumns, sourceRelation.through.foreignKey),
+    localColumn: getColumn(throughColumns, sourceRelation.through.localKey),
+    table: through.table,
+  };
+};
 
 export function createDrizzleSourceRuntime<Context>({
   db,
@@ -503,13 +573,19 @@ export function createDrizzleSourceRuntime<Context>({
   }) => {
     const parentConfig = getSourceConfig(node.source);
     const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
-    const through = parentConfig.manyToMany?.[relationField];
+    const throughConfig = parentConfig.manyToMany?.[relationField];
 
-    if (!through) {
+    if (!throughConfig) {
       throw new Error(
         `No Drizzle many-to-many table registered for ${node.source.view.typeName}.${relationField}.`,
       );
     }
+    const through = resolveManyToManyConfig({
+      field: relationField,
+      source: node.source,
+      sourceRelation,
+      through: throughConfig,
+    });
 
     const parentKeys = [
       ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),

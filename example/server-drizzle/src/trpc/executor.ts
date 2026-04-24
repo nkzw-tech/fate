@@ -48,22 +48,14 @@ export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
     },
     {
       manyToMany: {
-        tags: {
-          foreignColumn: postToTag.tagId,
-          localColumn: postToTag.postId,
-          table: postToTag,
-        },
+        tags: postToTag,
       },
       source: postSource,
       table: post,
     },
     {
       manyToMany: {
-        tags: {
-          foreignColumn: postToTag.tagId,
-          localColumn: postToTag.postId,
-          table: postToTag,
-        },
+        tags: postToTag,
       },
       source: postSummarySource,
       table: post,
