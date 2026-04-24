@@ -28,6 +28,9 @@ vi.mock('../../init.ts', async () => {
       fetchById,
       procedures: vi.fn(() => ({})),
     },
+    live: {
+      update: vi.fn(),
+    },
     middleware: t.middleware,
     procedure: t.procedure,
     router: t.router,

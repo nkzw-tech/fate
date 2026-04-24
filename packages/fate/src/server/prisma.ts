@@ -66,15 +66,23 @@ type ListConfig = {
   defaultSize?: number;
 };
 
+type LiveConfig =
+  | import('./live.ts').LiveEventBus
+  | {
+      bus: import('./live.ts').LiveEventBus;
+    };
+
 type ViewProcedureInput<
   Item extends AnyRecord,
   ById extends boolean | undefined,
   List extends boolean | ListConfig | undefined,
+  Live extends false | LiveConfig | undefined,
 > =
   | ViewTarget<Item>
   | {
       byId?: ById;
       list?: List;
+      live?: Live;
       view: ViewTarget<Item>;
     };
 
@@ -127,6 +135,7 @@ export type PrismaSourceAdapter<Context> = {
 type ProcedureLike = {
   input: (schema: any) => {
     query: (resolver: (options: any) => unknown) => any;
+    subscription: (resolver: (options: any) => unknown) => any;
   };
 };
 
@@ -686,15 +695,16 @@ export function createPrismaFate<Context, Procedure extends ProcedureLike>({
       Item extends AnyRecord,
       ById extends boolean | undefined = undefined,
       List extends boolean | ListConfig | undefined = undefined,
+      Live extends false | LiveConfig | undefined = undefined,
     >(
-      input: ViewProcedureInput<Item, ById, List>,
+      input: ViewProcedureInput<Item, ById, List, Live>,
     ) => {
       const procedureInput = input as any;
       const options =
         procedureInput && typeof procedureInput === 'object' && 'view' in procedureInput
           ? { ...procedureInput, source: adapter.getSource(procedureInput.view) }
           : adapter.getSource(input as ViewTarget<Item>);
-      return procedures<Item, ById, List>(options);
+      return procedures<Item, ById, List, Live>(options);
     },
     resolveById: <Item extends AnyRecord = AnyRecord>({
       ctx,

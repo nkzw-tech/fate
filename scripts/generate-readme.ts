@@ -13,6 +13,7 @@ const files = [
   'docs/guide/views.md',
   'docs/guide/requests.md',
   'docs/guide/list-views.md',
+  'docs/guide/live-views.md',
   'docs/guide/actions.md',
   'docs/guide/server-integration.md',
   'docs/parts/outro.md',

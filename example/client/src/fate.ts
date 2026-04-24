@@ -63,6 +63,7 @@ declare module 'react-fate' {
 
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
+  onLiveError?: (error: unknown) => void;
 }) => {
   const trpcClient = createTRPCProxyClient<AppRouter>(options);
 
@@ -77,6 +78,7 @@ export const createFateClient = (options: {
 
   return createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
     mutations,
+    onLiveError: options.onLiveError,
     roots,
     transport: createTRPCTransport<AppRouter, typeof trpcMutations>({
       byId: {
@@ -130,6 +132,11 @@ export const createFateClient = (options: {
         commentSearch: (client: TRPCClientType) => client.comment.search.query,
         events: (client: TRPCClientType) => client.event.list.query,
         posts: (client: TRPCClientType) => client.post.list.query,
+      },
+      live: {
+        byId: {
+          Post: (client: TRPCClientType) => client.post.live.subscribe,
+        },
       },
       mutations: trpcMutations,
     }),

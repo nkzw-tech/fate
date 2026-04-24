@@ -6,11 +6,14 @@ import type {
   PostSelect,
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
-import { fate, procedure, router } from '../init.ts';
+import { fate, live, procedure, router } from '../init.ts';
 import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
-  ...fate.procedures(postDataView),
+  ...fate.procedures({
+    live,
+    view: postDataView,
+  }),
   add: procedure
     .input(
       z.object({
@@ -94,7 +97,7 @@ export const postRouter = router({
       });
       const select = toPrismaSelect(plan);
 
-      return (await plan.resolve(
+      const post = (await plan.resolve(
         await ctx.prisma.post.update({
           data: {
             likes: {
@@ -105,6 +108,10 @@ export const postRouter = router({
           where: { id: input.id },
         } as PostUpdateArgs),
       )) as Post;
+
+      live.update('Post', input.id);
+
+      return post;
     }),
   unlike: procedure
     .input(
@@ -114,8 +121,8 @@ export const postRouter = router({
         select: z.array(z.string()),
       }),
     )
-    .mutation(({ ctx, input }) =>
-      ctx.prisma.$transaction(async (tx) => {
+    .mutation(async ({ ctx, input }) => {
+      const post = await ctx.prisma.$transaction(async (tx) => {
         const plan = fate.createPlan({
           ...input,
           ctx,
@@ -158,6 +165,10 @@ export const postRouter = router({
             where: { id: input.id },
           } as PostUpdateArgs),
         )) as Post;
-      }),
-    ),
+      });
+
+      live.update('Post', input.id);
+
+      return post;
+    }),
 });

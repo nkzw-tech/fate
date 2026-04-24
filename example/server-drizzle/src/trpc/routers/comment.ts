@@ -14,7 +14,7 @@ import {
   deleteCommentRecord,
 } from '../../drizzle/queries.ts';
 import { comment } from '../../drizzle/schema.ts';
-import { fate, procedure, router } from '../init.ts';
+import { fate, live, procedure, router } from '../init.ts';
 import { commentDataView, postDataView } from '../views.ts';
 
 export const commentRouter = router({
@@ -79,6 +79,8 @@ export const commentRouter = router({
         });
       }
 
+      live.update('Post', input.postId);
+
       return comment as CommentItem & { post?: { commentCount: number } };
     }),
   delete: procedure
@@ -134,7 +136,15 @@ export const commentRouter = router({
         comment.post = post;
       }
 
-      return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      const resolved = (await plan.resolve(comment)) as CommentItem & {
+        post?: { commentCount: number };
+      };
+
+      if (comment.postId) {
+        live.update('Post', comment.postId);
+      }
+
+      return resolved;
     }),
 
   search: fate.connection({

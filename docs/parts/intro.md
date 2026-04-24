@@ -16,6 +16,7 @@
 - **Async React:** fate uses modern Async React features like Actions, Suspense, and `use` to support concurrent rendering and enable a seamless user experience.
 - **Lists & Pagination:** fate provides built-in support for connection-style lists with cursor-based pagination, making it easy to implement infinite scrolling and "load-more" functionality.
 - **Optimistic Updates:** fate supports declarative optimistic updates for mutations, allowing the UI to update immediately while the server request is in-flight. If the request fails, the cache and its associated views are rolled back to their previous state.
+- **Live Views:** fate can keep individual view refs up to date through tRPC subscriptions and Server-Sent Events, merging updates into the normalized cache.
 - **AI-Ready:** fate's minimal, predictable API and explicit data selection enable local reasoning, enabling humans and AI tools to generate stable, type-safe data-fetching code.
 
 ## A modern data client for React & tRPC

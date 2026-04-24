@@ -55,6 +55,204 @@ const getNodeRefIds = (value: unknown) =>
 
 const createNodeRefs = (ids: Array<string>) => ids.map((id) => createNodeRef(id));
 
+test('live view subscriptions merge pushed records into the cache', () => {
+  let handlers: any;
+  const subscribeById = vi.fn((_type, _id, _select, _args, nextHandlers) => {
+    handlers = nextHandlers;
+    return vi.fn();
+  });
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const dispose = client.subscribeLiveView(PostView, postRef);
+
+  expect(subscribeById).toHaveBeenCalledWith(
+    'Post',
+    'post-1',
+    expect.any(Set),
+    undefined,
+    expect.objectContaining({
+      onData: expect.any(Function),
+      onDelete: expect.any(Function),
+      onError: expect.any(Function),
+    }),
+  );
+  const call = subscribeById.mock.calls[0];
+  if (!call) {
+    throw new Error('Expected subscribeById to be called.');
+  }
+  expect([...(call[2] as Set<string>)]).toEqual(['content', 'id']);
+
+  handlers.onData({
+    __typename: 'Post',
+    content: 'Live Banana',
+    id: 'post-1',
+  });
+
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({
+    content: 'Live Banana',
+    id: 'post-1',
+  });
+
+  dispose();
+});
+
+test('live view subscription errors are reported through the client out of band', async () => {
+  let handlers: any;
+  const onLiveError = vi.fn();
+  const error = new Error('subscription failed');
+  const client = createClient({
+    onLiveError,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById: vi.fn((_type, _id, _select, _args, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const dispose = client.subscribeLiveView(PostView, postRef);
+
+  handlers.onError(error);
+  expect(onLiveError).not.toHaveBeenCalled();
+
+  await Promise.resolve();
+
+  expect(onLiveError).toHaveBeenCalledWith(error);
+
+  dispose();
+});
+
+test('live view subscription setup errors are reported through the client out of band', async () => {
+  const onLiveError = vi.fn();
+  const error = new Error('missing resolver');
+  const client = createClient({
+    onLiveError,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById: vi.fn(() => {
+        throw error;
+      }),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const dispose = client.subscribeLiveView(PostView, postRef);
+
+  expect(onLiveError).not.toHaveBeenCalled();
+
+  await Promise.resolve();
+
+  expect(onLiveError).toHaveBeenCalledWith(error);
+
+  dispose();
+});
+
+test('live view subscriptions are ref-counted by entity and selection', () => {
+  const unsubscribe = vi.fn();
+  const subscribeById = vi.fn(() => unsubscribe);
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const disposeA = client.subscribeLiveView(PostView, postRef);
+  const disposeB = client.subscribeLiveView(PostView, postRef);
+
+  expect(subscribeById).toHaveBeenCalledTimes(1);
+
+  disposeA();
+  expect(unsubscribe).not.toHaveBeenCalled();
+
+  disposeB();
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+test('live delete events remove records from lists', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById: vi.fn((_type, _id, _select, _args, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      content: 'Apple',
+      id: 'post-1',
+    },
+    new Set(['__typename', 'content', 'id']),
+  );
+  client.store.setList('posts', { ids: [postId] });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const dispose = client.subscribeLiveView(PostView, postRef);
+
+  handlers.onDelete('post-1');
+
+  expect(client.store.read(postId)).toBeUndefined();
+  expect(client.store.getList('posts')).toEqual([]);
+
+  dispose();
+});
+
 test(`'readView' returns the selected fields`, () => {
   const client = createClient({
     roots: {},

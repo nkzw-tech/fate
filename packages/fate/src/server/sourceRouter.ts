@@ -1,13 +1,15 @@
-import type { AnyTRPCProcedure } from '@trpc/server';
+import { tracked, type AnyTRPCProcedure } from '@trpc/server';
 import type { AnyRecord } from '../types.ts';
 import type { SourceRegistry } from './executor.ts';
-import { resolveSourceByIds, resolveSourceConnection } from './executor.ts';
-import { byIdInput } from './input.ts';
+import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
+import { byIdInput, liveByIdInput } from './input.ts';
+import type { LiveEventBus, LiveSourceEvent } from './live.ts';
 import type { SourceDefinition } from './source.ts';
 
 type ProcedureLike = {
   input: (schema: any) => {
     query: (resolver: (options: any) => unknown) => AnyTRPCProcedure;
+    subscription: (resolver: (options: any) => unknown) => AnyTRPCProcedure;
   };
 };
 
@@ -30,6 +32,12 @@ type ListConfig = {
   defaultSize?: number;
 };
 
+type LiveConfig =
+  | LiveEventBus
+  | {
+      bus: LiveEventBus;
+    };
+
 type SourceProcedureOptions<
   Context,
   Item extends AnyRecord,
@@ -41,6 +49,7 @@ type SourceProcedureOptions<
   byId?: boolean;
   createConnectionProcedure?: ConnectionProcedure;
   list?: boolean | ListConfig;
+  live?: false | LiveConfig;
   procedure: Procedure;
   registry: SourceRegistry<Context>;
   source: SourceDefinition<Item, unknown>;
@@ -50,9 +59,11 @@ type SourceProcedureFactoryOptions<
   Item extends AnyRecord,
   ById extends boolean | undefined = boolean | undefined,
   List extends boolean | ListConfig | undefined = boolean | ListConfig | undefined,
+  Live extends false | LiveConfig | undefined = false | LiveConfig | undefined,
 > = {
   byId?: ById;
   list?: List;
+  live?: Live;
   source: SourceDefinition<Item, unknown>;
 };
 
@@ -60,7 +71,8 @@ type SourceProcedureFactoryInput<
   Item extends AnyRecord,
   ById extends boolean | undefined = boolean | undefined,
   List extends boolean | ListConfig | undefined = boolean | ListConfig | undefined,
-> = SourceDefinition<Item, unknown> | SourceProcedureFactoryOptions<Item, ById, List>;
+  Live extends false | LiveConfig | undefined = false | LiveConfig | undefined,
+> = SourceDefinition<Item, unknown> | SourceProcedureFactoryOptions<Item, ById, List, Live>;
 
 type SourceProcedureFactoryDefaults<
   Context,
@@ -76,27 +88,54 @@ type ProcedureResult<Procedure extends ProcedureLike> = ReturnType<
   ReturnType<Procedure['input']>['query']
 >;
 
+type SubscriptionProcedureResult<Procedure extends ProcedureLike> = ReturnType<
+  ReturnType<Procedure['input']>['subscription']
+>;
+
 type ConnectionProcedureResult<ConnectionProcedure extends ConnectionProcedureLike | undefined> =
   ConnectionProcedure extends ConnectionProcedureLike ? ReturnType<ConnectionProcedure> : never;
 
 type SourceProcedureResult<
   ById extends boolean | undefined,
   List extends boolean | ListConfig | undefined,
+  Live extends false | LiveConfig | undefined,
   Procedure extends ProcedureLike,
   ConnectionProcedure extends ConnectionProcedureLike | undefined,
 > = (ById extends false ? Record<never, never> : { byId: ProcedureResult<Procedure> }) &
   (List extends false
     ? Record<never, never>
-    : { list: ConnectionProcedureResult<ConnectionProcedure> });
+    : { list: ConnectionProcedureResult<ConnectionProcedure> }) &
+  (Live extends LiveConfig
+    ? { live: SubscriptionProcedureResult<Procedure> }
+    : Record<never, never>);
 
 const normalizeSourceOptions = <
   Item extends AnyRecord,
   ById extends boolean | undefined,
   List extends boolean | ListConfig | undefined,
+  Live extends false | LiveConfig | undefined,
 >(
-  input: SourceProcedureFactoryInput<Item, ById, List>,
-): SourceProcedureFactoryOptions<Item, ById, List> =>
+  input: SourceProcedureFactoryInput<Item, ById, List, Live>,
+): SourceProcedureFactoryOptions<Item, ById, List, Live> =>
   'source' in input ? input : { source: input };
+
+const livePayload = (event: LiveSourceEvent, data: unknown) => {
+  const payload =
+    event.type === 'delete' || data == null ? { delete: true, id: event.id } : { data };
+  return event.eventId ? tracked(event.eventId, payload) : payload;
+};
+
+const getLiveBus = (live: false | LiveConfig | undefined): LiveEventBus | null => {
+  if (!live) {
+    return null;
+  }
+
+  if ('subscribe' in live) {
+    return live;
+  }
+
+  return live.bus;
+};
 
 /**
  * Creates standard `byId` and `list` procedures for a Fate source.
@@ -113,17 +152,20 @@ export function createSourceProcedures<
     | undefined,
   ById extends boolean | undefined = undefined,
   List extends boolean | ListConfig | undefined = undefined,
+  Live extends false | LiveConfig | undefined = undefined,
 >({
   byId,
   createConnectionProcedure,
   list,
+  live,
   procedure,
   registry,
   source,
 }: SourceProcedureOptions<Context, Item, Procedure, ConnectionProcedure> & {
   byId?: ById;
   list?: List;
-}): SourceProcedureResult<ById, List, Procedure, ConnectionProcedure> {
+  live?: Live;
+}): SourceProcedureResult<ById, List, Live, Procedure, ConnectionProcedure> {
   const procedures: Record<string, any> = {};
 
   if (byId !== false) {
@@ -173,7 +215,44 @@ export function createSourceProcedures<
     });
   }
 
-  return procedures as SourceProcedureResult<ById, List, Procedure, ConnectionProcedure>;
+  const liveBus = getLiveBus(live);
+  if (liveBus) {
+    procedures.live = procedure.input(liveByIdInput).subscription(async function* ({
+      ctx,
+      input,
+      signal,
+    }: {
+      ctx: Context;
+      input: {
+        args?: Record<string, unknown>;
+        id: string;
+        select: Array<string>;
+      };
+      signal?: AbortSignal;
+    }) {
+      const iterable = liveBus.subscribe(source.view.typeName, input.id, { signal });
+
+      for await (const [event] of iterable) {
+        const data =
+          event.type === 'delete'
+            ? null
+            : await resolveSourceById({
+                ctx,
+                id: String(event.id),
+                input: {
+                  args: input.args,
+                  select: input.select,
+                },
+                registry,
+                source,
+              });
+
+        yield livePayload(event, data);
+      }
+    });
+  }
+
+  return procedures as SourceProcedureResult<ById, List, Live, Procedure, ConnectionProcedure>;
 }
 
 /**
@@ -191,8 +270,9 @@ export function bindSourceProcedures<
     Item extends AnyRecord,
     ById extends boolean | undefined = undefined,
     List extends boolean | ListConfig | undefined = undefined,
+    Live extends false | LiveConfig | undefined = undefined,
   >(
-    input: SourceProcedureFactoryInput<Item, ById, List>,
+    input: SourceProcedureFactoryInput<Item, ById, List, Live>,
   ) =>
     createSourceProcedures({
       ...defaults,

@@ -73,6 +73,7 @@ export default defineConfig({
           { link: '/guide/core-concepts', text: 'Core Concepts' },
           { link: '/guide/views', text: 'Views' },
           { link: '/guide/list-views', text: 'List Views' },
+          { link: '/guide/live-views', text: 'Live Views' },
           { link: '/guide/actions', text: 'Actions' },
           { link: '/guide/requests', text: 'Requests' },
           { link: '/guide/server-integration', text: 'Server Integration' },

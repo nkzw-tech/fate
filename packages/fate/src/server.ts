@@ -35,6 +35,7 @@ export type {
   SourceRelation,
 } from './server/source.ts';
 export type { SourceRegistry } from './server/executor.ts';
+export type { LiveEventBus, LiveEventType, LiveSourceEvent } from './server/live.ts';
 
 export {
   computed,
@@ -46,6 +47,7 @@ export {
   resolver,
 } from './server/dataView.ts';
 export { withConnection, connectionArgs } from './server/connection.ts';
+export { createLiveEventBus } from './server/live.ts';
 export {
   resolveSourceById,
   resolveSourceByIds,

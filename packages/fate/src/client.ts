@@ -83,6 +83,7 @@ type FateClientOptions<Roots extends FateRoots, Mutations extends FateMutations>
    */
   gcReleaseBufferSize?: number;
   mutations?: Mutations;
+  onLiveError?: (error: unknown) => void;
   roots: Roots;
   transport: Transport<MutationMapFromDefinitions<Mutations>>;
   types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<{ getId: TypeConfig['getId'] }>>;
@@ -102,6 +103,7 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
 };
 
 const emptySet = new Set<string>();
+const emptyDispose = () => undefined;
 
 type ListEntry = Readonly<{ cursor?: string; id: EntityId }>;
 
@@ -222,6 +224,11 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   private readonly optimisticByEntity = new Map<EntityId, Set<number>>();
   private readonly optimisticEntityResolutions = new Map<EntityId, EntityId>();
   private optimisticTokenCounter = 0;
+  private readonly onLiveError: ((error: unknown) => void) | undefined;
+  private readonly liveSubscriptions = new Map<
+    string,
+    { count: number; unsubscribe: () => void }
+  >();
   private readonly requests = new Map<
     string,
     Map<RequestMode, FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>>
@@ -244,6 +251,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     this.actions = Object.create(null) as MutationActionsFor<Mutations>;
     this.mutationMap = Object.create(null);
     this.mutations = Object.create(null) as MutationFunctionsFor<Mutations>;
+    this.onLiveError = options.onLiveError;
     this.operationLifetime = new OperationLifetime(options.gcReleaseBufferSize ?? 10);
     this.roots = options.roots;
     this.transport = options.transport;
@@ -647,6 +655,99 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
     }
     return resolveSnapshot();
+  }
+
+  assertLiveViewSupport() {
+    if (!this.transport.subscribeById) {
+      throw new Error(
+        `fate: transport does not support live views. Please provide a 'subscribeById' implementation in your transport.`,
+      );
+    }
+  }
+
+  subscribeLiveView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): () => void {
+    this.assertLiveViewSupport();
+
+    const id = ref.id;
+    const type = ref.__typename;
+    if (id == null) {
+      throw new Error(
+        `fate: Invalid live view reference. Expected 'id' to be provided as part of the reference.`,
+      );
+    }
+
+    if (type == null) {
+      throw new Error(
+        `fate: Invalid live view reference. Expected '__typename' to be provided as part of the reference.`,
+      );
+    }
+
+    const viewNames = getViewNames(view);
+    const refViews = ref[ViewsTag];
+
+    if (!refViews || ![...viewNames].every((name) => refViews.has(name))) {
+      const received = refViews ? [...refViews].join(', ') : JSON.stringify(ref);
+
+      throw new Error(
+        `fate: Invalid live view reference. Expected the provided ref to include the view(s) '${[...viewNames].join("', '")}', received '${received}'.`,
+      );
+    }
+
+    const entityId = toEntityId(type, id);
+    const plan = getSelectionPlan(view, ref);
+    const key = this.liveSubscriptionKey(entityId, plan);
+    const existing = this.liveSubscriptions.get(key);
+    if (existing) {
+      existing.count += 1;
+      return () => {
+        this.releaseLiveSubscription(key);
+      };
+    }
+
+    const args = resolvedArgsFromPlan(plan);
+    let unsubscribe: () => void;
+    try {
+      unsubscribe = this.transport.subscribeById!(type, id, plan.paths, args, {
+        onData: (record) => {
+          if (!record || typeof record !== 'object') {
+            return;
+          }
+
+          const pendingMask = this.getPendingOptimisticMask(entityId);
+          const selection = this.filterSelectionForPendingOptimistics(
+            entityId,
+            new Set(plan.paths),
+          );
+
+          this.write(
+            type,
+            record as AnyRecord,
+            selection,
+            undefined,
+            plan,
+            null,
+            pendingMask,
+            'none',
+          );
+        },
+        onDelete: (deletedId) => {
+          this.deleteRecord(type, deletedId ?? id);
+        },
+        onError: (error) => this.reportLiveError(error),
+      });
+    } catch (error) {
+      this.reportLiveError(error);
+      return emptyDispose;
+    }
+
+    this.liveSubscriptions.set(key, { count: 1, unsubscribe });
+
+    return () => {
+      this.releaseLiveSubscription(key);
+    };
   }
 
   private mergeListState(
@@ -2145,6 +2246,41 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
   private pendingKey(entityId: string, missingFields: Set<string>) {
     return `${this.pendingPrefix(entityId)}${[...missingFields].sort().join('|')}`;
+  }
+
+  private liveSubscriptionKey(entityId: EntityId, plan: SelectionPlan) {
+    const paths = [...plan.paths].sort().join('|');
+    const args = [...plan.args.entries()]
+      .map(([path, entry]) => `${path}:${entry.hash}`)
+      .sort()
+      .join('|');
+    return `${entityId}|${paths}|${args}`;
+  }
+
+  private releaseLiveSubscription(key: string) {
+    const subscription = this.liveSubscriptions.get(key);
+    if (!subscription) {
+      return;
+    }
+
+    subscription.count -= 1;
+    if (subscription.count > 0) {
+      return;
+    }
+
+    subscription.unsubscribe();
+    this.liveSubscriptions.delete(key);
+  }
+
+  private reportLiveError(error: unknown) {
+    const onLiveError = this.onLiveError;
+    if (!onLiveError) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      onLiveError(error);
+    });
   }
 }
 

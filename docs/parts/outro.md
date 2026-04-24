@@ -27,10 +27,10 @@ Probably. One day. _Maybe._
 
 **_fate_** is not complete yet. The current implementation of _fate_ ships with tRPC, Prisma, and Drizzle support, but the core ideas are not tied to a particular transport or database. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
 
+- Live views for pagination
 - Support backends other than tRPC
 - Persistent storage for offline support
 - Better code generation and less type repetition
-- Support for live views and real-time updates via `useLiveView` and SSE
 
 # Acknowledgements
 

@@ -2,7 +2,7 @@ import { connectionArgs, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentSelect } from '../../prisma/prisma-client/models.ts';
-import { fate, procedure, router } from '../init.ts';
+import { fate, live, procedure, router } from '../init.ts';
 import type { CommentItem } from '../views.ts';
 import { commentDataView } from '../views.ts';
 
@@ -65,7 +65,7 @@ export const commentRouter = router({
       });
       const select = toPrismaSelect(plan);
 
-      return plan.resolve(
+      const comment = (await plan.resolve(
         await ctx.prisma.comment.create({
           data: {
             authorId: ctx.sessionUser.id,
@@ -74,7 +74,11 @@ export const commentRouter = router({
           },
           select: getCommentSelection(select),
         }),
-      ) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      )) as CommentItem & { post?: { commentCount: number } };
+
+      live.update('Post', input.postId);
+
+      return comment;
     }),
   delete: procedure
     .input(
@@ -86,7 +90,7 @@ export const commentRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const comment = await ctx.prisma.comment.findUnique({
-        select: { authorId: true },
+        select: { authorId: true, postId: true },
         where: { id: input.id },
       });
 
@@ -121,7 +125,13 @@ export const commentRouter = router({
         };
       }
 
-      return plan.resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
+      const resolved = (await plan.resolve(result)) as CommentItem & {
+        post?: { commentCount: number };
+      };
+
+      live.update('Post', comment.postId);
+
+      return resolved;
     }),
 
   search: fate.connection({

@@ -6,3 +6,9 @@ export const byIdInput = z.object({
   ids: z.array(z.string().min(1)).nonempty(),
   select: z.array(z.string()),
 });
+
+export const liveByIdInput = z.object({
+  args: connectionArgs,
+  id: z.string().min(1),
+  select: z.array(z.string()),
+});

@@ -14,7 +14,7 @@ import {
   useState,
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { useFateClient, useListView, useView, view, ViewRef } from 'react-fate';
+import { useFateClient, useListView, useLiveView, useView, view, ViewRef } from 'react-fate';
 import { Link } from 'react-router';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
@@ -130,7 +130,7 @@ const CommentInput = ({
 
 export function PostCard({ detail, post: postRef }: { detail?: boolean; post: ViewRef<'Post'> }) {
   const fate = useFateClient();
-  const post = useView(PostView, postRef);
+  const post = useLiveView(PostView, postRef);
   const author = useView(UserView, post.author);
   const category = useView(CategorySummaryView, post.category);
   const [comments, loadNext] = useListView(CommentConnectionView, post.comments);
