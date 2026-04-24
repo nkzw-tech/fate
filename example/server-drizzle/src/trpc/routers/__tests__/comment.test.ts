@@ -1,7 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 
-const { deleteCommentRecord, fetchById } = vi.hoisted(() => ({
+const { deleteCommentRecord, drizzleRegistry, fetchById } = vi.hoisted(() => ({
   deleteCommentRecord: vi.fn(),
+  drizzleRegistry: new Map(),
   fetchById: vi.fn(),
 }));
 
@@ -11,16 +12,18 @@ vi.mock('../../../drizzle/queries.ts', () => ({
 }));
 
 vi.mock('../../executor.ts', () => ({
-  drizzleRegistry: new Map(),
+  drizzleRegistry,
   drizzleRuntime: {
     fetchById,
   },
 }));
 import { router } from '../../init.ts';
+import { postSource } from '../../views.ts';
 import { commentRouter } from '../comment.ts';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  drizzleRegistry.clear();
 });
 
 test('delete returns the post relation after the comment has been removed', async () => {
@@ -41,6 +44,14 @@ test('delete returns the post relation after the comment has been removed', asyn
       id: 'post-1',
       title: 'Post title',
     });
+
+  drizzleRegistry.set(postSource, {
+    byId: ({ id, plan }: { id: string; plan: { resolve: (item: unknown) => Promise<unknown> } }) =>
+      fetchById({
+        id,
+        plan,
+      }),
+  });
 
   const appRouter = router({ comment: commentRouter });
   const caller = appRouter.createCaller({

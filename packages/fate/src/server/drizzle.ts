@@ -188,6 +188,10 @@ const buildConnection = <TNode extends { id: string }>({
 const mapByField = <T extends AnyRecord>(items: Array<T>, field: string) =>
   new Map(items.map((item) => [item[field], item]));
 
+const compactKeys = (values: Array<unknown>) => [
+  ...new Set(values.filter((value) => value !== null && value !== undefined)),
+];
+
 const reorderByIds = <T extends { id: string }>(ids: Array<string>, items: Array<T>) => {
   const itemsById = mapByField(items, 'id');
   return ids.flatMap((id) => {
@@ -469,9 +473,10 @@ export function createDrizzleSourceRuntime<Context>({
 
         const childSource = resolveSource(sourceRelation.source);
         const childConfig = getSourceConfig(childSource);
-        const parentKeys = [
-          ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
-        ];
+        const parentKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
+        if (parentKeys.length === 0) {
+          continue;
+        }
         const where = and(
           inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
           whereFromObject(childConfig.columns, need.where),
@@ -506,9 +511,7 @@ export function createDrizzleSourceRuntime<Context>({
   }) => {
     const childSource = resolveSource(sourceRelation.source);
     const childConfig = getSourceConfig(childSource);
-    const parentKeys = [
-      ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
-    ];
+    const parentKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
 
     if (parentKeys.length === 0) {
       return new Map<unknown, Array<AnyRecord>>();
@@ -542,12 +545,129 @@ export function createDrizzleSourceRuntime<Context>({
     const direction = getConnectionDirection(args);
     const pageSize = getConnectionSize(20, args);
     const cursor = direction === 'forward' ? args.after : args.before;
+
+    if (parentKey === null || parentKey === undefined) {
+      return buildConnection({
+        cursor,
+        direction,
+        items: [],
+        pageSize,
+      });
+    }
+
     const rows = await queryNodePage({
       baseWhere: eq(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKey),
       cursor,
       direction,
       node: relationNode,
       take: pageSize + 1,
+    });
+    const hydrated = await hydrateRows(rows, relationNode);
+    return buildConnection({
+      cursor,
+      direction,
+      items: hydrated as Array<AnyRecord & { id: string }>,
+      pageSize,
+    });
+  };
+
+  const queryManyToManyPage = async ({
+    cursor,
+    direction,
+    node,
+    parentKey,
+    sourceRelation,
+    take,
+    through,
+  }: {
+    cursor?: string;
+    direction: 'backward' | 'forward';
+    node: ExecutionPlanNode<any, any>;
+    parentKey: unknown;
+    sourceRelation: Relation;
+    take: number;
+    through: RegisteredManyToManyConfig;
+  }) => {
+    const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
+    let whereClause: any = eq(through.localColumn, parentKey);
+
+    if (cursor) {
+      const cursorSelection = Object.fromEntries(
+        node.orderBy.map((entry) => [entry.field, getColumn(childConfig.columns, entry.field)]),
+      );
+      const [cursorRow] = await db
+        .select(cursorSelection)
+        .from(through.table)
+        .innerJoin(
+          childConfig.table,
+          eq(through.foreignColumn, getColumn(childConfig.columns, sourceRelation.foreignKey)),
+        )
+        .where(
+          and(
+            eq(through.localColumn, parentKey),
+            eq(getColumn(childConfig.columns, node.source.id), cursor),
+          ),
+        )
+        .limit(1);
+
+      if (cursorRow) {
+        whereClause = and(
+          whereClause,
+          buildCursorWhere({
+            columns: childConfig.columns,
+            cursorValues: cursorRow,
+            direction,
+            node,
+          }),
+        );
+      }
+    }
+
+    const rows = (await db
+      .select({
+        ...buildSelection(node),
+        parentKey: through.localColumn,
+      })
+      .from(through.table)
+      .innerJoin(
+        childConfig.table,
+        eq(through.foreignColumn, getColumn(childConfig.columns, sourceRelation.foreignKey)),
+      )
+      .where(whereClause)
+      .orderBy(...getQueryOrder(direction, node, childConfig.columns))
+      .limit(take)) as Array<AnyRecord & { parentKey: unknown }>;
+
+    return direction === 'backward' ? rows.reverse() : rows;
+  };
+
+  const fetchManyToManyConnection = async (
+    parentKey: unknown,
+    relationNode: ExecutionPlanNode<any, any>,
+    sourceRelation: Relation,
+    through: RegisteredManyToManyConfig,
+  ): Promise<ConnectionResult<AnyRecord>> => {
+    const args = paginationArgs(relationNode.args);
+    const direction = getConnectionDirection(args);
+    const pageSize = getConnectionSize(20, args);
+    const cursor = direction === 'forward' ? args.after : args.before;
+
+    if (parentKey === null || parentKey === undefined) {
+      return buildConnection({
+        cursor,
+        direction,
+        items: [],
+        pageSize,
+      });
+    }
+
+    const rows = await queryManyToManyPage({
+      cursor,
+      direction,
+      node: relationNode,
+      parentKey,
+      sourceRelation,
+      take: pageSize + 1,
+      through,
     });
     const hydrated = await hydrateRows(rows, relationNode);
     return buildConnection({
@@ -587,9 +707,7 @@ export function createDrizzleSourceRuntime<Context>({
       through: throughConfig,
     });
 
-    const parentKeys = [
-      ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
-    ];
+    const parentKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
     if (parentKeys.length === 0) {
       return new Map<unknown, Array<AnyRecord>>();
     }
@@ -636,9 +754,7 @@ export function createDrizzleSourceRuntime<Context>({
 
       if (sourceRelation.kind === 'one') {
         const childConfig = getSourceConfig(resolveSource(sourceRelation.source));
-        const childKeys = [
-          ...new Set(items.map((item) => item[sourceRelation.localKey]).filter(Boolean)),
-        ];
+        const childKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
         const childRows = childKeys.length
           ? await queryRows({
               node: relationNode,
@@ -650,14 +766,54 @@ export function createDrizzleSourceRuntime<Context>({
 
         for (const item of items) {
           const localKey = item[sourceRelation.localKey];
-          item[field] = localKey
-            ? ((childByKey.get(localKey) as AnyRecord | undefined) ?? null)
-            : null;
+          item[field] =
+            localKey !== null && localKey !== undefined
+              ? ((childByKey.get(localKey) as AnyRecord | undefined) ?? null)
+              : null;
         }
         continue;
       }
 
       if (sourceRelation.kind === 'manyToMany') {
+        const parentConfig = getSourceConfig(node.source);
+        const throughConfig = parentConfig.manyToMany?.[field];
+
+        if (!throughConfig) {
+          throw new Error(
+            `No Drizzle many-to-many table registered for ${node.source.view.typeName}.${field}.`,
+          );
+        }
+
+        const through = resolveManyToManyConfig({
+          field,
+          source: node.source,
+          sourceRelation,
+          through: throughConfig,
+        });
+
+        if (hasPagination(relationNode.args)) {
+          const connections = await Promise.all(
+            items.map(
+              async (item) =>
+                [
+                  item[sourceRelation.localKey],
+                  await fetchManyToManyConnection(
+                    item[sourceRelation.localKey],
+                    relationNode,
+                    sourceRelation,
+                    through,
+                  ),
+                ] as const,
+            ),
+          );
+          const connectionByParentKey = new Map(connections);
+
+          for (const item of items) {
+            item[field] = connectionByParentKey.get(item[sourceRelation.localKey]);
+          }
+          continue;
+        }
+
         const byParentKey = await fetchManyToManyRelation({
           items,
           node,

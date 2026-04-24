@@ -1,4 +1,4 @@
-import { connectionArgs, createExecutionPlan, executeSourceById } from '@nkzw/fate/server';
+import { connectionArgs, refetchSourceById } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { createPostRecord, likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
@@ -26,12 +26,6 @@ export const postRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: postSource,
-      });
-
       const postId = await createPostRecord({
         authorId: ctx.sessionUser.id,
         content: input.content,
@@ -45,11 +39,12 @@ export const postRouter = router({
         });
       }
 
-      const post = await executeSourceById({
+      const post = await refetchSourceById({
         ctx,
         id: postId,
-        plan,
+        input,
         registry: drizzleRegistry,
+        source: postSource,
       });
       if (!post) {
         throw new TRPCError({
@@ -88,15 +83,12 @@ export const postRouter = router({
         });
       }
 
-      const existing = await executeSourceById({
+      const existing = await refetchSourceById({
         ctx,
         id: input.id,
-        plan: createExecutionPlan({
-          ctx,
-          select: ['id'],
-          source: postSource,
-        }),
+        input: { select: ['id'] },
         registry: drizzleRegistry,
+        source: postSource,
       });
 
       if (!existing) {
@@ -106,12 +98,6 @@ export const postRouter = router({
         });
       }
 
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: postSource,
-      });
-
       const updated = await likePostRecord(input.id);
       if (!updated) {
         throw new TRPCError({
@@ -120,11 +106,12 @@ export const postRouter = router({
         });
       }
 
-      const post = await executeSourceById({
+      const post = await refetchSourceById({
         ctx,
         id: input.id,
-        plan,
+        input,
         registry: drizzleRegistry,
+        source: postSource,
       });
       if (!post) {
         throw new TRPCError({
@@ -144,12 +131,6 @@ export const postRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: postSource,
-      });
-
       const updated = await unlikePostRecord(input.id);
       if (!updated) {
         throw new TRPCError({
@@ -158,11 +139,12 @@ export const postRouter = router({
         });
       }
 
-      const post = await executeSourceById({
+      const post = await refetchSourceById({
         ctx,
         id: input.id,
-        plan,
+        input,
         registry: drizzleRegistry,
+        source: postSource,
       });
       if (!post) {
         throw new TRPCError({

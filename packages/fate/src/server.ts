@@ -56,6 +56,7 @@ export {
   executeSourceById,
   executeSourceByIds,
   executeSourceConnection,
+  refetchSourceById,
 } from './server/executor.ts';
 export { byIdInput } from './server/input.ts';
 export { toPrismaSelect } from './server/prismaSelect.ts';
@@ -64,9 +65,16 @@ export {
   asc,
   createExecutionPlan,
   createKeysetSteps,
+  createNestedExecutionPlan,
   decodeCursor,
   defineSource,
   desc,
   encodeCursor,
   getSourceOrder,
+  getNestedSelection,
+  getNestedSourceInput,
+  hasNestedSelection,
+  many,
+  manyToMany,
+  one,
 } from './server/source.ts';

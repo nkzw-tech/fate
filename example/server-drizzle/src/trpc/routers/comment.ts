@@ -1,8 +1,10 @@
 import {
+  hasNestedSelection,
   connectionArgs,
   createExecutionPlan,
-  executeSourceById,
+  createNestedExecutionPlan,
   executeSourceConnection,
+  refetchSourceById,
 } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { ilike } from 'drizzle-orm';
@@ -18,29 +20,6 @@ import { drizzleRegistry, drizzleRuntime } from '../executor.ts';
 import { procedure, router } from '../init.ts';
 import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
 import { commentSource, postSource } from '../views.ts';
-
-const hasNestedSelection = (select: Array<string>, field: string) =>
-  select.some((path) => path === field || path.startsWith(`${field}.`));
-
-const getNestedSelection = (select: Array<string>, field: string) =>
-  select.flatMap((path) => {
-    if (path === field) {
-      return [];
-    }
-
-    return path.startsWith(`${field}.`) ? [path.slice(field.length + 1)] : [];
-  });
-
-const getNestedArgs = (args: unknown, field: string): Record<string, unknown> | undefined => {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) {
-    return undefined;
-  }
-
-  const value = (args as Record<string, unknown>)[field];
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-};
 
 export const commentRouter = router({
   ...sourceProcedures({
@@ -64,15 +43,12 @@ export const commentRouter = router({
         });
       }
 
-      const post = await executeSourceById({
+      const post = await refetchSourceById({
         ctx,
         id: input.postId,
-        plan: createExecutionPlan({
-          ctx,
-          select: ['id'],
-          source: postSource,
-        }),
+        input: { select: ['id'] },
         registry: drizzleRegistry,
+        source: postSource,
       });
 
       if (!post) {
@@ -81,12 +57,6 @@ export const commentRouter = router({
           message: 'Post not found',
         });
       }
-
-      const plan = createExecutionPlan({
-        ...input,
-        ctx,
-        source: commentSource,
-      });
 
       const commentId = await createCommentRecord({
         authorId: ctx.sessionUser.id,
@@ -101,11 +71,12 @@ export const commentRouter = router({
         });
       }
 
-      const comment = await executeSourceById({
+      const comment = await refetchSourceById({
         ctx,
         id: commentId,
-        plan,
+        input,
         registry: drizzleRegistry,
+        source: commentSource,
       });
       if (!comment) {
         throw new TRPCError({
@@ -156,10 +127,10 @@ export const commentRouter = router({
       if (comment.postId && hasNestedSelection(input.select, 'post')) {
         const post = await drizzleRuntime.fetchById<PostItem>({
           id: comment.postId,
-          plan: createExecutionPlan({
-            args: getNestedArgs(input.args, 'post'),
+          plan: createNestedExecutionPlan({
             ctx,
-            select: getNestedSelection(input.select, 'post'),
+            field: 'post',
+            input,
             source: postSource,
           }),
         });

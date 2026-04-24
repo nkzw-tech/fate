@@ -7,6 +7,9 @@ import {
   desc,
   field,
   list,
+  many,
+  manyToMany,
+  one,
   type Entity,
 } from '@nkzw/fate/server';
 import type {
@@ -180,29 +183,23 @@ export const postSummarySource = defineSource(postSummaryDataView, {
   id: 'id',
   orderBy: [desc('createdAt'), desc('id')],
   relations: {
-    author: {
+    author: one(() => userSource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'authorId',
-      source: () => userSource,
-    },
-    category: {
+    }),
+    category: one(() => categorySummarySource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'categoryId',
-      source: () => categorySummarySource,
-    },
-    tags: {
+    }),
+    tags: manyToMany(() => tagSource, {
       foreignKey: 'id',
-      kind: 'manyToMany',
       localKey: 'id',
       orderBy: [asc('name'), asc('id')],
-      source: () => tagSource,
       through: {
         foreignKey: 'tagId',
         localKey: 'postId',
       },
-    },
+    }),
   },
 });
 
@@ -210,18 +207,14 @@ export const commentSource = defineSource(commentDataView, {
   id: 'id',
   orderBy: [desc('createdAt'), desc('id')],
   relations: {
-    author: {
+    author: one(() => userSource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'authorId',
-      source: () => userSource,
-    },
-    post: {
+    }),
+    post: one(() => postSummarySource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'postId',
-      source: () => postSummarySource,
-    },
+    }),
   },
 });
 
@@ -229,36 +222,28 @@ export const postSource = defineSource(postDataView, {
   id: 'id',
   orderBy: [desc('createdAt'), desc('id')],
   relations: {
-    author: {
+    author: one(() => userSource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'authorId',
-      source: () => userSource,
-    },
-    category: {
+    }),
+    category: one(() => categorySummarySource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'categoryId',
-      source: () => categorySummarySource,
-    },
-    comments: {
+    }),
+    comments: many(() => commentSource, {
       foreignKey: 'postId',
-      kind: 'many',
       localKey: 'id',
       orderBy: [desc('createdAt'), desc('id')],
-      source: () => commentSource,
-    },
-    tags: {
+    }),
+    tags: manyToMany(() => tagSource, {
       foreignKey: 'id',
-      kind: 'manyToMany',
       localKey: 'id',
       orderBy: [asc('name'), asc('id')],
-      source: () => tagSource,
       through: {
         foreignKey: 'tagId',
         localKey: 'postId',
       },
-    },
+    }),
   },
 });
 
@@ -266,13 +251,11 @@ export const categorySource = defineSource(categoryDataView, {
   id: 'id',
   orderBy: [asc('createdAt'), asc('id')],
   relations: {
-    posts: {
+    posts: many(() => postSource, {
       foreignKey: 'categoryId',
-      kind: 'many',
       localKey: 'id',
       orderBy: [desc('createdAt'), desc('id')],
-      source: () => postSource,
-    },
+    }),
   },
 });
 
@@ -280,12 +263,10 @@ export const eventAttendeeSource = defineSource(eventAttendeeDataView, {
   id: 'id',
   orderBy: [asc('createdAt'), asc('id')],
   relations: {
-    user: {
+    user: one(() => userSource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'userId',
-      source: () => userSource,
-    },
+    }),
   },
 });
 
@@ -293,19 +274,15 @@ export const eventSource = defineSource(eventDataView, {
   id: 'id',
   orderBy: [asc('startAt'), asc('id')],
   relations: {
-    attendees: {
+    attendees: many(() => eventAttendeeSource, {
       foreignKey: 'eventId',
-      kind: 'many',
       localKey: 'id',
       orderBy: [asc('createdAt'), asc('id')],
-      source: () => eventAttendeeSource,
-    },
-    host: {
+    }),
+    host: one(() => userSource, {
       foreignKey: 'id',
-      kind: 'one',
       localKey: 'hostId',
-      source: () => userSource,
-    },
+    }),
   },
 });
 

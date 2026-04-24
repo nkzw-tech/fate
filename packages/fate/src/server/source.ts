@@ -1,5 +1,6 @@
 import type { AnyRecord } from '../types.ts';
 import { createViewPlan, type DataView, type ViewPlan, type ViewPlanNode } from './dataView.ts';
+import { getScopedArgs } from './queryArgs.ts';
 
 export type OrderDirection = 'asc' | 'desc';
 
@@ -69,6 +70,71 @@ export function defineSource<Item extends AnyRecord, Adapter = unknown>(
   };
 }
 
+type SourceRelationConfig<Item extends AnyRecord = AnyRecord, Adapter = unknown> = Omit<
+  SourceRelation<Item, Adapter>,
+  'kind' | 'source'
+>;
+
+export const one = <Item extends AnyRecord, Adapter = unknown>(
+  source: SourceReference<Item, Adapter>,
+  config: SourceRelationConfig<Item, Adapter>,
+): SourceRelation<Item, Adapter> => ({
+  ...config,
+  kind: 'one',
+  source,
+});
+
+export const many = <Item extends AnyRecord, Adapter = unknown>(
+  source: SourceReference<Item, Adapter>,
+  config: SourceRelationConfig<Item, Adapter>,
+): SourceRelation<Item, Adapter> => ({
+  ...config,
+  kind: 'many',
+  source,
+});
+
+export const manyToMany = <Item extends AnyRecord, Adapter = unknown>(
+  source: SourceReference<Item, Adapter>,
+  config: SourceRelationConfig<Item, Adapter>,
+): SourceRelation<Item, Adapter> => ({
+  ...config,
+  kind: 'manyToMany',
+  source,
+});
+
+export const hasNestedSelection = (select: Iterable<string>, field: string) => {
+  for (const path of select) {
+    if (path === field || path.startsWith(`${field}.`)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const getNestedSelection = (select: Iterable<string>, field: string): Array<string> => {
+  const nested: Array<string> = [];
+
+  for (const path of select) {
+    if (path.startsWith(`${field}.`)) {
+      nested.push(path.slice(field.length + 1));
+    }
+  }
+
+  return nested;
+};
+
+export const getNestedSourceInput = (
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  },
+  field: string,
+) => ({
+  args: getScopedArgs(input.args, field),
+  select: getNestedSelection(input.select, field),
+});
+
 const resolveSourceReference = <Adapter = unknown>(
   source: SourceReference<AnyRecord, Adapter>,
 ): SourceDefinition<AnyRecord, Adapter> => (typeof source === 'function' ? source() : source);
@@ -135,6 +201,31 @@ export function createExecutionPlan<Item extends AnyRecord, Context = unknown, A
     root: attachSourceNode(plan.root, source),
     source,
   } satisfies ExecutionPlan<Item, Context, Adapter>;
+}
+
+export function createNestedExecutionPlan<
+  Item extends AnyRecord,
+  Context = unknown,
+  Adapter = unknown,
+>({
+  ctx,
+  field,
+  input,
+  source,
+}: {
+  ctx?: Context;
+  field: string;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
+  source: SourceDefinition<Item, Adapter>;
+}) {
+  return createExecutionPlan({
+    ...getNestedSourceInput(input, field),
+    ctx,
+    source,
+  });
 }
 
 const cursorEncoding = 'base64url';

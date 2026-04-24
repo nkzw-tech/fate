@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import db from './db.ts';
 import {
   comment,
@@ -86,39 +86,35 @@ export const createPostRecord = async ({
 };
 
 export const likePostRecord = async (id: string) => {
-  const [row] = await db.select().from(post).where(eq(post.id, id)).limit(1);
-  if (!row) {
-    return false;
-  }
-
-  await db
+  const [updated] = await db
     .update(post)
     .set({
-      likes: row.likes + 1,
+      likes: sql`${post.likes} + 1`,
       updatedAt: new Date(),
     })
-    .where(eq(post.id, id));
+    .where(eq(post.id, id))
+    .returning({ id: post.id });
 
-  return true;
+  return Boolean(updated);
 };
 
 export const unlikePostRecord = async (id: string) => {
-  const [row] = await db.select().from(post).where(eq(post.id, id)).limit(1);
-  if (!row) {
-    return false;
+  const [updated] = await db
+    .update(post)
+    .set({
+      likes: sql`${post.likes} - 1`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(post.id, id), gt(post.likes, 0)))
+    .returning({ id: post.id });
+
+  if (updated) {
+    return true;
   }
 
-  if (row.likes > 0) {
-    await db
-      .update(post)
-      .set({
-        likes: row.likes - 1,
-        updatedAt: new Date(),
-      })
-      .where(eq(post.id, id));
-  }
+  const [existing] = await db.select({ id: post.id }).from(post).where(eq(post.id, id)).limit(1);
 
-  return true;
+  return Boolean(existing);
 };
 
 export const createCommentRecord = async ({

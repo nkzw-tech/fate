@@ -1,5 +1,5 @@
 import type { AnyRecord } from '../types.ts';
-import type { ExecutionPlan, SourceDefinition } from './source.ts';
+import { createExecutionPlan, type ExecutionPlan, type SourceDefinition } from './source.ts';
 
 export type SourceConnectionHandler<
   Context,
@@ -173,3 +173,29 @@ export const executeSourceConnection = async <Context, Item extends AnyRecord>({
     }),
   );
 };
+
+export const refetchSourceById = async <Context, Item extends AnyRecord>({
+  ctx,
+  extra,
+  id,
+  input,
+  registry,
+  source,
+}: {
+  ctx: Context;
+  extra?: unknown;
+  id: string;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
+  registry: SourceRegistry<Context>;
+  source: SourceDefinition<Item, unknown>;
+}) =>
+  executeSourceById({
+    ctx,
+    extra,
+    id,
+    plan: createExecutionPlan({ ...input, ctx, source }),
+    registry,
+  });
