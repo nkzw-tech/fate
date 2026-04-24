@@ -231,3 +231,49 @@ test('toPrismaSelect skips orderBy for singular relations', () => {
     id: true,
   });
 });
+
+test('toPrismaSelect applies list order from data view relation fields', () => {
+  const commentView = dataView<{ createdAt: Date; id: string }>('Comment')({
+    createdAt: true,
+    id: true,
+  });
+  const postView = dataView<{ comments?: Array<{ createdAt: Date; id: string }>; id: string }>(
+    'Post',
+  )({
+    comments: list(commentView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
+    id: true,
+  });
+
+  const [, postSource] = createSourceDefinitions([
+    {
+      view: commentView,
+    },
+    {
+      relations: {
+        comments: {
+          foreignKey: 'postId',
+          localKey: 'id',
+        },
+      },
+      view: postView,
+    },
+  ]);
+
+  expect(
+    toPrismaSelect(
+      createSourcePlan({
+        select: ['comments.createdAt'],
+        source: postSource,
+      }),
+    ),
+  ).toEqual({
+    comments: {
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        createdAt: true,
+        id: true,
+      },
+    },
+    id: true,
+  });
+});

@@ -233,7 +233,7 @@ type CountRequest = {
   field: string;
   needName: string;
   relation: string;
-  where?: AnyRecord;
+  where?: unknown;
 };
 
 const stableStringify = (value: unknown): string => {
@@ -377,7 +377,7 @@ export function createPrismaSourceAdapter<Context>({
     foreignKey: string;
     parentKeys: Array<unknown>;
     source: Source;
-    where?: AnyRecord;
+    where?: unknown;
   }) => {
     const delegate = getDelegate(ctx, source);
 
@@ -390,7 +390,7 @@ export function createPrismaSourceAdapter<Context>({
       by: [foreignKey],
       where: {
         [foreignKey]: { in: parentKeys },
-        ...(where ?? {}),
+        ...((where as AnyRecord | undefined) ?? {}),
       },
     });
 
@@ -429,10 +429,16 @@ export function createPrismaSourceAdapter<Context>({
       }
 
       const childSource = resolveSourceReference(relation.source);
-      const parentKeys = [...new Set(items.map((item) => item[relation.localKey]).filter(Boolean))];
+      const parentKeys = [
+        ...new Set(
+          items
+            .map((item) => item[relation.localKey])
+            .filter((value) => value !== null && value !== undefined),
+        ),
+      ];
       const assignmentsBySignature = new Map<
         string,
-        { requests: Array<CountRequest>; where?: AnyRecord }
+        { requests: Array<CountRequest>; where?: unknown }
       >();
 
       for (const request of requests) {

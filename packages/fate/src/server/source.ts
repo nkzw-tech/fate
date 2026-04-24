@@ -191,15 +191,18 @@ export function createSourceDefinition<Item extends AnyRecord, Adapter = unknown
 export const getRelationView = (
   view: DataView<AnyRecord>,
   field: string,
-): { kind: 'many' | 'one'; view: DataView<AnyRecord> } | null => {
+): { kind: 'many' | 'one'; orderBy?: SourceOrder; view: DataView<AnyRecord> } | null => {
   const config = view.fields[field];
 
   if (!isDataView(config)) {
     return null;
   }
 
+  const orderBy = toSourceOrder(getDataViewListOptions(config)?.orderBy);
+
   return {
     kind: config.kind === 'list' ? 'many' : 'one',
+    ...(orderBy ? { orderBy } : null),
     view: config,
   };
 };
@@ -271,6 +274,7 @@ export function createSourceDefinitions<Adapter = unknown>(
           source,
           target: relationSource,
         }),
+        ...(relationView.orderBy ? { orderBy: relationView.orderBy } : null),
         ...(config.relations?.[field] ?? {}),
       };
 

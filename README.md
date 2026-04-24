@@ -909,7 +909,7 @@ export const commentDataView = dataView<CommentItem>('Comment')({
 
 export const postDataView = dataView<PostItem>('Post')({
   author: userDataView,
-  comments: list(commentDataView),
+  comments: list(commentDataView, { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
 });
 ```
 
@@ -917,15 +917,20 @@ We can define extra root-level lists and queries by exporting a `Root` object fr
 
 ```tsx
 export const Root = {
-  categories: list(categoryDataView),
-  commentSearch: { procedure: 'search', view: list(commentDataView) },
-  events: list(eventDataView),
+  categories: list(categoryDataView, { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+  commentSearch: {
+    procedure: 'search',
+    view: list(commentDataView, { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
+  },
+  events: list(eventDataView, { orderBy: [{ startAt: 'asc' }, { id: 'asc' }] }),
   posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
   viewer: userDataView,
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name. You can pass default list options such as `orderBy` to `list(...)`; Fate always appends the id field as a tie-breaker when it is missing.
+Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
+
+You can pass default list options such as `orderBy` to `list(...)`. Ordering is scoped to that specific list wrapper: `Root.posts` can order posts by `createdAt desc`, while `categoryDataView.posts` or `postDataView.comments` can choose their own order. If no order is provided, Fate orders by `id asc`. Fate always appends `id asc` as a tie-breaker when no `id` order is present; include `id` yourself when you need a different tie-breaker direction such as `id desc`. Use the array form when ordering by multiple fields so the priority is unambiguous.
 
 For the above `Root` definitions, you can make the following requests using `useRequest`:
 
@@ -1040,7 +1045,7 @@ export const fate = createDrizzleFate<AppContext, typeof procedure>({
 });
 ```
 
-The Drizzle adapter builds SQL queries from your registered data views. It selects only requested columns, hydrates singular, list, and many-to-many relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts.
+The Drizzle adapter builds SQL queries from your registered data views. It selects only requested columns, hydrates singular, list, and many-to-many relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts. Count filters may be plain equality objects or Drizzle SQL predicates written as `(columns) => eq(columns.status, 'GOING')`.
 
 For request-specific sorting, prefer a custom root query that validates and translates explicit sort args.
 

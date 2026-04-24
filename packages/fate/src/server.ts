@@ -11,6 +11,7 @@ export type {
   ComputedField,
   ComputedSelection,
   CountSelection,
+  CountWhere,
   DataViewListOptions,
   DataViewOrderBy,
   DataViewOrderDirection,
@@ -54,5 +55,11 @@ export {
 export { byIdInput } from './server/input.ts';
 export { toPrismaSelect } from './server/prismaSelect.ts';
 export { isRecord } from './record.ts';
+export { getScopedArgs } from './server/queryArgs.ts';
 export { bindSourceProcedures, createSourceProcedures } from './server/sourceRouter.ts';
-export { createSourcePlan } from './server/source.ts';
+export {
+  createNestedSourcePlan,
+  createSourcePlan,
+  getNestedSelection,
+  hasNestedSelection,
+} from './server/source.ts';

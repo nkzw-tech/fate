@@ -1,6 +1,7 @@
+import { eq } from 'drizzle-orm';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { expect, test } from 'vite-plus/test';
-import { dataView, list } from '../dataView.ts';
+import { computed, count, dataView, list } from '../dataView.ts';
 import { createDrizzleSourceAdapter } from '../drizzle.ts';
 import { createSourcePlan } from '../source.ts';
 
@@ -463,6 +464,100 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
           previousCursor: undefined,
         },
       },
+    },
+  ]);
+});
+
+test('Drizzle computed counts support many-to-many relations', async () => {
+  const postTable = pgTable('Post', {
+    id: text('id').notNull(),
+  });
+  const tagTable = pgTable('Tag', {
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+  });
+  const postToTagTable = pgTable('_PostTags', {
+    postId: text('postId').notNull(),
+    tagId: text('tagId').notNull(),
+  });
+
+  const tagView = dataView<{ id: string; name: string }>('Tag')({
+    id: true,
+    name: true,
+  });
+  let countWhereColumns: Record<string, unknown> | undefined;
+  const postView = dataView<{ id: string; tagCount?: number }>('Post')({
+    id: true,
+    tagCount: computed<{ id: string; tagCount?: number }, number>({
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
+        count: count('tags', {
+          where: (columns) => {
+            countWhereColumns = columns;
+            return eq(columns.name, 'TypeScript');
+          },
+        }),
+      },
+    }),
+    tags: list(tagView),
+  });
+
+  const db = {
+    select: () => ({
+      from: (table: unknown) => {
+        const builder = {
+          groupBy: () => [{ count: 2, parentKey: 'post-1' }],
+          innerJoin: () => builder,
+          orderBy: () => (table === postTable ? [{ id: 'post-1' }] : builder),
+          where: () => builder,
+        };
+
+        return builder;
+      },
+    }),
+  };
+
+  const adapter = createDrizzleSourceAdapter({
+    db,
+    views: [
+      {
+        manyToMany: {
+          tags: postToTagTable,
+        },
+        relations: {
+          tags: {
+            foreignKey: 'id',
+            localKey: 'id',
+            through: {
+              foreignKey: 'tagId',
+              localKey: 'postId',
+            },
+          },
+        },
+        table: postTable,
+        view: postView,
+      },
+      {
+        table: tagTable,
+        view: tagView,
+      },
+    ],
+  });
+  const plan = createSourcePlan({
+    select: ['tagCount'],
+    source: adapter.getSource(postView),
+  });
+
+  const items = await adapter.fetchByIds({
+    ids: ['post-1'],
+    plan,
+  });
+
+  expect(countWhereColumns).toEqual(expect.objectContaining({ name: tagTable.name }));
+  expect(await plan.resolveMany(items)).toEqual([
+    {
+      id: 'post-1',
+      tagCount: 2,
     },
   ]);
 });

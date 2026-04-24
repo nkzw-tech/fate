@@ -62,7 +62,7 @@ export const commentDataView = dataView<CommentItem>('Comment')({
 
 export const postDataView = dataView<PostItem>('Post')({
   ...basePost,
-  comments: list(commentDataView),
+  comments: list(commentDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   tags: list(tagDataView),
 });
 
@@ -87,7 +87,7 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 });
 
 export const eventDataView = dataView<EventItem>('Event')({
-  attendees: list(eventAttendeeDataView),
+  attendees: list(eventAttendeeDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   attendingCount: computed<EventItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
@@ -153,9 +153,12 @@ export type Event = Entity<
 >;
 
 export const Root = {
-  categories: list(categoryDataView),
-  commentSearch: { procedure: 'search', view: list(commentDataView) },
-  events: list(eventDataView),
+  categories: list(categoryDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
+  commentSearch: {
+    procedure: 'search',
+    view: list(commentDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  },
+  events: list(eventDataView, { orderBy: [{ startAt: 'asc' }, { id: 'asc' }] }),
   posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
   viewer: userDataView,
 };

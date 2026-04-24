@@ -30,10 +30,19 @@ export type FieldSelection = {
   path: string;
 };
 
+type SQLWrapperLike = {
+  getSQL: () => unknown;
+};
+
+export type CountWhere =
+  | AnyRecord
+  | SQLWrapperLike
+  | ((columns: Record<string, any>) => SQLWrapperLike | undefined);
+
 export type CountSelection = {
   kind: 'count';
   relation: string;
-  where?: AnyRecord;
+  where?: CountWhere;
 };
 
 export type ComputedSelection = CountSelection | FieldSelection;
@@ -200,7 +209,7 @@ export const field = (path: string): FieldSelection => ({
   path,
 });
 
-export const count = (relation: string, options?: { where?: AnyRecord }): CountSelection => ({
+export const count = (relation: string, options?: { where?: CountWhere }): CountSelection => ({
   kind: 'count',
   relation,
   where: options?.where,

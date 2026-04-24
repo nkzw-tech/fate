@@ -1,4 +1,9 @@
-import { connectionArgs, isRecord } from '@nkzw/fate/server';
+import {
+  connectionArgs,
+  getNestedSelection,
+  getScopedArgs,
+  hasNestedSelection,
+} from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { ilike } from 'drizzle-orm';
 import { z } from 'zod';
@@ -11,43 +16,6 @@ import {
 import { comment } from '../../drizzle/schema.ts';
 import { fate, procedure, router } from '../init.ts';
 import { commentDataView, postDataView } from '../views.ts';
-
-type AnyRecord = Record<string, unknown>;
-
-const hasNestedSelection = (select: Iterable<string>, field: string) => {
-  for (const path of select) {
-    if (path === field || path.startsWith(`${field}.`)) {
-      return true;
-    }
-  }
-  return false;
-};
-
-const getNestedSelection = (select: Iterable<string>, field: string): Array<string> => {
-  const nested: Array<string> = [];
-  for (const path of select) {
-    if (path.startsWith(`${field}.`)) {
-      nested.push(path.slice(field.length + 1));
-    }
-  }
-  return nested;
-};
-
-const getScopedArgs = (args: AnyRecord | undefined, path: string): AnyRecord | undefined => {
-  if (!args) {
-    return undefined;
-  }
-
-  let current: unknown = args;
-  for (const segment of path.split('.')) {
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-
-  return isRecord(current) ? current : undefined;
-};
 
 export const commentRouter = router({
   ...fate.procedures({

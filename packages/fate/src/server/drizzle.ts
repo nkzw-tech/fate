@@ -389,12 +389,27 @@ const getQueryOrder = (
         : asc(column);
   });
 
-const whereFromObject = (columns: ColumnMap, where?: AnyRecord) => {
-  if (!where || Object.keys(where).length === 0) {
+const isSQLWrapper = (value: unknown): value is SQLWrapper =>
+  isRecord(value) && typeof value.getSQL === 'function';
+
+const whereFromCountSelection = (columns: ColumnMap, where?: unknown) => {
+  if (!where) {
     return undefined;
   }
 
-  const conditions = Object.entries(where).map(([field, value]) =>
+  if (typeof where === 'function') {
+    return (where as (columns: ColumnMap) => SQLWrapper | undefined)(columns);
+  }
+
+  if (isSQLWrapper(where)) {
+    return where;
+  }
+
+  if (Object.keys(where).length === 0) {
+    return undefined;
+  }
+
+  const conditions = Object.entries(where as AnyRecord).map(([field, value]) =>
     eq(getColumn(columns, field), value),
   );
   return conditions.length === 1 ? conditions[0] : and(...conditions);
@@ -874,30 +889,74 @@ export function createDrizzleSourceAdapter<Context>({
         }
 
         const sourceRelation = node.source.relations?.[selection.relation];
-        if (!sourceRelation || sourceRelation.kind !== 'many') {
+        if (
+          !sourceRelation ||
+          (sourceRelation.kind !== 'many' && sourceRelation.kind !== 'manyToMany')
+        ) {
           throw new Error(
-            `Computed count ${node.source.view.typeName}.${field} requires a 'many' relation named ${selection.relation}.`,
+            `Computed count ${node.source.view.typeName}.${field} requires a collection relation named ${selection.relation}.`,
           );
         }
 
-        const childSource = resolveSource(sourceRelation.source);
-        const childConfig = getSourceConfig(childSource);
         const parentKeys = compactKeys(items.map((item) => item[sourceRelation.localKey]));
         if (parentKeys.length === 0) {
           continue;
         }
-        const where = and(
-          inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
-          whereFromObject(childConfig.columns, selection.where),
-        );
-        const rows = await getDb(ctx)
-          .select({
-            count: sql<number>`count(*)`.mapWith(Number),
-            parentKey: getColumn(childConfig.columns, sourceRelation.foreignKey),
-          })
-          .from(childConfig.table)
-          .where(where)
-          .groupBy(getColumn(childConfig.columns, sourceRelation.foreignKey));
+        const childSource = resolveSource(sourceRelation.source);
+        const childConfig = getSourceConfig(childSource);
+        let rows: Array<AnyRecord>;
+
+        if (sourceRelation.kind === 'manyToMany') {
+          const parentConfig = getSourceConfig(node.source);
+          const throughConfig = parentConfig.manyToMany?.[selection.relation];
+
+          if (!throughConfig) {
+            throw new Error(
+              `No Drizzle many-to-many table registered for ${node.source.view.typeName}.${selection.relation}.`,
+            );
+          }
+
+          const through = resolveManyToManyConfig({
+            field: selection.relation,
+            source: node.source,
+            sourceRelation,
+            through: throughConfig,
+          });
+
+          rows = (await getDb(ctx)
+            .select({
+              count: sql<number>`count(*)`.mapWith(Number),
+              parentKey: through.localColumn,
+            })
+            .from(through.table)
+            .innerJoin(
+              childConfig.table,
+              eq(through.foreignColumn, getColumn(childConfig.columns, sourceRelation.foreignKey)),
+            )
+            .where(
+              and(
+                inArray(through.localColumn, parentKeys),
+                whereFromCountSelection(childConfig.columns, selection.where),
+              ),
+            )
+            .groupBy(through.localColumn)) as Array<AnyRecord>;
+        } else {
+          const parentKeyColumn = getColumn(childConfig.columns, sourceRelation.foreignKey);
+          rows = (await getDb(ctx)
+            .select({
+              count: sql<number>`count(*)`.mapWith(Number),
+              parentKey: parentKeyColumn,
+            })
+            .from(childConfig.table)
+            .where(
+              and(
+                inArray(parentKeyColumn, parentKeys),
+                whereFromCountSelection(childConfig.columns, selection.where),
+              ),
+            )
+            .groupBy(parentKeyColumn)) as Array<AnyRecord>;
+        }
+
         const counts = new Map(rows.map((row: AnyRecord) => [row.parentKey, row.count]));
 
         for (const item of items) {
