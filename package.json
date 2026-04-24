@@ -11,8 +11,10 @@
   "type": "module",
   "scripts": {
     "build:all": "vp run -r build && vp run generate-readme && vp run copy-files",
-    "build:docs": "typedoc && vitepress build",
+    "build:api-docs": "typedoc",
+    "build:docs": "vp run build:api-docs && vp run copy-package-docs && vitepress build",
     "copy-files": "find packages/fate packages/react-fate -type d -maxdepth 0 -exec cp README.md LICENSE {} \\;",
+    "copy-package-docs": "node --conditions=development --no-warnings --loader ts-node/esm scripts/copy-package-docs.ts",
     "dev": "npm-run-all --parallel dev:client dev:server",
     "dev:client": "cd example/client && vp dev",
     "dev:docs": "typedoc && vitepress dev",
@@ -24,7 +26,7 @@
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",
-    "ship": "vp run build:all && vp check && vp test && vp pm publish -r --access public"
+    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public"
   },
   "devDependencies": {
     "@fontsource/fira-code": "^5.2.7",

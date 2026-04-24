@@ -75,6 +75,12 @@ export type RequestMode =
 export type RequestOptions = Readonly<{ mode?: RequestMode }>;
 
 type FateClientOptions<Roots extends FateRoots, Mutations extends FateMutations> = {
+  /**
+   * Number of recently released requests to keep retained before their records
+   * and lists are eligible for garbage collection.
+   *
+   * @defaultValue 10
+   */
   gcReleaseBufferSize?: number;
   mutations?: Mutations;
   roots: Roots;
@@ -1052,6 +1058,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
   }
 
+  /**
+   * Keeps the records and lists reachable from a request alive until the
+   * returned handle is disposed.
+   *
+   * `useRequest` calls this automatically while the component is mounted.
+   * Use it directly for non-React request lifetimes, tests, or preloaded data
+   * that must survive manual garbage collection.
+   */
   retain(request: Request): RetainHandle {
     return this.operationLifetime.retain(this.createRequestDescriptor(request), () =>
       this.scheduleGarbageCollection(),
@@ -1070,6 +1084,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     });
   }
 
+  /**
+   * Removes records and lists that are not reachable from retained requests or
+   * the release buffer.
+   *
+   * Garbage collection is scheduled automatically when retained requests are
+   * released. Calling this method manually is mainly useful in tests and custom
+   * memory-management flows.
+   */
   gc(): void {
     if (this.hasActiveOptimisticUpdates()) {
       this.gcPending = true;

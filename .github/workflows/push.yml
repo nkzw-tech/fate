@@ -28,7 +28,7 @@ jobs:
           cache: true
 
       - name: Run setup
-        run: vp install && vp run dev:setup && vp run build:all && vpx typedoc
+        run: vp install && vp run dev:setup && vp run build:all && vp run build:api-docs && vp run copy-package-docs
 
       - name: Run check
         run: vp check

@@ -69,6 +69,8 @@ const { posts } = useRequest({
 });
 ```
 
+Request arguments are part of the cache key. Two list requests for the same root with different filters or sorting arguments keep separate list state, and cursor arguments are merged into the same list when you load more pages. The selected view is part of the key as well: requesting `PostCardView` and `PostDetailView` can share normalized records, but fate still tracks whether the specific fields for each request are present.
+
 ## Request Modes
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
@@ -89,3 +91,40 @@ const { posts } = useRequest(
   },
 );
 ```
+
+## Cache Lifetime
+
+fate stores records in a normalized cache keyed by `__typename` and `id`. Lists and root queries point at those records, and views read from the normalized cache. When a `useRequest` call is mounted, fate retains the request so the records and lists needed by that screen stay in memory. When the component unmounts, the request is released and fate schedules garbage collection.
+
+Released requests are kept in a small release buffer before their data becomes collectible. This makes common route transitions cheap: navigating away from a screen and quickly coming back usually reuses the cached records instead of refetching them. The default release buffer stores the 10 most recently released requests.
+
+You can tune the buffer when creating the client:
+
+```tsx
+const fate = createClient({
+  gcReleaseBufferSize: 20,
+  roots,
+  transport,
+  types,
+});
+```
+
+Set `gcReleaseBufferSize` to `0` in tests or very memory-sensitive environments when released screens should be collected immediately.
+
+`cache-first` request handles are stable while their request is cached. If garbage collection later removes the data for a fulfilled request, the next `cache-first` request automatically fetches it again rather than returning stale references.
+
+If you call `fate.request(...)` outside React and need the result to stay in memory across manual `gc()` calls, retain the same request for the lifetime of that work:
+
+```tsx
+const request = { posts: { list: PostView } };
+const retained = fate.retain(request);
+
+try {
+  const { posts } = await fate.request(request);
+  // Use posts while this request is retained.
+} finally {
+  retained.dispose();
+}
+```
+
+Garbage collection waits for active optimistic updates to settle before sweeping records. This keeps temporary optimistic records and their list positions stable while mutations are still pending.

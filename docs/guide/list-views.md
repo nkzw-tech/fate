@@ -49,3 +49,38 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 ```
 
 If `loadNext` is undefined, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be undefined.
+
+## Pagination Arguments
+
+Connection views can define default arguments, and `useListView` carries those arguments forward when loading more pages:
+
+```tsx
+const CommentConnectionView = {
+  args: { first: 10 },
+  items: {
+    cursor: true,
+    node: CommentView,
+  },
+  pagination: {
+    hasNext: true,
+    hasPrevious: true,
+    nextCursor: true,
+    previousCursor: true,
+  },
+};
+```
+
+When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
+
+Additional arguments on a root request are scoped to that root list:
+
+```tsx
+const { posts } = useRequest({
+  posts: {
+    args: { categoryId: category.id, first: 20 },
+    list: PostConnectionView,
+  },
+});
+```
+
+The `categoryId` list above has its own cache entry and pagination state. Loading another page for that list does not update a different `posts` request with another category or search query.

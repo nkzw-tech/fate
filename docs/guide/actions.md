@@ -84,6 +84,24 @@ addComment({
 });
 ```
 
+By default, fate inserts new records after existing items in matching root lists and nested lists. For a newest-first list, pass `insert: 'before'` so optimistic records appear at the beginning:
+
+```tsx
+addComment({
+  input: { content, postId: post.id },
+  insert: 'before',
+  optimistic: {
+    content,
+    id: `optimistic:${Date.now().toString(36)}`,
+    post: { id: post.id },
+  },
+});
+```
+
+Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
+
+Multiple pending optimistic inserts keep their visible order. For example, two `insert: 'before'` calls on a newest-first feed show the second optimistic item before the first, matching what users expect from newly created content.
+
 ## Selecting a View with Actions
 
 Mutations may change data that is not directly specified in the mutation result. For example, adding a comment increases the post's comment count. For such cases, you can provide a `view` to an action that specifies which fields to fetch as part of the mutation:

@@ -500,6 +500,8 @@ const { posts } = useRequest({
 });
 ```
 
+Request arguments are part of the cache key. Two list requests for the same root with different filters or sorting arguments keep separate list state, and cursor arguments are merged into the same list when you load more pages. The selected view is part of the key as well: requesting `PostCardView` and `PostDetailView` can share normalized records, but fate still tracks whether the specific fields for each request are present.
+
 ### Request Modes
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
@@ -520,6 +522,43 @@ const { posts } = useRequest(
   },
 );
 ```
+
+### Cache Lifetime
+
+fate stores records in a normalized cache keyed by `__typename` and `id`. Lists and root queries point at those records, and views read from the normalized cache. When a `useRequest` call is mounted, fate retains the request so the records and lists needed by that screen stay in memory. When the component unmounts, the request is released and fate schedules garbage collection.
+
+Released requests are kept in a small release buffer before their data becomes collectible. This makes common route transitions cheap: navigating away from a screen and quickly coming back usually reuses the cached records instead of refetching them. The default release buffer stores the 10 most recently released requests.
+
+You can tune the buffer when creating the client:
+
+```tsx
+const fate = createClient({
+  gcReleaseBufferSize: 20,
+  roots,
+  transport,
+  types,
+});
+```
+
+Set `gcReleaseBufferSize` to `0` in tests or very memory-sensitive environments when released screens should be collected immediately.
+
+`cache-first` request handles are stable while their request is cached. If garbage collection later removes the data for a fulfilled request, the next `cache-first` request automatically fetches it again rather than returning stale references.
+
+If you call `fate.request(...)` outside React and need the result to stay in memory across manual `gc()` calls, retain the same request for the lifetime of that work:
+
+```tsx
+const request = { posts: { list: PostView } };
+const retained = fate.retain(request);
+
+try {
+  const { posts } = await fate.request(request);
+  // Use posts while this request is retained.
+} finally {
+  retained.dispose();
+}
+```
+
+Garbage collection waits for active optimistic updates to settle before sweeping records. This keeps temporary optimistic records and their list positions stable while mutations are still pending.
 
 ## List Views
 
@@ -572,6 +611,41 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 ```
 
 If `loadNext` is undefined, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be undefined.
+
+### Pagination Arguments
+
+Connection views can define default arguments, and `useListView` carries those arguments forward when loading more pages:
+
+```tsx
+const CommentConnectionView = {
+  args: { first: 10 },
+  items: {
+    cursor: true,
+    node: CommentView,
+  },
+  pagination: {
+    hasNext: true,
+    hasPrevious: true,
+    nextCursor: true,
+    previousCursor: true,
+  },
+};
+```
+
+When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
+
+Additional arguments on a root request are scoped to that root list:
+
+```tsx
+const { posts } = useRequest({
+  posts: {
+    args: { categoryId: category.id, first: 20 },
+    list: PostConnectionView,
+  },
+});
+```
+
+The `categoryId` list above has its own cache entry and pagination state. Loading another page for that list does not update a different `posts` request with another category or search query.
 
 ## Actions
 
@@ -658,6 +732,24 @@ addComment({
   },
 });
 ```
+
+By default, fate inserts new records after existing items in matching root lists and nested lists. For a newest-first list, pass `insert: 'before'` so optimistic records appear at the beginning:
+
+```tsx
+addComment({
+  input: { content, postId: post.id },
+  insert: 'before',
+  optimistic: {
+    content,
+    id: `optimistic:${Date.now().toString(36)}`,
+    post: { id: post.id },
+  },
+});
+```
+
+Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
+
+Multiple pending optimistic inserts keep their visible order. For example, two `insert: 'before'` calls on a newest-first feed show the second optimistic item before the first, matching what users expect from newly created content.
 
 ### Selecting a View with Actions
 

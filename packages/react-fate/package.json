@@ -16,6 +16,7 @@
     "fate": "./lib/cli.mjs"
   },
   "files": [
+    "docs",
     "lib"
   ],
   "type": "module",

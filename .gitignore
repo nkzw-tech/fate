@@ -8,6 +8,8 @@ dist/
 docs/api
 example/client/dist/
 example/server-prisma/src/prisma/prisma-client/
+packages/fate/docs/
+packages/react-fate/docs/
 packages/**/lib/
 packages/**/LICENSE
 packages/**/README.md
