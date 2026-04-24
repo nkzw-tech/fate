@@ -1,3 +1,12 @@
+/**
+ * The fate Drizzle source adapter.
+ *
+ * @example
+ * import { createDrizzleSourceRuntime } from '@nkzw/fate/server/drizzle';
+ *
+ * @module @nkzw/fate/server/drizzle
+ */
+
 import {
   and,
   asc,

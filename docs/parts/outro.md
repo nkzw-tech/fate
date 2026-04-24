@@ -25,12 +25,10 @@ Probably. One day. _Maybe._
 
 # Future
 
-**_fate_** is not complete yet. The library lacks core features such as garbage collection, a compiler to extract view definitions statically ahead of time, and there is too much backend boilerplate. The current implementation of _fate_ is not tied to tRPC or Prisma, those are just the ones we are starting with. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
+**_fate_** is not complete yet. The current implementation of _fate_ ships with tRPC, Prisma, and Drizzle support, but the core ideas are not tied to a particular transport or database. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
 
-- Support for Drizzle
 - Support backends other than tRPC
 - Persistent storage for offline support
-- Implement garbage collection for the cache
 - Better code generation and less type repetition
 - Support for live views and real-time updates via `useLiveView` and SSE
 

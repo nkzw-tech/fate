@@ -821,7 +821,7 @@ addComment({
 
 ## Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. At the moment _fate_ is designed to work with tRPC and Prisma, but the framework is not coupled to any particular ORM or database, it's just what we are starting with.
+Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. _fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters both plug into the same runtime and expose the same tRPC procedure shape to the client.
 
 ### Conventions & Object Identity
 
@@ -839,13 +839,13 @@ fate's type definitions might seem verbose at first glance. However, with fate's
 
 ### Data Views
 
-To continue with our client example, let's assume we have a `post.ts` file with a tRPC router that exposes a `byId` query for selecting objects by id, and a root `list` query to fetch a list of posts.
-
 Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client. On the client, we define views to select fields on each type. We can do the same on the server using fate data views and the `dataView` function from `@nkzw/fate/server`.
 
-Create a `views.ts` file next to your root tRPC router that exports the data views for each type. Here is how you can define a `User` data view for Prisma's `User` model:
+Create a `views.ts` file next to your root tRPC router that exports the data views for each type. The same data view shape works with both Prisma model types and Drizzle row types:
 
-```tsx
+::: code-group
+
+```tsx [Prisma]
 import { dataView, type Entity } from '@nkzw/fate/server';
 import type { User as PrismaUser } from '../prisma/prisma-client/client.ts';
 
@@ -858,36 +858,20 @@ export const userDataView = dataView<PrismaUser>('User')({
 export type User = Entity<typeof userDataView, 'User'>;
 ```
 
-_Note: Currently, fate provides helpers to integrate with Prisma, but the framework is not coupled to any particular ORM or database. We hope to provide more direct integrations in the future, and are always open to contributions._
+```tsx [Drizzle]
+import { dataView, type Entity } from '@nkzw/fate/server';
+import type { UserRow } from '../drizzle/schema.ts';
 
-### tRPC Router Implementation
-
-We can apply the above data view in our tRPC router and resolve the client's selection against it using `createResolver`. Here is an example implementation of the `byId` query for the `User` type which allows fetching multiple users by `id`:
-
-```tsx
-import { byIdInput, createResolver } from '@nkzw/fate/server';
-import { z } from 'zod';
-import type { UserFindManyArgs } from '../../prisma/prisma-client/models.ts';
-import { procedure, router } from '../init.ts';
-import { userDataView } from '../views.ts';
-
-export const userRouter = router({
-  byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
-    const { resolveMany, select } = createResolver({
-      ...input,
-      ctx,
-      view: userDataView,
-    });
-
-    const users = await ctx.prisma.user.findMany({
-      select: select,
-      where: { id: { in: input.ids } },
-    } as UserFindManyArgs);
-
-    return await resolveMany(users);
-  }),
+export const userDataView = dataView<UserRow>('User')({
+  id: true,
+  name: true,
+  username: true,
 });
+
+export type User = Entity<typeof userDataView, 'User'>;
 ```
+
+:::
 
 Now that we apply `userDataView` to the `byId` query, the server limits the selection to the fields defined in the data view, keeping private fields hidden from the client, and providing type safety for client views:
 
@@ -895,43 +879,6 @@ Now that we apply `userDataView` to the `byId` query, the server limits the sele
 const UserData = view<User>()({
   // Type-error + ignored during runtime.
   password: true,
-});
-```
-
-### tRPC List Implementation
-
-To implement the `list` query for fetching a paginated list of posts, we can use fate's `createConnectionProcedure` helper. This helper simplifies the implementation of pagination. Here is an example implementation of the `postRouter` with a `list` query:
-
-```tsx
-import { createResolver } from '@nkzw/fate/server';
-import type { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
-import { createConnectionProcedure } from '../connection.ts';
-import { router } from '../init.ts';
-import { postDataView } from '../views.ts';
-
-export const postRouter = router({
-  list: createConnectionProcedure({
-    query: async ({ ctx, cursor, direction, input, skip, take }) => {
-      const { resolveMany, select } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-      const findOptions: PostFindManyArgs = {
-        orderBy: { createdAt: 'desc' },
-        select,
-        take: direction === 'forward' ? take : -take,
-      };
-
-      if (cursor) {
-        findOptions.cursor = { id: cursor };
-        findOptions.skip = skip;
-      }
-
-      const items = await ctx.prisma.post.findMany(findOptions);
-      return resolveMany(direction === 'forward' ? items : items.reverse());
-    },
-  }),
 });
 ```
 
@@ -999,39 +946,370 @@ const { posts, categories, viewer } = useRequest({
 });
 ```
 
+### Sources
+
+A data view describes which fields are visible. A source describes how that type is stored and how it relates to other sources. Sources are shared by both database adapters:
+
+```tsx
+import { asc, defineSource, desc, many, manyToMany, one } from '@nkzw/fate/server';
+
+export const userSource = defineSource(userDataView, {
+  id: 'id',
+});
+
+export const tagSource = defineSource(tagDataView, {
+  id: 'id',
+  orderBy: [asc('name'), asc('id')],
+});
+
+export const postSource = defineSource(postDataView, {
+  id: 'id',
+  orderBy: [desc('createdAt'), desc('id')],
+  relations: {
+    author: one(() => userSource, {
+      foreignKey: 'id',
+      localKey: 'authorId',
+    }),
+    comments: many(() => commentSource, {
+      foreignKey: 'postId',
+      localKey: 'id',
+      orderBy: [desc('createdAt'), desc('id')],
+    }),
+    tags: manyToMany(() => tagSource, {
+      foreignKey: 'id',
+      localKey: 'id',
+      orderBy: [asc('name'), asc('id')],
+      through: {
+        foreignKey: 'tagId',
+        localKey: 'postId',
+      },
+    }),
+  },
+});
+```
+
+The `id` field is used for object identity and cursor pagination. `orderBy` controls stable list ordering and should include a unique field, usually `id`, as a final tie-breaker. Relations describe the key mapping in source terms:
+
+- `one` loads a nullable or singular relation.
+- `many` loads a list relation and supports nested pagination.
+- `manyToMany` loads through a join table and supports nested pagination.
+
+### Database Adapters
+
+The Prisma and Drizzle adapters both turn source definitions into a `SourceRegistry`. This registry is what fate's generic tRPC helpers call for `byId`, `byIds`, and paginated `list` execution.
+
+#### Prisma
+
+Use `createPrismaSourceRuntime` from `@nkzw/fate/server/prisma` and connect each source to a Prisma delegate. The delegate receives your tRPC context so it can use `ctx.prisma`, a transaction client, or any request-scoped Prisma client:
+
+```tsx
+import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+import type { AppContext } from './context.ts';
+import { commentSource, postSource, userSource } from './views.ts';
+
+export const prismaRuntime = createPrismaSourceRuntime<AppContext>({
+  sources: [
+    {
+      delegate: (ctx) => ctx.prisma.comment,
+      source: commentSource,
+    },
+    {
+      delegate: (ctx) => ctx.prisma.post,
+      source: postSource,
+    },
+    {
+      delegate: (ctx) => ctx.prisma.user,
+      source: userSource,
+    },
+  ],
+});
+
+export const prismaRegistry = prismaRuntime.registry;
+```
+
+The Prisma adapter translates a source execution plan into Prisma `select`, `where`, `orderBy`, `cursor`, `skip`, and `take` options. It also hydrates computed `count(...)` dependencies using Prisma `groupBy` when needed.
+
+For custom Prisma queries and mutations, you can still use the lower-level `createExecutionPlan` and `toPrismaSelect` helpers:
+
+```tsx
+import { createExecutionPlan, toPrismaSelect } from '@nkzw/fate/server';
+
+const plan = createExecutionPlan({
+  ...input,
+  ctx,
+  source: postSource,
+});
+
+const post = await ctx.prisma.post.update({
+  data: {
+    likes: {
+      increment: 1,
+    },
+  },
+  select: toPrismaSelect(plan),
+  where: { id: input.id },
+});
+
+return plan.resolve(post);
+```
+
+#### Drizzle
+
+Use `createDrizzleSourceRuntime` from `@nkzw/fate/server/drizzle` and connect each source to a Drizzle table. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
+
+```tsx
+import { createDrizzleSourceRuntime } from '@nkzw/fate/server/drizzle';
+import db from '../drizzle/db.ts';
+import { comment, post, postToTag, tag, user } from '../drizzle/schema.ts';
+import type { AppContext } from './context.ts';
+import { commentSource, postSource, tagSource, userSource } from './views.ts';
+
+export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+  db,
+  sources: [
+    {
+      source: commentSource,
+      table: comment,
+    },
+    {
+      manyToMany: {
+        tags: postToTag,
+      },
+      source: postSource,
+      table: post,
+    },
+    {
+      source: tagSource,
+      table: tag,
+    },
+    {
+      source: userSource,
+      table: user,
+    },
+  ],
+});
+
+export const drizzleRegistry = drizzleRuntime.registry;
+```
+
+If your database lives on the request context, pass a function instead:
+
+```tsx
+export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+  db: (ctx) => ctx.db,
+  sources,
+});
+```
+
+The Drizzle adapter builds SQL queries from your source definitions. It selects only requested columns, hydrates `one`, `many`, and `manyToMany` relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts.
+
+For many-to-many relations, register the join table under the relation field name. When your source relation includes `through.foreignKey` and `through.localKey`, fate can infer the join columns from the Drizzle table:
+
+```tsx
+export const postSource = defineSource(postDataView, {
+  id: 'id',
+  relations: {
+    tags: manyToMany(() => tagSource, {
+      foreignKey: 'id',
+      localKey: 'id',
+      through: {
+        foreignKey: 'tagId',
+        localKey: 'postId',
+      },
+    }),
+  },
+});
+
+export const drizzleRuntime = createDrizzleSourceRuntime<AppContext>({
+  db,
+  sources: [
+    {
+      manyToMany: {
+        tags: postToTag,
+      },
+      source: postSource,
+      table: post,
+    },
+    {
+      source: tagSource,
+      table: tag,
+    },
+  ],
+});
+```
+
+You can provide explicit join columns when the Drizzle column names do not match the source relation keys:
+
+```tsx
+{
+  manyToMany: {
+    tags: {
+      foreignColumn: postToTag.tagId,
+      localColumn: postToTag.postId,
+      table: postToTag,
+    },
+  },
+  source: postSource,
+  table: post,
+}
+```
+
+Drizzle writes should stay ordinary Drizzle code. After creating or updating a row, use `refetchSourceById` to load the selected shape that the client asked for:
+
+```tsx
+import { refetchSourceById } from '@nkzw/fate/server';
+
+const postId = await createPostRecord({
+  authorId: ctx.sessionUser.id,
+  content: input.content,
+  title: input.title,
+});
+
+const post = await refetchSourceById({
+  ctx,
+  id: postId,
+  input,
+  registry: drizzleRegistry,
+  source: postSource,
+});
+
+return post;
+```
+
+### tRPC Source Procedures
+
+Once you have a registry, use `createSourceProcedureFactory` to build standard `byId` and `list` procedures for each source:
+
+```tsx
+import { createSourceProcedureFactory } from '@nkzw/fate/server';
+import { createConnectionProcedure } from './connection.ts';
+import type { AppContext } from './context.ts';
+import { prismaRegistry } from './executor.ts';
+import { procedure } from './init.ts';
+
+export const sourceProcedures = createSourceProcedureFactory<
+  AppContext,
+  typeof procedure,
+  typeof createConnectionProcedure
+>({
+  createConnectionProcedure,
+  procedure,
+  registry: prismaRegistry,
+});
+```
+
+For Drizzle, pass `drizzleRegistry` instead:
+
+```tsx
+export const sourceProcedures = createSourceProcedureFactory<
+  AppContext,
+  typeof procedure,
+  typeof createConnectionProcedure
+>({
+  createConnectionProcedure,
+  procedure,
+  registry: drizzleRegistry,
+});
+```
+
+Then spread the generated source procedures into your tRPC routers:
+
+```tsx
+import { router } from '../init.ts';
+import { sourceProcedures } from '../sourceRouter.ts';
+import { postSource } from '../views.ts';
+
+export const postRouter = router({
+  ...sourceProcedures(postSource),
+});
+```
+
+This creates the standard `byId` and `list` procedures expected by the generated fate client. You can disable the generated `list` procedure if a source should only be fetched by id:
+
+```tsx
+export const commentRouter = router({
+  ...sourceProcedures({
+    list: false,
+    source: commentSource,
+  }),
+});
+```
+
+### Custom Queries
+
+You can add custom root queries next to source procedures. Define the root in `Root`, implement a matching tRPC procedure, and call `executeSourceConnection` with the source registry:
+
+```tsx
+export const Root = {
+  commentSearch: { procedure: 'search', view: list(commentDataView) },
+};
+```
+
+```tsx
+import { createExecutionPlan, executeSourceConnection } from '@nkzw/fate/server';
+import { ilike } from 'drizzle-orm';
+
+export const commentRouter = router({
+  ...sourceProcedures({
+    list: false,
+    source: commentSource,
+  }),
+  search: createConnectionProcedure({
+    input: z.object({
+      query: z.string().min(1, 'Search query is required'),
+    }),
+    query: ({ ctx, cursor, direction, input, take }) =>
+      executeSourceConnection({
+        ctx,
+        cursor,
+        direction,
+        extra: {
+          where: ilike(comment.content, `%${input.args.query}%`),
+        },
+        plan: createExecutionPlan({
+          ...input,
+          ctx,
+          source: commentSource,
+        }),
+        registry: drizzleRegistry,
+        take,
+      }),
+  }),
+});
+```
+
+For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` instead of a Drizzle SQL expression.
+
 ### Data View Resolvers
 
-fate data views support resolvers for computed fields. If we want to add a `commentCount` field to our `Post` data view, we can use the `resolver` helper that defines a Prisma selection for the database query together with a `resolve` function:
+fate data views support computed fields. Use `computed`, `field`, and `count` to describe the hidden data needed to resolve a public field:
 
 ```tsx
-export const postDataView = dataView<PostItem>('Post')({
-  author: userDataView,
-  commentCount: resolver<PostItem, number>({
-    resolve: ({ _count }) => _count?.comments ?? 0,
-    select: () => ({
-      _count: { select: { comments: true } },
-    }),
-  }),
-  comments: list(commentDataView),
-  id: true,
-});
-```
+import { computed, count, field } from '@nkzw/fate/server';
 
-This definition makes the `commentCount` field available to your client-side views.
-
-### Authorization in Resolvers
-
-You might want to restrict access to certain fields based on the current user or other contextual information. You can do this by adding an `authorize` function to your resolver definition:
-
-```tsx
 export const userDataView = dataView<UserItem>('User')({
-  email: resolver<UserItem, string | null, { sessionUser: string }>({
-    authorize: ({ id }, context) => context?.sessionUserId === id,
-    resolve: ({ email }) => email,
+  email: computed<UserItem, string | null, AppContext>({
+    authorize: ({ id }, context) => context?.sessionUser?.id === id,
+    needs: {
+      email: field('email'),
+    },
+    resolve: (_item, deps) => (deps.email as string | null) ?? null,
+  }),
+  id: true,
+});
+
+export const postDataView = dataView<PostItem>('Post')({
+  commentCount: computed<PostItem, number>({
+    needs: {
+      count: count('comments'),
+    },
+    resolve: (_item, deps) => (deps.count as number) ?? 0,
   }),
   id: true,
 });
 ```
+
+The adapters fetch the hidden `field(...)` and `count(...)` dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
 
 ### Generating a typed client
 
@@ -1121,12 +1399,10 @@ Probably. One day. _Maybe._
 
 ## Future
 
-**_fate_** is not complete yet. The library lacks core features such as garbage collection, a compiler to extract view definitions statically ahead of time, and there is too much backend boilerplate. The current implementation of _fate_ is not tied to tRPC or Prisma, those are just the ones we are starting with. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
+**_fate_** is not complete yet. The current implementation of _fate_ ships with tRPC, Prisma, and Drizzle support, but the core ideas are not tied to a particular transport or database. We welcome contributions and ideas to improve fate. Here are some features we'd like to add:
 
-- Support for Drizzle
 - Support backends other than tRPC
 - Persistent storage for offline support
-- Implement garbage collection for the cache
 - Better code generation and less type repetition
 - Support for live views and real-time updates via `useLiveView` and SSE
 

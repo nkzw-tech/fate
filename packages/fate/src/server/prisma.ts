@@ -1,3 +1,12 @@
+/**
+ * The fate Prisma source adapter.
+ *
+ * @example
+ * import { createPrismaSourceRuntime } from '@nkzw/fate/server/prisma';
+ *
+ * @module @nkzw/fate/server/prisma
+ */
+
 import type { AnyRecord } from '../types.ts';
 import { attachComputedState } from './dataView.ts';
 import { createSourceRegistry, type SourceRegistry } from './executor.ts';
