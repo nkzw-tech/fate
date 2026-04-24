@@ -2,7 +2,7 @@ import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { expect, test } from 'vite-plus/test';
 import { dataView, list } from '../dataView.ts';
 import { createDrizzleSourceAdapter } from '../drizzle.ts';
-import { createSourcePlan, defineSource } from '../source.ts';
+import { createSourcePlan } from '../source.ts';
 
 test('Drizzle runtime can resolve the database from request context', async () => {
   const userTable = pgTable('User', {
@@ -12,9 +12,6 @@ test('Drizzle runtime can resolve the database from request context', async () =
   const userView = dataView<{ id: string; name: string }>('User')({
     id: true,
     name: true,
-  });
-  const userSource = defineSource(userView, {
-    id: 'id',
   });
   const ctx = { tenant: 'tenant-1' };
   const contexts: Array<typeof ctx> = [];
@@ -41,17 +38,17 @@ test('Drizzle runtime can resolve the database from request context', async () =
   };
   const adapter = createDrizzleSourceAdapter({
     db,
-    sources: [
+    views: [
       {
-        source: userSource,
         table: userTable,
+        view: userView,
       },
     ],
   });
   const plan = createSourcePlan({
     ctx,
     select: ['name'],
-    source: userSource,
+    source: adapter.getSource(userView),
   });
 
   const items = await adapter.fetchByIds({
@@ -91,25 +88,6 @@ test('Drizzle many-to-many relations infer join columns from source through keys
     tags: list(tagView),
   });
 
-  const tagSource = defineSource(tagView, {
-    id: 'id',
-  });
-  const postSource = defineSource(postView, {
-    id: 'id',
-    relations: {
-      tags: {
-        foreignKey: 'id',
-        kind: 'manyToMany',
-        localKey: 'id',
-        source: () => tagSource,
-        through: {
-          foreignKey: 'tagId',
-          localKey: 'postId',
-        },
-      },
-    },
-  });
-
   const db = {
     select: () => ({
       from: (table: unknown) => {
@@ -135,23 +113,33 @@ test('Drizzle many-to-many relations infer join columns from source through keys
 
   const adapter = createDrizzleSourceAdapter({
     db,
-    sources: [
+    views: [
       {
         manyToMany: {
           tags: postToTagTable,
         },
-        source: postSource,
+        relations: {
+          tags: {
+            foreignKey: 'id',
+            localKey: 'id',
+            through: {
+              foreignKey: 'tagId',
+              localKey: 'postId',
+            },
+          },
+        },
         table: postTable,
+        view: postView,
       },
       {
-        source: tagSource,
         table: tagTable,
+        view: tagView,
       },
     ],
   });
   const plan = createSourcePlan({
     select: ['tags.name'],
-    source: postSource,
+    source: adapter.getSource(postView),
   });
 
   const items = await adapter.fetchByIds({
@@ -204,21 +192,6 @@ test('Drizzle many relations preserve falsy relation keys', async () => {
     comments: list(commentView),
     id: true,
   });
-  const commentSource = defineSource(commentView, {
-    id: 'id',
-  });
-  const postSource = defineSource(postView, {
-    id: 'id',
-    relations: {
-      comments: {
-        foreignKey: 'postId',
-        kind: 'many',
-        localKey: 'id',
-        source: () => commentSource,
-      },
-    },
-  });
-
   const db = {
     select: () => ({
       from: (table: unknown) => {
@@ -242,20 +215,26 @@ test('Drizzle many relations preserve falsy relation keys', async () => {
   };
   const adapter = createDrizzleSourceAdapter({
     db,
-    sources: [
+    views: [
       {
-        source: postSource,
+        relations: {
+          comments: {
+            foreignKey: 'postId',
+            localKey: 'id',
+          },
+        },
         table: postTable,
+        view: postView,
       },
       {
-        source: commentSource,
         table: commentTable,
+        view: commentView,
       },
     ],
   });
   const plan = createSourcePlan({
     select: ['comments.content'],
-    source: postSource,
+    source: adapter.getSource(postView),
   });
 
   const items = await adapter.fetchByIds({
@@ -309,21 +288,6 @@ test('Drizzle one relations preserve falsy relation keys', async () => {
     author: userView,
     id: true,
   });
-  const userSource = defineSource(userView, {
-    id: 'id',
-  });
-  const commentSource = defineSource(commentView, {
-    id: 'id',
-    relations: {
-      author: {
-        foreignKey: 'id',
-        kind: 'one',
-        localKey: 'authorId',
-        source: () => userSource,
-      },
-    },
-  });
-
   const db = {
     select: () => ({
       from: (table: unknown) => {
@@ -346,20 +310,26 @@ test('Drizzle one relations preserve falsy relation keys', async () => {
   };
   const adapter = createDrizzleSourceAdapter({
     db,
-    sources: [
+    views: [
       {
-        source: commentSource,
+        relations: {
+          author: {
+            foreignKey: 'id',
+            localKey: 'authorId',
+          },
+        },
         table: commentTable,
+        view: commentView,
       },
       {
-        source: userSource,
         table: userTable,
+        view: userView,
       },
     ],
   });
   const plan = createSourcePlan({
     select: ['author.name'],
-    source: commentSource,
+    source: adapter.getSource(commentView),
   });
 
   const items = await adapter.fetchByIds({
@@ -400,25 +370,6 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
     id: true,
     tags: list(tagView),
   });
-  const tagSource = defineSource(tagView, {
-    id: 'id',
-  });
-  const postSource = defineSource(postView, {
-    id: 'id',
-    relations: {
-      tags: {
-        foreignKey: 'id',
-        kind: 'manyToMany',
-        localKey: 'id',
-        source: () => tagSource,
-        through: {
-          foreignKey: 'tagId',
-          localKey: 'postId',
-        },
-      },
-    },
-  });
-
   const limits: Array<number> = [];
   const db = {
     select: () => ({
@@ -452,17 +403,27 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
   };
   const adapter = createDrizzleSourceAdapter({
     db,
-    sources: [
+    views: [
       {
         manyToMany: {
           tags: postToTagTable,
         },
-        source: postSource,
+        relations: {
+          tags: {
+            foreignKey: 'id',
+            localKey: 'id',
+            through: {
+              foreignKey: 'tagId',
+              localKey: 'postId',
+            },
+          },
+        },
         table: postTable,
+        view: postView,
       },
       {
-        source: tagSource,
         table: tagTable,
+        view: tagView,
       },
     ],
   });
@@ -473,7 +434,7 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
       },
     },
     select: ['tags.name'],
-    source: postSource,
+    source: adapter.getSource(postView),
   });
 
   const items = await adapter.fetchByIds({

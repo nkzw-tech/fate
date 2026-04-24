@@ -1,10 +1,9 @@
-import { router } from '../init.ts';
-import { sourceProcedures } from '../sourceRouter.ts';
-import { tagSource } from '../views.ts';
+import { fate, router } from '../init.ts';
+import { tagDataView } from '../views.ts';
 
 export const tagRouter = router(
-  sourceProcedures({
+  fate.procedures({
     list: false,
-    source: tagSource,
+    view: tagDataView,
   }),
 );

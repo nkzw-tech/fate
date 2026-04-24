@@ -1,8 +1,8 @@
 /**
- * The fate Drizzle source adapter.
+ * Fate's Drizzle integration.
  *
  * @example
- * import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
+ * import { createDrizzleFate } from '@nkzw/fate/server/drizzle';
  *
  * @module @nkzw/fate/server/drizzle
  */
@@ -12,23 +12,69 @@ import {
   asc,
   desc,
   eq,
+  createTableRelationsHelpers,
+  extractTablesRelationalConfig,
   getTableColumns,
   gt,
   inArray,
   isTable,
   lt,
+  normalizeRelation,
   or,
   sql,
 } from 'drizzle-orm';
-import type { AnyColumn, SQLWrapper, Table } from 'drizzle-orm';
+import type { AnyColumn, SQLWrapper, Table, TableRelationalConfig } from 'drizzle-orm';
+import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
+import { withConnection } from './connection.ts';
 import type { ConnectionResult } from './connection.ts';
-import { attachComputedState, type ComputedNeed } from './dataView.ts';
-import { createSourceRegistry, type SourceRegistry } from './executor.ts';
-import type { SourcePlan, SourcePlanNode, SourceDefinition, SourceRelation } from './source.ts';
+import {
+  attachComputedState,
+  isDataView,
+  type ComputedSelection,
+  type DataView,
+} from './dataView.ts';
+import {
+  createSourceRegistry,
+  resolveSourceById,
+  resolveSourceByIds,
+  resolveSourceConnection,
+  type SourceRegistry,
+} from './executor.ts';
+import {
+  collectDataViewConfigs,
+  createSourcePlan,
+  createSourceDefinitions,
+  getDataViewSourceConfig,
+  type DataViewModule,
+  type SourceConfig,
+  type SourcePlan,
+  type SourcePlanNode,
+  type SourceDefinition,
+  type SourceRelation,
+} from './source.ts';
+import { bindSourceProcedures } from './sourceRouter.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 type Relation = SourceRelation<AnyRecord, unknown>;
+type SourceTarget<Item extends AnyRecord = AnyRecord> =
+  | DataView<Item>
+  | SourceDefinition<Item, unknown>;
+type ViewTarget<Item extends AnyRecord = AnyRecord> = DataView<Item>;
+type ListConfig = {
+  defaultSize?: number;
+};
+type ViewProcedureInput<
+  Item extends AnyRecord,
+  ById extends boolean | undefined,
+  List extends boolean | ListConfig | undefined,
+> =
+  | ViewTarget<Item>
+  | {
+      byId?: ById;
+      list?: List;
+      view: ViewTarget<Item>;
+    };
 type ColumnMap = Record<string, AnyColumn>;
 type DrizzleTable = Table;
 
@@ -60,14 +106,27 @@ export type DrizzleManyToManyConfig = DrizzleManyToManyColumns & {
 
 export type DrizzleManyToManyInput = DrizzleManyToManyConfig | DrizzleTable;
 
-export type DrizzleSourceConfig<
+export type DrizzleViewConfig<
   Item extends AnyRecord = AnyRecord,
   TTable extends DrizzleTable = DrizzleTable,
-> = {
+> = SourceConfig<Item, unknown> & {
   columns?: ColumnMap;
   manyToMany?: Record<string, DrizzleManyToManyInput>;
-  source: SourceDefinition<Item, unknown>;
   table: TTable;
+};
+
+type DrizzleViewsInput = Array<DataView<AnyRecord> | DrizzleViewConfig<AnyRecord>> | DataViewModule;
+
+type DrizzleSourceAdapterOptions<Context> = {
+  db: DrizzleDatabaseInput<Context>;
+  schema?: Record<string, unknown>;
+  views: DrizzleViewsInput;
+};
+
+type DrizzleSchemaMetadata = {
+  fullSchema: Record<string, unknown>;
+  schema: Record<string, TableRelationalConfig>;
+  tableNamesMap: Record<string, string>;
 };
 
 export type DrizzleSourceAdapter<Context> = {
@@ -108,10 +167,24 @@ export type DrizzleSourceAdapter<Context> = {
     plan: SourcePlan<Item, Context>;
     take: number;
   }) => Promise<Array<Item>>;
+  getSource: <Item extends AnyRecord = AnyRecord>(
+    target: SourceTarget<Item>,
+  ) => SourceDefinition<Item, unknown>;
   registry: SourceRegistry<Context>;
 };
 
-type RegisteredSourceConfig = DrizzleSourceConfig<AnyRecord> & {
+type ProcedureLike = {
+  input: (schema: any) => {
+    query: (resolver: (options: any) => unknown) => any;
+  };
+};
+
+type SourceInput = {
+  args?: Record<string, unknown>;
+  select: Iterable<string>;
+};
+
+type RegisteredSourceConfig = DrizzleViewConfig<AnyRecord> & {
   columns: ColumnMap;
 };
 
@@ -130,6 +203,10 @@ type PaginationArgs = {
 
 const resolveSource = (source: Source | (() => Source)): Source =>
   typeof source === 'function' ? source() : source;
+
+const isSourceDefinition = <Item extends AnyRecord>(
+  target: SourceTarget<Item>,
+): target is SourceDefinition<Item, unknown> => 'view' in target && 'id' in target;
 
 const getColumn = (columns: ColumnMap, field: string) => {
   const column = columns[field];
@@ -219,14 +296,17 @@ const addColumnField = (fields: Set<string>, field: string) => {
   fields.add(field);
 };
 
-const addNeedColumns = (fields: Set<string>, needs?: Record<string, ComputedNeed>) => {
-  if (!needs) {
+const addComputedSelectionColumns = (
+  fields: Set<string>,
+  select?: Record<string, ComputedSelection>,
+) => {
+  if (!select) {
     return;
   }
 
-  for (const need of Object.values(needs)) {
-    if (need.kind === 'field') {
-      const [field] = need.path.split('.');
+  for (const selection of Object.values(select)) {
+    if (selection.kind === 'field') {
+      const [field] = selection.path.split('.');
       addColumnField(fields, field);
     }
   }
@@ -245,7 +325,7 @@ const getRequiredFields = (node: SourcePlanNode<any, any>, extraFields: Array<st
   }
 
   for (const computed of node.computeds.values()) {
-    addNeedColumns(fields, computed.needs);
+    addComputedSelectionColumns(fields, computed.select);
   }
 
   for (const [field] of node.relations) {
@@ -320,10 +400,246 @@ const whereFromObject = (columns: ColumnMap, where?: AnyRecord) => {
   return conditions.length === 1 ? conditions[0] : and(...conditions);
 };
 
-const toRegisteredConfig = (config: DrizzleSourceConfig<AnyRecord>): RegisteredSourceConfig => ({
+const toRegisteredConfig = (config: DrizzleViewConfig<AnyRecord>): RegisteredSourceConfig => ({
   ...config,
   columns: config.columns ?? getTableColumns(config.table),
 });
+
+const lowerFirst = (value: string) => `${value.slice(0, 1).toLowerCase()}${value.slice(1)}`;
+
+const getColumnKey = (columns: ColumnMap, column: AnyColumn): string => {
+  const entry = Object.entries(columns).find(([, candidate]) => candidate === column);
+
+  if (!entry) {
+    throw new Error(`Unable to resolve Drizzle column ${column.name}.`);
+  }
+
+  return entry[0];
+};
+
+const includesColumn = (columns: ColumnMap, column: AnyColumn) =>
+  Object.values(columns).includes(column);
+
+const getDrizzleSchemaMetadata = <Context>({
+  db,
+  schema,
+}: {
+  db: DrizzleDatabaseInput<Context>;
+  schema?: Record<string, unknown>;
+}): DrizzleSchemaMetadata | undefined => {
+  if (schema) {
+    const extracted = extractTablesRelationalConfig(schema, createTableRelationsHelpers);
+    return {
+      fullSchema: schema,
+      schema: extracted.tables,
+      tableNamesMap: extracted.tableNamesMap,
+    };
+  }
+
+  if (typeof db === 'function') {
+    return undefined;
+  }
+
+  const metadata = (db as DrizzleDatabase & { _?: Partial<DrizzleSchemaMetadata> })._;
+  return metadata?.schema && metadata.fullSchema && metadata.tableNamesMap
+    ? {
+        fullSchema: metadata.fullSchema,
+        schema: metadata.schema,
+        tableNamesMap: metadata.tableNamesMap,
+      }
+    : undefined;
+};
+
+const getTableConfig = ({
+  config,
+  metadata,
+}: {
+  config: DrizzleViewConfig<AnyRecord>;
+  metadata: DrizzleSchemaMetadata;
+}): TableRelationalConfig => {
+  const entry = Object.entries(metadata.fullSchema).find(([, table]) => table === config.table);
+
+  if (!entry) {
+    throw new Error(`No Drizzle schema metadata found for ${config.view.typeName}.`);
+  }
+
+  const tableConfig = metadata.schema[entry[0]];
+  if (!tableConfig) {
+    throw new Error(`No Drizzle relational config found for ${config.view.typeName}.`);
+  }
+
+  return tableConfig;
+};
+
+const getTableForView = (
+  view: DataView<AnyRecord>,
+  metadata: DrizzleSchemaMetadata,
+): DrizzleTable => {
+  const directTable = metadata.fullSchema[lowerFirst(view.typeName)];
+  if (isTable(directTable)) {
+    return directTable;
+  }
+
+  const tableConfig = Object.values(metadata.schema).find(
+    (config) =>
+      config.tsName === lowerFirst(view.typeName) ||
+      config.dbName === view.typeName ||
+      lowerFirst(config.dbName) === lowerFirst(view.typeName),
+  );
+
+  if (tableConfig) {
+    const table = metadata.fullSchema[tableConfig.tsName];
+    if (isTable(table)) {
+      return table;
+    }
+  }
+
+  throw new Error(`No Drizzle table found for view ${view.typeName}.`);
+};
+
+const isDrizzleViewConfig = (value: unknown): value is DrizzleViewConfig<AnyRecord> =>
+  isRecord(value) && isDataView(value.view) && isTable(value.table);
+
+const createDrizzleViewConfigs = ({
+  metadata,
+  views,
+}: {
+  metadata?: DrizzleSchemaMetadata;
+  views: DrizzleViewsInput;
+}): Array<DrizzleViewConfig<AnyRecord>> => {
+  if (Array.isArray(views)) {
+    return views.map((view) => {
+      if (isDrizzleViewConfig(view)) {
+        return view;
+      }
+
+      if (!isDataView(view)) {
+        throw new Error(`Expected a data view or Drizzle view config.`);
+      }
+
+      if (!metadata) {
+        throw new Error(
+          `Drizzle table for ${view.typeName} could not be inferred. Pass 'schema' to createDrizzleFate or use an explicit view config.`,
+        );
+      }
+
+      const config = getDataViewSourceConfig(view);
+
+      return {
+        ...config,
+        table: getTableForView(config.view, metadata),
+      };
+    });
+  }
+
+  if (!metadata) {
+    throw new Error(
+      `Drizzle tables could not be inferred. Pass 'schema' to createDrizzleFate or use explicit view configs.`,
+    );
+  }
+
+  return collectDataViewConfigs(views).map((config) => ({
+    ...config,
+    table: getTableForView(config.view, metadata),
+  }));
+};
+
+const inferDirectRelation = ({
+  field,
+  metadata,
+  sourceConfig,
+  targetConfig,
+}: {
+  field: string;
+  metadata: DrizzleSchemaMetadata;
+  sourceConfig: DrizzleViewConfig<AnyRecord>;
+  targetConfig: DrizzleViewConfig<AnyRecord>;
+}) => {
+  const sourceTableConfig = getTableConfig({ config: sourceConfig, metadata });
+  const targetTableConfig = getTableConfig({ config: targetConfig, metadata });
+  const relation = sourceTableConfig.relations[field];
+
+  if (!relation) {
+    return null;
+  }
+
+  const normalized = normalizeRelation(metadata.schema, metadata.tableNamesMap, relation);
+
+  return {
+    foreignKey: getColumnKey(targetTableConfig.columns, normalized.references[0] as AnyColumn),
+    localKey: getColumnKey(sourceTableConfig.columns, normalized.fields[0] as AnyColumn),
+  };
+};
+
+const inferManyToManyRelation = ({
+  field,
+  metadata,
+  sourceConfig,
+  targetConfig,
+}: {
+  field: string;
+  metadata: DrizzleSchemaMetadata;
+  sourceConfig: DrizzleViewConfig<AnyRecord>;
+  targetConfig: DrizzleViewConfig<AnyRecord>;
+}) => {
+  const sourceTableConfig = getTableConfig({ config: sourceConfig, metadata });
+  const targetTableConfig = getTableConfig({ config: targetConfig, metadata });
+
+  for (const joinTableConfig of Object.values(metadata.schema)) {
+    if (joinTableConfig === sourceTableConfig || joinTableConfig === targetTableConfig) {
+      continue;
+    }
+
+    let sourceJoin: { field: AnyColumn; reference: AnyColumn } | null = null;
+    let targetJoin: { field: AnyColumn; reference: AnyColumn } | null = null;
+
+    for (const relation of Object.values(joinTableConfig.relations)) {
+      let normalized;
+      try {
+        normalized = normalizeRelation(metadata.schema, metadata.tableNamesMap, relation);
+      } catch {
+        continue;
+      }
+      const fieldColumn = normalized.fields[0] as AnyColumn | undefined;
+      const referenceColumn = normalized.references[0] as AnyColumn | undefined;
+
+      if (!fieldColumn || !referenceColumn) {
+        continue;
+      }
+
+      if (includesColumn(sourceTableConfig.columns, referenceColumn)) {
+        sourceJoin = { field: fieldColumn, reference: referenceColumn };
+      } else if (includesColumn(targetTableConfig.columns, referenceColumn)) {
+        targetJoin = { field: fieldColumn, reference: referenceColumn };
+      }
+    }
+
+    if (!sourceJoin || !targetJoin) {
+      continue;
+    }
+
+    const joinTable = metadata.fullSchema[joinTableConfig.tsName];
+    if (!isTable(joinTable)) {
+      continue;
+    }
+
+    sourceConfig.manyToMany = {
+      ...sourceConfig.manyToMany,
+      [field]: sourceConfig.manyToMany?.[field] ?? joinTable,
+    };
+
+    return {
+      foreignKey: getColumnKey(targetTableConfig.columns, targetJoin.reference),
+      localKey: getColumnKey(sourceTableConfig.columns, sourceJoin.reference),
+      through: {
+        foreignKey: getColumnKey(joinTableConfig.columns, targetJoin.field),
+        localKey: getColumnKey(joinTableConfig.columns, sourceJoin.field),
+      },
+    };
+  }
+
+  return null;
+};
 
 const resolveManyToManyConfig = ({
   field,
@@ -363,14 +679,81 @@ const resolveManyToManyConfig = ({
 
 export function createDrizzleSourceAdapter<Context>({
   db,
-  sources,
-}: {
-  db: DrizzleDatabaseInput<Context>;
-  sources: Array<DrizzleSourceConfig<AnyRecord>>;
-}): DrizzleSourceAdapter<Context> {
-  const sourceConfigs = new Map<Source, RegisteredSourceConfig>(
-    sources.map((source) => [source.source as Source, toRegisteredConfig(source)]),
+  schema,
+  views,
+}: DrizzleSourceAdapterOptions<Context>): DrizzleSourceAdapter<Context> {
+  const metadata = getDrizzleSchemaMetadata({ db, schema });
+  const viewConfigs = createDrizzleViewConfigs({ metadata, views }).map((config) => ({
+    ...config,
+    manyToMany: config.manyToMany ? { ...config.manyToMany } : undefined,
+    relations: config.relations ? { ...config.relations } : undefined,
+  }));
+  const configsByView = new Map<DataView<AnyRecord>, DrizzleViewConfig<AnyRecord>>(
+    viewConfigs.map((config) => [config.view, config]),
   );
+  const configsByFields = new Map<DataView<AnyRecord>['fields'], DrizzleViewConfig<AnyRecord>>(
+    viewConfigs.map((config) => [config.view.fields, config]),
+  );
+  const sourceDefinitions = createSourceDefinitions(viewConfigs, {
+    resolveRelation: ({ config, field, kind, target }) => {
+      if (!metadata) {
+        return undefined;
+      }
+
+      const targetConfig =
+        configsByView.get(target.view) ?? configsByFields.get(target.view.fields);
+      if (!targetConfig) {
+        return undefined;
+      }
+
+      return (
+        inferDirectRelation({
+          field,
+          metadata,
+          sourceConfig: config as DrizzleViewConfig<AnyRecord>,
+          targetConfig,
+        }) ??
+        (kind === 'many'
+          ? inferManyToManyRelation({
+              field,
+              metadata,
+              sourceConfig: config as DrizzleViewConfig<AnyRecord>,
+              targetConfig,
+            })
+          : undefined) ??
+        undefined
+      );
+    },
+  });
+  const sourcesByView = new Map<DataView<AnyRecord>, Source>(
+    sourceDefinitions.map((source) => [source.view, source]),
+  );
+  const sourcesByFields = new Map<DataView<AnyRecord>['fields'], Source>(
+    sourceDefinitions.map((source) => [source.view.fields, source]),
+  );
+  const sourceConfigs = new Map<Source, RegisteredSourceConfig>(
+    viewConfigs.map((config, index) => [
+      sourceDefinitions[index] as Source,
+      {
+        ...toRegisteredConfig(config),
+        source: sourceDefinitions[index] as Source,
+      },
+    ]),
+  );
+
+  const getSource = <Item extends AnyRecord = AnyRecord>(
+    target: SourceTarget<Item>,
+  ): SourceDefinition<Item, unknown> => {
+    if (isSourceDefinition(target)) {
+      return target;
+    }
+
+    const source = sourcesByView.get(target) ?? sourcesByFields.get(target.fields);
+    if (!source) {
+      throw new Error(`No source registered for view ${target.typeName}.`);
+    }
+    return source as SourceDefinition<Item, unknown>;
+  };
 
   const getSourceConfig = (source: Source): RegisteredSourceConfig => {
     const config = sourceConfigs.get(source);
@@ -481,19 +864,19 @@ export function createDrizzleSourceAdapter<Context>({
     }
 
     for (const [field, computed] of node.computeds) {
-      if (!computed.needs) {
+      if (!computed.select) {
         continue;
       }
 
-      for (const [needName, need] of Object.entries(computed.needs)) {
-        if (need.kind !== 'count') {
+      for (const [selectionName, selection] of Object.entries(computed.select)) {
+        if (selection.kind !== 'count') {
           continue;
         }
 
-        const sourceRelation = node.source.relations?.[need.relation];
+        const sourceRelation = node.source.relations?.[selection.relation];
         if (!sourceRelation || sourceRelation.kind !== 'many') {
           throw new Error(
-            `Computed count ${node.source.view.typeName}.${field} requires a 'many' relation named ${need.relation}.`,
+            `Computed count ${node.source.view.typeName}.${field} requires a 'many' relation named ${selection.relation}.`,
           );
         }
 
@@ -505,7 +888,7 @@ export function createDrizzleSourceAdapter<Context>({
         }
         const where = and(
           inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), parentKeys),
-          whereFromObject(childConfig.columns, need.where),
+          whereFromObject(childConfig.columns, selection.where),
         );
         const rows = await getDb(ctx)
           .select({
@@ -519,7 +902,7 @@ export function createDrizzleSourceAdapter<Context>({
 
         for (const item of items) {
           attachComputedState(item, field, {
-            [needName]: counts.get(item[sourceRelation.localKey]) ?? 0,
+            [selectionName]: counts.get(item[sourceRelation.localKey]) ?? 0,
           });
         }
       }
@@ -977,8 +1360,8 @@ export function createDrizzleSourceAdapter<Context>({
     ) as Promise<Array<Item>>;
 
   const registry = createSourceRegistry<Context>(
-    sources.map((source) => [
-      source.source as Source,
+    sourceDefinitions.map((source) => [
+      source as Source,
       {
         byId: ({ ctx, extra, id, plan }) =>
           fetchById({ ctx, extra: extra as DrizzleQueryExtra | undefined, id, plan }),
@@ -1001,6 +1384,7 @@ export function createDrizzleSourceAdapter<Context>({
     fetchById,
     fetchByIds,
     fetchConnection,
+    getSource,
     registry,
   };
 }
@@ -1008,3 +1392,124 @@ export function createDrizzleSourceAdapter<Context>({
 export const createDrizzleSourceRegistry = <Context>(
   options: Parameters<typeof createDrizzleSourceAdapter<Context>>[0],
 ) => createDrizzleSourceAdapter<Context>(options).registry;
+
+export function createDrizzleFate<Context, Procedure extends ProcedureLike>({
+  procedure,
+  ...options
+}: Parameters<typeof createDrizzleSourceAdapter<Context>>[0] & {
+  procedure: Procedure;
+}) {
+  const adapter = createDrizzleSourceAdapter<Context>(options);
+  const connection = withConnection(procedure);
+  const procedures = bindSourceProcedures<Context, Procedure, typeof connection>({
+    createConnectionProcedure: connection,
+    procedure,
+    registry: adapter.registry,
+  });
+
+  return {
+    ...adapter,
+    connection,
+    createPlan: <Item extends AnyRecord = AnyRecord>({
+      args,
+      ctx,
+      select,
+      view,
+    }: SourceInput & {
+      ctx?: Context;
+      view: ViewTarget<Item>;
+    }) =>
+      createSourcePlan({
+        args,
+        ctx,
+        select,
+        source: adapter.getSource(view),
+      }),
+    procedures: <
+      Item extends AnyRecord,
+      ById extends boolean | undefined = undefined,
+      List extends boolean | ListConfig | undefined = undefined,
+    >(
+      input: ViewProcedureInput<Item, ById, List>,
+    ) => {
+      const procedureInput = input as any;
+      const options =
+        procedureInput && typeof procedureInput === 'object' && 'view' in procedureInput
+          ? { ...procedureInput, source: adapter.getSource(procedureInput.view) }
+          : adapter.getSource(input as ViewTarget<Item>);
+      return procedures<Item, ById, List>(options);
+    },
+    resolveById: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      id,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: DrizzleQueryExtra;
+      id: string;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceById({
+        ctx,
+        extra,
+        id,
+        input,
+        registry: adapter.registry,
+        source: adapter.getSource(view),
+      }),
+    resolveByIds: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      ids,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: DrizzleQueryExtra;
+      ids: Array<string>;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceByIds({
+        ctx,
+        extra,
+        ids,
+        input,
+        registry: adapter.registry,
+        source: adapter.getSource(view),
+      }),
+    resolveConnection: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      cursor,
+      direction,
+      extra,
+      input,
+      skip,
+      take,
+      view,
+    }: {
+      ctx: Context;
+      cursor?: string;
+      direction: 'backward' | 'forward';
+      extra?: DrizzleQueryExtra;
+      input: SourceInput;
+      skip?: number;
+      take: number;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceConnection({
+        ctx,
+        cursor,
+        direction,
+        extra,
+        input,
+        registry: adapter.registry,
+        skip,
+        source: adapter.getSource(view),
+        take,
+      }),
+  };
+}

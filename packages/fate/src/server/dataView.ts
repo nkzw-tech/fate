@@ -5,6 +5,8 @@ import { toPrismaSelect } from './prismaSelect.ts';
 import { getScopedArgs } from './queryArgs.ts';
 
 const dataViewFieldsKey = Symbol('__fate__DataViewFields');
+const dataViewBaseKey = Symbol('__fate__DataViewBase');
+const dataViewListOptionsKey = Symbol('__fate__DataViewListOptions');
 const computedStateKey = Symbol('__fate__ComputedState');
 
 type ResolverSelect<Context> =
@@ -23,25 +25,25 @@ type ResolverAuthorize<Item extends AnyRecord, Context> = Bivariant<
   (item: Item, context?: Context, args?: AnyRecord) => Promise<boolean> | boolean
 >;
 
-export type FieldNeed = {
+export type FieldSelection = {
   kind: 'field';
   path: string;
 };
 
-export type CountNeed = {
+export type CountSelection = {
   kind: 'count';
   relation: string;
   where?: AnyRecord;
 };
 
-export type ComputedNeed = CountNeed | FieldNeed;
+export type ComputedSelection = CountSelection | FieldSelection;
 
-type ComputedDeps<Needs extends Record<string, ComputedNeed> | undefined> =
-  Needs extends Record<string, ComputedNeed>
+type ComputedDeps<Select extends Record<string, ComputedSelection> | undefined> =
+  Select extends Record<string, ComputedSelection>
     ? {
-        [Key in keyof Needs]: Needs[Key] extends CountNeed
+        [Key in keyof Select]: Select[Key] extends CountSelection
           ? number
-          : Needs[Key] extends FieldNeed
+          : Select[Key] extends FieldSelection
             ? unknown
             : never;
       }
@@ -50,12 +52,12 @@ type ComputedDeps<Needs extends Record<string, ComputedNeed> | undefined> =
 type ComputedResolve<
   Item extends AnyRecord,
   Result,
-  Needs extends Record<string, ComputedNeed> | undefined,
+  Select extends Record<string, ComputedSelection> | undefined,
   Context,
 > = Bivariant<
   (
     item: Item,
-    deps: ComputedDeps<Needs>,
+    deps: ComputedDeps<Select>,
     context?: Context,
     args?: AnyRecord,
   ) => Promise<Result> | Result
@@ -75,12 +77,12 @@ export type ComputedField<
   Item extends AnyRecord,
   Result,
   Context,
-  Needs extends Record<string, ComputedNeed> | undefined = Record<string, ComputedNeed>,
+  Select extends Record<string, ComputedSelection> | undefined = Record<string, ComputedSelection>,
 > = {
   authorize?: ResolverAuthorize<Item, Context>;
   kind: 'computed';
-  needs?: Needs;
-  resolve: ComputedResolve<Item, Result, Needs, Context>;
+  resolve: ComputedResolve<Item, Result, Select, Context>;
+  select?: Select;
 };
 
 type DataField<Item extends AnyRecord> =
@@ -110,10 +112,36 @@ export type DataView<Item extends AnyRecord> = {
   typeName: string;
 };
 
+type DataViewInternals<Item extends AnyRecord> = {
+  readonly [dataViewBaseKey]?: DataView<Item>;
+  readonly [dataViewListOptionsKey]?: DataViewListOptions;
+};
+
 /**
  * Convenience type for declaring the fields of a server data view.
  */
 export type DataViewConfig<Item extends AnyRecord> = Record<string, DataField<Item>>;
+
+export type DataViewOrderDirection = 'asc' | 'desc';
+
+export type DataViewOrderBy =
+  | Record<string, DataViewOrderDirection>
+  | Array<Record<string, DataViewOrderDirection>>;
+
+export type DataViewListOptions = {
+  orderBy?: DataViewOrderBy;
+};
+
+export const isDataView = (value: unknown): value is DataView<AnyRecord> =>
+  isRecord(value) && isRecord(value.fields) && typeof value.typeName === 'string';
+
+export const getBaseDataView = <Item extends AnyRecord>(view: DataView<Item>): DataView<Item> =>
+  (view as DataView<Item> & DataViewInternals<Item>)[dataViewBaseKey] ?? view;
+
+export const getDataViewListOptions = <Item extends AnyRecord>(
+  view: DataView<Item>,
+): DataViewListOptions | undefined =>
+  (view as DataView<Item> & DataViewInternals<Item>)[dataViewListOptionsKey];
 
 /**
  * Declares a server data view that exposes an object's available fields to the client.
@@ -140,8 +168,16 @@ export function dataView<Item extends AnyRecord>(typeName: string) {
  * Marks a data view as a list resolver so the server can respond with
  * connection information.
  */
-export const list = <Item extends AnyRecord>(view: DataView<Item>) => {
-  return { ...view, kind: 'list' as const };
+export const list = <Item extends AnyRecord>(
+  view: DataView<Item>,
+  options?: DataViewListOptions,
+) => {
+  return {
+    ...view,
+    [dataViewBaseKey]: getBaseDataView(view),
+    ...(options ? { [dataViewListOptionsKey]: options } : null),
+    kind: 'list' as const,
+  } as DataView<Item> & DataViewInternals<Item>;
 };
 
 /**
@@ -159,12 +195,12 @@ export function resolver<Item extends AnyRecord, Result = unknown, Context = unk
   };
 }
 
-export const field = (path: string): FieldNeed => ({
+export const field = (path: string): FieldSelection => ({
   kind: 'field',
   path,
 });
 
-export const count = (relation: string, options?: { where?: AnyRecord }): CountNeed => ({
+export const count = (relation: string, options?: { where?: AnyRecord }): CountSelection => ({
   kind: 'count',
   relation,
   where: options?.where,
@@ -174,12 +210,12 @@ export function computed<
   Item extends AnyRecord,
   Result = unknown,
   Context = unknown,
-  Needs extends Record<string, ComputedNeed> | undefined = Record<string, ComputedNeed>,
+  Select extends Record<string, ComputedSelection> | undefined = Record<string, ComputedSelection>,
 >(config: {
   authorize?: ResolverAuthorize<Item, Context>;
-  needs?: Needs;
-  resolve: ComputedResolve<Item, Result, Needs, Context>;
-}): ComputedField<Item, Result, Context, Needs> {
+  resolve: ComputedResolve<Item, Result, Select, Context>;
+  select?: Select;
+}): ComputedField<Item, Result, Context, Select> {
   return {
     kind: 'computed' as const,
     ...config,
@@ -336,26 +372,26 @@ export const attachComputedState = <Item extends AnyRecord>(
 const getComputedDeps = (
   item: AnyRecord,
   field: string,
-  needs?: Record<string, ComputedNeed>,
+  select?: Record<string, ComputedSelection>,
 ): Record<string, unknown> => {
   const attached = getComputedState(item)?.[field] ?? {};
   const deps: Record<string, unknown> = { ...attached };
 
-  if (!needs) {
+  if (!select) {
     return deps;
   }
 
-  for (const [name, need] of Object.entries(needs)) {
+  for (const [name, selection] of Object.entries(select)) {
     if (deps[name] !== undefined) {
       continue;
     }
 
-    if (need.kind === 'count') {
-      deps[name] = getValueAtPath(item, `_count.${need.relation}`) ?? 0;
+    if (selection.kind === 'count') {
+      deps[name] = getValueAtPath(item, `_count.${selection.relation}`) ?? 0;
       continue;
     }
 
-    deps[name] = getValueAtPath(item, need.path);
+    deps[name] = getValueAtPath(item, selection.path);
   }
 
   return deps;
@@ -583,7 +619,7 @@ const resolveNode = async <Item extends AnyRecord, Context>({
 
     const value = await computedField.resolve(
       getItem(),
-      getComputedDeps(getItem(), field, computedField.needs) as never,
+      getComputedDeps(getItem(), field, computedField.select) as never,
       resolverOptions.context,
       resolverOptions.args,
     );

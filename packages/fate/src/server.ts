@@ -9,10 +9,13 @@
 
 export type {
   ComputedField,
-  ComputedNeed,
-  CountNeed,
+  ComputedSelection,
+  CountSelection,
+  DataViewListOptions,
+  DataViewOrderBy,
+  DataViewOrderDirection,
   Entity,
-  FieldNeed,
+  FieldSelection,
 } from './server/dataView.ts';
 export type {
   ConnectionItem,
@@ -23,9 +26,11 @@ export type {
   SourcePlan,
   SourcePlanNode,
   OrderDirection,
+  SourceConfig,
   SourceDefinition,
   SourceOrder,
   SourceOrderField,
+  SourceRelationConfig,
   SourceRelation,
 } from './server/source.ts';
 export type { SourceRegistry } from './server/executor.ts';
@@ -48,13 +53,6 @@ export {
 } from './server/executor.ts';
 export { byIdInput } from './server/input.ts';
 export { toPrismaSelect } from './server/prismaSelect.ts';
+export { isRecord } from './record.ts';
 export { bindSourceProcedures, createSourceProcedures } from './server/sourceRouter.ts';
-export {
-  asc,
-  createSourcePlan,
-  defineSource,
-  desc,
-  many,
-  manyToMany,
-  one,
-} from './server/source.ts';
+export { createSourcePlan } from './server/source.ts';

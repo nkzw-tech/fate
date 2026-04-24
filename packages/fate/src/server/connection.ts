@@ -123,10 +123,6 @@ const paginationArgsSchema = z
   .refine(
     ({ first, last }) => !(first && last),
     "Connection args can't include both 'first' and 'last'.",
-  )
-  .refine(
-    ({ before, last }) => !last || before !== undefined,
-    "Connection args using 'last' must also include 'before'.",
   );
 
 const extractPaginationArgs = (

@@ -1,9 +1,4 @@
-import {
-  connectionArgs,
-  createSourcePlan,
-  resolveSourceConnection,
-  refetchSourceById,
-} from '@nkzw/fate/server';
+import { connectionArgs, isRecord } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { ilike } from 'drizzle-orm';
 import { z } from 'zod';
@@ -14,15 +9,10 @@ import {
   deleteCommentRecord,
 } from '../../drizzle/queries.ts';
 import { comment } from '../../drizzle/schema.ts';
-import { drizzleRegistry, drizzleAdapter } from '../executor.ts';
-import { procedure, router } from '../init.ts';
-import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
-import { commentSource, postSource } from '../views.ts';
+import { fate, procedure, router } from '../init.ts';
+import { commentDataView, postDataView } from '../views.ts';
 
 type AnyRecord = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const hasNestedSelection = (select: Iterable<string>, field: string) => {
   for (const path of select) {
@@ -60,9 +50,9 @@ const getScopedArgs = (args: AnyRecord | undefined, path: string): AnyRecord | u
 };
 
 export const commentRouter = router({
-  ...sourceProcedures({
+  ...fate.procedures({
     list: false,
-    source: commentSource,
+    view: commentDataView,
   }),
   add: procedure
     .input(
@@ -81,12 +71,11 @@ export const commentRouter = router({
         });
       }
 
-      const post = await refetchSourceById({
+      const post = await fate.resolveById({
         ctx,
         id: input.postId,
         input: { select: ['id'] },
-        registry: drizzleRegistry,
-        source: postSource,
+        view: postDataView,
       });
 
       if (!post) {
@@ -109,12 +98,11 @@ export const commentRouter = router({
         });
       }
 
-      const comment = await refetchSourceById({
+      const comment = await fate.resolveById({
         ctx,
         id: commentId,
         input,
-        registry: drizzleRegistry,
-        source: commentSource,
+        view: commentDataView,
       });
       if (!comment) {
         throw new TRPCError({
@@ -134,13 +122,13 @@ export const commentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = createSourcePlan({
+      const plan = fate.createPlan({
         ...input,
         ctx,
-        source: commentSource,
+        view: commentDataView,
       });
 
-      const comment = await drizzleAdapter.fetchById<CommentItem>({
+      const comment = await fate.fetchById<CommentItem>({
         ctx,
         extra: { extraFields: ['authorId', 'postId'] },
         id: input.id,
@@ -164,14 +152,14 @@ export const commentRouter = router({
       await deleteCommentRecord(input.id);
 
       if (comment.postId && hasNestedSelection(input.select, 'post')) {
-        const post = await drizzleAdapter.fetchById<PostItem>({
+        const post = await fate.fetchById<PostItem>({
           ctx,
           id: comment.postId,
-          plan: createSourcePlan({
+          plan: fate.createPlan({
             args: getScopedArgs(input.args, 'post'),
             ctx,
             select: getNestedSelection(input.select, 'post'),
-            source: postSource,
+            view: postDataView,
           }),
         });
 
@@ -181,7 +169,7 @@ export const commentRouter = router({
       return plan.resolve(comment) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
-  search: createConnectionProcedure({
+  search: fate.connection({
     input: z.object({
       query: z.string().min(1, 'Search query is required'),
     }),
@@ -196,7 +184,7 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      return resolveSourceConnection({
+      return fate.resolveConnection({
         ctx,
         cursor,
         direction,
@@ -204,9 +192,8 @@ export const commentRouter = router({
           where: ilike(comment.content, `%${query}%`),
         },
         input,
-        registry: drizzleRegistry,
-        source: commentSource,
         take,
+        view: commentDataView,
       });
     },
   }),

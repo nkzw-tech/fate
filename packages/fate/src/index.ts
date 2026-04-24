@@ -46,6 +46,7 @@ export { createClient, FateClient } from './client.ts';
 export { ConnectionTag, isViewTag } from './types.ts';
 export { createTRPCTransport } from './transport.ts';
 export { getSelectionPlan } from './selection.ts';
+export { isRecord } from './record.ts';
 export { mutation } from './mutation.ts';
 export { clientRoot } from './root.ts';
 export { toEntityId } from './ref.ts';

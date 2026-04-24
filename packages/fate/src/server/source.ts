@@ -1,5 +1,14 @@
 import type { AnyRecord } from '../types.ts';
-import { createViewPlan, type DataView, type ViewPlan, type ViewPlanNode } from './dataView.ts';
+import {
+  createViewPlan,
+  getBaseDataView,
+  getDataViewListOptions,
+  isDataView,
+  type DataView,
+  type DataViewOrderBy,
+  type ViewPlan,
+  type ViewPlanNode,
+} from './dataView.ts';
 import { getScopedArgs } from './queryArgs.ts';
 
 export type OrderDirection = 'asc' | 'desc';
@@ -51,20 +60,8 @@ type SourceRelationKeyConfig = {
   localKey: string;
 };
 
-type OneSourceRelationConfig = SourceRelationKeyConfig & {
-  orderBy?: never;
-  through?: never;
-};
-
-type OrderedSourceRelationConfig = SourceRelationKeyConfig & {
+export type SourceRelationConfig = Partial<SourceRelationKeyConfig> & {
   orderBy?: SourceOrder;
-};
-
-type ManySourceRelationConfig = OrderedSourceRelationConfig & {
-  through?: never;
-};
-
-type ManyToManySourceRelationConfig = OrderedSourceRelationConfig & {
   through?: {
     foreignKey: string;
     localKey: string;
@@ -76,6 +73,14 @@ export type SourceDefinition<Item extends AnyRecord = AnyRecord, Adapter = unkno
   id: string;
   orderBy?: SourceOrder;
   relations?: Record<string, SourceRelation<AnyRecord, Adapter>>;
+  view: DataView<Item>;
+};
+
+export type SourceConfig<Item extends AnyRecord = AnyRecord, Adapter = unknown> = {
+  adapter?: Adapter;
+  id?: string;
+  orderBy?: SourceOrder;
+  relations?: Record<string, SourceRelationConfig>;
   view: DataView<Item>;
 };
 
@@ -94,52 +99,201 @@ export type SourcePlan<
   source: SourceDefinition<Item, Adapter>;
 };
 
-export const asc = (field: string): SourceOrderField => ({
-  direction: 'asc',
-  field,
-});
+const ascending = (field: string): SourceOrderField => ({ direction: 'asc', field });
 
-export const desc = (field: string): SourceOrderField => ({
-  direction: 'desc',
-  field,
-});
+const toSourceOrder = (orderBy?: DataViewOrderBy): SourceOrder | undefined => {
+  if (!orderBy) {
+    return undefined;
+  }
 
-export function defineSource<Item extends AnyRecord, Adapter = unknown>(
+  const entries = Array.isArray(orderBy) ? orderBy : [orderBy];
+  const sourceOrder = entries.flatMap((entry) =>
+    Object.entries(entry).map(([field, direction]) => ({ direction, field })),
+  );
+
+  return sourceOrder.length ? sourceOrder : undefined;
+};
+
+export const getDataViewSourceConfig = (input: DataView<AnyRecord>): SourceConfig<AnyRecord> => {
+  const view = getBaseDataView(input);
+  const orderBy = toSourceOrder(getDataViewListOptions(input)?.orderBy);
+
+  return {
+    ...(orderBy ? { orderBy } : null),
+    view,
+  };
+};
+
+export type DataViewModule = Record<string, unknown>;
+
+export const collectDataViewConfigs = (input: DataViewModule): Array<SourceConfig<AnyRecord>> => {
+  const configsByFields = new Map<DataView<AnyRecord>['fields'], SourceConfig<AnyRecord>>();
+  const seenValues = new Set<unknown>();
+
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object' || seenValues.has(value)) {
+      return;
+    }
+
+    seenValues.add(value);
+
+    if (isDataView(value)) {
+      const config = getDataViewSourceConfig(value);
+      const existingConfig = configsByFields.get(config.view.fields);
+
+      if (existingConfig) {
+        if (config.orderBy) {
+          existingConfig.orderBy = config.orderBy;
+        }
+      } else {
+        configsByFields.set(config.view.fields, config);
+      }
+
+      for (const field of Object.values(config.view.fields)) {
+        visit(field);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        visit(entry);
+      }
+      return;
+    }
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'Root') {
+        continue;
+      }
+      visit(entry);
+    }
+  };
+
+  visit(input);
+
+  return [...configsByFields.values()];
+};
+
+export function createSourceDefinition<Item extends AnyRecord, Adapter = unknown>(
   view: DataView<Item>,
-  config: Omit<SourceDefinition<Item, Adapter>, 'view'>,
+  config: Omit<SourceDefinition<Item, Adapter>, 'view' | 'relations'> & {
+    relations?: Record<string, SourceRelationConfig>;
+  },
 ): SourceDefinition<Item, Adapter> {
   return {
     ...config,
+    relations: undefined,
     view,
   };
 }
 
-export const one = <Item extends AnyRecord, Adapter = unknown>(
-  source: SourceReference<Item, Adapter>,
-  config: OneSourceRelationConfig,
-): SourceRelation<Item, Adapter> => ({
-  ...config,
-  kind: 'one',
-  source,
-});
+export const getRelationView = (
+  view: DataView<AnyRecord>,
+  field: string,
+): { kind: 'many' | 'one'; view: DataView<AnyRecord> } | null => {
+  const config = view.fields[field];
 
-export const many = <Item extends AnyRecord, Adapter = unknown>(
-  source: SourceReference<Item, Adapter>,
-  config: ManySourceRelationConfig,
-): SourceRelation<Item, Adapter> => ({
-  ...config,
-  kind: 'many',
-  source,
-});
+  if (!isDataView(config)) {
+    return null;
+  }
 
-export const manyToMany = <Item extends AnyRecord, Adapter = unknown>(
-  source: SourceReference<Item, Adapter>,
-  config: ManyToManySourceRelationConfig,
-): SourceRelation<Item, Adapter> => ({
-  ...config,
-  kind: 'manyToMany',
-  source,
-});
+  return {
+    kind: config.kind === 'list' ? 'many' : 'one',
+    view: config,
+  };
+};
+
+type SourceRelationContext<Adapter = unknown> = {
+  config: SourceConfig<AnyRecord, Adapter>;
+  field: string;
+  kind: 'many' | 'one';
+  source: SourceDefinition<AnyRecord, Adapter>;
+  target: SourceDefinition<AnyRecord, Adapter>;
+};
+
+export function createSourceDefinitions<Adapter = unknown>(
+  configs: Array<SourceConfig<AnyRecord, Adapter>>,
+  options?: {
+    resolveRelation?: (context: SourceRelationContext<Adapter>) => SourceRelationConfig | undefined;
+  },
+): Array<SourceDefinition<AnyRecord, Adapter>> {
+  const sources = configs.map((config) =>
+    createSourceDefinition(config.view, {
+      adapter: config.adapter,
+      id: config.id ?? 'id',
+      orderBy: config.orderBy,
+    }),
+  );
+
+  const sourcesByView = new Map<DataView<AnyRecord>, SourceDefinition<AnyRecord, Adapter>>();
+  const sourcesByFields = new Map<
+    DataView<AnyRecord>['fields'],
+    SourceDefinition<AnyRecord, Adapter>
+  >();
+
+  for (const source of sources) {
+    sourcesByView.set(source.view, source);
+    sourcesByFields.set(source.view.fields, source);
+  }
+
+  for (const [index, config] of configs.entries()) {
+    const source = sources[index] as SourceDefinition<AnyRecord, Adapter>;
+
+    const relations: Record<string, SourceRelation<AnyRecord, Adapter>> = {};
+    const relationFields = new Set([
+      ...Object.keys(config.relations ?? {}),
+      ...Object.keys(config.view.fields).filter((field) => getRelationView(config.view, field)),
+    ]);
+
+    for (const field of relationFields) {
+      const relationView = getRelationView(config.view, field);
+      if (!relationView) {
+        throw new Error(
+          `Source ${config.view.typeName}.${field} must reference a data view relation.`,
+        );
+      }
+
+      const relationSource =
+        sourcesByView.get(relationView.view) ?? sourcesByFields.get(relationView.view.fields);
+
+      if (!relationSource) {
+        throw new Error(
+          `Source ${config.view.typeName}.${field} references an unregistered data view.`,
+        );
+      }
+
+      const relationConfig = {
+        ...options?.resolveRelation?.({
+          config,
+          field,
+          kind: relationView.kind,
+          source,
+          target: relationSource,
+        }),
+        ...(config.relations?.[field] ?? {}),
+      };
+
+      if (!relationConfig.foreignKey || !relationConfig.localKey) {
+        throw new Error(
+          `Source ${config.view.typeName}.${field} requires foreignKey and localKey relation metadata.`,
+        );
+      }
+
+      relations[field] = {
+        ...relationConfig,
+        kind: relationConfig.through ? 'manyToMany' : relationView.kind,
+        source: relationSource,
+      } as SourceRelation<AnyRecord, Adapter>;
+    }
+
+    if (Object.keys(relations).length > 0) {
+      source.relations = relations;
+    }
+  }
+
+  return sources;
+}
 
 export const hasNestedSelection = (select: Iterable<string>, field: string) => {
   for (const path of select) {
@@ -186,10 +340,10 @@ export const getSourceOrder = <Adapter = unknown>(
   const hasId = base.some((entry) => entry.field === source.id);
 
   if (!hasId) {
-    base.push(asc(source.id));
+    base.push(ascending(source.id));
   }
 
-  return base.length ? base : [asc(source.id)];
+  return base.length ? base : [ascending(source.id)];
 };
 
 const attachSourceNode = <Context, Adapter = unknown>(

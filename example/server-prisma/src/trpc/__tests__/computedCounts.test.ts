@@ -1,4 +1,4 @@
-import { computed, count, createSourcePlan, dataView, defineSource } from '@nkzw/fate/server';
+import { computed, count, createSourcePlan, dataView, list } from '@nkzw/fate/server';
 import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
 import { expect, test, vi } from 'vite-plus/test';
 import type { AppContext } from '../context.ts';
@@ -7,38 +7,27 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
   const attendeeView = dataView<{ eventId: string; id: string }>('EventAttendee')({
     id: true,
   });
-  const attendeeSource = defineSource(attendeeView, {
-    id: 'id',
-  });
-  const eventView = dataView<{ id: string }>('Event')({
+  const eventView = dataView<{ attendees?: Array<{ eventId: string; id: string }>; id: string }>(
+    'Event',
+  )({
+    attendees: list(attendeeView),
     goingCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'GOING' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
     id: true,
     waitlistCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'WAITLIST' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
-  });
-  const eventSource = defineSource(eventView, {
-    id: 'id',
-    relations: {
-      attendees: {
-        foreignKey: 'eventId',
-        kind: 'many',
-        localKey: 'id',
-        source: () => attendeeSource,
-      },
-    },
   });
   const groupBy = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
     if (where.status === 'GOING') {
@@ -58,24 +47,24 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
     },
     sessionUser: null,
   } as unknown as AppContext;
-  const plan = createSourcePlan({
-    ctx,
-    select: ['goingCount', 'waitlistCount'],
-    source: eventSource,
-  });
   const adapter = createPrismaSourceAdapter<AppContext>({
-    sources: [
+    views: [
       {
         delegate: () => ({
           findMany: async () => [{ id: 'event-1' }, { id: 'event-2' }],
         }),
-        source: eventSource,
+        view: eventView,
       },
       {
         delegate: () => ({ groupBy }),
-        source: attendeeSource,
+        view: attendeeView,
       },
     ],
+  });
+  const plan = createSourcePlan({
+    ctx,
+    select: ['goingCount', 'waitlistCount'],
+    source: adapter.getSource(eventView),
   });
   const items = await adapter.fetchByIds({
     ctx,

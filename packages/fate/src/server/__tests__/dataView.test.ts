@@ -13,7 +13,7 @@ import {
   list,
   resolver,
 } from '../dataView.ts';
-import { asc, createSourcePlan, defineSource, desc } from '../source.ts';
+import { collectDataViewConfigs, createSourceDefinitions, createSourcePlan } from '../source.ts';
 
 type UserItem = { id: string; name: string; password: string };
 
@@ -75,10 +75,10 @@ test('resolvers can add prisma selections and compute values', async () => {
 test('computed fields can resolve hidden source dependencies', async () => {
   const view = dataView<{ email: string; id: string; name: string }>('User')({
     email: computed<{ email: string; id: string; name: string }, string>({
-      needs: {
+      resolve: (_item, deps) => deps.email as string,
+      select: {
         email: field('email'),
       },
-      resolve: (_item, deps) => deps.email as string,
     }),
     id: true,
     name: true,
@@ -105,21 +105,21 @@ test('computed fields can resolve hidden source dependencies', async () => {
 test('computed fields can resolve conflicting relation counts from attached state', async () => {
   const view = dataView<{ id: string }>('Event')({
     goingCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'GOING' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
     id: true,
     waitlistCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'WAITLIST' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
   });
 
@@ -541,24 +541,23 @@ test('createSourcePlan attaches source order metadata', () => {
     id: true,
   });
 
-  const commentSource = defineSource(commentView, {
-    id: 'id',
-    orderBy: [desc('createdAt')],
-  });
-
-  const postSource = defineSource(postView, {
-    id: 'id',
-    orderBy: [asc('id')],
-    relations: {
-      comments: {
-        foreignKey: 'postId',
-        kind: 'many',
-        localKey: 'id',
-        orderBy: [desc('createdAt')],
-        source: () => commentSource,
-      },
+  const [, postSource] = createSourceDefinitions([
+    {
+      orderBy: [{ direction: 'desc', field: 'createdAt' }],
+      view: commentView,
     },
-  });
+    {
+      orderBy: [{ direction: 'asc', field: 'id' }],
+      relations: {
+        comments: {
+          foreignKey: 'postId',
+          localKey: 'id',
+          orderBy: [{ direction: 'desc', field: 'createdAt' }],
+        },
+      },
+      view: postView,
+    },
+  ]);
 
   const plan = createSourcePlan({
     select: ['comments.id'],
@@ -570,4 +569,20 @@ test('createSourcePlan attaches source order metadata', () => {
     { direction: 'desc', field: 'createdAt' },
     { direction: 'asc', field: 'id' },
   ]);
+});
+
+test('collectDataViewConfigs reads list order defaults', () => {
+  const postView = dataView<{ createdAt: Date; id: string }>('Post')({
+    id: true,
+  });
+
+  const [config] = collectDataViewConfigs({
+    posts: list(postView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  });
+
+  expect(config?.orderBy).toEqual([
+    { direction: 'desc', field: 'createdAt' },
+    { direction: 'desc', field: 'id' },
+  ]);
+  expect(config?.view).toBe(postView);
 });

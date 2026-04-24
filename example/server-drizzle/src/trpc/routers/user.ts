@@ -1,10 +1,9 @@
-import { connectionArgs, resolveSourceById } from '@nkzw/fate/server';
+import { connectionArgs } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { auth } from '../../lib/auth.tsx';
-import { drizzleRegistry } from '../executor.ts';
-import { procedure, router } from '../init.ts';
-import { User, userSource } from '../views.ts';
+import { fate, procedure, router } from '../init.ts';
+import { User, userDataView } from '../views.ts';
 
 export const userRouter = router({
   update: procedure
@@ -32,12 +31,11 @@ export const userRouter = router({
         headers: ctx.headers,
       });
 
-      const user = await resolveSourceById({
+      const user = await fate.resolveById({
         ctx,
         id: ctx.sessionUser.id,
         input,
-        registry: drizzleRegistry,
-        source: userSource,
+        view: userDataView,
       });
       if (!user) {
         throw new TRPCError({
@@ -59,12 +57,11 @@ export const userRouter = router({
         return null;
       }
 
-      return (await resolveSourceById({
+      return (await fate.resolveById({
         ctx,
         id: ctx.sessionUser.id,
         input,
-        registry: drizzleRegistry,
-        source: userSource,
+        view: userDataView,
       })) as User | null;
     }),
 });

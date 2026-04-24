@@ -1,17 +1,10 @@
-import {
-  connectionArgs,
-  createSourcePlan,
-  resolveSourceConnection,
-  toPrismaSelect,
-} from '@nkzw/fate/server';
+import { connectionArgs, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { CommentSelect } from '../../prisma/prisma-client/models.ts';
-import { prismaRegistry } from '../executor.ts';
-import { procedure, router } from '../init.ts';
-import { createConnectionProcedure, sourceProcedures } from '../sourceRouter.ts';
+import { fate, procedure, router } from '../init.ts';
 import type { CommentItem } from '../views.ts';
-import { commentSource } from '../views.ts';
+import { commentDataView } from '../views.ts';
 
 const postSelection = {
   id: true,
@@ -31,9 +24,9 @@ const getCommentSelection = (select: Record<string, unknown>) => {
 };
 
 export const commentRouter = router({
-  ...sourceProcedures({
+  ...fate.procedures({
     list: false,
-    source: commentSource,
+    view: commentDataView,
   }),
   add: procedure
     .input(
@@ -65,10 +58,10 @@ export const commentRouter = router({
         });
       }
 
-      const plan = createSourcePlan({
+      const plan = fate.createPlan({
         ...input,
         ctx,
-        source: commentSource,
+        view: commentDataView,
       });
       const select = toPrismaSelect(plan);
 
@@ -104,10 +97,10 @@ export const commentRouter = router({
         });
       }
 
-      const plan = createSourcePlan({
+      const plan = fate.createPlan({
         ...input,
         ctx,
-        source: commentSource,
+        view: commentDataView,
       });
       const select = toPrismaSelect(plan);
 
@@ -131,7 +124,7 @@ export const commentRouter = router({
       return plan.resolve(result) as Promise<CommentItem & { post?: { commentCount: number } }>;
     }),
 
-  search: createConnectionProcedure({
+  search: fate.connection({
     input: z.object({
       query: z.string().min(1, 'Search query is required'),
     }),
@@ -146,7 +139,7 @@ export const commentRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      return resolveSourceConnection({
+      return fate.resolveConnection({
         ctx,
         cursor,
         direction,
@@ -159,10 +152,9 @@ export const commentRouter = router({
           },
         },
         input,
-        registry: prismaRegistry,
         skip,
-        source: commentSource,
         take,
+        view: commentDataView,
       });
     },
   }),

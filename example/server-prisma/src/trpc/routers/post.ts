@@ -1,4 +1,4 @@
-import { connectionArgs, createSourcePlan, toPrismaSelect } from '@nkzw/fate/server';
+import { connectionArgs, toPrismaSelect } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type {
@@ -6,12 +6,11 @@ import type {
   PostSelect,
   PostUpdateArgs,
 } from '../../prisma/prisma-client/models.ts';
-import { procedure, router } from '../init.ts';
-import { sourceProcedures } from '../sourceRouter.ts';
-import { Post, postSource } from '../views.ts';
+import { fate, procedure, router } from '../init.ts';
+import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
-  ...sourceProcedures(postSource),
+  ...fate.procedures(postDataView),
   add: procedure
     .input(
       z.object({
@@ -29,10 +28,10 @@ export const postRouter = router({
         });
       }
 
-      const plan = createSourcePlan({
+      const plan = fate.createPlan({
         ...input,
         ctx,
-        source: postSource,
+        view: postDataView,
       });
       const select = toPrismaSelect(plan);
 
@@ -88,10 +87,10 @@ export const postRouter = router({
         });
       }
 
-      const plan = createSourcePlan({
+      const plan = fate.createPlan({
         ...input,
         ctx,
-        source: postSource,
+        view: postDataView,
       });
       const select = toPrismaSelect(plan);
 
@@ -117,10 +116,10 @@ export const postRouter = router({
     )
     .mutation(({ ctx, input }) =>
       ctx.prisma.$transaction(async (tx) => {
-        const plan = createSourcePlan({
+        const plan = fate.createPlan({
           ...input,
           ctx,
-          source: postSource,
+          view: postDataView,
         });
         const select = toPrismaSelect(plan);
         const existing = await tx.post.findUnique({

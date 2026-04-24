@@ -97,18 +97,18 @@ const getConflictingCountRelations = <Context>(node: ViewPlanNode<Context>): Set
   const signaturesByRelation = new Map<string, Set<string>>();
 
   for (const computed of node.computeds.values()) {
-    if (!computed.needs) {
+    if (!computed.select) {
       continue;
     }
 
-    for (const need of Object.values(computed.needs)) {
-      if (need.kind !== 'count') {
+    for (const selection of Object.values(computed.select)) {
+      if (selection.kind !== 'count') {
         continue;
       }
 
-      const signatures = signaturesByRelation.get(need.relation) ?? new Set<string>();
-      signatures.add(stableStringify(need.where ?? null));
-      signaturesByRelation.set(need.relation, signatures);
+      const signatures = signaturesByRelation.get(selection.relation) ?? new Set<string>();
+      signatures.add(stableStringify(selection.where ?? null));
+      signaturesByRelation.set(selection.relation, signatures);
     }
   }
 
@@ -169,13 +169,13 @@ const applyComputedSelections = <Context>(node: ViewPlanNode<Context>, select: A
   const conflictingCountRelations = getConflictingCountRelations(node);
 
   for (const computed of node.computeds.values()) {
-    if (!computed.needs) {
+    if (!computed.select) {
       continue;
     }
 
-    for (const need of Object.values(computed.needs)) {
-      if (need.kind === 'count') {
-        if (conflictingCountRelations.has(need.relation)) {
+    for (const selection of Object.values(computed.select)) {
+      if (selection.kind === 'count') {
+        if (conflictingCountRelations.has(selection.relation)) {
           continue;
         }
 
@@ -184,12 +184,12 @@ const applyComputedSelections = <Context>(node: ViewPlanNode<Context>, select: A
         target._count = existing;
         const countSelect = (existing.select as AnyRecord | undefined) ?? {};
         existing.select = countSelect;
-        countSelect[need.relation] = need.where ? { where: need.where } : true;
+        countSelect[selection.relation] = selection.where ? { where: selection.where } : true;
         continue;
       }
 
       const target = ensureRelationSelect(select, node.path);
-      assignDependencyPath(target, need.path);
+      assignDependencyPath(target, selection.path);
     }
   }
 

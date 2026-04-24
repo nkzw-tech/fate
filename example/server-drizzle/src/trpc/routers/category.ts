@@ -1,5 +1,4 @@
-import { router } from '../init.ts';
-import { sourceProcedures } from '../sourceRouter.ts';
-import { categorySource } from '../views.ts';
+import { fate, router } from '../init.ts';
+import { categoryDataView } from '../views.ts';
 
-export const categoryRouter = router(sourceProcedures(categorySource));
+export const categoryRouter = router(fate.procedures(categoryDataView));

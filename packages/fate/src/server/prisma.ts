@@ -1,17 +1,38 @@
 /**
- * The fate Prisma source adapter.
+ * Fate's Prisma integration.
  *
  * @example
- * import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
+ * import { createPrismaFate } from '@nkzw/fate/server/prisma';
  *
  * @module @nkzw/fate/server/prisma
  */
 
+import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
-import { attachComputedState } from './dataView.ts';
-import { createSourceRegistry, type SourceRegistry } from './executor.ts';
+import { withConnection } from './connection.ts';
+import { attachComputedState, isDataView, type DataView } from './dataView.ts';
+import {
+  createSourceRegistry,
+  resolveSourceById,
+  resolveSourceByIds,
+  resolveSourceConnection,
+  type SourceRegistry,
+} from './executor.ts';
 import { toPrismaSelect } from './prismaSelect.ts';
-import type { SourcePlan, SourcePlanNode, SourceDefinition, SourceOrder } from './source.ts';
+import {
+  collectDataViewConfigs,
+  createSourcePlan,
+  createSourceDefinitions,
+  getDataViewSourceConfig,
+  type DataViewModule,
+  type SourceConfig,
+  type SourcePlan,
+  type SourcePlanNode,
+  type SourceDefinition,
+  type SourceOrder,
+  type SourceRelationConfig,
+} from './source.ts';
+import { bindSourceProcedures } from './sourceRouter.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 
@@ -23,10 +44,39 @@ export type PrismaDelegate = {
 
 export type PrismaQueryExtra = AnyRecord;
 
-export type PrismaSourceConfig<Context, Item extends AnyRecord = AnyRecord> = {
+export type PrismaViewConfig<Context, Item extends AnyRecord = AnyRecord> = {
   delegate: (ctx: Context) => unknown;
-  source: SourceDefinition<Item, unknown>;
+} & SourceConfig<Item, unknown>;
+
+type PrismaViewsInput<Context> =
+  | Array<DataView<AnyRecord> | PrismaViewConfig<Context, AnyRecord>>
+  | DataViewModule;
+
+type PrismaSourceAdapterOptions<Context> = {
+  prisma?: (ctx: Context) => unknown;
+  views: PrismaViewsInput<Context>;
 };
+
+type SourceTarget<Item extends AnyRecord = AnyRecord> =
+  | DataView<Item>
+  | SourceDefinition<Item, unknown>;
+type ViewTarget<Item extends AnyRecord = AnyRecord> = DataView<Item>;
+
+type ListConfig = {
+  defaultSize?: number;
+};
+
+type ViewProcedureInput<
+  Item extends AnyRecord,
+  ById extends boolean | undefined,
+  List extends boolean | ListConfig | undefined,
+> =
+  | ViewTarget<Item>
+  | {
+      byId?: ById;
+      list?: List;
+      view: ViewTarget<Item>;
+    };
 
 export type PrismaSourceAdapter<Context> = {
   fetchById: <Item extends AnyRecord = AnyRecord>({
@@ -68,7 +118,115 @@ export type PrismaSourceAdapter<Context> = {
     skip?: number;
     take: number;
   }) => Promise<Array<Item>>;
+  getSource: <Item extends AnyRecord = AnyRecord>(
+    target: SourceTarget<Item>,
+  ) => SourceDefinition<Item, unknown>;
   registry: SourceRegistry<Context>;
+};
+
+type ProcedureLike = {
+  input: (schema: any) => {
+    query: (resolver: (options: any) => unknown) => any;
+  };
+};
+
+type SourceInput = {
+  args?: Record<string, unknown>;
+  select: Iterable<string>;
+};
+
+const lowerFirst = (value: string) => `${value.slice(0, 1).toLowerCase()}${value.slice(1)}`;
+
+const isPrismaViewConfig = <Context>(
+  value: unknown,
+): value is PrismaViewConfig<Context, AnyRecord> =>
+  isRecord(value) && isDataView(value.view) && typeof value.delegate === 'function';
+
+const getPrismaClient = <Context>({
+  ctx,
+  prisma,
+}: {
+  ctx: Context;
+  prisma?: (ctx: Context) => unknown;
+}) => {
+  if (prisma) {
+    return prisma(ctx);
+  }
+
+  return isRecord(ctx) && isRecord(ctx.prisma) ? ctx.prisma : ctx;
+};
+
+const createPrismaDelegate = <Context>(
+  view: DataView<AnyRecord>,
+  prisma?: (ctx: Context) => unknown,
+) => {
+  const delegateName = lowerFirst(view.typeName);
+
+  return (ctx: Context) => {
+    const client = getPrismaClient({ ctx, prisma });
+    if (!isRecord(client)) {
+      throw new Error(
+        `Prisma client for ${view.typeName} could not be inferred. Pass 'prisma' to createPrismaFate.`,
+      );
+    }
+
+    const delegate = client[delegateName];
+    if (!delegate) {
+      throw new Error(`Prisma delegate '${delegateName}' for ${view.typeName} was not found.`);
+    }
+
+    return delegate;
+  };
+};
+
+const createPrismaViewConfigs = <Context>({
+  prisma,
+  views,
+}: PrismaSourceAdapterOptions<Context>): Array<PrismaViewConfig<Context, AnyRecord>> =>
+  Array.isArray(views)
+    ? views.map((view) => {
+        if (isPrismaViewConfig<Context>(view)) {
+          return view;
+        }
+
+        if (!isDataView(view)) {
+          throw new Error(`Expected a data view or Prisma view config.`);
+        }
+
+        const config = getDataViewSourceConfig(view);
+
+        return {
+          ...config,
+          delegate: createPrismaDelegate(config.view, prisma),
+        };
+      })
+    : collectDataViewConfigs(views).map((config) => ({
+        ...config,
+        delegate: createPrismaDelegate(config.view, prisma),
+      }));
+
+const inferPrismaRelation = ({
+  field,
+  kind,
+  source,
+  target,
+}: {
+  field: string;
+  kind: 'many' | 'one';
+  source: SourceDefinition<AnyRecord, unknown>;
+  target: SourceDefinition<AnyRecord, unknown>;
+}): SourceRelationConfig => {
+  if (kind === 'one') {
+    return {
+      foreignKey: target.id,
+      localKey: `${field}Id`,
+    };
+  }
+
+  return {
+    foreignKey: `${lowerFirst(source.view.typeName)}Id`,
+    localKey: source.id,
+  };
 };
 
 type CountRequest = {
@@ -77,9 +235,6 @@ type CountRequest = {
   relation: string;
   where?: AnyRecord;
 };
-
-const isRecord = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const stableStringify = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -98,6 +253,10 @@ const stableStringify = (value: unknown): string => {
 
 const resolveSourceReference = (source: Source | (() => Source)) =>
   typeof source === 'function' ? source() : source;
+
+const isSourceDefinition = <Item extends AnyRecord>(
+  target: SourceTarget<Item>,
+): target is SourceDefinition<Item, unknown> => 'view' in target && 'id' in target;
 
 const toPrismaOrderBy = (orderBy: SourceOrder) =>
   orderBy.map((entry) => ({ [entry.field]: entry.direction }));
@@ -132,23 +291,28 @@ const getConflictingCountRequests = <Context>(
   const requestsByRelation = new Map<string, Array<CountRequest>>();
 
   for (const [field, computed] of node.computeds) {
-    if (!computed.needs) {
+    if (!computed.select) {
       continue;
     }
 
-    for (const [needName, need] of Object.entries(computed.needs)) {
-      if (need.kind !== 'count') {
+    for (const [selectionName, selection] of Object.entries(computed.select)) {
+      if (selection.kind !== 'count') {
         continue;
       }
 
-      const signature = stableStringify(need.where ?? null);
-      const signatures = signaturesByRelation.get(need.relation) ?? new Set<string>();
+      const signature = stableStringify(selection.where ?? null);
+      const signatures = signaturesByRelation.get(selection.relation) ?? new Set<string>();
       signatures.add(signature);
-      signaturesByRelation.set(need.relation, signatures);
+      signaturesByRelation.set(selection.relation, signatures);
 
-      const requests = requestsByRelation.get(need.relation) ?? [];
-      requests.push({ field, needName, relation: need.relation, where: need.where });
-      requestsByRelation.set(need.relation, requests);
+      const requests = requestsByRelation.get(selection.relation) ?? [];
+      requests.push({
+        field,
+        needName: selectionName,
+        relation: selection.relation,
+        where: selection.where,
+      });
+      requestsByRelation.set(selection.relation, requests);
     }
   }
 
@@ -160,16 +324,39 @@ const getConflictingCountRequests = <Context>(
 };
 
 export function createPrismaSourceAdapter<Context>({
-  sources,
-}: {
-  sources: Array<PrismaSourceConfig<Context, AnyRecord>>;
-}): PrismaSourceAdapter<Context> {
+  prisma,
+  views,
+}: PrismaSourceAdapterOptions<Context>): PrismaSourceAdapter<Context> {
+  const viewConfigs = createPrismaViewConfigs({ prisma, views });
+  const sourceDefinitions = createSourceDefinitions(viewConfigs, {
+    resolveRelation: inferPrismaRelation,
+  });
+  const sourcesByView = new Map<DataView<AnyRecord>, Source>(
+    sourceDefinitions.map((source) => [source.view, source]),
+  );
+  const sourcesByFields = new Map<DataView<AnyRecord>['fields'], Source>(
+    sourceDefinitions.map((source) => [source.view.fields, source]),
+  );
   const delegates = new Map<Source, (ctx: Context) => PrismaDelegate>(
-    sources.map((source) => [
-      source.source as Source,
-      (ctx: Context) => source.delegate(ctx) as PrismaDelegate,
+    viewConfigs.map((config, index) => [
+      sourceDefinitions[index] as Source,
+      (ctx: Context) => config.delegate(ctx) as PrismaDelegate,
     ]),
   );
+
+  const getSource = <Item extends AnyRecord = AnyRecord>(
+    target: SourceTarget<Item>,
+  ): SourceDefinition<Item, unknown> => {
+    if (isSourceDefinition(target)) {
+      return target;
+    }
+
+    const source = sourcesByView.get(target) ?? sourcesByFields.get(target.fields);
+    if (!source) {
+      throw new Error(`No source registered for view ${target.typeName}.`);
+    }
+    return source as SourceDefinition<Item, unknown>;
+  };
 
   const getDelegate = (ctx: Context, source: Source): PrismaDelegate => {
     const getSourceDelegate = delegates.get(source);
@@ -423,8 +610,8 @@ export function createPrismaSourceAdapter<Context>({
   };
 
   const registry = createSourceRegistry<Context>(
-    sources.map((source) => [
-      source.source as Source,
+    sourceDefinitions.map((source) => [
+      source as Source,
       {
         byId: ({ ctx, extra, id, plan }) =>
           fetchById({ ctx, extra: extra as PrismaQueryExtra | undefined, id, plan }),
@@ -448,6 +635,7 @@ export function createPrismaSourceAdapter<Context>({
     fetchById,
     fetchByIds,
     fetchConnection,
+    getSource,
     registry,
   };
 }
@@ -455,3 +643,124 @@ export function createPrismaSourceAdapter<Context>({
 export const createPrismaSourceRegistry = <Context>(
   options: Parameters<typeof createPrismaSourceAdapter<Context>>[0],
 ) => createPrismaSourceAdapter<Context>(options).registry;
+
+export function createPrismaFate<Context, Procedure extends ProcedureLike>({
+  procedure,
+  ...options
+}: Parameters<typeof createPrismaSourceAdapter<Context>>[0] & {
+  procedure: Procedure;
+}) {
+  const adapter = createPrismaSourceAdapter<Context>(options);
+  const connection = withConnection(procedure);
+  const procedures = bindSourceProcedures<Context, Procedure, typeof connection>({
+    createConnectionProcedure: connection,
+    procedure,
+    registry: adapter.registry,
+  });
+
+  return {
+    ...adapter,
+    connection,
+    createPlan: <Item extends AnyRecord = AnyRecord>({
+      args,
+      ctx,
+      select,
+      view,
+    }: SourceInput & {
+      ctx?: Context;
+      view: ViewTarget<Item>;
+    }) =>
+      createSourcePlan({
+        args,
+        ctx,
+        select,
+        source: adapter.getSource(view),
+      }),
+    procedures: <
+      Item extends AnyRecord,
+      ById extends boolean | undefined = undefined,
+      List extends boolean | ListConfig | undefined = undefined,
+    >(
+      input: ViewProcedureInput<Item, ById, List>,
+    ) => {
+      const procedureInput = input as any;
+      const options =
+        procedureInput && typeof procedureInput === 'object' && 'view' in procedureInput
+          ? { ...procedureInput, source: adapter.getSource(procedureInput.view) }
+          : adapter.getSource(input as ViewTarget<Item>);
+      return procedures<Item, ById, List>(options);
+    },
+    resolveById: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      id,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: PrismaQueryExtra;
+      id: string;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceById({
+        ctx,
+        extra,
+        id,
+        input,
+        registry: adapter.registry,
+        source: adapter.getSource(view),
+      }),
+    resolveByIds: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      ids,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: PrismaQueryExtra;
+      ids: Array<string>;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceByIds({
+        ctx,
+        extra,
+        ids,
+        input,
+        registry: adapter.registry,
+        source: adapter.getSource(view),
+      }),
+    resolveConnection: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      cursor,
+      direction,
+      extra,
+      input,
+      skip,
+      take,
+      view,
+    }: {
+      ctx: Context;
+      cursor?: string;
+      direction: 'backward' | 'forward';
+      extra?: PrismaQueryExtra;
+      input: SourceInput;
+      skip?: number;
+      take: number;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceConnection({
+        ctx,
+        cursor,
+        direction,
+        extra,
+        input,
+        registry: adapter.registry,
+        skip,
+        source: adapter.getSource(view),
+        take,
+      }),
+  };
+}

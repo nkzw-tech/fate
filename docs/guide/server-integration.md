@@ -99,12 +99,12 @@ export const Root = {
   categories: list(categoryDataView),
   commentSearch: { procedure: 'search', view: list(commentDataView) },
   events: list(eventDataView),
-  posts: list(postDataView),
+  posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
   viewer: userDataView,
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
+Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name. You can pass default list options such as `orderBy` to `list(...)`; Fate always appends the id field as a tie-breaker when it is missing.
 
 For the above `Root` definitions, you can make the following requests using `useRequest`:
 
@@ -125,98 +125,46 @@ const { posts, categories, viewer } = useRequest({
 });
 ```
 
-## Sources
+## Fate Setup
 
-A data view describes which fields are visible. A source describes how that type is stored and how it relates to other sources. Sources are shared by both database adapters:
+The Prisma and Drizzle integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.
 
-```tsx
-import { asc, defineSource, desc, many, manyToMany, one } from '@nkzw/fate/server';
-
-export const userSource = defineSource(userDataView, {
-  id: 'id',
-});
-
-export const tagSource = defineSource(tagDataView, {
-  id: 'id',
-  orderBy: [asc('name'), asc('id')],
-});
-
-export const postSource = defineSource(postDataView, {
-  id: 'id',
-  orderBy: [desc('createdAt'), desc('id')],
-  relations: {
-    author: one(() => userSource, {
-      foreignKey: 'id',
-      localKey: 'authorId',
-    }),
-    comments: many(() => commentSource, {
-      foreignKey: 'postId',
-      localKey: 'id',
-      orderBy: [desc('createdAt'), desc('id')],
-    }),
-    tags: manyToMany(() => tagSource, {
-      foreignKey: 'id',
-      localKey: 'id',
-      orderBy: [asc('name'), asc('id')],
-      through: {
-        foreignKey: 'tagId',
-        localKey: 'postId',
-      },
-    }),
-  },
-});
-```
-
-The `id` field is used for object identity and cursor pagination. `orderBy` controls stable list ordering and should include a unique field, usually `id`, as a final tie-breaker. Relations describe the key mapping in source terms:
-
-- `one` loads a nullable or singular relation.
-- `many` loads a list relation and supports nested pagination.
-- `manyToMany` loads through a join table and supports nested pagination.
-
-## Database Adapters
-
-The Prisma and Drizzle adapters both turn source definitions into a `SourceRegistry`. This registry is what fate's generic tRPC helpers use to resolve `byId`, `byIds`, and paginated `list` requests.
+Pass the `Root` export from `views.ts` to Fate in your tRPC `init.ts` file. Fate walks that view graph to find the data views it needs. `id` defaults to `"id"`, and Fate uses it as the fallback ordering for cursor pagination. Relations are inferred from the data view and ORM schema: a nested data view is loaded as a singular relation, `list(view)` is loaded as a list relation, and Drizzle join tables are discovered from relation metadata.
 
 ### Prisma
 
-Use `createPrismaSourceAdapter` from `@nkzw/fate/server/prisma` and connect each source to a Prisma delegate. The delegate receives your tRPC context so it can use `ctx.prisma`, a transaction client, or any request-scoped Prisma client:
+Use `createPrismaFate` from `@nkzw/fate/server/prisma` next to your tRPC helpers. By default, Fate reads Prisma delegates from `ctx.prisma` using each data view's type name:
 
 ```tsx
-import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
+import { initTRPC } from '@trpc/server';
+import { createPrismaFate } from '@nkzw/fate/server/prisma';
 import type { AppContext } from './context.ts';
-import { commentSource, postSource, userSource } from './views.ts';
+import { Root } from './views.ts';
 
-export const prismaAdapter = createPrismaSourceAdapter<AppContext>({
-  sources: [
-    {
-      delegate: (ctx) => ctx.prisma.comment,
-      source: commentSource,
-    },
-    {
-      delegate: (ctx) => ctx.prisma.post,
-      source: postSource,
-    },
-    {
-      delegate: (ctx) => ctx.prisma.user,
-      source: userSource,
-    },
-  ],
+const t = initTRPC.context<AppContext>().create();
+
+export const router = t.router;
+export const procedure = t.procedure;
+
+export const fate = createPrismaFate<AppContext, typeof procedure>({
+  procedure,
+  views: Root,
 });
-
-export const prismaRegistry = prismaAdapter.registry;
 ```
 
-The Prisma adapter translates a source execution plan into Prisma `select`, `where`, `orderBy`, `cursor`, `skip`, and `take` options. It also hydrates computed `count(...)` dependencies using Prisma `groupBy` when needed.
+If your Prisma client is not stored at `ctx.prisma`, pass `prisma: (ctx) => ctx.db`.
 
-For custom Prisma queries and mutations, you can still use the lower-level `createSourcePlan` and `toPrismaSelect` helpers:
+The Prisma integration translates view requests into Prisma `select`, `where`, `cursor`, `skip`, and `take` options. It also hydrates computed `count(...)` dependencies using Prisma `groupBy` when needed.
+
+For custom Prisma queries and mutations, use `fate.createPlan` with `toPrismaSelect`:
 
 ```tsx
-import { createSourcePlan, toPrismaSelect } from '@nkzw/fate/server';
+import { toPrismaSelect } from '@nkzw/fate/server';
 
-const plan = createSourcePlan({
+const plan = fate.createPlan({
   ...input,
   ctx,
-  source: postSource,
+  view: postDataView,
 });
 
 const post = await ctx.prisma.post.update({
@@ -234,90 +182,59 @@ return plan.resolve(post);
 
 ### Drizzle
 
-Use `createDrizzleSourceAdapter` from `@nkzw/fate/server/drizzle` and connect each source to a Drizzle table. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
+Use `createDrizzleFate` from `@nkzw/fate/server/drizzle`. Fate matches data view type names to Drizzle tables from your schema. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
 
 ```tsx
-import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
+import { initTRPC } from '@trpc/server';
+import { createDrizzleFate } from '@nkzw/fate/server/drizzle';
 import db from '../drizzle/db.ts';
-import { comment, post, postToTag, tag, user } from '../drizzle/schema.ts';
+import schema from '../drizzle/schema.ts';
 import type { AppContext } from './context.ts';
-import { commentSource, postSource, tagSource, userSource } from './views.ts';
+import { Root } from './views.ts';
 
-export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
+const t = initTRPC.context<AppContext>().create();
+
+export const router = t.router;
+export const procedure = t.procedure;
+
+export const fate = createDrizzleFate<AppContext, typeof procedure>({
   db,
-  sources: [
-    {
-      source: commentSource,
-      table: comment,
-    },
-    {
-      manyToMany: {
-        tags: postToTag,
-      },
-      source: postSource,
-      table: post,
-    },
-    {
-      source: tagSource,
-      table: tag,
-    },
-    {
-      source: userSource,
-      table: user,
-    },
-  ],
+  procedure,
+  schema,
+  views: Root,
 });
-
-export const drizzleRegistry = drizzleAdapter.registry;
 ```
 
 If your database lives on the request context, pass a function instead:
 
 ```tsx
-export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
+import schema from '../drizzle/schema.ts';
+import { Root } from './views.ts';
+
+export const fate = createDrizzleFate<AppContext, typeof procedure>({
   db: (ctx) => ctx.db,
-  sources,
+  procedure,
+  schema,
+  views: Root,
 });
 ```
 
-The Drizzle adapter builds SQL queries from your source definitions. It selects only requested columns, hydrates `one`, `many`, and `manyToMany` relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts.
+The Drizzle adapter builds SQL queries from your registered data views. It selects only requested columns, hydrates singular, list, and many-to-many relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts.
 
-For many-to-many relations, register the join table under the relation field name. When your source relation includes `through.foreignKey` and `through.localKey`, fate can infer the join columns from the Drizzle table:
+For request-specific sorting, prefer a custom root query that validates and translates explicit sort args.
+
+For many-to-many relations, define the join table relations in your Drizzle schema. Fate discovers a join table that points at both the source table and the target table:
 
 ```tsx
-export const postSource = defineSource(postDataView, {
-  id: 'id',
-  relations: {
-    tags: manyToMany(() => tagSource, {
-      foreignKey: 'id',
-      localKey: 'id',
-      through: {
-        foreignKey: 'tagId',
-        localKey: 'postId',
-      },
-    }),
-  },
-});
-
-export const drizzleAdapter = createDrizzleSourceAdapter<AppContext>({
+export const fate = createDrizzleFate<AppContext, typeof procedure>({
   db,
-  sources: [
-    {
-      manyToMany: {
-        tags: postToTag,
-      },
-      source: postSource,
-      table: post,
-    },
-    {
-      source: tagSource,
-      table: tag,
-    },
-  ],
+  procedure,
+  schema,
+  views: Root,
 });
 ```
 
-You can provide explicit join columns when the Drizzle column names do not match the source relation keys:
+You can still provide explicit join metadata when the schema is ambiguous:
 
 ```tsx
 {
@@ -328,95 +245,67 @@ You can provide explicit join columns when the Drizzle column names do not match
       table: postToTag,
     },
   },
-  source: postSource,
+  relations: {
+    tags: {
+      foreignKey: 'id',
+      localKey: 'id',
+      through: {
+        foreignKey: 'tagId',
+        localKey: 'postId',
+      },
+    },
+  },
   table: post,
+  view: postDataView,
 }
 ```
 
-Drizzle writes should stay ordinary Drizzle code. After creating or updating a row, use `refetchSourceById` to load the selected shape that the client asked for:
+Drizzle writes should stay ordinary Drizzle code. After creating or updating a row, use `fate.resolveById` to return the selected shape that the client asked for:
 
 ```tsx
-import { refetchSourceById } from '@nkzw/fate/server';
-
 const postId = await createPostRecord({
   authorId: ctx.sessionUser.id,
   content: input.content,
   title: input.title,
 });
 
-const post = await refetchSourceById({
+const post = await fate.resolveById({
   ctx,
   id: postId,
   input,
-  registry: drizzleRegistry,
-  source: postSource,
+  view: postDataView,
 });
 
 return post;
 ```
 
-## tRPC Source Procedures
+## tRPC Procedures
 
-Once you have a registry, use `bindSourceProcedures` to build standard `byId` and `list` procedures for each source:
-
-```tsx
-import { bindSourceProcedures } from '@nkzw/fate/server';
-import { createConnectionProcedure } from './connection.ts';
-import type { AppContext } from './context.ts';
-import { prismaRegistry } from './executor.ts';
-import { procedure } from './init.ts';
-
-export const sourceProcedures = bindSourceProcedures<
-  AppContext,
-  typeof procedure,
-  typeof createConnectionProcedure
->({
-  createConnectionProcedure,
-  procedure,
-  registry: prismaRegistry,
-});
-```
-
-For Drizzle, pass `drizzleRegistry` instead:
+Use `fate.procedures` to build the standard `byId` and `list` procedures expected by the generated fate client:
 
 ```tsx
-export const sourceProcedures = bindSourceProcedures<
-  AppContext,
-  typeof procedure,
-  typeof createConnectionProcedure
->({
-  createConnectionProcedure,
-  procedure,
-  registry: drizzleRegistry,
-});
-```
-
-Then spread the generated source procedures into your tRPC routers:
-
-```tsx
-import { router } from '../init.ts';
-import { sourceProcedures } from '../sourceRouter.ts';
-import { postSource } from '../views.ts';
+import { fate, router } from '../init.ts';
+import { postDataView } from '../views.ts';
 
 export const postRouter = router({
-  ...sourceProcedures(postSource),
+  ...fate.procedures(postDataView),
 });
 ```
 
-This creates the standard `byId` and `list` procedures expected by the generated fate client. You can disable the generated `list` procedure if a source should only be fetched by id:
+You can disable the generated `list` procedure if a view should only be fetched by id:
 
 ```tsx
 export const commentRouter = router({
-  ...sourceProcedures({
+  ...fate.procedures({
     list: false,
-    source: commentSource,
+    view: commentDataView,
   }),
 });
 ```
 
 ## Custom Queries
 
-You can add custom root queries next to source procedures. Define the root in `Root`, implement a matching tRPC procedure, and call `resolveSourceConnection` with the source registry:
+You can add custom root queries next to generated procedures. Define the root in `Root`, implement a matching tRPC procedure, and call `fate.resolveConnection`:
 
 ```tsx
 export const Root = {
@@ -425,20 +314,20 @@ export const Root = {
 ```
 
 ```tsx
-import { resolveSourceConnection } from '@nkzw/fate/server';
 import { ilike } from 'drizzle-orm';
+import { fate } from '../init.ts';
 
 export const commentRouter = router({
-  ...sourceProcedures({
+  ...fate.procedures({
     list: false,
-    source: commentSource,
+    view: commentDataView,
   }),
-  search: createConnectionProcedure({
+  search: fate.connection({
     input: z.object({
       query: z.string().min(1, 'Search query is required'),
     }),
     query: ({ ctx, cursor, direction, input, take }) =>
-      resolveSourceConnection({
+      fate.resolveConnection({
         ctx,
         cursor,
         direction,
@@ -446,9 +335,8 @@ export const commentRouter = router({
           where: ilike(comment.content, `%${input.args.query}%`),
         },
         input,
-        registry: drizzleRegistry,
-        source: commentSource,
         take,
+        view: commentDataView,
       }),
   }),
 });
@@ -466,7 +354,7 @@ import { computed, count, field } from '@nkzw/fate/server';
 export const userDataView = dataView<UserItem>('User')({
   email: computed<UserItem, string | null, AppContext>({
     authorize: ({ id }, context) => context?.sessionUser?.id === id,
-    needs: {
+    select: {
       email: field('email'),
     },
     resolve: (_item, deps) => (deps.email as string | null) ?? null,
@@ -476,7 +364,7 @@ export const userDataView = dataView<UserItem>('User')({
 
 export const postDataView = dataView<PostItem>('Post')({
   commentCount: computed<PostItem, number>({
-    needs: {
+    select: {
       count: count('comments'),
     },
     resolve: (_item, deps) => (deps.count as number) ?? 0,

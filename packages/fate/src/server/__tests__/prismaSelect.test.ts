@@ -11,7 +11,7 @@ import {
 } from '../dataView.ts';
 import { prismaSelect } from '../prismaSelect.ts';
 import { toPrismaSelect } from '../prismaSelect.ts';
-import { createSourcePlan, defineSource, desc } from '../source.ts';
+import { createSourceDefinitions, createSourcePlan } from '../source.ts';
 
 test('prismaSelect applies pagination args to relation selections', () => {
   const select = prismaSelect(['comments.id'], { comments: { first: 2 } });
@@ -90,20 +90,20 @@ test('toPrismaSelect matches createResolver output for view plans', () => {
 test('toPrismaSelect includes computed dependencies', () => {
   const userView = dataView<{ email: string; id: string }>('User')({
     email: computed<{ email: string; id: string }, string>({
-      needs: {
+      resolve: (_item, deps) => deps.email as string,
+      select: {
         email: field('email'),
       },
-      resolve: (_item, deps) => deps.email as string,
     }),
     id: true,
   });
 
   const postView = dataView<{ _count?: { comments: number }; id: string }>('Post')({
     commentCount: computed<{ _count?: { comments: number }; id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('comments'),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
     id: true,
   });
@@ -136,21 +136,21 @@ test('toPrismaSelect includes computed dependencies', () => {
 test('toPrismaSelect skips conflicting filtered counts on the same relation', () => {
   const eventView = dataView<{ id: string }>('Event')({
     goingCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'GOING' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
     id: true,
     waitlistCount: computed<{ id: string }, number>({
-      needs: {
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
         count: count('attendees', {
           where: { status: 'WAITLIST' },
         }),
       },
-      resolve: (_item, deps) => (deps.count as number) ?? 0,
     }),
   });
 
@@ -184,31 +184,29 @@ test('toPrismaSelect skips orderBy for singular relations', () => {
     id: true,
   });
 
-  const userSource = defineSource(userView, {
-    id: 'id',
-  });
-  const commentSource = defineSource(commentView, {
-    id: 'id',
-    orderBy: [desc('id')],
-  });
-  const postSource = defineSource(postView, {
-    id: 'id',
-    relations: {
-      author: {
-        foreignKey: 'id',
-        kind: 'one',
-        localKey: 'authorId',
-        source: () => userSource,
-      },
-      comments: {
-        foreignKey: 'postId',
-        kind: 'many',
-        localKey: 'id',
-        orderBy: [desc('id')],
-        source: () => commentSource,
-      },
+  const [, , postSource] = createSourceDefinitions([
+    {
+      view: userView,
     },
-  });
+    {
+      orderBy: [{ direction: 'desc', field: 'id' }],
+      view: commentView,
+    },
+    {
+      relations: {
+        author: {
+          foreignKey: 'id',
+          localKey: 'authorId',
+        },
+        comments: {
+          foreignKey: 'postId',
+          localKey: 'id',
+          orderBy: [{ direction: 'desc', field: 'id' }],
+        },
+      },
+      view: postView,
+    },
+  ]);
 
   expect(
     toPrismaSelect(

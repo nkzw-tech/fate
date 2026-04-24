@@ -1,7 +1,5 @@
-type AnyRecord = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is AnyRecord =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+import { isRecord } from '../record.ts';
+import type { AnyRecord } from '../types.ts';
 
 export const toPrismaArgs = (args: AnyRecord): AnyRecord => {
   const prismaArgs: AnyRecord = {};

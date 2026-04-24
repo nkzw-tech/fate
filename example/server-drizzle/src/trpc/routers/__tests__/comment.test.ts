@@ -1,8 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 
-const { deleteCommentRecord, drizzleRegistry, fetchById } = vi.hoisted(() => ({
+const { deleteCommentRecord, fetchById } = vi.hoisted(() => ({
   deleteCommentRecord: vi.fn(),
-  drizzleRegistry: new Map(),
   fetchById: vi.fn(),
 }));
 
@@ -11,19 +10,35 @@ vi.mock('../../../drizzle/queries.ts', () => ({
   deleteCommentRecord,
 }));
 
-vi.mock('../../executor.ts', () => ({
-  drizzleAdapter: {
-    fetchById,
-  },
-  drizzleRegistry,
-}));
+vi.mock('../../init.ts', async () => {
+  const { initTRPC } = await import('@trpc/server');
+  const { createResolver } = await import('@nkzw/fate/server');
+  const { commentDataView, postDataView } = await import('../../views.ts');
+  const t = initTRPC.context<any>().create();
+
+  return {
+    fate: {
+      connection: vi.fn(() => t.procedure.query(() => null)),
+      createPlan: vi.fn(({ view, ...options }) =>
+        createResolver({
+          ...options,
+          view: view === postDataView ? postDataView : commentDataView,
+        }),
+      ),
+      fetchById,
+      procedures: vi.fn(() => ({})),
+    },
+    middleware: t.middleware,
+    procedure: t.procedure,
+    router: t.router,
+  };
+});
+
 import { router } from '../../init.ts';
-import { postSource } from '../../views.ts';
 import { commentRouter } from '../comment.ts';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  drizzleRegistry.clear();
 });
 
 test('delete returns the post relation after the comment has been removed', async () => {
@@ -44,14 +59,6 @@ test('delete returns the post relation after the comment has been removed', asyn
       id: 'post-1',
       title: 'Post title',
     });
-
-  drizzleRegistry.set(postSource, {
-    byId: ({ id, plan }: { id: string; plan: { resolve: (item: unknown) => Promise<unknown> } }) =>
-      fetchById({
-        id,
-        plan,
-      }),
-  });
 
   const appRouter = router({ comment: commentRouter });
   const caller = appRouter.createCaller({

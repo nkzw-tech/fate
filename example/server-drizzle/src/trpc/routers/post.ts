@@ -1,14 +1,12 @@
-import { connectionArgs, refetchSourceById } from '@nkzw/fate/server';
+import { connectionArgs } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { createPostRecord, likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
-import { drizzleRegistry } from '../executor.ts';
-import { procedure, router } from '../init.ts';
-import { sourceProcedures } from '../sourceRouter.ts';
-import { Post, postSource } from '../views.ts';
+import { fate, procedure, router } from '../init.ts';
+import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
-  ...sourceProcedures(postSource),
+  ...fate.procedures(postDataView),
   add: procedure
     .input(
       z.object({
@@ -39,12 +37,11 @@ export const postRouter = router({
         });
       }
 
-      const post = await refetchSourceById({
+      const post = await fate.resolveById({
         ctx,
         id: postId,
         input,
-        registry: drizzleRegistry,
-        source: postSource,
+        view: postDataView,
       });
       if (!post) {
         throw new TRPCError({
@@ -83,12 +80,11 @@ export const postRouter = router({
         });
       }
 
-      const existing = await refetchSourceById({
+      const existing = await fate.resolveById({
         ctx,
         id: input.id,
         input: { select: ['id'] },
-        registry: drizzleRegistry,
-        source: postSource,
+        view: postDataView,
       });
 
       if (!existing) {
@@ -106,12 +102,11 @@ export const postRouter = router({
         });
       }
 
-      const post = await refetchSourceById({
+      const post = await fate.resolveById({
         ctx,
         id: input.id,
         input,
-        registry: drizzleRegistry,
-        source: postSource,
+        view: postDataView,
       });
       if (!post) {
         throw new TRPCError({
@@ -139,12 +134,11 @@ export const postRouter = router({
         });
       }
 
-      const post = await refetchSourceById({
+      const post = await fate.resolveById({
         ctx,
         id: input.id,
         input,
-        registry: drizzleRegistry,
-        source: postSource,
+        view: postDataView,
       });
       if (!post) {
         throw new TRPCError({
