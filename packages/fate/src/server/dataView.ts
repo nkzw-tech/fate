@@ -291,7 +291,7 @@ type RawDataViewResult<V extends DataView<AnyRecord>> =
       }
     : never;
 
-type DataViewResult<V extends DataView<AnyRecord>> = Serializable<RawDataViewResult<V>>;
+export type DataViewResult<V extends DataView<AnyRecord>> = Serializable<RawDataViewResult<V>>;
 
 type WithTypename<T, Name extends string> = T & { __typename: Name };
 

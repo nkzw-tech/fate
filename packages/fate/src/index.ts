@@ -45,6 +45,14 @@ export type { LiveEvent, Transport } from './transport.ts';
 export { createClient, FateClient } from './client.ts';
 export { ConnectionTag, isViewTag } from './types.ts';
 export { createTRPCTransport } from './transport.ts';
+export { createHTTPTransport } from './httpTransport.ts';
+export type { InferFateAPI } from './server/http.ts';
+export type {
+  FateLiveEvent,
+  FateOperation,
+  FateProtocolRequest,
+  FateProtocolResponse,
+} from './protocol.ts';
 export { getSelectionPlan } from './selection.ts';
 export { isRecord } from './record.ts';
 export { mutation } from './mutation.ts';

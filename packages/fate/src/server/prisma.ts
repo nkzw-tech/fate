@@ -130,6 +130,30 @@ export type PrismaSourceAdapter<Context> = {
     target: SourceTarget<Item>,
   ) => SourceDefinition<Item, unknown>;
   registry: SourceRegistry<Context>;
+  resolveById: <Item extends AnyRecord = AnyRecord>(options: {
+    ctx: Context;
+    extra?: PrismaQueryExtra;
+    id: string;
+    input: SourceInput;
+    view: ViewTarget<Item>;
+  }) => Promise<AnyRecord | null>;
+  resolveByIds: <Item extends AnyRecord = AnyRecord>(options: {
+    ctx: Context;
+    extra?: PrismaQueryExtra;
+    ids: Array<string>;
+    input: SourceInput;
+    view: ViewTarget<Item>;
+  }) => Promise<Array<AnyRecord>>;
+  resolveConnection: <Item extends AnyRecord = AnyRecord>(options: {
+    ctx: Context;
+    cursor?: string;
+    direction: 'backward' | 'forward';
+    extra?: PrismaQueryExtra;
+    input: SourceInput;
+    skip?: number;
+    take: number;
+    view: ViewTarget<Item>;
+  }) => Promise<Array<AnyRecord>>;
 };
 
 type ProcedureLike = {
@@ -652,6 +676,78 @@ export function createPrismaSourceAdapter<Context>({
     fetchConnection,
     getSource,
     registry,
+    resolveById: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      id,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: PrismaQueryExtra;
+      id: string;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceById({
+        ctx,
+        extra,
+        id,
+        input,
+        registry,
+        source: getSource(view),
+      }),
+    resolveByIds: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      extra,
+      ids,
+      input,
+      view,
+    }: {
+      ctx: Context;
+      extra?: PrismaQueryExtra;
+      ids: Array<string>;
+      input: SourceInput;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceByIds({
+        ctx,
+        extra,
+        ids,
+        input,
+        registry,
+        source: getSource(view),
+      }),
+    resolveConnection: <Item extends AnyRecord = AnyRecord>({
+      ctx,
+      cursor,
+      direction,
+      extra,
+      input,
+      skip,
+      take,
+      view,
+    }: {
+      ctx: Context;
+      cursor?: string;
+      direction: 'backward' | 'forward';
+      extra?: PrismaQueryExtra;
+      input: SourceInput;
+      skip?: number;
+      take: number;
+      view: ViewTarget<Item>;
+    }) =>
+      resolveSourceConnection({
+        ctx,
+        cursor,
+        direction,
+        extra,
+        input,
+        registry,
+        skip,
+        source: getSource(view),
+        take,
+      }),
   };
 }
 

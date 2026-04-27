@@ -18,7 +18,7 @@ export type LiveEventBus = Readonly<{
   subscribe: (
     type: string,
     id: string | number,
-    options?: { signal?: AbortSignal },
+    options?: { lastEventId?: string; signal?: AbortSignal },
   ) => AsyncIterable<readonly [LiveSourceEvent]>;
   update: (type: string, id: string | number, options?: { eventId?: string }) => void;
 }>;

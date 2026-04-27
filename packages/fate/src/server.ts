@@ -15,6 +15,7 @@ export type {
   DataViewListOptions,
   DataViewOrderBy,
   DataViewOrderDirection,
+  DataViewResult,
   Entity,
   FieldSelection,
 } from './server/dataView.ts';
@@ -36,6 +37,7 @@ export type {
 } from './server/source.ts';
 export type { SourceRegistry } from './server/executor.ts';
 export type { LiveEventBus, LiveEventType, LiveSourceEvent } from './server/live.ts';
+export type { FateServer, FateServerManifest, InferFateAPI, NativeFateAPI } from './server/http.ts';
 
 export {
   computed,
@@ -48,6 +50,7 @@ export {
 } from './server/dataView.ts';
 export { withConnection, connectionArgs } from './server/connection.ts';
 export { createLiveEventBus } from './server/live.ts';
+export { createFateFetchHandler, createFateServer, createHonoFateHandler } from './server/http.ts';
 export {
   resolveSourceById,
   resolveSourceByIds,

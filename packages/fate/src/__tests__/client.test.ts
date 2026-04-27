@@ -2,6 +2,7 @@ import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
+import { FateRequestError } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
@@ -1261,6 +1262,41 @@ test('mutations roll back optimistic updates when requests fail', async () => {
     id: 'user-1',
     name: 'Initial',
   });
+});
+
+test('Fate request errors with call-site status codes return at the call site', async () => {
+  type UpdateUserMutationInput = { id: string; name: string };
+  type UpdateUserMutationResult = { __typename: 'User'; id: string; name: string };
+  const requestError = new FateRequestError('VALIDATION_ERROR', 'Invalid input.');
+  const mutate = vi.fn(async () => {
+    throw requestError;
+  });
+  const mutations = {
+    updateUser: mutation<User, UpdateUserMutationInput, UpdateUserMutationResult>('User'),
+  };
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [{ type: 'User' }],
+  });
+  const UserView = view<User>()({
+    id: true,
+    name: true,
+  });
+
+  const { error, result } = await client.mutations.updateUser({
+    input: { id: 'user-1', name: 'Server' },
+    view: UserView,
+  });
+
+  expect(error).toBe(requestError);
+  expect(result).toBeUndefined();
 });
 
 test(`optimistic updates without identifiers are ignored`, async () => {

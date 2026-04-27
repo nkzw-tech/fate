@@ -10,11 +10,13 @@
 export {
   clientRoot,
   createClient,
+  createHTTPTransport,
   createTRPCTransport,
   mutation,
   toEntityId,
   type ConnectionRef,
   type ViewRef,
+  type InferFateAPI,
   view,
 } from '@nkzw/fate';
 

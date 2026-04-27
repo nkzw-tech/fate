@@ -1,6 +1,7 @@
-import { TRPCError } from '@trpc/server';
+import type { TRPCError } from '@trpc/server';
 import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
+import { FateRequestError } from './protocol.ts';
 import { toEntityId } from './ref.ts';
 import { getSelectionPlan } from './selection.ts';
 import { List } from './store.ts';
@@ -299,10 +300,8 @@ export function wrapMutation<
         }
 
         if (error instanceof Error) {
-          const { data } = error as { data?: TRPCError };
-          const errorCategory = data
-            ? categorizeTRPCError(getHTTPStatusCodeFromError(data))
-            : 'boundary';
+          const statusCode = getErrorStatusCode(error);
+          const errorCategory = statusCode ? categorizeHTTPErrorStatus(statusCode) : 'boundary';
 
           if (errorCategory === 'boundary') {
             throw error;
@@ -329,8 +328,20 @@ export function wrapMutation<
 
 export type ErrorHandlingScope = 'callSite' | 'boundary';
 
-// See https://trpc.io/docs/server/error-handling#error-codes
-export function categorizeTRPCError(statusCode: number): ErrorHandlingScope {
+const getErrorStatusCode = (error: Error): number | undefined => {
+  if (error instanceof FateRequestError) {
+    return error.status;
+  }
+
+  const { data } = error as { data?: unknown };
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+
+  return getHTTPStatusCodeFromError(data as TRPCError);
+};
+
+const categorizeHTTPErrorStatus = (statusCode: number): ErrorHandlingScope => {
   switch (statusCode) {
     case 400: // BAD_REQUEST
     case 402: // PAYMENT_REQUIRED
@@ -357,4 +368,4 @@ export function categorizeTRPCError(statusCode: number): ErrorHandlingScope {
     default:
       return 'boundary';
   }
-}
+};

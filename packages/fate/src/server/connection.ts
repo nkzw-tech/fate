@@ -132,6 +132,61 @@ const extractPaginationArgs = (
     ? Object.fromEntries(Object.entries(args).filter(([key]) => paginationArgKeys.has(key)))
     : {};
 
+export async function resolveConnection<TContext, TItem, TNode, TInput extends ConnectionInput>({
+  ctx,
+  defaultSize = 20,
+  getCursor = (node: TNode) => (node as { id: string }).id,
+  input,
+  map,
+  query,
+}: {
+  ctx: TContext;
+  defaultSize?: number;
+  getCursor?: (node: TNode) => ConnectionCursor;
+  input: TInput;
+  map?: MapFn<TContext, TItem, TNode, TInput>;
+  query: QueryFn<TContext, TItem, TInput>;
+}): Promise<ConnectionResult<TNode>> {
+  const paginationArgs = paginationArgsSchema.parse(extractPaginationArgs(input.args));
+  const isBackward = paginationArgs.before !== undefined || paginationArgs.last !== undefined;
+  const cursor = isBackward ? paginationArgs.before : paginationArgs.after;
+  const direction = isBackward ? 'backward' : 'forward';
+  const pageSize = paginationArgs.first ?? paginationArgs.last ?? defaultSize;
+  const rawItems = await query({
+    ctx,
+    cursor,
+    direction,
+    input,
+    skip: cursor ? 1 : undefined,
+    take: pageSize + 1,
+  });
+
+  const hasMore = rawItems.length > pageSize;
+  const limitedItems = isBackward
+    ? rawItems.slice(Math.max(0, rawItems.length - pageSize))
+    : rawItems.slice(0, pageSize);
+  const nodes = map
+    ? await map({ ctx, input, items: limitedItems })
+    : (limitedItems as unknown as Array<TNode>);
+
+  const items = nodes.map((node) => ({
+    cursor: getCursor(node),
+    node,
+  }));
+  const firstItem = items[0];
+  const lastItem = items.at(-1);
+
+  return {
+    items,
+    pagination: {
+      hasNext: isBackward ? Boolean(cursor) : hasMore,
+      hasPrevious: isBackward ? hasMore : Boolean(cursor),
+      nextCursor: lastItem?.cursor,
+      previousCursor: (isBackward ? hasMore : Boolean(cursor)) ? firstItem?.cursor : undefined,
+    },
+  };
+}
+
 /**
  * Converts an array of nodes into a list view connection result the client
  * can normalize.
@@ -370,44 +425,14 @@ export function withConnection(procedure: ProcedureLike) {
         input: Input;
       };
 
-      const paginationArgs = paginationArgsSchema.parse(extractPaginationArgs(input.args));
-      const isBackward = paginationArgs.before !== undefined || paginationArgs.last !== undefined;
-      const cursor = isBackward ? paginationArgs.before : paginationArgs.after;
-      const direction = isBackward ? 'backward' : 'forward';
-      const pageSize = paginationArgs.first ?? paginationArgs.last ?? defaultSize;
-      const rawItems = await query({
+      return resolveConnection({
         ctx,
-        cursor,
-        direction,
+        defaultSize,
+        getCursor,
         input,
-        skip: cursor ? 1 : undefined,
-        take: pageSize + 1,
+        map,
+        query,
       });
-
-      const hasMore = rawItems.length > pageSize;
-      const limitedItems = isBackward
-        ? rawItems.slice(Math.max(0, rawItems.length - pageSize))
-        : rawItems.slice(0, pageSize);
-      const nodes = map
-        ? await map({ ctx, input, items: limitedItems })
-        : (limitedItems as unknown as Array<TNode>);
-
-      const items = nodes.map((node) => ({
-        cursor: getCursor(node),
-        node,
-      }));
-      const firstItem = items[0];
-      const lastItem = items.at(-1);
-
-      return {
-        items,
-        pagination: {
-          hasNext: isBackward ? Boolean(cursor) : hasMore,
-          hasPrevious: isBackward ? hasMore : Boolean(cursor),
-          nextCursor: lastItem?.cursor,
-          previousCursor: (isBackward ? hasMore : Boolean(cursor)) ? firstItem?.cursor : undefined,
-        },
-      } satisfies ConnectionResult<TNode>;
     }) as ConnectionProcedure<
       ConnectionInputWithAdditional<TAdditionalInput>,
       ConnectionResult<TNode>

@@ -1,10 +1,15 @@
 # Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a tRPC backend that follows some conventions so you can generate a typed client using fate's CLI. _fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters both plug into the same runtime and expose the same tRPC procedure shape to the client.
+Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so you can generate a typed client using fate's CLI. _fate_ currently ships two server paths:
+
+- The native Fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
+- The tRPC adapter, which keeps compatibility with existing tRPC backends.
+
+_fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters plug into the same source execution runtime and can be exposed through the native protocol or through tRPC.
 
 ## Conventions & Object Identity
 
-fate expects that data is served by a tRPC backend that follows these conventions:
+fate expects that data is served by a backend that follows these conventions:
 
 - A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
 - A `list` query for fetching lists of objects with support for pagination.
@@ -20,7 +25,7 @@ fate's type definitions might seem verbose at first glance. However, with fate's
 
 Since clients can send arbitrary selection objects to the server, we need to implement a way to translate these selection objects into database queries without exposing raw database queries and private data to the client. On the client, we define views to select fields on each type. We can do the same on the server using fate data views and the `dataView` function from `@nkzw/fate/server`.
 
-Create a `views.ts` file next to your root tRPC router that exports the data views for each type. The same data view shape works with both Prisma model types and Drizzle row types:
+Create a `views.ts` file next to your server entry that exports the data views for each type. The same data view shape works with both Prisma model types and Drizzle row types:
 
 ::: code-group
 
@@ -107,7 +112,7 @@ export const Root = {
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers and use the `procedure` name when calling the corresponding router procedure, defaulting to `list`. If you omit `list(...)`, fate treats the entry as a standard query and uses the view type name to infer the router name.
+Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name sent by the generated client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. If you omit `list(...)`, fate treats the entry as a standard query.
 
 You can pass default list options such as `orderBy` to `list(...)`. Ordering is scoped to that specific list wrapper: `Root.posts` can order posts by `createdAt desc`, while `categoryDataView.posts` or `postDataView.comments` can choose their own order. If no order is provided, Fate orders by `id asc`. Fate always appends `id asc` as a tie-breaker when no `id` order is present; include `id` yourself when you need a different tie-breaker direction such as `id desc`. Use the array form when ordering by multiple fields so the priority is unambiguous.
 
@@ -130,9 +135,154 @@ const { posts, categories, viewer } = useRequest({
 });
 ```
 
-## Fate Setup
+## Native Fate Protocol
 
-The Prisma and Drizzle integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.
+The native protocol keeps tRPC optional. Create a source adapter from your ORM integration, pass it to `createFateServer`, and expose the returned server through a Fetch-compatible handler.
+
+```tsx
+import { createFateServer, createHonoFateHandler } from '@nkzw/fate/server';
+import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
+import { Hono } from 'hono';
+import type { AppContext } from './context.ts';
+import { prisma } from './prisma.ts';
+import { Root, userDataView } from './views.ts';
+
+export { Root } from './views.ts';
+
+const sources = createPrismaSourceAdapter<AppContext>({
+  prisma: (ctx) => ctx.prisma,
+  views: Root,
+});
+
+export const fate = createFateServer({
+  context: async ({ adapterContext }) => ({
+    prisma,
+    request: adapterContext.req.raw,
+    sessionUser: await getSessionUser(adapterContext.req.raw),
+  }),
+  queries: {
+    viewer: {
+      resolve: ({ ctx, select }) =>
+        sources.resolveById({
+          ctx,
+          id: ctx.sessionUser.id,
+          input: { select },
+          view: userDataView,
+        }),
+    },
+  },
+  roots: Root,
+  sources,
+});
+
+const app = new Hono();
+const handler = createHonoFateHandler(fate);
+
+app.post('/fate', handler);
+app.post('/fate/live', handler);
+```
+
+The generated client uses `createHTTPTransport`:
+
+```bash
+pnpm fate generate --transport native @your-org/server/fate.ts client/src/fate.ts
+```
+
+```tsx
+import { createFateClient } from './fate.ts';
+
+const client = createFateClient({
+  url: '/fate',
+});
+```
+
+The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use `POST /fate/live` with `text/event-stream` so the client can send the selected fields and args in the request body.
+
+### Custom Queries
+
+Root query entries such as `viewer` need an explicit resolver because fate cannot infer application-specific behavior like "current user" from a data view:
+
+```tsx
+export const fate = createFateServer({
+  context,
+  queries: {
+    viewer: {
+      resolve: ({ ctx, select }) =>
+        sources.resolveById({
+          ctx,
+          id: ctx.sessionUser.id,
+          input: { select },
+          view: userDataView,
+        }),
+    },
+  },
+  roots: Root,
+  sources,
+});
+```
+
+### Custom Mutations
+
+Mutations declare the entity type they return and receive the selected fields requested by the client. Resolve the updated record through the source adapter so the response has the same masking and relation behavior as regular view requests:
+
+```tsx
+export const fate = createFateServer({
+  mutations: {
+    'post.like': {
+      input: likeInput,
+      resolve: async ({ ctx, input, select }) => {
+        await ctx.prisma.post.update({
+          data: { likes: { increment: 1 } },
+          where: { id: input.id },
+        });
+
+        return sources.resolveById({
+          ctx,
+          id: input.id,
+          input: { select },
+          view: postDataView,
+        });
+      },
+      type: 'Post',
+    },
+  },
+  roots: Root,
+  sources,
+});
+```
+
+### Live Views
+
+Pass a live event bus to enable `useLiveView` over the native SSE endpoint:
+
+```tsx
+import { createLiveEventBus } from '@nkzw/fate/server';
+
+export const live = createLiveEventBus();
+
+export const fate = createFateServer({
+  live,
+  queries: {
+    viewer: {
+      resolve: ({ ctx, select }) =>
+        sources.resolveById({
+          ctx,
+          id: ctx.sessionUser.id,
+          input: { select },
+          view: userDataView,
+        }),
+    },
+  },
+  roots: Root,
+  sources,
+});
+
+live.update('Post', post.id, { eventId: `post:${post.id}:${Date.now()}` });
+```
+
+## tRPC Fate Setup
+
+The Prisma and Drizzle tRPC integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.
 
 Pass the `Root` export from `views.ts` to Fate in your tRPC `init.ts` file. Fate walks that view graph to find the data views it needs. `id` defaults to `"id"`, and Fate uses it as the fallback ordering for cursor pagination. Relations are inferred from the data view and ORM schema: a nested data view is loaded as a singular relation, `list(view)` is loaded as a list relation, and Drizzle join tables are discovered from relation metadata.
 
