@@ -95,7 +95,7 @@ export default defineConfig({
   run: {
     tasks: {
       'test:all': {
-        command: 'vp check && vp test',
+        command: 'vp run dev:setup && vp check && vp test',
       },
     },
   },

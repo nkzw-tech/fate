@@ -12,6 +12,9 @@
     "type": "git",
     "url": "https://github.com/nkzw-tech/fate"
   },
+  "bin": {
+    "fate": "./lib/cli.mjs"
+  },
   "files": [
     "docs",
     "lib"
@@ -27,7 +30,7 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.tsx"
+    "build": "vp pack -d lib --target=node24 src/index.tsx src/cli.ts"
   },
   "dependencies": {
     "@nkzw/fate": "workspace:^"

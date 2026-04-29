@@ -12,6 +12,9 @@
     "type": "git",
     "url": "https://github.com/nkzw-tech/fate"
   },
+  "bin": {
+    "fate": "./lib/cli.mjs"
+  },
   "files": [
     "docs",
     "lib"
@@ -29,6 +32,11 @@
       "types": "./lib/clientStub.d.mts",
       "@nkzw/source": "./src/clientStub.ts",
       "default": "./lib/clientStub.mjs"
+    },
+    "./cli": {
+      "types": "./lib/cli.d.mts",
+      "@nkzw/source": "./src/cli.ts",
+      "default": "./lib/cli.mjs"
     },
     "./server": {
       "types": "./lib/server.d.mts",
@@ -52,7 +60,7 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/vite.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/vite.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",
