@@ -12,9 +12,6 @@
     "type": "git",
     "url": "https://github.com/nkzw-tech/fate"
   },
-  "bin": {
-    "fate": "./lib/cli.mjs"
-  },
   "files": [
     "docs",
     "lib"
@@ -28,10 +25,10 @@
       "@nkzw/source": "./src/index.ts",
       "default": "./lib/index.mjs"
     },
-    "./cli": {
-      "types": "./lib/cli.d.mts",
-      "@nkzw/source": "./src/cli.ts",
-      "default": "./lib/cli.mjs"
+    "./client": {
+      "types": "./lib/clientStub.d.mts",
+      "@nkzw/source": "./src/clientStub.ts",
+      "default": "./lib/clientStub.mjs"
     },
     "./server": {
       "types": "./lib/server.d.mts",
@@ -47,10 +44,15 @@
       "types": "./lib/server/prisma.d.mts",
       "@nkzw/source": "./src/server/prisma.ts",
       "default": "./lib/server/prisma.mjs"
+    },
+    "./vite": {
+      "types": "./lib/vite.d.mts",
+      "@nkzw/source": "./src/vite.ts",
+      "default": "./lib/vite.mjs"
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/cli.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/vite.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",
@@ -59,14 +61,19 @@
   "devDependencies": {
     "@trpc/client": "^11.16.0",
     "@trpc/server": "^11.16.0",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "vite": "catalog:"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0",
-    "drizzle-orm": "^0.45.0"
+    "drizzle-orm": "^0.45.0",
+    "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   }

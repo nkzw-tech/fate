@@ -22,7 +22,6 @@
     "dev:drizzle-server": "cd example/server-drizzle && vp run dev",
     "dev:server": "cd example/server-prisma && vp run dev",
     "dev:setup": "(cd example/server-prisma && vp run dev:setup)",
-    "fate:generate": "node --conditions=development --no-warnings --loader ts-node/esm --env-file example/server-prisma/.env packages/fate/src/cli.ts generate @nkzw/fate-server/src/trpc/router.ts example/client/src/fate.ts",
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",

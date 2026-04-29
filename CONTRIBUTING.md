@@ -52,7 +52,6 @@ Then, at the root of the project, run:
 - `vp run prisma migrate dev` to create the database and run the migrations.
 - You might want to run `vp run prisma migrate reset` and `vp run prisma db seed` to seed the database with initial data.
 - Run `vp run dev` to run the example.
-- Run `vp run fate:generate` to regenerate the fate client code.
 
 ## Running Tests
 

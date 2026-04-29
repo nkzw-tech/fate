@@ -30,6 +30,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@nkzw/fate": "workspace:*",
     "@tailwindcss/vite": "^4.2.2",
     "@trpc/server": "^11.16.0",
     "@types/node": "^25.6.0",

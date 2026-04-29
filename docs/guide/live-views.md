@@ -35,7 +35,7 @@ tRPC subscriptions need a subscription link. For HTTP/SSE, use `httpSubscription
 ```tsx
 import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from './fate.ts';
+import { createFateClient } from '@nkzw/fate/client';
 
 export function App() {
   const fate = useMemo(
@@ -113,6 +113,8 @@ export const postRouter = router({
 
 The shorthand above is equivalent to `live: { bus: live }`. If your event bus has a different variable name, pass it as `live: events`. The generated procedure is called `live`, so the generated client can map `Post` refs to `client.post.live.subscribe`.
 
+Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
+
 ## Emitting Events
 
 After a mutation changes an object, emit an update event for that object:
@@ -176,31 +178,6 @@ You can pass an `eventId` when emitting. fate wraps events with tRPC's tracked e
 ```tsx
 live.update('Post', input.id, { eventId: `post:${input.id}:${Date.now()}` });
 ```
-
-## Generating the Client
-
-Run the fate generator after adding `live` procedures:
-
-```bash
-pnpm fate generate @your-org/server/trpc/router.ts client/src/fate.ts
-```
-
-The generated transport includes a live resolver map:
-
-```tsx
-transport: createTRPCTransport({
-  byId: {
-    Post: (client) => client.post.byId.query,
-  },
-  live: {
-    byId: {
-      Post: (client) => client.post.live.subscribe,
-    },
-  },
-});
-```
-
-Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
 
 ## Error Handling
 

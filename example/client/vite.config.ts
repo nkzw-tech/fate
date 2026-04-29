@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { fate } from '@nkzw/fate/vite';
 import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
@@ -25,6 +26,9 @@ export default defineConfig({
     }),
     tailwindcss(),
     react(),
+    fate({
+      module: '@nkzw/fate-server/src/trpc/router.ts',
+    }),
   ],
   resolve: { conditions: ['@nkzw/source'] },
   server: { port: 6001 },

@@ -26,7 +26,7 @@ type RootConfig =
     };
 
 /**
- * Builds the schema object used by the CLI generator from your data views and
+ * Builds the schema object used by the Vite plugin from your data views and
  * root resolver configs.
  */
 export const createSchema = (

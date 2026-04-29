@@ -169,6 +169,9 @@ importers:
         specifier: ^3.5.0
         version: 3.5.0
     devDependencies:
+      '@nkzw/fate':
+        specifier: workspace:*
+        version: link:../../packages/fate
       '@tailwindcss/vite':
         specifier: ^4.2.2
         version: 4.2.2(@voidzero-dev/vite-plus-core@0.1.18(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3))
@@ -297,6 +300,9 @@ importers:
       superjson:
         specifier: ^2.2.6
         version: 2.2.6
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.18
+        version: '@voidzero-dev/vite-plus-core@0.1.18(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
       zod:
         specifier: ^4.3.6
         version: 4.3.6

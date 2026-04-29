@@ -24,25 +24,25 @@ yarn dlx giget@latest gh:nkzw-tech/fate-template
 
 ## Manual Installation
 
-**_fate_** requires React 19.2+. For your client you need to install `react-fate`:
+**_fate_** requires React 19.2+. For your client you need to install `react-fate` and the core `@nkzw/fate` package:
 
 ::: code-group
 
 ```bash [npm]
-npm add react-fate
+npm add react-fate @nkzw/fate
 ```
 
 ```bash [pnpm]
-pnpm add react-fate
+pnpm add react-fate @nkzw/fate
 ```
 
 ```bash [yarn]
-yarn add react-fate
+yarn add react-fate @nkzw/fate
 ```
 
 :::
 
-And for your server, install the core `@nkzw/fate` package:
+If your server is a separate package, install `@nkzw/fate` there as a runtime dependency too:
 
 ::: code-group
 

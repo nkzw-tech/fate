@@ -84,25 +84,25 @@ yarn dlx giget@latest gh:nkzw-tech/fate-template
 
 ### Manual Installation
 
-**_fate_** requires React 19.2+. For your client you need to install `react-fate`:
+**_fate_** requires React 19.2+. For your client you need to install `react-fate` and the core `@nkzw/fate` package:
 
 ::: code-group
 
 ```bash [npm]
-npm add react-fate
+npm add react-fate @nkzw/fate
 ```
 
 ```bash [pnpm]
-pnpm add react-fate
+pnpm add react-fate @nkzw/fate
 ```
 
 ```bash [yarn]
-yarn add react-fate
+yarn add react-fate @nkzw/fate
 ```
 
 :::
 
-And for your server, install the core `@nkzw/fate` package:
+If your server is a separate package, install `@nkzw/fate` there as a runtime dependency too:
 
 ::: code-group
 
@@ -685,7 +685,7 @@ tRPC subscriptions need a subscription link. For HTTP/SSE, use `httpSubscription
 ```tsx
 import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from './fate.ts';
+import { createFateClient } from '@nkzw/fate/client';
 
 export function App() {
   const fate = useMemo(
@@ -763,6 +763,8 @@ export const postRouter = router({
 
 The shorthand above is equivalent to `live: { bus: live }`. If your event bus has a different variable name, pass it as `live: events`. The generated procedure is called `live`, so the generated client can map `Post` refs to `client.post.live.subscribe`.
 
+Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
+
 ### Emitting Events
 
 After a mutation changes an object, emit an update event for that object:
@@ -826,31 +828,6 @@ You can pass an `eventId` when emitting. fate wraps events with tRPC's tracked e
 ```tsx
 live.update('Post', input.id, { eventId: `post:${input.id}:${Date.now()}` });
 ```
-
-### Generating the Client
-
-Run the fate generator after adding `live` procedures:
-
-```bash
-pnpm fate generate @your-org/server/trpc/router.ts client/src/fate.ts
-```
-
-The generated transport includes a live resolver map:
-
-```tsx
-transport: createTRPCTransport({
-  byId: {
-    Post: (client) => client.post.byId.query,
-  },
-  live: {
-    byId: {
-      Post: (client) => client.post.live.subscribe,
-    },
-  },
-});
-```
-
-Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
 
 ### Error Handling
 
@@ -1135,7 +1112,7 @@ addComment({
 
 ## Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so you can generate a typed client using fate's CLI. _fate_ currently ships two server paths:
+Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so the Vite plugin can provide a typed client module. _fate_ currently ships two server paths:
 
 - The native Fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
 - The tRPC adapter, which keeps compatibility with existing tRPC backends.
@@ -1151,7 +1128,7 @@ fate expects that data is served by a backend that follows these conventions:
 
 Objects are identified by their ID and type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
 
-fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you. For example, fate has a minimal CLI that generates types for the client, but you can also let your LLM write it by hand if you prefer.
+fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you, or you can let the Vite plugin provide the typed client module for your app.
 
 > [!NOTE]
 > You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
@@ -1317,14 +1294,26 @@ app.post('/fate', handler);
 app.post('/fate/live', handler);
 ```
 
-The generated client uses `createHTTPTransport`:
-
-```bash
-pnpm fate generate --transport native @your-org/server/fate.ts client/src/fate.ts
-```
+Configure the Vite plugin with the native transport:
 
 ```tsx
-import { createFateClient } from './fate.ts';
+import { fate } from '@nkzw/fate/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [
+    fate({
+      module: '@your-org/server/fate.ts',
+      transport: 'native',
+    }),
+  ],
+});
+```
+
+The generated client uses `createHTTPTransport`:
+
+```tsx
+import { createFateClient } from '@nkzw/fate/client';
 
 const client = createFateClient({
   url: '/fate',
@@ -1665,9 +1654,9 @@ export const postDataView = dataView<PostItem>('Post')({
 
 The adapters fetch the hidden `field(...)` and `count(...)` dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
 
-### Generating a typed client
+### Configuring the typed client
 
-Now that we have defined our client views and our tRPC server, we need to connect them with some glue code. We recommend using fate's CLI for convenience.
+Now that we have defined our client views and our tRPC server, we need to connect them with some glue code. We recommend using fate's Vite plugin for convenience.
 
 First, make sure our tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views we have defined:
 
@@ -1686,22 +1675,41 @@ export type AppRouter = typeof appRouter;
 export * from './views.ts';
 ```
 
-_Note: We try to keep magic to a minimum and you can handwrite the [generated client](https://github.com/nkzw-tech/fate/blob/main/example/client/src/fate.ts) if you prefer._
+Configure the fate Vite plugin with your server module:
 
-```bash
-pnpm fate generate @your-org/server/trpc/router.ts client/src/fate.ts
+```tsx
+import { fate } from '@nkzw/fate/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [
+    fate({
+      module: '@your-org/server/trpc/router.ts',
+    }),
+  ],
+});
 ```
 
-_Note: fate uses the specified server module name to extract the server types it needs and uses the same module name to import the views into the generated client. Make sure that the module is available both at the root where you are running the CLI and in the client package._
+_Note: fate uses the specified server module name to extract the server types it needs and uses the same module name in the generated client. Make sure that the module is available to the client package's Vite config._
+
+During development, the plugin watches the server module and the files it imports. When one of those files changes, fate regenerates the project-local client and invalidates `@nkzw/fate/client` in Vite's module graph.
+
+The plugin writes project-local types under `.fate/`. If your TypeScript config does not already include dot-directories, extend the generated config:
+
+```json
+{
+  "extends": "./.fate/tsconfig.json"
+}
+```
 
 ### Creating a _fate_ Client
 
-Now that we have generated the client types, all that remains is creating an instance of the fate client, and using it in our React app using the `FateClient` context provider:
+Now that the Vite plugin provides the client types, all that remains is creating an instance of the fate client, and using it in our React app using the `FateClient` context provider:
 
 ```tsx
 import { httpBatchLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from './fate.ts';
+import { createFateClient } from '@nkzw/fate/client';
 
 export function App() {
   const fate = useMemo(

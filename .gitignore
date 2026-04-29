@@ -1,4 +1,6 @@
 .vite-hooks/_/
+.fate/
+**/.fate/
 .pnpm-debug.log
 .vitepress/cache
 **/node_modules/
