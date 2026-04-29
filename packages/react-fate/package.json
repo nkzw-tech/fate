@@ -27,10 +27,20 @@
       "types": "./lib/index.d.mts",
       "@nkzw/source": "./src/index.tsx",
       "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "types": "./lib/client.d.mts",
+      "@nkzw/source": "./src/client.ts",
+      "default": "./lib/client.mjs"
+    },
+    "./vite": {
+      "types": "./lib/vite.d.mts",
+      "@nkzw/source": "./src/vite.ts",
+      "default": "./lib/vite.mjs"
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.tsx src/cli.ts"
+    "build": "vp pack -d lib --target=node24 src/index.tsx src/client.ts src/cli.ts src/vite.ts"
   },
   "dependencies": {
     "@nkzw/fate": "workspace:^"

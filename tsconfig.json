@@ -21,7 +21,7 @@
     "types": ["vite/client", "vitepress/client"]
   },
   "exclude": ["node_modules"],
-  "include": ["**/.fate/*.d.ts", "**/*.d.ts", "**/*.ts", "**/*.tsx"],
+  "include": ["**/.fate/*.ts", "**/*.d.ts", "**/*.ts", "**/*.tsx"],
   "ts-node": {
     "transpileOnly": true,
     "transpiler": "ts-node/transpilers/swc",

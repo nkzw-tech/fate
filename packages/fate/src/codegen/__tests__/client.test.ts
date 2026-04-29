@@ -87,12 +87,50 @@ test('generates a native HTTP client source', () => {
   });
 
   expect(sourceText).toContain('createHTTPTransport<FateAPI>');
+  expect(sourceText).toContain("from 'react-fate'");
+  expect(sourceText).toContain("declare module 'react-fate/client'");
+  expect(sourceText).not.toContain("declare module '@nkzw/fate/client'");
   expect(sourceText).toContain('live: false');
   expect(sourceText).toContain('type FateAPI = InferFateAPI<typeof fateServer>;');
   expect(sourceText).toContain("'posts': clientRoot<FateAPI['lists']['posts']['output'], 'Post'>");
   expect(sourceText).toContain(
     "mutation<\n    Post,\n    FateAPI['mutations']['post.like']['input']",
   );
+});
+
+test('generates a native HTTP client source without react-fate for core clients', () => {
+  type Post = { id: string; title: string };
+  const postDataView = dataView<Post>('Post')({
+    id: true,
+    title: true,
+  });
+  const source: SourceDefinition<Post> = { id: 'id', view: postDataView };
+  const fate = createFateServer({
+    roots: {
+      posts: list(postDataView),
+    },
+    sources: {
+      getSource: <Item extends Record<string, unknown>>() =>
+        source as unknown as SourceDefinition<Item>,
+      registry: createSourceRegistry([[source, {}]]),
+    },
+  });
+
+  const sourceText = createClientSource({
+    clientModule: '@nkzw/fate',
+    moduleExports: {
+      fate,
+      postDataView,
+      Root: { posts: list(postDataView) },
+    },
+    moduleName: '@org/server/http.ts',
+    transport: 'native',
+  });
+
+  expect(sourceText).toContain("from '@nkzw/fate'");
+  expect(sourceText).toContain("declare module '@nkzw/fate/client'");
+  expect(sourceText).not.toContain("from 'react-fate'");
+  expect(sourceText).not.toContain("declare module 'react-fate/client'");
 });
 
 test('generates a native HTTP client source for fateServer exports', () => {

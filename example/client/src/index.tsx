@@ -1,11 +1,11 @@
 import './App.css';
-import { createFateClient } from '@nkzw/fate/client';
 import Stack from '@nkzw/stack';
 import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { StrictMode, Suspense, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from 'react-error-boundary';
 import { FateClient } from 'react-fate';
+import { createFateClient } from 'react-fate/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import env from './lib/env.tsx';
 import CategoryRoute from './routes/CategoryRoute.tsx';

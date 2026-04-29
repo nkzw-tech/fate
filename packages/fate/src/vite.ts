@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   runnerImport,
@@ -10,11 +10,12 @@ import {
 import { createClientSource } from './codegen/client.ts';
 
 type ClientTransport = 'native' | 'trpc';
+type ClientRuntime = '@nkzw/fate' | 'react-fate';
 
 type ModuleExports = Record<string, unknown>;
 
 export type FateVitePluginOptions = {
-  declarationFile?: false | string;
+  clientModule?: ClientRuntime;
   generatedFile?: false | string;
   module: string;
   transport?: ClientTransport;
@@ -23,13 +24,9 @@ export type FateVitePluginOptions = {
 
 const defaultClientModule = '@nkzw/fate/client';
 const defaultGeneratedFile = '.fate/client.generated.ts';
-const defaultDeclarationFile = '.fate/client.d.ts';
+const legacyDeclarationFile = '.fate/client.d.ts';
 const defaultTsconfigFile = '.fate/tsconfig.json';
-
-const toImportPath = (fromFile: string, toFile: string) => {
-  const relativePath = path.relative(path.dirname(fromFile), toFile).replaceAll(path.sep, '/');
-  return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
-};
+const resolvedClientModule = `\0${defaultClientModule}.ts`;
 
 const toTsconfigPath = (fromFile: string, toFile: string) => {
   const relativePath = path.relative(path.dirname(fromFile), toFile).replaceAll(path.sep, '/');
@@ -49,9 +46,17 @@ const writeIfChanged = async (file: string, contents: string) => {
   await writeFile(file, contents);
 };
 
-export const fate = (options: FateVitePluginOptions): Plugin => {
-  const resolvedClientModule = `\0${defaultClientModule}.ts`;
+const removeIfExists = async (file: string) => {
+  try {
+    await rm(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+};
 
+export const fate = (options: FateVitePluginOptions): Plugin => {
   let config: ResolvedConfig;
   let dependencies = new Set<string>();
   let generatedSource: string | null = null;
@@ -62,19 +67,6 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
     options.generatedFile === false
       ? null
       : path.resolve(config.root, options.generatedFile ?? defaultGeneratedFile);
-
-  const getDeclarationFile = () => {
-    if (options.declarationFile === false || options.generatedFile === false) {
-      return null;
-    }
-
-    const generatedFile = getGeneratedFile();
-    if (!generatedFile) {
-      return null;
-    }
-
-    return path.resolve(config.root, options.declarationFile ?? defaultDeclarationFile);
-  };
 
   const getTsconfigFile = () =>
     options.tsconfigFile === false
@@ -88,24 +80,7 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
     }
 
     await writeIfChanged(generatedFile, source);
-
-    const declarationFile = getDeclarationFile();
-    if (!declarationFile) {
-      return;
-    }
-
-    const generatedImportPath = JSON.stringify(toImportPath(declarationFile, generatedFile));
-
-    await writeIfChanged(
-      declarationFile,
-      `export {};
-declare module ${JSON.stringify(defaultClientModule)} {
-  export function createFateClient(
-    ...args: Parameters<typeof import(${generatedImportPath}).createFateClient>
-  ): ReturnType<typeof import(${generatedImportPath}).createFateClient>;
-}
-`,
-    );
+    await removeIfExists(path.resolve(config.root, legacyDeclarationFile));
 
     const tsconfigFile = getTsconfigFile();
     if (!tsconfigFile) {
@@ -116,7 +91,7 @@ declare module ${JSON.stringify(defaultClientModule)} {
       tsconfigFile,
       `${JSON.stringify(
         {
-          files: [toTsconfigPath(tsconfigFile, declarationFile)],
+          files: [toTsconfigPath(tsconfigFile, generatedFile)],
         },
         null,
         2,
@@ -143,6 +118,7 @@ declare module ${JSON.stringify(defaultClientModule)} {
   const generate = async () => {
     const moduleExports = await importServerModule();
     const source = createClientSource({
+      clientModule: options.clientModule ?? '@nkzw/fate',
       moduleExports,
       moduleName: options.module,
       transport: options.transport ?? 'trpc',

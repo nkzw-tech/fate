@@ -35,7 +35,7 @@ tRPC subscriptions need a subscription link. For HTTP/SSE, use `httpSubscription
 ```tsx
 import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from '@nkzw/fate/client';
+import { createFateClient } from 'react-fate/client';
 
 export function App() {
   const fate = useMemo(

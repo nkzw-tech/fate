@@ -25,8 +25,3 @@ export { useLiveView } from './useLiveView.tsx';
 export { useView } from './useView.tsx';
 export { useRequest } from './useRequest.tsx';
 export { useListView } from './useListView.tsx';
-
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ClientMutations {}
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ClientRoots {}

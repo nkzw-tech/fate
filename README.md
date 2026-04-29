@@ -84,25 +84,25 @@ yarn dlx giget@latest gh:nkzw-tech/fate-template
 
 ### Manual Installation
 
-**_fate_** requires React 19.2+. For your client you need to install `react-fate` and the core `@nkzw/fate` package:
+**_fate_** requires React 19.2+. For a React client, install `react-fate`:
 
 ::: code-group
 
 ```bash [npm]
-npm add react-fate @nkzw/fate
+npm add react-fate
 ```
 
 ```bash [pnpm]
-pnpm add react-fate @nkzw/fate
+pnpm add react-fate
 ```
 
 ```bash [yarn]
-yarn add react-fate @nkzw/fate
+yarn add react-fate
 ```
 
 :::
 
-If your server is a separate package, install `@nkzw/fate` there as a runtime dependency too:
+If your server is a separate package, install `@nkzw/fate` there as a runtime dependency too. Install `@nkzw/fate` on the client only for a barebones integration without React:
 
 ::: code-group
 
@@ -685,7 +685,7 @@ tRPC subscriptions need a subscription link. For HTTP/SSE, use `httpSubscription
 ```tsx
 import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from '@nkzw/fate/client';
+import { createFateClient } from 'react-fate/client';
 
 export function App() {
   const fate = useMemo(
@@ -1297,7 +1297,7 @@ app.post('/fate/live', handler);
 Configure the Vite plugin with the native transport:
 
 ```tsx
-import { fate } from '@nkzw/fate/vite';
+import { fate } from 'react-fate/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -1313,7 +1313,7 @@ export default defineConfig({
 The generated client uses `createHTTPTransport`:
 
 ```tsx
-import { createFateClient } from '@nkzw/fate/client';
+import { createFateClient } from 'react-fate/client';
 
 const client = createFateClient({
   url: '/fate',
@@ -1678,7 +1678,7 @@ export * from './views.ts';
 Configure the fate Vite plugin with your server module:
 
 ```tsx
-import { fate } from '@nkzw/fate/vite';
+import { fate } from 'react-fate/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -1693,6 +1693,8 @@ export default defineConfig({
 _Note: fate uses the specified server module name to extract the server types it needs and uses the same module name in the generated client. Make sure that the module is available to the client package's Vite config._
 
 During development, the plugin watches the server module and the files it imports. When one of those files changes, fate regenerates the project-local client and invalidates `@nkzw/fate/client` in Vite's module graph.
+
+For a barebones client without React, import the plugin from `@nkzw/fate/vite` and the generated client from `@nkzw/fate/client`. The plugin writes the project-local client for the selected client module path.
 
 The plugin writes project-local types under `.fate/`. If your TypeScript config does not already include dot-directories, extend the generated config:
 
@@ -1709,7 +1711,7 @@ Now that the Vite plugin provides the client types, all that remains is creating
 ```tsx
 import { httpBatchLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
-import { createFateClient } from '@nkzw/fate/client';
+import { createFateClient } from 'react-fate/client';
 
 export function App() {
   const fate = useMemo(

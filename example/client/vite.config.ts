@@ -1,9 +1,9 @@
 import { join } from 'node:path';
-import { fate } from '@nkzw/fate/vite';
 import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import dotenv from 'dotenv';
+import { fate } from 'react-fate/vite';
 import { defineConfig } from 'vite-plus';
 
 const root = import.meta.dirname;

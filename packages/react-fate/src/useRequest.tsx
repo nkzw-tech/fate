@@ -1,10 +1,19 @@
-import { RequestResult, type Request, type RequestOptions } from '@nkzw/fate';
-import { FateRoots } from '@nkzw/fate';
+import {
+  type FateClient as FateClientT,
+  FateRoots,
+  RequestResult,
+  type Request,
+  type RequestOptions,
+} from '@nkzw/fate';
 import { use, useDeferredValue, useEffect } from 'react';
 import { useFateClient } from './context.tsx';
-import { ClientRoots } from './index.tsx';
 
-export type Roots = keyof ClientRoots extends never ? FateRoots : ClientRoots;
+type GeneratedFateClient = ReturnType<typeof import('react-fate/client').createFateClient>;
+export type Roots = [GeneratedFateClient] extends [never]
+  ? FateRoots
+  : GeneratedFateClient extends FateClientT<infer R, any>
+    ? R
+    : FateRoots;
 
 /**
  * Declares the data a screen needs and kicks off fetching, suspending while the
