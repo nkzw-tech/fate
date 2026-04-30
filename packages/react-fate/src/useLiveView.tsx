@@ -1,5 +1,5 @@
 import { View, ViewData, ViewEntity, ViewEntityName, ViewRef, ViewSelection } from '@nkzw/fate';
-import { useEffect } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 import { useFateClient } from './context.tsx';
 import { useView } from './useView.tsx';
 
@@ -23,15 +23,19 @@ export function useLiveView<V extends View<any, any>>(
   ref: ViewRef<ViewEntityName<V>> | null,
 ): ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null {
   const client = useFateClient();
+  const liveId = ref?.id;
+  const liveType = ref?.__typename;
 
-  useEffect(() => {
+  const subscribeLiveView = useEffectEvent(() => {
     if (ref === null) {
       return;
     }
 
     client.assertLiveViewSupport();
     return client.subscribeLiveView(view, ref);
-  }, [client, view, ref]);
+  });
+
+  useEffect(() => subscribeLiveView(), [client, view, liveId, liveType]);
 
   return useView(view, ref);
 }

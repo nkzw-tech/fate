@@ -1,6 +1,8 @@
 import type {
+  FateLiveControlRequest,
   FateLiveEvent,
-  FateLiveRequest,
+  FateLiveMessage,
+  FateLiveSubscribeOperation,
   FateOperation,
   FateOperationResult,
   FateProtocolRequest,
@@ -90,6 +92,18 @@ type LiveConfig =
 type ContextOptions<AdapterContext> = {
   adapterContext?: AdapterContext;
   request: Request;
+};
+
+type LiveServerSubscription = {
+  abort: () => void;
+};
+
+type LiveConnection<Context> = {
+  abort: () => void;
+  closed: boolean;
+  controller?: ReadableStreamDefaultController<Uint8Array>;
+  ctx: Context;
+  subscriptions: Map<string, LiveServerSubscription>;
 };
 
 type FateServerOptions<
@@ -315,31 +329,55 @@ const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
   return value as FateProtocolRequest;
 };
 
-const assertLiveRequest = (value: unknown): FateLiveRequest => {
+const assertLiveControlRequest = (value: unknown): FateLiveControlRequest => {
   if (
     !isRecord(value) ||
     value.version !== 1 ||
-    typeof value.type !== 'string' ||
-    !isProtocolId(value.id) ||
-    ('args' in value && value.args !== undefined && !isRecord(value.args)) ||
-    ('lastEventId' in value &&
-      value.lastEventId !== undefined &&
-      typeof value.lastEventId !== 'string') ||
-    !isStringArray(value.select)
+    typeof value.connectionId !== 'string' ||
+    !Array.isArray(value.operations)
   ) {
     throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live request.');
   }
 
-  return value as FateLiveRequest;
+  for (const operation of value.operations) {
+    if (
+      !isRecord(operation) ||
+      typeof operation.id !== 'string' ||
+      typeof operation.kind !== 'string'
+    ) {
+      throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live operation.');
+    }
+
+    if (operation.kind === 'subscribe') {
+      if (
+        typeof operation.type !== 'string' ||
+        !isProtocolId(operation.entityId) ||
+        ('args' in operation && operation.args !== undefined && !isRecord(operation.args)) ||
+        ('lastEventId' in operation &&
+          operation.lastEventId !== undefined &&
+          typeof operation.lastEventId !== 'string') ||
+        !isStringArray(operation.select)
+      ) {
+        throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live subscribe operation.');
+      }
+      continue;
+    }
+
+    if (operation.kind !== 'unsubscribe') {
+      throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live operation.');
+    }
+  }
+
+  return value as FateLiveControlRequest;
 };
 
-const sse = (event: FateLiveEvent, eventId?: string): string => {
+const sse = (message: FateLiveMessage, eventId?: string): string => {
   const lines = [];
   if (eventId) {
     lines.push(`id: ${eventId}`);
   }
-  lines.push(`event: ${event.delete === true ? 'delete' : 'update'}`);
-  lines.push(`data: ${JSON.stringify(event)}`);
+  lines.push(`event: ${message.kind}`);
+  lines.push(`data: ${JSON.stringify(message)}`);
   return `${lines.join('\n')}\n\n`;
 };
 
@@ -567,6 +605,134 @@ export function createFateServer<
     ),
   };
 
+  const liveConnections = new Map<string, LiveConnection<Context>>();
+  const encoder = new TextEncoder();
+
+  const cleanupLiveConnection = (connectionId: string) => {
+    const connection = liveConnections.get(connectionId);
+    if (!connection) {
+      return;
+    }
+
+    connection.closed = true;
+    liveConnections.delete(connectionId);
+    for (const subscription of connection.subscriptions.values()) {
+      subscription.abort();
+    }
+    connection.subscriptions.clear();
+    try {
+      connection.controller?.close();
+    } catch {
+      // The stream may already be closed by the runtime.
+    }
+    connection.abort();
+  };
+
+  const sendLiveMessage = (
+    connection: LiveConnection<Context>,
+    message: FateLiveMessage,
+    eventId?: string,
+  ) => {
+    if (connection.closed || !connection.controller) {
+      return;
+    }
+
+    try {
+      connection.controller.enqueue(encoder.encode(sse(message, eventId)));
+    } catch {
+      connection.closed = true;
+    }
+  };
+
+  const subscribeLiveOperation = (
+    connection: LiveConnection<Context>,
+    operation: FateLiveSubscribeOperation,
+  ) => {
+    const source = sourcesByType.get(operation.type);
+    if (!source) {
+      throw new FateRequestError('NOT_FOUND', `No source registered for '${operation.type}'.`);
+    }
+
+    connection.subscriptions.get(operation.id)?.abort();
+
+    const subscriptionController = new AbortController();
+    const abort = () => subscriptionController.abort();
+    connection.subscriptions.set(operation.id, { abort });
+
+    void (async () => {
+      try {
+        const iterable = liveBus!.subscribe(operation.type, operation.entityId, {
+          lastEventId: operation.lastEventId,
+          signal: subscriptionController.signal,
+        });
+
+        for await (const [event] of iterable) {
+          const data =
+            event.type === 'delete'
+              ? null
+              : await resolveSourceById({
+                  ctx: connection.ctx,
+                  id: String(event.id),
+                  input: {
+                    args: operation.args,
+                    select: operation.select,
+                  },
+                  registry: sources.registry,
+                  source,
+                });
+
+          sendLiveMessage(
+            connection,
+            {
+              event: livePayload(event, data),
+              id: operation.id,
+              kind: 'next',
+            },
+            event.eventId,
+          );
+        }
+      } catch (error) {
+        if (!subscriptionController.signal.aborted) {
+          sendLiveMessage(connection, {
+            error: toProtocolError(error),
+            id: operation.id,
+            kind: 'error',
+          });
+        }
+      } finally {
+        if (connection.subscriptions.get(operation.id)?.abort === abort) {
+          connection.subscriptions.delete(operation.id);
+        }
+      }
+    })();
+  };
+
+  const controlLiveConnection = async (request: Request): Promise<FateProtocolResponse> => {
+    const body = assertLiveControlRequest(await parseJSON(request));
+    const connection = liveConnections.get(body.connectionId);
+    if (!connection || connection.closed) {
+      throw new FateRequestError('NOT_FOUND', 'Live connection not found.');
+    }
+
+    const results: Array<FateOperationResult> = [];
+    for (const operation of body.operations) {
+      try {
+        if (operation.kind === 'subscribe') {
+          subscribeLiveOperation(connection, operation);
+        } else {
+          connection.subscriptions.get(operation.id)?.abort();
+          connection.subscriptions.delete(operation.id);
+        }
+
+        results.push({ data: null, id: operation.id, ok: true });
+      } catch (error) {
+        results.push({ error: toProtocolError(error), id: operation.id, ok: false });
+      }
+    }
+
+    return { results, version: 1 };
+  };
+
   const server: FateServer<NativeFateAPI<Roots, Queries, Lists, Mutations>, AdapterContext> = {
     async handleLiveRequest(request, adapterContext) {
       try {
@@ -574,10 +740,18 @@ export function createFateServer<
           throw new FateRequestError('NOT_FOUND', 'Live views are not enabled.');
         }
 
-        const body = assertLiveRequest(await parseJSON(request));
-        const source = sourcesByType.get(body.type);
-        if (!source) {
-          throw new FateRequestError('NOT_FOUND', `No source registered for '${body.type}'.`);
+        if (request.method === 'POST') {
+          return Response.json(await controlLiveConnection(request), { headers: jsonHeaders });
+        }
+
+        if (request.method !== 'GET') {
+          throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live request.');
+        }
+
+        const url = new URL(request.url);
+        const connectionId = url.searchParams.get('connectionId');
+        if (!connectionId) {
+          throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live request.');
         }
 
         const ctx = await getContext(request, adapterContext);
@@ -588,48 +762,33 @@ export function createFateServer<
         } else {
           request.signal.addEventListener('abort', abortLive, { once: true });
         }
-        const signal = liveController.signal;
-        const encoder = new TextEncoder();
-        const lastEventId = body.lastEventId ?? request.headers.get('last-event-id') ?? undefined;
+        cleanupLiveConnection(connectionId);
 
         const stream = new ReadableStream<Uint8Array>({
           cancel() {
-            request.signal.removeEventListener('abort', abortLive);
-            abortLive();
+            cleanupLiveConnection(connectionId);
           },
-          async start(controller) {
-            let closed = false;
-            try {
-              const iterable = liveBus.subscribe(body.type, body.id, { lastEventId, signal });
-              for await (const [event] of iterable) {
-                const data =
-                  event.type === 'delete'
-                    ? null
-                    : await resolveSourceById({
-                        ctx,
-                        id: String(event.id),
-                        input: {
-                          args: body.args,
-                          select: body.select,
-                        },
-                        registry: sources.registry,
-                        source,
-                      });
-                controller.enqueue(encoder.encode(sse(livePayload(event, data), event.eventId)));
-              }
-            } catch (error) {
-              if (!signal.aborted) {
-                closed = true;
-                controller.error(error);
-              }
-            } finally {
-              request.signal.removeEventListener('abort', abortLive);
-              if (!closed && !signal.aborted) {
-                controller.close();
-              }
-            }
+          start(controller) {
+            const connection: LiveConnection<Context> = {
+              abort: abortLive,
+              closed: false,
+              controller,
+              ctx,
+              subscriptions: new Map(),
+            };
+            liveConnections.set(connectionId, connection);
+            controller.enqueue(encoder.encode(': connected\n\n'));
           },
         });
+
+        liveController.signal.addEventListener(
+          'abort',
+          () => {
+            request.signal.removeEventListener('abort', abortLive);
+            cleanupLiveConnection(connectionId);
+          },
+          { once: true },
+        );
 
         return new Response(stream, { headers: sseHeaders });
       } catch (error) {

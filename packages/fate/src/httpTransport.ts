@@ -1,5 +1,8 @@
 import type {
+  FateLiveControlOperation,
+  FateLiveControlRequest,
   FateLiveEvent,
+  FateLiveMessage,
   FateOperation,
   FateOperationResult,
   FateProtocolRequest,
@@ -33,6 +36,16 @@ type PendingOperation = {
   resolve: (value: unknown) => void;
 };
 
+type LiveSubscription = {
+  args: Record<string, unknown> | undefined;
+  handlers: Parameters<NonNullable<Transport['subscribeById']>>[4];
+  id: string;
+  lastEventId?: string;
+  select: Array<string>;
+  targetId: string | number;
+  type: string;
+};
+
 type SSEMessage = {
   data: string;
   event?: string;
@@ -61,6 +74,23 @@ const requestHeaders = async (
 const normalizeEndpoint = (url: string | URL): string => String(url).replace(/\/$/, '');
 
 const liveEndpoint = (url: string): string => `${normalizeEndpoint(url)}/live`;
+
+const createConnectionId = (): string =>
+  typeof crypto === 'object' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const appendSearchParam = (url: string, key: string, value: string): string => {
+  const hashIndex = url.indexOf('#');
+  const base = hashIndex === -1 ? url : url.slice(0, hashIndex);
+  const hash = hashIndex === -1 ? '' : url.slice(hashIndex);
+  const separator = base.includes('?')
+    ? base.endsWith('?') || base.endsWith('&')
+      ? ''
+      : '&'
+    : '?';
+  return `${base}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}${hash}`;
+};
 
 const responseError = async (response: Response): Promise<Error> => {
   let message = response.statusText || `HTTP ${response.status}`;
@@ -276,33 +306,231 @@ export function createHTTPTransport<
   };
 
   if (live) {
-    transport.subscribeById = (type, id, select, args, handlers) => {
+    const connectionId = createConnectionId();
+    const liveSubscriptions = new Map<string, LiveSubscription>();
+    let liveController: AbortController | undefined;
+    let liveEverConnected = false;
+    let liveNextId = 0;
+    let liveNeedsResubscribe = false;
+    let liveReadyPromise: Promise<void> | undefined;
+    let liveRetry: ReturnType<typeof setTimeout> | undefined;
+    let liveResubscribeRetry: ReturnType<typeof setTimeout> | undefined;
+    let liveControlRetry: ReturnType<typeof setTimeout> | undefined;
+    let failedLiveOperations: Array<FateLiveControlOperation> = [];
+    let pendingLiveOperations: Array<FateLiveControlOperation> = [];
+    let liveOperationScheduled = false;
+
+    const liveError = (error: unknown) => {
+      for (const subscription of liveSubscriptions.values()) {
+        subscription.handlers.onError?.(error);
+      }
+    };
+
+    const stopLiveStream = () => {
+      if (liveRetry) {
+        clearTimeout(liveRetry);
+        liveRetry = undefined;
+      }
+      if (liveResubscribeRetry) {
+        clearTimeout(liveResubscribeRetry);
+        liveResubscribeRetry = undefined;
+      }
+      if (liveControlRetry) {
+        clearTimeout(liveControlRetry);
+        liveControlRetry = undefined;
+      }
+      liveController?.abort();
+      liveController = undefined;
+      liveReadyPromise = undefined;
+    };
+
+    const sendLiveControl = async (
+      operations: Array<FateLiveControlOperation>,
+      options: { ensureStream: boolean },
+    ) => {
+      if (!operations.length) {
+        return;
+      }
+
+      if (options.ensureStream) {
+        await startLiveStream();
+      }
+
+      const response = await fetchImpl(liveEndpointUrl, {
+        body: JSON.stringify({
+          connectionId,
+          operations,
+          version: 1,
+        } satisfies FateLiveControlRequest),
+        headers: await requestHeaders(
+          {
+            'content-type': 'application/json',
+          },
+          headers,
+        ),
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw await responseError(response);
+      }
+
+      const payload = assertProtocolResponse(await response.json());
+      const results = new Map(payload.results.map((result) => [result.id, result]));
+
+      for (const operation of operations) {
+        const result = results.get(operation.id);
+        if (!result) {
+          liveSubscriptions
+            .get(operation.id)
+            ?.handlers.onError?.(
+              new Error(`fate(http): Missing live result for operation '${operation.id}'.`),
+            );
+          continue;
+        }
+
+        try {
+          resultValue(result);
+        } catch (error) {
+          liveSubscriptions.get(operation.id)?.handlers.onError?.(error);
+        }
+      }
+    };
+
+    const flushLiveOperations = async () => {
+      liveOperationScheduled = false;
+      const operations = pendingLiveOperations;
+      pendingLiveOperations = [];
+
+      try {
+        await sendLiveControl(operations, { ensureStream: true });
+      } catch (error) {
+        if (operations.length) {
+          liveNeedsResubscribe = true;
+          failedLiveOperations.push(...operations);
+          scheduleLiveControlRetry();
+        }
+        liveError(error);
+      }
+    };
+
+    const enqueueLiveOperation = (operation: FateLiveControlOperation) => {
+      pendingLiveOperations.push(operation);
+
+      if (!liveOperationScheduled) {
+        liveOperationScheduled = true;
+        queueMicrotask(() => void flushLiveOperations());
+      }
+    };
+
+    const resubscribeLive = async () => {
+      if (liveResubscribeRetry) {
+        clearTimeout(liveResubscribeRetry);
+        liveResubscribeRetry = undefined;
+      }
+
+      const operations = [...liveSubscriptions.values()].map(
+        (subscription): FateLiveControlOperation => ({
+          args: subscription.args,
+          entityId: subscription.targetId,
+          id: subscription.id,
+          kind: 'subscribe',
+          lastEventId: subscription.lastEventId,
+          select: subscription.select,
+          type: subscription.type,
+        }),
+      );
+
+      try {
+        await sendLiveControl(operations, { ensureStream: false });
+        liveNeedsResubscribe = false;
+        failedLiveOperations = [];
+      } catch (error) {
+        liveNeedsResubscribe = true;
+        scheduleLiveResubscribe();
+        liveError(error);
+      }
+    };
+
+    const scheduleLiveResubscribe = () => {
+      if (!liveController || liveController.signal.aborted || liveResubscribeRetry) {
+        return;
+      }
+
+      liveResubscribeRetry = setTimeout(() => void resubscribeLive(), liveRetryMs);
+    };
+
+    const retryFailedLiveOperations = async () => {
+      liveControlRetry = undefined;
+      const operations = failedLiveOperations.filter(
+        (operation) => operation.kind === 'unsubscribe' || liveSubscriptions.has(operation.id),
+      );
+      failedLiveOperations = [];
+
+      if (!operations.length) {
+        return;
+      }
+
+      try {
+        await sendLiveControl(operations, { ensureStream: true });
+      } catch (error) {
+        failedLiveOperations.push(...operations);
+        liveNeedsResubscribe = true;
+        scheduleLiveControlRetry();
+        liveError(error);
+      }
+    };
+
+    const scheduleLiveControlRetry = () => {
+      if (!liveController || liveController.signal.aborted || liveControlRetry) {
+        return;
+      }
+
+      liveControlRetry = setTimeout(() => void retryFailedLiveOperations(), liveRetryMs);
+    };
+
+    function startLiveStream(): Promise<void> {
+      if (liveReadyPromise) {
+        return liveReadyPromise;
+      }
+
+      if (liveRetry) {
+        clearTimeout(liveRetry);
+        liveRetry = undefined;
+      }
+
       const controller = new AbortController();
-      let lastEventId: string | undefined;
-      let retry: ReturnType<typeof setTimeout> | undefined;
+      liveController = controller;
+      let readySettled = false;
+      let resolveReady!: () => void;
+      let rejectReady!: (error: unknown) => void;
+      liveReadyPromise = new Promise<void>((resolve, reject) => {
+        resolveReady = () => {
+          readySettled = true;
+          resolve();
+        };
+        rejectReady = (error) => {
+          readySettled = true;
+          reject(error);
+        };
+      });
 
       const connect = async () => {
         let shouldReconnect = true;
         try {
-          const response = await fetchImpl(liveEndpointUrl, {
-            body: JSON.stringify({
-              args,
-              id,
-              lastEventId,
-              select: [...select],
-              type,
-              version: 1,
-            }),
-            headers: await requestHeaders(
-              {
-                accept: 'text/event-stream',
-                'content-type': 'application/json',
-              },
-              headers,
-            ),
-            method: 'POST',
-            signal: controller.signal,
-          });
+          const response = await fetchImpl(
+            appendSearchParam(liveEndpointUrl, 'connectionId', connectionId),
+            {
+              headers: await requestHeaders(
+                {
+                  accept: 'text/event-stream',
+                },
+                headers,
+              ),
+              method: 'GET',
+              signal: controller.signal,
+            },
+          );
 
           if (!response.ok) {
             throw await responseError(response);
@@ -320,6 +548,12 @@ export function createHTTPTransport<
           let buffer = '';
 
           controller.signal.addEventListener('abort', cancelReader, { once: true });
+          resolveReady();
+          if (liveEverConnected || liveNeedsResubscribe) {
+            void resubscribeLive();
+          }
+          liveEverConnected = true;
+
           try {
             while (true) {
               const { done, value } = await reader.read();
@@ -336,15 +570,30 @@ export function createHTTPTransport<
                   continue;
                 }
 
-                if (message.id) {
-                  lastEventId = message.id;
+                const event = JSON.parse(message.data) as FateLiveMessage;
+                const subscription = liveSubscriptions.get(event.id);
+                if (!subscription) {
+                  continue;
                 }
 
-                const event = JSON.parse(message.data) as FateLiveEvent;
-                if (event.delete === true) {
-                  handlers.onDelete?.(event.id ?? id);
-                } else if ('data' in event) {
-                  handlers.onData(event.data);
+                if (message.id) {
+                  subscription.lastEventId = message.id;
+                }
+
+                if (event.kind === 'error') {
+                  subscription.handlers.onError?.(
+                    new FateRequestError(event.error.code, event.error.message, {
+                      issues: event.error.issues,
+                    }),
+                  );
+                  continue;
+                }
+
+                const liveEvent = event.event as FateLiveEvent;
+                if (liveEvent.delete === true) {
+                  subscription.handlers.onDelete?.(liveEvent.id ?? subscription.targetId);
+                } else if ('data' in liveEvent) {
+                  subscription.handlers.onData(liveEvent.data);
                 }
               }
             }
@@ -352,26 +601,74 @@ export function createHTTPTransport<
             controller.signal.removeEventListener('abort', cancelReader);
           }
         } catch (error) {
+          const wasReady = readySettled;
+          if (!readySettled) {
+            rejectReady(error);
+          }
+
           if (!controller.signal.aborted) {
             if (error instanceof FateRequestError && error.status >= 400 && error.status < 500) {
               shouldReconnect = false;
             }
-            handlers.onError?.(error);
+            if (wasReady) {
+              liveError(error);
+            }
           }
         } finally {
-          if (!controller.signal.aborted && shouldReconnect) {
-            retry = setTimeout(() => void connect(), liveRetryMs);
+          if (liveController === controller) {
+            liveController = undefined;
+            liveReadyPromise = undefined;
+          }
+
+          if (!controller.signal.aborted && shouldReconnect && liveSubscriptions.size > 0) {
+            liveRetry = setTimeout(
+              () => void startLiveStream().catch(() => undefined),
+              liveRetryMs,
+            );
           }
         }
       };
 
       void connect();
+      return liveReadyPromise;
+    }
+
+    transport.subscribeById = (type, id, select, args, handlers) => {
+      const liveId = String(++liveNextId);
+      liveSubscriptions.set(liveId, {
+        args,
+        handlers,
+        id: liveId,
+        select: [...select],
+        targetId: id,
+        type,
+      });
+
+      enqueueLiveOperation({
+        args,
+        entityId: id,
+        id: liveId,
+        kind: 'subscribe',
+        select: [...select],
+        type,
+      });
 
       return () => {
-        if (retry) {
-          clearTimeout(retry);
+        if (!liveSubscriptions.delete(liveId)) {
+          return;
         }
-        controller.abort();
+
+        if (liveSubscriptions.size === 0) {
+          pendingLiveOperations = [];
+          liveOperationScheduled = false;
+          stopLiveStream();
+          return;
+        }
+
+        enqueueLiveOperation({
+          id: liveId,
+          kind: 'unsubscribe',
+        });
       };
     };
   }

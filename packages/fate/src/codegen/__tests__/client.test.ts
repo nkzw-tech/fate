@@ -38,6 +38,12 @@ test('generates the same client source for the Prisma and Drizzle examples', asy
     expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
       "comments: { listOf: 'Comment' }",
     );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
+      'createHTTPTransport',
+    );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).not.toContain(
+      'live.subscribe',
+    );
   } finally {
     const [{ default: prisma }, { closeDatabase }] = await Promise.all([
       importExampleModule<{

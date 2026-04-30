@@ -1,6 +1,6 @@
 import './App.css';
 import Stack from '@nkzw/stack';
-import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
+import { httpBatchLink } from '@trpc/client';
 import { StrictMode, Suspense, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from 'react-error-boundary';
@@ -35,24 +35,25 @@ const App = () => {
     () =>
       createFateClient({
         links: [
-          splitLink({
-            condition: (operation) => operation.type === 'subscription',
-            false: httpBatchLink({
+          httpBatchLink({
+            fetch: (input, init) =>
+              fetch(input, {
+                ...init,
+                credentials: userId ? 'include' : undefined,
+              }),
+            url: `${env('SERVER_URL')}/trpc`,
+          }),
+        ],
+        liveUrl: `${env('SERVER_URL')}/fate`,
+        ...(userId
+          ? {
               fetch: (input, init) =>
                 fetch(input, {
                   ...init,
-                  credentials: userId ? 'include' : undefined,
+                  credentials: 'include',
                 }),
-              url: `${env('SERVER_URL')}/trpc`,
-            }),
-            true: httpSubscriptionLink({
-              eventSourceOptions: {
-                withCredentials: Boolean(userId),
-              },
-              url: `${env('SERVER_URL')}/trpc`,
-            }),
-          }),
-        ],
+            }
+          : null),
       }),
     [userId],
   );

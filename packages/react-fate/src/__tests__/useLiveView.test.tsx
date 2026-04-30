@@ -18,7 +18,7 @@ type Post = {
   id: string;
 };
 
-test('renders like useView and updates from live subscription data', () => {
+test('renders like useView and updates from live subscription data', async () => {
   let handlers: any;
   const unsubscribe = vi.fn();
   const subscribeById = vi.fn((_type, _id, _select, _args, nextHandlers) => {
@@ -60,7 +60,7 @@ test('renders like useView and updates from live subscription data', () => {
   const container = document.createElement('div');
   const root = createRoot(container);
 
-  act(() => {
+  await act(async () => {
     root.render(
       <FateClient client={client}>
         <Suspense fallback={null}>
@@ -83,14 +83,16 @@ test('renders like useView and updates from live subscription data', () => {
 
   expect(container.textContent).toBe('Banana');
 
-  act(() => {
+  await act(async () => {
     root.unmount();
   });
+
+  await Promise.resolve();
 
   expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
 
-test('does not subscribe for null refs', () => {
+test('does not subscribe for null refs', async () => {
   const subscribeById = vi.fn(() => vi.fn());
   const client = createClient({
     roots: {},
@@ -116,7 +118,7 @@ test('does not subscribe for null refs', () => {
   const container = document.createElement('div');
   const root = createRoot(container);
 
-  act(() => {
+  await act(async () => {
     root.render(
       <FateClient client={client}>
         <Suspense fallback={null}>
@@ -129,7 +131,80 @@ test('does not subscribe for null refs', () => {
   expect(container.textContent).toBe('empty');
   expect(subscribeById).not.toHaveBeenCalled();
 
-  act(() => {
+  await act(async () => {
     root.unmount();
   });
+});
+
+test('keeps the same live subscription when ref identity changes for the same entity', async () => {
+  const unsubscribe = vi.fn();
+  const subscribeById = vi.fn(() => unsubscribe);
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById,
+    } as any,
+    types: [{ type: 'Post' }],
+  });
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      content: 'Apple',
+      id: 'post-1',
+    },
+    new Set(['__typename', 'content', 'id']),
+  );
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  const Component = ({ postRef }: { postRef: ViewRef<'Post'> }) => {
+    const post = useLiveView(PostView, postRef);
+    return <span>{post.content}</span>;
+  };
+
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component postRef={client.ref<Post>('Post', 'post-1', PostView)} />
+        </Suspense>
+      </FateClient>,
+    );
+  });
+
+  expect(container.textContent).toBe('Apple');
+  expect(subscribeById).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component postRef={client.ref<Post>('Post', 'post-1', PostView)} />
+        </Suspense>
+      </FateClient>,
+    );
+  });
+
+  expect(container.textContent).toBe('Apple');
+  expect(subscribeById).toHaveBeenCalledTimes(1);
+  expect(unsubscribe).not.toHaveBeenCalled();
+
+  await act(async () => {
+    root.unmount();
+  });
+
+  await Promise.resolve();
+
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
 });

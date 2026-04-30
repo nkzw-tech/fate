@@ -1,6 +1,5 @@
 import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
-import { isRecord } from './record.ts';
 import { AnyRecord, Pagination, type MutationShape } from './types.ts';
 
 /**
@@ -18,25 +17,11 @@ type TRPCListResult = {
   pagination: Pagination;
 };
 
-export type LiveEvent =
-  | Readonly<{ data: unknown; delete?: false; type?: 'data' | 'update' }>
-  | Readonly<{ delete: true; id?: string | number; type?: 'delete' }>;
-
 type LiveEventHandlers = Readonly<{
   onData: (record: unknown) => void;
   onDelete?: (id?: string | number) => void;
   onError?: (error: unknown) => void;
 }>;
-
-type Unsubscribable = { unsubscribe: () => void };
-
-const isTrackedLiveEnvelope = (
-  value: Record<string, unknown>,
-): value is { data: LiveEvent; id: string } =>
-  'id' in value &&
-  'data' in value &&
-  isRecord(value.data) &&
-  ('data' in value.data || value.data.delete === true);
 
 /**
  * Contract the fate client expects from a network transport. The transport is
@@ -105,23 +90,6 @@ export type TRPCQueryResolvers<AppRouter extends AnyRouter> = Record<
   ) => (input: { args?: ResolvedArgsPayload; select: Array<string> }) => Promise<unknown>
 >;
 
-export type TRPCLiveByIdResolvers<AppRouter extends AnyRouter> = Record<
-  string,
-  (client: TRPCClient<AppRouter>) => Bivariant<
-    (
-      input: {
-        args?: ResolvedArgsPayload;
-        id: string;
-        select: Array<string>;
-      },
-      handlers: {
-        onData?: (value: unknown) => void;
-        onError?: (error: unknown) => void;
-      },
-    ) => Unsubscribable
-  >
->;
-
 /**
  * Mapping of a mutation procedure name to a tRPC resolver factory.
  */
@@ -156,14 +124,12 @@ export function createTRPCTransport<
   byId,
   client,
   lists,
-  live,
   mutations,
   queries,
 }: {
   byId: TRPCByIdResolvers<AppRouter>;
   client: TRPCClient<AppRouter>;
   lists?: TRPCListResolvers<AppRouter>;
-  live?: { byId?: TRPCLiveByIdResolvers<AppRouter> };
   mutations?: Mutations;
   queries?: TRPCQueryResolvers<AppRouter>;
 }): Transport<MutationMapFromResolvers<Mutations>> {
@@ -211,55 +177,6 @@ export function createTRPCTransport<
       });
     },
   };
-
-  if (live?.byId) {
-    transport.subscribeById = (type, id, select, args, handlers) => {
-      const resolver = live.byId?.[type];
-      if (!resolver) {
-        throw new Error(`fate(trpc): Missing live resolver for entity type '${type}'.`);
-      }
-
-      const subscription = resolver(client)(
-        {
-          args,
-          id: String(id),
-          select: [...select],
-        },
-        {
-          onData(value) {
-            const dispatch = (payload: unknown) => {
-              if (isRecord(payload)) {
-                if (isTrackedLiveEnvelope(payload)) {
-                  dispatch(payload.data);
-                  return;
-                }
-
-                const event = payload as LiveEvent;
-                if (event.delete === true) {
-                  handlers.onDelete?.(event.id ?? id);
-                  return;
-                }
-
-                if ('data' in event) {
-                  handlers.onData(event.data);
-                  return;
-                }
-              }
-
-              handlers.onData(payload);
-            };
-
-            dispatch(value);
-          },
-          onError: handlers.onError,
-        },
-      );
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    };
-  }
 
   transport.mutate = async <K extends Extract<keyof Mutations, string>>(
     procedure: K,

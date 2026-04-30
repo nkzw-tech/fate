@@ -180,7 +180,7 @@ test('live view subscription setup errors are reported through the client out of
   dispose();
 });
 
-test('live view subscriptions are ref-counted by entity and selection', () => {
+test('live view subscriptions are ref-counted by entity and selection', async () => {
   const unsubscribe = vi.fn();
   const subscribeById = vi.fn(() => unsubscribe);
   const client = createClient({
@@ -208,6 +208,47 @@ test('live view subscriptions are ref-counted by entity and selection', () => {
   expect(unsubscribe).not.toHaveBeenCalled();
 
   disposeB();
+  expect(unsubscribe).not.toHaveBeenCalled();
+
+  await Promise.resolve();
+
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+test('live view subscriptions cancel same-tick release when remounted', async () => {
+  const unsubscribe = vi.fn();
+  const subscribeById = vi.fn(() => unsubscribe);
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeById,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+
+  const disposeA = client.subscribeLiveView(PostView, postRef);
+  disposeA();
+  const disposeB = client.subscribeLiveView(PostView, postRef);
+
+  await Promise.resolve();
+
+  expect(subscribeById).toHaveBeenCalledTimes(1);
+  expect(unsubscribe).not.toHaveBeenCalled();
+
+  disposeB();
+  expect(unsubscribe).not.toHaveBeenCalled();
+
+  await Promise.resolve();
+
   expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
 

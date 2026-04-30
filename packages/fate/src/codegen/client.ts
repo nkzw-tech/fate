@@ -68,7 +68,6 @@ export const createClientSource = ({
     router: string;
     type: string;
   }> = [];
-  const liveEntries: Array<{ entityType: string; router: string }> = [];
   const queryEntries: Array<{ name: string; procedure: string; router: string; type: string }> = [];
 
   const rootsByRouter = new Map<string, Array<[string, (typeof roots)[string]]>>();
@@ -107,11 +106,6 @@ export const createClientSource = ({
         continue;
       }
 
-      if (procedureName === 'live' && type === 'subscription') {
-        liveEntries.push({ entityType, router });
-        continue;
-      }
-
       for (const [queryName, root] of routerRoots) {
         if (root.kind !== 'query') {
           continue;
@@ -146,7 +140,6 @@ export const createClientSource = ({
 
   mutationEntries.sort((a, b) => a.name.localeCompare(b.name));
   byIdEntries.sort((a, b) => a.entityType.localeCompare(b.entityType));
-  liveEntries.sort((a, b) => a.entityType.localeCompare(b.entityType));
   queryEntries.sort((a, b) => a.name.localeCompare(b.name));
   listEntries.sort((a, b) => a.list.localeCompare(b.list));
 
@@ -202,11 +195,6 @@ export const createClientSource = ({
     select,
   }),`,
   );
-  const liveLines = liveEntries.map(
-    ({ entityType, router }) =>
-      `${entityType}: (client: TRPCClientType) => client.${router}.live.subscribe,`,
-  );
-
   const listLines = listEntries.map(
     ({ list, procedure, router }) =>
       `${list}: (client: TRPCClientType) => client.${router}.${procedure}.query,`,
@@ -241,9 +229,29 @@ export const createClientSource = ({
   const queriesBlock = queryLines.length
     ? `      queries: {\n${indentBlock(queriesBlockContent, 8)}\n      },\n`
     : '';
-  const liveBlockContent = liveLines.join('\n');
-  const liveBlock = liveLines.length
-    ? `      live: {\n        byId: {\n${indentBlock(liveBlockContent, 10)}\n        },\n      },\n`
+  const trpcFateServer = moduleExports.fateServer?.manifest ? moduleExports.fateServer : null;
+  const hasLive = Object.keys(trpcFateServer?.manifest.live ?? {}).length > 0;
+  const liveOptions = hasLive
+    ? `fetch?: typeof fetch;
+headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
+liveRetryMs?: number;
+liveUrl: string | URL;`
+    : '';
+  const liveImport = hasLive ? ', createHTTPTransport' : '';
+  const liveTransportSetup = hasLive
+    ? `
+  const liveTransport = createHTTPTransport({
+    fetch: options.fetch,
+    headers: options.headers,
+    liveRetryMs: options.liveRetryMs,
+    url: options.liveUrl,
+  });
+`
+    : '';
+  const liveTransportAssignment = hasLive
+    ? `
+  transport.subscribeById = liveTransport.subscribeById;
+`
     : '';
   const clientDeclarationModule = `${clientModule}/client`;
 
@@ -262,7 +270,7 @@ declare module '${clientDeclarationModule}' {
 ${typeImports}
 import { createTRPCProxyClient } from '@trpc/client';
 import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
-import { clientRoot, createClient, createTRPCTransport, mutation } from '${clientModule}';
+import { clientRoot, createClient${liveImport}, createTRPCTransport, mutation } from '${clientModule}';
 
 type TRPCClientType = ReturnType<typeof createTRPCProxyClient<AppRouter>>;
 type RouterInputs = inferRouterInputs<AppRouter>;
@@ -281,25 +289,30 @@ export type GeneratedClientRoots = typeof roots;
 
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
+${indentBlock(liveOptions.trim(), 2)}
   onLiveError?: (error: unknown) => void;
 }) => {
   const trpcClient = createTRPCProxyClient<AppRouter>(options);
+${liveTransportSetup}
 
   const trpcMutations = {
 ${mutationResolverBlock}
   } as const;
 
+  const transport = createTRPCTransport<AppRouter, typeof trpcMutations>({
+    byId: {
+${byIdBlock}
+    },
+    client: trpcClient,
+${queriesBlock}${listsBlock}    mutations: trpcMutations,
+  });
+${liveTransportAssignment}
+
   return createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
     mutations,
     onLiveError: options.onLiveError,
     roots,
-    transport: createTRPCTransport<AppRouter, typeof trpcMutations>({
-      byId: {
-${byIdBlock}
-      },
-      client: trpcClient,
-${queriesBlock}${listsBlock}${liveBlock}      mutations: trpcMutations,
-    }),
+    transport,
     types: ${typesBlock.trimStart()},
   });
 };

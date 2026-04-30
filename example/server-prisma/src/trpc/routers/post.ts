@@ -11,7 +11,6 @@ import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
   ...fate.procedures({
-    live,
     view: postDataView,
   }),
   add: procedure

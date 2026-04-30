@@ -17,4 +17,5 @@ export const appRouter = router({
 
 export type AppRouter = typeof appRouter;
 
+export { fateServer } from './init.ts';
 export * from './views.ts';

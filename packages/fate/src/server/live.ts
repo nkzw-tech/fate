@@ -28,8 +28,8 @@ const eventName = (type: string, id: string | number) => `${type}:${String(id)}`
 /**
  * Creates a small in-memory event bus for Fate live view subscriptions.
  *
- * The bus only signals that an entity changed. Live tRPC procedures refetch the
- * selected record before sending it to clients.
+ * The bus only signals that an entity changed. The native live handler refetches
+ * the selected record before sending it to clients.
  */
 export function createLiveEventBus(): LiveEventBus {
   const emitter = new EventEmitter();

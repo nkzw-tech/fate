@@ -3,12 +3,14 @@ import { parseArgs, styleText } from 'node:util';
 import { serve } from '@hono/node-server';
 import { trpcServer } from '@hono/trpc-server';
 import parseInteger from '@nkzw/core/parseInteger.js';
+import { createHonoFateHandler } from '@nkzw/fate/server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { connectDatabase } from './drizzle/db.ts';
 import { auth } from './lib/auth.tsx';
 import env from './lib/env.ts';
 import { createContext } from './trpc/context.ts';
+import { fateServer } from './trpc/init.ts';
 import { appRouter } from './trpc/router.ts';
 
 try {
@@ -48,6 +50,8 @@ app.use(
     router: appRouter,
   }),
 );
+
+app.all('/fate/*', createHonoFateHandler(fateServer));
 
 app.on(['POST', 'GET'], '/api/auth/*', ({ req }) => auth.handler(req.raw));
 

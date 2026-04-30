@@ -1,6 +1,6 @@
 # Live Views
 
-`useLiveView` resolves a `ViewRef` just like `useView`, but also keeps the selected object up to date through a live tRPC subscription.
+`useLiveView` resolves a `ViewRef` just like `useView`, but also keeps the selected object up to date through the native live SSE transport.
 
 ```tsx
 import { useLiveView, ViewRef } from 'react-fate';
@@ -22,7 +22,9 @@ The API mirrors `useView`: pass a view and a ref, and get back the same masked d
 
 ## How Live Updates Work
 
-When the server sends an update through Server-Sent-Events (SSE), fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
+The native HTTP transport opens one Server-Sent Events (SSE) connection per Fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
+
+When the server sends an update, fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
 
 For example, if `PostView` selects `likes`, a live update that changes `likes` re-renders the `PostCard`. If another component only selected `title`, it does not re-render for a `likes` change.
 
@@ -30,10 +32,9 @@ Live deletion events remove the record from the normalized cache in the same way
 
 ## Client Setup
 
-tRPC subscriptions need a subscription link. For HTTP/SSE, use `httpSubscriptionLink` for subscription operations and keep `httpBatchLink` for queries and mutations:
+Generate the client with the native transport and point it at your Fate endpoint:
 
 ```tsx
-import { httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
 import { FateClient } from 'react-fate';
 import { createFateClient } from 'react-fate/client';
 
@@ -41,25 +42,12 @@ export function App() {
   const fate = useMemo(
     () =>
       createFateClient({
-        links: [
-          splitLink({
-            condition: (operation) => operation.type === 'subscription',
-            false: httpBatchLink({
-              fetch: (input, init) =>
-                fetch(input, {
-                  ...init,
-                  credentials: 'include',
-                }),
-              url: `${env('SERVER_URL')}/trpc`,
-            }),
-            true: httpSubscriptionLink({
-              eventSourceOptions: {
-                withCredentials: true,
-              },
-              url: `${env('SERVER_URL')}/trpc`,
-            }),
+        fetch: (input, init) =>
+          fetch(input, {
+            ...init,
+            credentials: 'include',
           }),
-        ],
+        url: `${env('SERVER_URL')}/fate`,
       }),
     [],
   );
@@ -70,48 +58,30 @@ export function App() {
 
 > [!NOTE]
 >
-> `httpSubscriptionLink` uses Server-Sent Events. If your app does not need cookies for subscriptions, you can omit `eventSourceOptions`.
+> Live views use `GET /fate/live` for the single SSE stream and `POST /fate/live` for subscribe/unsubscribe control messages.
 
 ## Server Setup
 
 Live views use an event bus. The bus only signals that an object changed; fate refetches the selected object through the same data view pipeline used by `byId` queries before sending it to the client.
 
-Create one bus next to your tRPC helpers:
+Pass a live event bus to `createFateServer` and expose the native handler:
 
 ```tsx
-import { createLiveEventBus } from '@nkzw/fate/server';
-import { createPrismaFate } from '@nkzw/fate/server/prisma';
-import { initTRPC } from '@trpc/server';
+import { createFateServer, createHonoFateHandler, createLiveEventBus } from '@nkzw/fate/server';
 import type { AppContext } from './context.ts';
+import { sources } from './sources.ts';
 import { Root } from './views.ts';
 
-const t = initTRPC.context<AppContext>().create();
-
-export const router = t.router;
-export const procedure = t.procedure;
 export const live = createLiveEventBus();
 
-export const fate = createPrismaFate<AppContext, typeof procedure>({
-  procedure,
-  views: Root,
+export const fate = createFateServer<AppContext>({
+  live,
+  roots: Root,
+  sources,
 });
+
+app.all('/fate/*', createHonoFateHandler(fate));
 ```
-
-Then enable live subscriptions for the data view you want to expose:
-
-```tsx
-import { fate, live, procedure, router } from '../init.ts';
-import { postDataView } from '../views.ts';
-
-export const postRouter = router({
-  ...fate.procedures({
-    live,
-    view: postDataView,
-  }),
-});
-```
-
-The shorthand above is equivalent to `live: { bus: live }`. If your event bus has a different variable name, pass it as `live: events`. The generated procedure is called `live`, so the generated client can map `Post` refs to `client.post.live.subscribe`.
 
 Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
 
@@ -122,7 +92,6 @@ After a mutation changes an object, emit an update event for that object:
 ```tsx
 export const postRouter = router({
   ...fate.procedures({
-    live,
     view: postDataView,
   }),
   like: procedure.input(likeInput).mutation(async ({ ctx, input }) => {
@@ -173,7 +142,7 @@ If deleting the object also changes another object, emit an update for that obje
 live.update('Post', postId);
 ```
 
-You can pass an `eventId` when emitting. fate wraps events with tRPC's tracked envelope so clients can resume from the last received SSE event when supported by your deployment:
+You can pass an `eventId` when emitting. fate sends it on the native SSE event so clients can resume from the last received event when supported by your deployment:
 
 ```tsx
 live.update('Post', input.id, { eventId: `post:${input.id}:${Date.now()}` });

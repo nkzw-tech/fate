@@ -227,7 +227,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   private readonly onLiveError: ((error: unknown) => void) | undefined;
   private readonly liveSubscriptions = new Map<
     string,
-    { count: number; unsubscribe: () => void }
+    { count: number; releaseScheduled?: boolean; unsubscribe: () => void }
   >();
   private readonly requests = new Map<
     string,
@@ -702,6 +702,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const existing = this.liveSubscriptions.get(key);
     if (existing) {
       existing.count += 1;
+      existing.releaseScheduled = false;
       return () => {
         this.releaseLiveSubscription(key);
       };
@@ -2263,13 +2264,25 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       return;
     }
 
+    if (subscription.count <= 0) {
+      return;
+    }
+
     subscription.count -= 1;
     if (subscription.count > 0) {
       return;
     }
 
-    subscription.unsubscribe();
-    this.liveSubscriptions.delete(key);
+    subscription.releaseScheduled = true;
+    queueMicrotask(() => {
+      const current = this.liveSubscriptions.get(key);
+      if (!current || !current.releaseScheduled || current.count > 0) {
+        return;
+      }
+
+      current.unsubscribe();
+      this.liveSubscriptions.delete(key);
+    });
   }
 
   private reportLiveError(error: unknown) {

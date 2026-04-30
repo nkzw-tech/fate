@@ -353,24 +353,78 @@ test('rejects invalid native live requests before streaming', async () => {
 
 test('streams live updates over SSE', async () => {
   const { fate, live } = createServer();
-  const responsePromise = fate.handleLiveRequest(
-    postJSON('http://local/fate/live', {
-      id: '1',
-      select: ['id', 'title'],
-      type: 'Post',
-      version: 1,
-    }),
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
   );
-
-  const response = await responsePromise;
   const reader = response.body!.getReader();
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            entityId: '1',
+            id: 'sub-1',
+            kind: 'subscribe',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 200);
+
   live.update('Post', '1', { eventId: 'evt-1' });
+  await reader.read();
   const { value } = await reader.read();
   const chunk = new TextDecoder().decode(value);
 
   expect(chunk).toContain('id: evt-1');
-  expect(chunk).toContain('event: update');
-  expect(chunk).toContain('"data":{"id":"1","title":"One"}');
+  expect(chunk).toContain('event: next');
+  expect(chunk).toContain('"id":"sub-1"');
+  expect(chunk).toContain('"event":{"data":{"id":"1","title":"One"}}');
+  await reader.cancel();
+});
+
+test('routes live updates only to matching subscriptions on one SSE stream', async () => {
+  const { fate, live } = createServer();
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          entityId: '1',
+          id: 'sub-1',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+        {
+          entityId: '2',
+          id: 'sub-2',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.update('Post', '2', { eventId: 'evt-2' });
+  await reader.read();
+  const { value } = await reader.read();
+  const chunk = new TextDecoder().decode(value);
+
+  expect(chunk).toContain('"id":"sub-2"');
+  expect(chunk).toContain('"event":{"data":{"id":"2","title":"Two"}}');
+  expect(chunk).not.toContain('"id":"sub-1"');
   await reader.cancel();
 });
 

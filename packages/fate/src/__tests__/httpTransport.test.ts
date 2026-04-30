@@ -133,20 +133,26 @@ test('subscribes to native SSE live events', async () => {
         new TextEncoder().encode(
           [
             'id: evt-1',
-            'event: update',
-            'data: {"data":{"id":"1","title":"One"}}',
+            'event: next',
+            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
             '',
-            'event: delete',
-            'data: {"delete":true,"id":"1"}',
+            'event: next',
+            'data: {"kind":"next","id":"1","event":{"delete":true,"id":"1"}}',
             '',
             '',
           ].join('\n'),
         ),
       );
-      controller.close();
     },
   });
-  const fetch = vi.fn(async () => new Response(stream));
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+    init?.method === 'GET'
+      ? new Response(stream)
+      : jsonResponse({
+          results: [{ data: null, id: '1', ok: true }],
+          version: 1,
+        }),
+  );
   const onData = vi.fn();
   const onDelete = vi.fn();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
@@ -154,20 +160,202 @@ test('subscribes to native SSE live events', async () => {
     url: '/fate',
   });
 
-  transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
     onData,
     onDelete,
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(fetch).toHaveBeenCalledWith(
-    '/fate/live',
-    expect.objectContaining({
-      method: 'POST',
-    }),
-  );
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
+  expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
   expect(onData).toHaveBeenCalledWith({ id: '1', title: 'One' });
   expect(onDelete).toHaveBeenCalledWith('1');
+  dispose?.();
+});
+
+test('preserves native SSE live URL query params', async () => {
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+    init?.method === 'GET'
+      ? new Response(new ReadableStream<Uint8Array>())
+      : jsonResponse({
+          results: [{ data: null, id: '1', ok: true }],
+          version: 1,
+        }),
+  );
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    fetch,
+    liveUrl: '/fate/live?token=apple',
+    url: '/fate',
+  });
+
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
+    onData: vi.fn(),
+  });
+
+  await vi.waitFor(() => {
+    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls.find(([, init]) => init.method === 'GET')?.[0]).toMatch(
+      /^\/fate\/live\?token=apple&connectionId=/,
+    );
+  });
+  dispose?.();
+});
+
+test('retries failed native SSE live control operations while the stream stays open', async () => {
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'GET') {
+      return new Response(new ReadableStream<Uint8Array>());
+    }
+
+    if (fetch.mock.calls.filter(([, callInit]) => callInit?.method === 'POST').length === 1) {
+      return new Response('temporary', { status: 503 });
+    }
+
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    return jsonResponse({
+      results: body.operations.map((operation: { id: string }) => ({
+        data: null,
+        id: operation.id,
+        ok: true,
+      })),
+      version: 1,
+    });
+  });
+  const onError = vi.fn();
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    fetch,
+    liveRetryMs: 0,
+    url: '/fate',
+  });
+
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
+    onData: vi.fn(),
+    onError,
+  });
+
+  await vi.waitFor(() => {
+    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
+    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2);
+  });
+
+  const postBodies = (fetch.mock.calls as unknown as Array<[string, RequestInit]>)
+    .filter(([, init]) => init.method === 'POST')
+    .map(([, init]) => JSON.parse(String(init.body)));
+  expect(postBodies[0].operations).toEqual(postBodies[1].operations);
+  expect(onError).toHaveBeenCalledTimes(1);
+  dispose?.();
+});
+
+test('resends native SSE live subscriptions after the initial stream setup retries', async () => {
+  let streamRequests = 0;
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'GET') {
+      streamRequests += 1;
+      if (streamRequests === 1) {
+        return new Response('temporary', { status: 500 });
+      }
+
+      return new Response(new ReadableStream<Uint8Array>());
+    }
+
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    return jsonResponse({
+      results: body.operations.map((operation: { id: string }) => ({
+        data: null,
+        id: operation.id,
+        ok: true,
+      })),
+      version: 1,
+    });
+  });
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    fetch,
+    liveRetryMs: 0,
+    url: '/fate',
+  });
+
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
+    onData: vi.fn(),
+  });
+
+  await vi.waitFor(() => {
+    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
+    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+  });
+  dispose?.();
+
+  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  const postCall = calls.find(([, init]) => init.method === 'POST');
+  expect(JSON.parse((postCall?.[1].body as string) ?? '{}').operations).toEqual([
+    {
+      entityId: '1',
+      id: '1',
+      kind: 'subscribe',
+      select: ['id', 'title'],
+      type: 'Post',
+    },
+  ]);
+});
+
+test('multiplexes native SSE live subscriptions over one stream', async () => {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          [
+            'event: next',
+            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
+            '',
+            'event: next',
+            'data: {"kind":"next","id":"2","event":{"data":{"id":"2","title":"Two"}}}',
+            '',
+            '',
+          ].join('\n'),
+        ),
+      );
+    },
+  });
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+    init?.method === 'GET'
+      ? new Response(stream)
+      : jsonResponse({
+          results: [
+            { data: null, id: '1', ok: true },
+            { data: null, id: '2', ok: true },
+          ],
+          version: 1,
+        }),
+  );
+  const onPostOne = vi.fn();
+  const onPostTwo = vi.fn();
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    fetch,
+    url: '/fate',
+  });
+
+  const disposeOne = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
+    onData: onPostOne,
+  });
+  const disposeTwo = transport.subscribeById?.('Post', '2', new Set(['id', 'title']), undefined, {
+    onData: onPostTwo,
+  });
+
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  const postBody = JSON.parse(
+    (calls.find(([, init]) => init.method === 'POST')?.[1].body as string) ?? '{}',
+  );
+  expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
+  expect(postBody.operations).toHaveLength(2);
+  expect(onPostOne).toHaveBeenCalledWith({ id: '1', title: 'One' });
+  expect(onPostTwo).toHaveBeenCalledWith({ id: '2', title: 'Two' });
+  disposeOne?.();
+  disposeTwo?.();
 });
 
 test('reconnects native SSE live events with the last received event id', async () => {
@@ -175,9 +363,13 @@ test('reconnects native SSE live events with the last received event id', async 
     start(controller) {
       controller.enqueue(
         new TextEncoder().encode(
-          ['id: evt-1', 'event: update', 'data: {"data":{"id":"1","title":"One"}}', '', ''].join(
-            '\n',
-          ),
+          [
+            'id: evt-1',
+            'event: next',
+            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
+            '',
+            '',
+          ].join('\n'),
         ),
       );
       controller.close();
@@ -187,15 +379,33 @@ test('reconnects native SSE live events with the last received event id', async 
     start(controller) {
       controller.enqueue(
         new TextEncoder().encode(
-          ['event: update', 'data: {"data":{"id":"1","title":"Two"}}', '', ''].join('\n'),
+          [
+            'event: next',
+            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"Two"}}}',
+            '',
+            '',
+          ].join('\n'),
         ),
       );
     },
   });
-  const fetch = vi
-    .fn()
-    .mockResolvedValueOnce(new Response(firstStream))
-    .mockResolvedValueOnce(new Response(secondStream));
+  let streamCount = 0;
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'GET') {
+      streamCount += 1;
+      return new Response(streamCount === 1 ? firstStream : secondStream);
+    }
+
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    return jsonResponse({
+      results: body.operations.map((operation: { id: string }) => ({
+        data: null,
+        id: operation.id,
+        ok: true,
+      })),
+      version: 1,
+    });
+  });
   const onData = vi.fn();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
     fetch,
@@ -206,11 +416,16 @@ test('reconnects native SSE live events with the last received event id', async 
   const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
     onData,
   });
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => {
+    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
+    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2);
+  });
   dispose?.();
 
   const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  expect(JSON.parse((calls[1]?.[1].body as string) ?? '{}')).toMatchObject({
+  const postCalls = calls.filter(([, init]) => init.method === 'POST');
+  expect(JSON.parse((postCalls[1]?.[1].body as string) ?? '{}').operations[0]).toMatchObject({
     lastEventId: 'evt-1',
   });
   expect(onData).toHaveBeenCalledWith({ id: '1', title: 'One' });

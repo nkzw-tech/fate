@@ -208,7 +208,7 @@ const client = createFateClient({
 });
 ```
 
-The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use `POST /fate/live` with `text/event-stream` so the client can send the selected fields and args in the request body.
+The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use one `GET /fate/live` SSE stream per Fate client and `POST /fate/live` control messages when views subscribe or unsubscribe.
 
 ### Custom Queries
 

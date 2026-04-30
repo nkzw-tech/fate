@@ -37,15 +37,6 @@ export type FateProtocolResponse = Readonly<{
   version: FateProtocolVersion;
 }>;
 
-export type FateLiveRequest = Readonly<{
-  args?: Record<string, unknown>;
-  id: string | number;
-  lastEventId?: string;
-  select: Array<string>;
-  type: string;
-  version: FateProtocolVersion;
-}>;
-
 export type FateLiveDataEvent = Readonly<{
   data: unknown;
   delete?: false;
@@ -59,6 +50,41 @@ export type FateLiveDeleteEvent = Readonly<{
 }>;
 
 export type FateLiveEvent = FateLiveDataEvent | FateLiveDeleteEvent;
+
+export type FateLiveSubscribeOperation = Readonly<{
+  args?: Record<string, unknown>;
+  entityId: string | number;
+  id: string;
+  kind: 'subscribe';
+  lastEventId?: string;
+  select: Array<string>;
+  type: string;
+}>;
+
+export type FateLiveUnsubscribeOperation = Readonly<{
+  id: string;
+  kind: 'unsubscribe';
+}>;
+
+export type FateLiveControlOperation = FateLiveSubscribeOperation | FateLiveUnsubscribeOperation;
+
+export type FateLiveControlRequest = Readonly<{
+  connectionId: string;
+  operations: Array<FateLiveControlOperation>;
+  version: FateProtocolVersion;
+}>;
+
+export type FateLiveMessage =
+  | Readonly<{
+      event: FateLiveEvent;
+      id: string;
+      kind: 'next';
+    }>
+  | Readonly<{
+      error: FateProtocolError;
+      id: string;
+      kind: 'error';
+    }>;
 
 export type FateConnectionResult = Readonly<{
   items: Array<{ cursor?: string; node: unknown }>;

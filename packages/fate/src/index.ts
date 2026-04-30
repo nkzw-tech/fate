@@ -40,7 +40,7 @@ export type {
 } from './types.ts';
 export type { RequestMode, RequestOptions } from './client.ts';
 export type { FateMutations } from './mutation.ts';
-export type { LiveEvent, Transport } from './transport.ts';
+export type { Transport } from './transport.ts';
 
 export { createClient, FateClient } from './client.ts';
 export { ConnectionTag, isViewTag } from './types.ts';
