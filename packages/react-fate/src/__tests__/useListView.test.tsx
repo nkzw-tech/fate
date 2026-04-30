@@ -2,7 +2,14 @@
  * @vitest-environment happy-dom
  */
 
-import { createClient, FateMutations, getSelectionPlan, clientRoot, view } from '@nkzw/fate';
+import {
+  createClient,
+  FateMutations,
+  getSelectionPlan,
+  clientRoot,
+  mutation,
+  view,
+} from '@nkzw/fate';
 import { act, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
@@ -561,6 +568,252 @@ test('updates root list items after loading the next page', async () => {
   });
 
   expect(renders.at(-1)).toEqual(['project-1', 'project-2']);
+});
+
+test('root list optimistic pending edges roll back after failed mutations', async () => {
+  type Project = { __typename: 'Project'; id: string; name: string };
+
+  const roots = {
+    projects: clientRoot('Project'),
+  };
+  const mutations = {
+    createProject: mutation<Project, { name: string }, Project>('Project'),
+  };
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [
+      {
+        cursor: 'cursor-1',
+        node: { __typename: 'Project', id: 'project-1', name: 'Project 1' },
+      },
+    ],
+    pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-1' },
+  });
+  let rejectMutation: ((error: Error) => void) | undefined;
+  const mutate = vi.fn(
+    (_key, _input, _select) =>
+      new Promise<Project>((_resolve, reject) => {
+        rejectMutation = reject;
+      }),
+  ) as NonNullable<
+    Parameters<typeof createClient<[typeof roots, typeof mutations]>>[0]['transport']['mutate']
+  >;
+  const client = createClient<[typeof roots, typeof mutations]>({
+    mutations,
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      mutate,
+    },
+    types: [{ fields: { name: 'scalar' }, type: 'Project' }],
+  });
+
+  const ProjectView = view<Project>()({ id: true, name: true });
+  const ProjectConnectionView = {
+    items: {
+      cursor: true,
+      node: ProjectView,
+    },
+    pagination: { hasNext: true, nextCursor: true },
+  } as const;
+
+  const request = {
+    projects: {
+      list: ProjectConnectionView,
+    },
+  };
+
+  const renders: Array<Array<string | null>> = [];
+
+  const Component = () => {
+    const { projects } = useRequest<typeof request, typeof roots>(request);
+    const [projectList] = useListView(ProjectConnectionView, projects);
+
+    renders.push(projectList.map(({ node }) => (node ? String(node.id) : null)));
+
+    return null;
+  };
+
+  const container = document.createElement('div');
+  const reactRoot = createRoot(container);
+
+  await act(async () => {
+    reactRoot.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['project-1']);
+
+  let mutationPromise: ReturnType<(typeof client.mutations)['createProject']> | undefined;
+
+  await act(async () => {
+    mutationPromise = client.mutations.createProject({
+      input: { name: 'Draft' },
+      optimistic: {
+        id: 'optimistic:project-2',
+        name: 'Draft',
+      },
+      view: ProjectView,
+    });
+
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['project-1', 'optimistic:project-2']);
+
+  await act(async () => {
+    rejectMutation?.(new Error('Not signed in.'));
+    await expect(mutationPromise).rejects.toThrow('Not signed in.');
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['project-1']);
+});
+
+test('nested list optimistic pending edges roll back after failed mutations', async () => {
+  type CommentWithPost = Comment & { post?: { id: string } | null };
+  type PostWithComments = {
+    __typename: 'Post';
+    comments: Array<CommentWithPost>;
+    id: string;
+  };
+  type CreateCommentInput = { content: string; postId: string };
+
+  const mutations = {
+    addComment: mutation<CommentWithPost, CreateCommentInput, CommentWithPost>('Comment'),
+  };
+  let rejectMutation: ((error: Error) => void) | undefined;
+  const mutate = vi.fn(
+    (_key, _input, _select) =>
+      new Promise<CommentWithPost>((_resolve, reject) => {
+        rejectMutation = reject;
+      }),
+  ) as NonNullable<
+    Parameters<
+      typeof createClient<[Record<string, never>, typeof mutations]>
+    >[0]['transport']['mutate']
+  >;
+  const client = createClient<[Record<string, never>, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [
+      { fields: { comments: { listOf: 'Comment' } }, type: 'Post' },
+      { fields: { post: { type: 'Post' } }, type: 'Comment' },
+    ],
+  });
+
+  const CommentView = view<CommentWithPost>()({
+    content: true,
+    id: true,
+    post: { id: true },
+  });
+  const CommentConnectionView = {
+    args: { first: 1 },
+    items: {
+      cursor: true,
+      node: CommentView,
+    },
+    pagination: { hasNext: true, hasPrevious: true, nextCursor: true },
+  } as const;
+  const PostView = view<PostWithComments>()({
+    comments: CommentConnectionView,
+    id: true,
+  });
+  const plan = getSelectionPlan(PostView, null);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      comments: {
+        items: [
+          {
+            cursor: 'cursor-1',
+            node: {
+              __typename: 'Comment',
+              content: 'Comment 1',
+              id: 'comment-1',
+            },
+          },
+        ],
+        pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-1' },
+      },
+      id: 'post-1',
+    },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const postRef = client.ref<PostWithComments>('Post', 'post-1', PostView);
+  const renders: Array<Array<string | null>> = [];
+
+  const Component = () => {
+    const post = useView(PostView, postRef);
+    const [comments] = useListView(CommentConnectionView, post.comments);
+
+    renders.push(comments.map(({ node }) => (node ? String(node.id) : null)));
+
+    return null;
+  };
+
+  const container = document.createElement('div');
+  const reactRoot = createRoot(container);
+
+  await act(async () => {
+    reactRoot.render(
+      <FateClient client={client}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['comment-1']);
+
+  let mutationPromise: ReturnType<(typeof client.mutations)['addComment']> | undefined;
+
+  await act(async () => {
+    mutationPromise = client.mutations.addComment({
+      input: { content: 'Draft', postId: 'post-1' },
+      optimistic: {
+        content: 'Draft',
+        id: 'optimistic:comment-2',
+        post: { id: 'post-1' },
+      },
+      view: CommentView,
+    });
+
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['comment-1', 'optimistic:comment-2']);
+
+  await act(async () => {
+    rejectMutation?.(new Error('Not signed in.'));
+    await expect(mutationPromise).rejects.toThrow('Not signed in.');
+    await flushAsync();
+  });
+
+  expect(renders.at(-1)).toEqual(['comment-1']);
 });
 
 test('loads previous items when loadPrevious is invoked', async () => {

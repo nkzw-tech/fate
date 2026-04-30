@@ -82,7 +82,7 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
           value={contentValue}
         />
         <Stack alignCenter between className="text-sm" gap={16}>
-          Mutation Debug Options
+          <span className="font-bold">Mutation Debug Options</span>
           <Stack alignCenter as="label" gap>
             <CheckBox
               checked={missingMutationSelection}

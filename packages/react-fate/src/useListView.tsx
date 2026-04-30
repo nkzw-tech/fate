@@ -2,6 +2,8 @@ import { ConnectionMetadata, ConnectionTag, isViewTag, Pagination, type View } f
 import { useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
 import { useFateClient } from './context.tsx';
 
+type ListEntry = Readonly<{ cursor?: string; id: string }>;
+
 type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
   ? ReadonlyArray<Item>
   : ReadonlyArray<never>;
@@ -22,6 +24,37 @@ const getNodeView = (view: ConnectionSelection) => {
   }
 
   return view;
+};
+
+const getListEntries = (
+  listState:
+    | Readonly<{
+        cursors?: ReadonlyArray<string | undefined>;
+        ids: ReadonlyArray<string>;
+        pendingAfterIds?: ReadonlyArray<string>;
+        pendingBeforeIds?: ReadonlyArray<string>;
+      }>
+    | undefined,
+): Array<ListEntry> => {
+  if (!listState) {
+    return [];
+  }
+
+  const entries: Array<ListEntry> = [];
+
+  for (const id of listState.pendingBeforeIds ?? []) {
+    entries.push({ id });
+  }
+
+  listState.ids.forEach((id, index) => {
+    entries.push({ cursor: listState.cursors?.[index], id });
+  });
+
+  for (const id of listState.pendingAfterIds ?? []) {
+    entries.push({ id });
+  }
+
+  return entries;
 };
 
 /**
@@ -60,15 +93,15 @@ export function useListView<
   const previousCursor = pagination?.previousCursor;
 
   const items = useMemo(() => {
-    if (metadata?.root && listState) {
-      return listState.ids.map((id, index) => ({
-        cursor: listState.cursors?.[index],
+    if (metadata && listState) {
+      return getListEntries(listState).map(({ cursor, id }) => ({
+        cursor,
         node: client.rootListRef(id, nodeView),
       }));
     }
 
     return connection?.items;
-  }, [client, connection?.items, listState, metadata?.root, nodeView]);
+  }, [client, connection?.items, listState, metadata, nodeView]);
 
   const loadNext = useMemo(() => {
     if (!metadata || !hasNext || !nextCursor) {
