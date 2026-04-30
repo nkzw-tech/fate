@@ -888,6 +888,76 @@ test(`'delete' removes an entity and cleans references`, () => {
   expect(restoredState).toEqual(initialState);
 });
 
+test(`failed delete mutations restore pending list edges`, async () => {
+  const mutate = vi.fn(async () => {
+    throw new FateRequestError('VALIDATION_ERROR', 'Invalid delete.');
+  });
+  const mutations = {
+    deleteComment: mutation<Comment, { id: string }, Comment>('Comment'),
+  };
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [{ type: 'Comment' }],
+  });
+
+  const commentId = toEntityId('Comment', 'comment-1');
+  client.store.merge(
+    commentId,
+    {
+      __typename: 'Comment',
+      author: null,
+      content: 'Pending',
+      id: 'comment-1',
+    },
+    new Set(['__typename', 'author', 'content', 'id']),
+  );
+
+  const pendingBeforeList = {
+    ids: [toEntityId('Comment', 'comment-2')],
+    pendingBeforeIds: [commentId],
+  } satisfies List;
+  const pendingAfterList = {
+    ids: [toEntityId('Comment', 'comment-3')],
+    pendingAfterIds: [commentId],
+  } satisfies List;
+
+  client.store.setList('before-comments', pendingBeforeList);
+  client.store.setList('after-comments', pendingAfterList);
+
+  const promise = client.mutations.deleteComment({
+    delete: true,
+    input: { id: 'comment-1' },
+  });
+
+  expect(client.store.read(commentId)).toBeUndefined();
+  expect(client.store.getListState('before-comments')).toEqual({
+    ids: [toEntityId('Comment', 'comment-2')],
+    pendingBeforeIds: [],
+  });
+  expect(client.store.getListState('after-comments')).toEqual({
+    ids: [toEntityId('Comment', 'comment-3')],
+    pendingAfterIds: [],
+  });
+
+  const { error, result } = await promise;
+
+  expect(error).toBeInstanceOf(FateRequestError);
+  expect(result).toBeUndefined();
+  expect(client.store.read(commentId)).toMatchObject({
+    content: 'Pending',
+    id: 'comment-1',
+  });
+  expect(client.store.getListState('before-comments')).toEqual(pendingBeforeList);
+  expect(client.store.getListState('after-comments')).toEqual(pendingAfterList);
+});
+
 test(`delete mutations can select a view and update related entities`, async () => {
   const mutate = vi.fn(async (_key, input: { id: string }, select: Set<string>) => {
     expect([...select]).toEqual(expect.arrayContaining(['id', 'post.commentCount']));

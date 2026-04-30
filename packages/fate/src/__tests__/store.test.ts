@@ -21,6 +21,28 @@ test('keeps cursor alignment when removing ids with undefined cursors', () => {
   expect(state?.cursors).toEqual([undefined]);
 });
 
+test('removes references from pending list edges', () => {
+  const store = new Store();
+  const cache = new ViewDataCache();
+  const listKey = 'list';
+
+  store.setList(listKey, {
+    cursors: ['cursor-one', 'cursor-two', 'cursor-three'],
+    ids: ['one', 'two', 'three'],
+    pendingAfterIds: ['four', 'two', 'five'],
+    pendingBeforeIds: ['zero', 'two'],
+  });
+
+  store.removeReferencesTo('two', cache);
+
+  expect(store.getListState(listKey)).toEqual({
+    cursors: ['cursor-one', 'cursor-three'],
+    ids: ['one', 'three'],
+    pendingAfterIds: ['four', 'five'],
+    pendingBeforeIds: ['zero'],
+  });
+});
+
 test('does not update records or notify subscribers for shallow equal merges', () => {
   const store = new Store();
   const entityId = 'Post:1';
