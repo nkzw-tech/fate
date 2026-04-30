@@ -12,9 +12,10 @@ import {
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
-import createRef, {
+import {
   assignViewTag,
   createRefWithViewNames,
+  getRootViewNames,
   parseEntityId,
   toEntityId,
 } from './ref.ts';
@@ -142,11 +143,6 @@ const getListEntries = (listState: List | undefined): Array<ListEntry> => {
   return entries;
 };
 
-const rootListRefWithViewNames = (entityId: EntityId, viewNames: ReadonlySet<string>) => {
-  const { id, type } = parseEntityId(entityId);
-  return createRefWithViewNames(type, id, viewNames);
-};
-
 const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
   const path = key.split('.');
   let current: AnyRecord = target;
@@ -229,6 +225,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     string,
     { count: number; releaseScheduled?: boolean; unsubscribe: () => void }
   >();
+  private readonly stableRefs = new Map<EntityId, Map<string, ViewRef<string>>>();
   private readonly requests = new Map<
     string,
     Map<RequestMode, FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>>
@@ -510,6 +507,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
 
     this.viewDataCache.invalidate(entityId);
+    this.stableRefs.delete(entityId);
     this.store.deleteRecord(entityId);
     this.store.removeReferencesTo(entityId, this.viewDataCache, snapshots, listSnapshots);
   }
@@ -523,17 +521,40 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     this.store.restoreList(name, list);
   }
 
+  private stableRefWithViewNames<TName extends string>(
+    type: TName,
+    id: string | number,
+    viewNames: ReadonlySet<string>,
+  ): ViewRef<TName> {
+    const entityId = toEntityId(type, id);
+    const key = `${typeof id}:${String(id)}:${[...viewNames].sort().join(',')}`;
+    let refs = this.stableRefs.get(entityId);
+    if (!refs) {
+      refs = new Map();
+      this.stableRefs.set(entityId, refs);
+    }
+
+    const existing = refs.get(key);
+    if (existing) {
+      return existing as ViewRef<TName>;
+    }
+
+    const ref = createRefWithViewNames(type, id, viewNames);
+    refs.set(key, ref);
+    return ref;
+  }
+
   ref<T extends Entity>(
     type: T['__typename'],
     id: string | number,
     view: View<T, Selection<T>>,
   ): ViewRef<T['__typename']> {
-    return createRef<T, Selection<T>, View<T, Selection<T>>>(type, id, view);
+    return this.stableRefWithViewNames(type, id, getViewNames(view));
   }
 
   rootListRef(entityId: EntityId, rootView: View<any, any>) {
     const { id, type } = parseEntityId(entityId);
-    return createRef(type, id, rootView, { root: true });
+    return this.stableRefWithViewNames(type, id, getRootViewNames(rootView));
   }
 
   readView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
@@ -560,7 +581,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const resolvedEntityId = this.optimisticEntityResolutions.get(entityId) ?? null;
     if (resolvedEntityId && resolvedEntityId !== entityId) {
       const { id: resolvedId, type: resolvedType } = parseEntityId(resolvedEntityId);
-      return this.readView<T, S, V>(view, createRef(resolvedType, resolvedId, view));
+      return this.readView<T, S, V>(
+        view,
+        this.stableRefWithViewNames(resolvedType, resolvedId, getViewNames(view)),
+      );
     }
     const viewNames = getViewNames(view);
     const refViews = ref[ViewsTag];
@@ -1288,6 +1312,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const swept = this.store.collectGarbage(markedRecords, markedLists, {
       onRecordDeleted: (id) => {
         this.viewDataCache.invalidate(id);
+        this.stableRefs.delete(id);
         this.clearStalledRequestsForEntity(id);
       },
     });
@@ -1551,13 +1576,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const result: AnyRecord = {};
     for (const item of request.items) {
       if (item.kind === 'node') {
-        result[item.name] = createRefWithViewNames(item.type, item.ids[0], item.refViewNames);
+        result[item.name] = this.stableRefWithViewNames(item.type, item.ids[0], item.refViewNames);
         continue;
       }
 
       if (item.kind === 'nodes') {
         result[item.name] = item.ids.map((id) =>
-          createRefWithViewNames(item.type, id, item.refViewNames),
+          this.stableRefWithViewNames(item.type, id, item.refViewNames),
         );
         continue;
       }
@@ -1566,7 +1591,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         const entityId = this.rootRequests.get(item.queryKey);
         if (entityId) {
           const { id } = parseEntityId(entityId);
-          result[item.name] = createRefWithViewNames(item.type, id, item.refViewNames);
+          result[item.name] = this.stableRefWithViewNames(item.type, id, item.refViewNames);
         } else {
           result[item.name] = null;
         }
@@ -1579,7 +1604,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
       const listState = this.store.getListState(item.listKey);
       const entries = getListEntries(listState);
-      const nodes = entries.map(({ id }) => rootListRefWithViewNames(id, item.nodeRefViewNames));
+      const nodes = entries.map(({ id }) => {
+        const { id: rawId, type } = parseEntityId(id);
+        return this.stableRefWithViewNames(type, rawId, item.nodeRefViewNames);
+      });
 
       if (item.hasItems) {
         const connection: AnyRecord = {

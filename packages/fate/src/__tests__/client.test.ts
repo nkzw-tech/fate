@@ -56,6 +56,55 @@ const getNodeRefIds = (value: unknown) =>
 
 const createNodeRefs = (ids: Array<string>) => ids.map((id) => createNodeRef(id));
 
+test('keeps refs stable by entity and view tags', () => {
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ type: 'Post' }],
+  });
+  const TitleView = view<Post>()({
+    id: true,
+  });
+  const ContentView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  expect(client.ref<Post>('Post', 'post-1', TitleView)).toBe(
+    client.ref<Post>('Post', 'post-1', TitleView),
+  );
+  expect(client.rootListRef(toEntityId('Post', 'post-1'), TitleView)).toBe(
+    client.rootListRef(toEntityId('Post', 'post-1'), TitleView),
+  );
+  expect(client.ref<Post>('Post', 'post-1', TitleView)).not.toBe(
+    client.ref<Post>('Post', 'post-1', ContentView),
+  );
+});
+
+test('drops stable refs when records are deleted', () => {
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ type: 'Post' }],
+  });
+  const PostView = view<Post>()({
+    id: true,
+  });
+  const ref = client.ref<Post>('Post', 'post-1', PostView);
+
+  client.deleteRecord('Post', 'post-1');
+
+  expect(client.ref<Post>('Post', 'post-1', PostView)).not.toBe(ref);
+});
+
 test('live view subscriptions merge pushed records into the cache', () => {
   let handlers: any;
   const subscribeById = vi.fn((_type, _id, _select, _args, nextHandlers) => {
@@ -2405,6 +2454,7 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
   expect(metadata?.args).toEqual({ first: 1 });
   expect(posts.items.map(({ node }) => node?.id)).toEqual(['post-1']);
   expect(posts.pagination?.hasNext).toBe(true);
+  const firstPostRef = posts.items[0]?.node;
 
   await client.loadConnection(PostConnectionView, metadata!, { after: 'cursor-1' });
 
@@ -2415,6 +2465,7 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
 
   const updated = client.getRequestResult(request).posts;
   expect(updated.items.map(({ node }) => node?.id)).toEqual(['post-1', 'post-2']);
+  expect(updated.items[0]?.node).toBe(firstPostRef);
 });
 
 test(`'request' keys root connection cache by nested node view`, async () => {
