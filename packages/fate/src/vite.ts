@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   runnerImport,
+  transformWithOxc,
   type InlineConfig,
   type Plugin,
   type ResolvedConfig,
@@ -22,7 +23,8 @@ export type FateVitePluginOptions = {
   tsconfigFile?: false | string;
 };
 
-const defaultClientModule = '@nkzw/fate/client';
+const defaultClientRuntime: ClientRuntime = '@nkzw/fate';
+const defaultClientModule = `${defaultClientRuntime}/client`;
 const defaultGeneratedFile = '.fate/client.generated.ts';
 const legacyDeclarationFile = '.fate/client.d.ts';
 const defaultTsconfigFile = '.fate/tsconfig.json';
@@ -57,6 +59,8 @@ const removeIfExists = async (file: string) => {
 };
 
 export const fate = (options: FateVitePluginOptions): Plugin => {
+  const clientModule = `${options.clientModule ?? defaultClientRuntime}/client`;
+  const clientModules = new Set([defaultClientModule, clientModule]);
   let config: ResolvedConfig;
   let dependencies = new Set<string>();
   let generatedSource: string | null = null;
@@ -118,7 +122,7 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
   const generate = async () => {
     const moduleExports = await importServerModule();
     const source = createClientSource({
-      clientModule: options.clientModule ?? '@nkzw/fate',
+      clientModule: options.clientModule ?? defaultClientRuntime,
       moduleExports,
       moduleName: options.module,
       transport: options.transport ?? 'trpc',
@@ -158,6 +162,7 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
     configureServer: (viteServer) => {
       server = viteServer;
     },
+    enforce: 'pre',
     handleHotUpdate: async ({ file, server: viteServer }) => {
       if (!dependencies.has(path.normalize(file))) {
         return;
@@ -177,9 +182,11 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
         return;
       }
 
-      return generatedSource ?? (await ensureGenerated());
+      return transformWithOxc(generatedSource ?? (await ensureGenerated()), id, {
+        lang: 'ts',
+      });
     },
     name: '@nkzw/fate',
-    resolveId: (id) => (id === defaultClientModule ? resolvedClientModule : undefined),
+    resolveId: (id) => (clientModules.has(id) ? resolvedClientModule : undefined),
   };
 };

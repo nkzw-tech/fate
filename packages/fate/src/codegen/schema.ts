@@ -33,7 +33,6 @@ export const createSchema = (
   dataViews: ReadonlyArray<DataView<AnyRecord>>,
   roots: Record<string, RootConfig>,
 ) => {
-  const canonicalViews = new Map<string, DataView<AnyRecord>>();
   const rootSchema: Record<
     string,
     {
@@ -49,12 +48,7 @@ export const createSchema = (
   const ensureType = (view: DataView<AnyRecord>): string => {
     const typeName = view.typeName;
 
-    const canonicalView = canonicalViews.get(typeName) ?? view;
     const existing = fateTypes.get(typeName);
-
-    if (existing && !processing.has(typeName)) {
-      return typeName;
-    }
 
     if (processing.has(typeName)) {
       return typeName;
@@ -64,7 +58,7 @@ export const createSchema = (
 
     const fields: FateTypeConfig['fields'] = existing?.fields ?? {};
 
-    for (const [field, child] of Object.entries(canonicalView.fields)) {
+    for (const [field, child] of Object.entries(view.fields)) {
       if (isDataView(child)) {
         const relationType = ensureType(child);
         fields[field] = child.kind === 'list' ? { listOf: relationType } : { type: relationType };
@@ -88,10 +82,6 @@ export const createSchema = (
 
     if (!typeName) {
       throw new Error('Data view is missing a type name.');
-    }
-
-    if (!canonicalViews.has(typeName)) {
-      canonicalViews.set(typeName, view);
     }
   }
 

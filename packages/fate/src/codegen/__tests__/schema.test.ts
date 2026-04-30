@@ -133,6 +133,50 @@ test('derives root type from lists when byId is missing', () => {
   });
 });
 
+test('merges relations from repeated data views with the same type name', () => {
+  const userView = dataView<User>('User')({
+    id: true,
+    name: true,
+  });
+
+  const commentView = dataView<Comment>('Comment')({
+    author: userView,
+    id: true,
+  });
+
+  const postSummaryView = dataView<Post>('Post')({
+    author: userView,
+    id: true,
+  });
+
+  const postView = dataView<Post>('Post')({
+    author: userView,
+    comments: list(commentView),
+    id: true,
+  });
+
+  const { types } = createSchema([postSummaryView, commentView, userView, postView], {
+    posts: list(postView),
+  });
+
+  expect(types).toEqual([
+    { type: 'User' },
+    {
+      fields: {
+        author: { type: 'User' },
+        comments: { listOf: 'Comment' },
+      },
+      type: 'Post',
+    },
+    {
+      fields: {
+        author: { type: 'User' },
+      },
+      type: 'Comment',
+    },
+  ]);
+});
+
 test('identifies data views among mixed runtime exports', () => {
   const userView = dataView<User>('User')({
     id: true,

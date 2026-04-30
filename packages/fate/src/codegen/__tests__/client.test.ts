@@ -35,6 +35,9 @@ test('generates the same client source for the Prisma and Drizzle examples', asy
     expect(createClientSource({ moduleExports: drizzleModule, moduleName })).toEqual(
       createClientSource({ moduleExports: prismaModule, moduleName }),
     );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
+      "comments: { listOf: 'Comment' }",
+    );
   } finally {
     const [{ default: prisma }, { closeDatabase }] = await Promise.all([
       importExampleModule<{
