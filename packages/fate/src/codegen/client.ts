@@ -251,6 +251,7 @@ liveUrl: string | URL;`
   const liveTransportAssignment = hasLive
     ? `
   transport.subscribeById = liveTransport.subscribeById;
+  transport.subscribeConnection = liveTransport.subscribeConnection;
 `
     : '';
   const clientDeclarationModule = `${clientModule}/client`;

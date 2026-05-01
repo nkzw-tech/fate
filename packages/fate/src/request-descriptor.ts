@@ -1,6 +1,7 @@
 import {
   applyArgsPayloadToPlan,
   combineArgsPayload,
+  filterConnectionArgs,
   hashArgs,
   resolvedArgsFromPlan,
 } from './args.ts';
@@ -56,6 +57,22 @@ const getRootDescriptorKey = (
   }
 
   return getListKey('__root__', name, plan.args.get('')?.hash ?? hashArgs(argsPayload));
+};
+
+const getRootListDescriptorKey = (
+  name: string,
+  argsPayload: ResolvedArgsPayload | undefined,
+  plan: SelectionPlan,
+): string => {
+  if (!argsPayload) {
+    return name;
+  }
+
+  return getListKey(
+    '__root__',
+    name,
+    plan.args.get('')?.hash ?? hashArgs(filterConnectionArgs(argsPayload) ?? {}),
+  );
 };
 
 export const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boolean =>
@@ -210,7 +227,7 @@ export const createRequestDescriptor = (
       argsPayload,
       hasItems,
       kind: 'list',
-      listKey: getRootDescriptorKey(name, argsPayload, plan),
+      listKey: getRootListDescriptorKey(name, argsPayload, plan),
       name,
       nodeRefViewNames: getRootViewNames(nodeView),
       plan,

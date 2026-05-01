@@ -76,6 +76,7 @@ export const commentRouter = router({
         }),
       )) as CommentItem & { post?: { commentCount: number } };
 
+      live.connection('Post.comments', { id: input.postId }).appendNode('Comment', comment.id);
       live.update('Post', input.postId);
 
       return comment;
@@ -129,6 +130,7 @@ export const commentRouter = router({
         post?: { commentCount: number };
       };
 
+      live.connection('Post.comments', { id: comment.postId }).deleteEdge('Comment', input.id);
       live.update('Post', comment.postId);
 
       return resolved;

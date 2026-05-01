@@ -735,6 +735,65 @@ app.all('/fate/*', createHonoFateHandler(fate));
 
 Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
 
+### Live List Views
+
+`useLiveListView` mirrors `useListView`, but subscribes to live connection events for the connection it receives:
+
+```tsx
+import { useLiveListView, useLiveView, ViewRef } from 'react-fate';
+
+export function PostCard({ post: postRef }: { post: ViewRef<'Post'> }) {
+  const post = useLiveView(PostView, postRef);
+  const [comments, loadNext] = useLiveListView(CommentConnectionView, post.comments);
+
+  return (
+    <>
+      {comments.map(({ node }) => (
+        <CommentCard comment={node} key={node.id} />
+      ))}
+      {loadNext ? <button onClick={loadNext}>Load more</button> : null}
+    </>
+  );
+}
+```
+
+The hook returns the same tuple as `useListView`: items, `loadNext`, and `loadPrevious`. Live events append, prepend, insert, or delete edges from one connection without deleting the underlying records.
+
+By default, live appends and prepends respect pagination boundaries. If the relevant edge still has more pages, fate keeps the incoming node attached to that edge instead of expanding the loaded window. For chat or activity streams where new items should keep appearing immediately, opt into visible live insertion on the connection view:
+
+```tsx
+const MessageConnectionView = {
+  args: { first: 30 },
+  items: {
+    node: MessageView,
+  },
+  live: {
+    append: 'visible',
+  },
+};
+```
+
+Emit connection events on the server when list membership changes:
+
+```tsx
+live.connection('Post.comments', { id: postId }).prependNode('Comment', comment.id);
+live.connection('Post.comments', { id: postId }).deleteEdge('Comment', comment.id);
+```
+
+For root lists, use the generated root procedure name:
+
+```tsx
+live.connection('posts', { categoryId }).prependNode('Post', post.id);
+```
+
+If the changed list cannot be described precisely, invalidate the active connection and fate will refetch it:
+
+```tsx
+live.connection('posts', { categoryId }).invalidate();
+```
+
+Connection identity follows Relay's model: pagination args like `first`, `last`, `after`, and `before` are ignored for live connection matching, while filter args such as `categoryId` are part of the identity.
+
 ### Emitting Events
 
 After a mutation changes an object, emit an update event for that object:

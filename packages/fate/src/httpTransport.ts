@@ -1,6 +1,7 @@
 import type {
   FateLiveControlOperation,
   FateLiveControlRequest,
+  FateLiveConnectionEvent,
   FateLiveEvent,
   FateLiveMessage,
   FateOperation,
@@ -38,11 +39,15 @@ type PendingOperation = {
 
 type LiveSubscription = {
   args: Record<string, unknown> | undefined;
-  handlers: Parameters<NonNullable<Transport['subscribeById']>>[4];
+  handlers:
+    | Parameters<NonNullable<Transport['subscribeById']>>[4]
+    | Parameters<NonNullable<Transport['subscribeConnection']>>[5];
   id: string;
   lastEventId?: string;
+  procedure?: string;
   select: Array<string>;
-  targetId: string | number;
+  selectionArgs?: Record<string, unknown> | undefined;
+  targetId?: string | number;
   type: string;
 };
 
@@ -430,15 +435,27 @@ export function createHTTPTransport<
       }
 
       const operations = [...liveSubscriptions.values()].map(
-        (subscription): FateLiveControlOperation => ({
-          args: subscription.args,
-          entityId: subscription.targetId,
-          id: subscription.id,
-          kind: 'subscribe',
-          lastEventId: subscription.lastEventId,
-          select: subscription.select,
-          type: subscription.type,
-        }),
+        (subscription): FateLiveControlOperation =>
+          subscription.procedure
+            ? {
+                args: subscription.args,
+                id: subscription.id,
+                kind: 'subscribeConnection',
+                lastEventId: subscription.lastEventId,
+                procedure: subscription.procedure,
+                select: subscription.select,
+                selectionArgs: subscription.selectionArgs,
+                type: subscription.type,
+              }
+            : {
+                args: subscription.args,
+                entityId: subscription.targetId!,
+                id: subscription.id,
+                kind: 'subscribe',
+                lastEventId: subscription.lastEventId,
+                select: subscription.select,
+                type: subscription.type,
+              },
       );
 
       try {
@@ -589,11 +606,22 @@ export function createHTTPTransport<
                   continue;
                 }
 
+                if (event.kind === 'connection') {
+                  const handlers = subscription.handlers as Parameters<
+                    NonNullable<Transport['subscribeConnection']>
+                  >[5];
+                  handlers.onEvent(event.event as FateLiveConnectionEvent);
+                  continue;
+                }
+
                 const liveEvent = event.event as FateLiveEvent;
+                const handlers = subscription.handlers as Parameters<
+                  NonNullable<Transport['subscribeById']>
+                >[4];
                 if (liveEvent.delete === true) {
-                  subscription.handlers.onDelete?.(liveEvent.id ?? subscription.targetId);
+                  handlers.onDelete?.(liveEvent.id ?? subscription.targetId);
                 } else if ('data' in liveEvent) {
-                  subscription.handlers.onData(liveEvent.data);
+                  handlers.onData(liveEvent.data);
                 }
               }
             }
@@ -650,6 +678,47 @@ export function createHTTPTransport<
         id: liveId,
         kind: 'subscribe',
         select: [...select],
+        type,
+      });
+
+      return () => {
+        if (!liveSubscriptions.delete(liveId)) {
+          return;
+        }
+
+        if (liveSubscriptions.size === 0) {
+          pendingLiveOperations = [];
+          liveOperationScheduled = false;
+          stopLiveStream();
+          return;
+        }
+
+        enqueueLiveOperation({
+          id: liveId,
+          kind: 'unsubscribe',
+        });
+      };
+    };
+
+    transport.subscribeConnection = (procedure, type, args, select, selectionArgs, handlers) => {
+      const liveId = String(++liveNextId);
+      liveSubscriptions.set(liveId, {
+        args,
+        handlers,
+        id: liveId,
+        procedure,
+        select: [...select],
+        selectionArgs,
+        type,
+      });
+
+      enqueueLiveOperation({
+        args,
+        id: liveId,
+        kind: 'subscribeConnection',
+        procedure,
+        select: [...select],
+        selectionArgs,
         type,
       });
 

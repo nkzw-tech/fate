@@ -48,6 +48,7 @@ export { createTRPCTransport } from './transport.ts';
 export { createHTTPTransport } from './httpTransport.ts';
 export type { InferFateAPI } from './server/http.ts';
 export type {
+  FateLiveConnectionEvent,
   FateLiveEvent,
   FateOperation,
   FateProtocolRequest,

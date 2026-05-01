@@ -1,17 +1,16 @@
-import { cloneArgs, hashArgs } from './args.ts';
+import { cloneArgs, hashArgs, paginationArgKeys } from './args.ts';
 import { isRecord } from './record.ts';
 import {
   AnyRecord,
   isViewTag,
   ViewRef,
   ViewsTag,
+  type ConnectionLivePolicy,
   type Entity,
   type Selection,
   type View,
 } from './types.ts';
 import { getViewPayloads } from './view.ts';
-
-const paginationKeys = new Set(['after', 'before', 'cursor']);
 
 type WalkContext = 'default' | 'connection';
 
@@ -24,6 +23,7 @@ export type SelectionPlan = {
     string,
     Readonly<{ hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }>
   >;
+  readonly live: Map<string, ConnectionLivePolicy>;
   readonly paths: Set<string>;
 };
 
@@ -42,6 +42,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     string,
     { hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }
   >();
+  const live = new Map<string, ConnectionLivePolicy>();
   const paths = new Set<string>();
 
   const assignArgs = (path: string, value: AnyRecord, ignoreKeys?: ReadonlySet<string>) => {
@@ -51,14 +52,22 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
 
   const walk = (selection: AnyRecord, prefix: string | null, context: WalkContext = 'default') => {
     if (prefix === null && context !== 'connection' && isConnectionSelection(selection)) {
+      if (selection.live && isRecord(selection.live)) {
+        live.set('', {
+          append: selection.live.append === 'visible' ? 'visible' : 'edge',
+          prepend: selection.live.prepend === 'visible' ? 'visible' : 'edge',
+        });
+      }
       if (selection.args && isRecord(selection.args)) {
         const clonedArgs = cloneArgs(selection.args, 'args');
         const ignoreKeys =
-          isRecord(selection.items) && isRecord(selection.items.node) ? paginationKeys : undefined;
+          isRecord(selection.items) && isRecord(selection.items.node)
+            ? paginationArgKeys
+            : undefined;
         assignArgs('', clonedArgs, ignoreKeys);
       }
 
-      const { args, ...withoutArgs } = selection;
+      const { args, live: _live, ...withoutArgs } = selection;
       walk(withoutArgs, prefix, 'connection');
       return;
     }
@@ -68,7 +77,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       const path = prefix ? `${prefix}.${key}` : key;
 
       if (context === 'connection') {
-        if (key === 'args' || key === 'pagination') {
+        if (key === 'args' || key === 'live' || key === 'pagination') {
           continue;
         }
 
@@ -98,16 +107,22 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
         const selectionObject = value;
 
         if (isConnectionSelection(selectionObject)) {
+          if (selectionObject.live && isRecord(selectionObject.live)) {
+            live.set(path, {
+              append: selectionObject.live.append === 'visible' ? 'visible' : 'edge',
+              prepend: selectionObject.live.prepend === 'visible' ? 'visible' : 'edge',
+            });
+          }
           if (selectionObject.args && isRecord(selectionObject.args)) {
             const clonedArgs = cloneArgs(selectionObject.args, path);
             const ignoreKeys =
               isRecord(selectionObject.items) && isRecord(selectionObject.items.node)
-                ? paginationKeys
+                ? paginationArgKeys
                 : undefined;
             assignArgs(path, clonedArgs, ignoreKeys);
           }
 
-          const { args: _ignored, ...withoutArgs } = selectionObject;
+          const { args: _ignored, live: _live, ...withoutArgs } = selectionObject;
           walk(withoutArgs, path, 'connection');
           continue;
         }
@@ -118,7 +133,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
           const clonedArgs = cloneArgs(selectionObject.args as AnyRecord, path);
           const ignoreKeys =
             isRecord(selectionObject.items) && isRecord(selectionObject.items?.node)
-              ? paginationKeys
+              ? paginationArgKeys
               : undefined;
           assignArgs(path, clonedArgs, ignoreKeys);
           const { args, ...rest } = selectionObject;
@@ -144,5 +159,5 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     }
   }
 
-  return { args, paths };
+  return { args, live, paths };
 };

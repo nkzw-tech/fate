@@ -2,7 +2,9 @@ import type {
   FateLiveControlRequest,
   FateLiveEvent,
   FateLiveMessage,
+  FateLiveConnectionEvent,
   FateLiveSubscribeOperation,
+  FateLiveConnectionSubscribeOperation,
   FateOperation,
   FateOperationResult,
   FateProtocolRequest,
@@ -15,7 +17,7 @@ import { resolveConnection, type ConnectionResult } from './connection.ts';
 import { isDataView, type DataView, type DataViewResult } from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
-import type { LiveEventBus, LiveSourceEvent } from './live.ts';
+import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
 import type { SourceDefinition } from './source.ts';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -363,6 +365,27 @@ const assertLiveControlRequest = (value: unknown): FateLiveControlRequest => {
       continue;
     }
 
+    if (operation.kind === 'subscribeConnection') {
+      if (
+        typeof operation.type !== 'string' ||
+        typeof operation.procedure !== 'string' ||
+        ('args' in operation && operation.args !== undefined && !isRecord(operation.args)) ||
+        ('selectionArgs' in operation &&
+          operation.selectionArgs !== undefined &&
+          !isRecord(operation.selectionArgs)) ||
+        ('lastEventId' in operation &&
+          operation.lastEventId !== undefined &&
+          typeof operation.lastEventId !== 'string') ||
+        !isStringArray(operation.select)
+      ) {
+        throw new FateRequestError(
+          'BAD_REQUEST',
+          'Invalid Fate live connection subscribe operation.',
+        );
+      }
+      continue;
+    }
+
     if (operation.kind !== 'unsubscribe') {
       throw new FateRequestError('BAD_REQUEST', 'Invalid Fate live operation.');
     }
@@ -383,6 +406,28 @@ const sse = (message: FateLiveMessage, eventId?: string): string => {
 
 const livePayload = (event: LiveSourceEvent, data: unknown): FateLiveEvent =>
   event.type === 'delete' || data == null ? { delete: true, id: event.id } : { data };
+
+const liveConnectionPayload = (
+  event: LiveConnectionSourceEvent,
+  node: unknown,
+): FateLiveConnectionEvent => {
+  switch (event.type) {
+    case 'deleteEdge':
+      return { id: event.id!, nodeType: event.nodeType!, type: 'deleteEdge' };
+    case 'invalidate':
+      return { type: 'invalidate' };
+    default:
+      return {
+        edge: {
+          cursor: event.cursor,
+          node,
+        },
+        nodeType: event.nodeType!,
+        targetCursor: event.targetCursor,
+        type: event.type,
+      };
+  }
+};
 
 export function createFateServer<
   Context = unknown,
@@ -707,6 +752,83 @@ export function createFateServer<
     })();
   };
 
+  const subscribeLiveConnectionOperation = (
+    connection: LiveConnection<Context>,
+    operation: FateLiveConnectionSubscribeOperation,
+  ) => {
+    connection.subscriptions.get(operation.id)?.abort();
+
+    const subscriptionController = new AbortController();
+    const abort = () => subscriptionController.abort();
+    connection.subscriptions.set(operation.id, { abort });
+
+    void (async () => {
+      try {
+        const iterable = liveBus!.subscribeConnection(
+          { args: operation.args, procedure: operation.procedure },
+          {
+            lastEventId: operation.lastEventId,
+            signal: subscriptionController.signal,
+          },
+        );
+
+        for await (const [event] of iterable) {
+          const nodeType = event.nodeType ?? operation.type;
+          const source = nodeType ? sourcesByType.get(nodeType) : null;
+          const node =
+            event.type === 'deleteEdge' || event.type === 'invalidate'
+              ? null
+              : event.node !== undefined
+                ? event.node
+                : event.id != null && source
+                  ? await resolveSourceById({
+                      ctx: connection.ctx,
+                      id: String(event.id),
+                      input: {
+                        args: operation.selectionArgs,
+                        select: operation.select,
+                      },
+                      registry: sources.registry,
+                      source,
+                    })
+                  : null;
+
+          if (
+            event.type !== 'invalidate' &&
+            (!nodeType || (event.type !== 'deleteEdge' && node == null))
+          ) {
+            throw new FateRequestError(
+              'NOT_FOUND',
+              `No source registered for live connection node type '${nodeType}'.`,
+            );
+          }
+
+          sendLiveMessage(
+            connection,
+            {
+              event: liveConnectionPayload(event, node),
+              id: operation.id,
+              kind: 'connection',
+            },
+            event.eventId,
+          );
+        }
+      } catch (error) {
+        if (!subscriptionController.signal.aborted) {
+          sendLiveMessage(connection, {
+            error: toProtocolError(error),
+            id: operation.id,
+            kind: 'error',
+          });
+        }
+      } finally {
+        if (connection.subscriptions.get(operation.id)?.abort === abort) {
+          connection.subscriptions.delete(operation.id);
+        }
+      }
+    })();
+  };
+
   const controlLiveConnection = async (request: Request): Promise<FateProtocolResponse> => {
     const body = assertLiveControlRequest(await parseJSON(request));
     const connection = liveConnections.get(body.connectionId);
@@ -719,6 +841,8 @@ export function createFateServer<
       try {
         if (operation.kind === 'subscribe') {
           subscribeLiveOperation(connection, operation);
+        } else if (operation.kind === 'subscribeConnection') {
+          subscribeLiveConnectionOperation(connection, operation);
         } else {
           connection.subscriptions.get(operation.id)?.abort();
           connection.subscriptions.delete(operation.id);

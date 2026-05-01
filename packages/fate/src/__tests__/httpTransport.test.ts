@@ -175,6 +175,72 @@ test('subscribes to native SSE live events', async () => {
   dispose?.();
 });
 
+test('subscribes to native SSE live connection events', async () => {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          [
+            'id: evt-1',
+            'event: connection',
+            'data: {"kind":"connection","id":"1","event":{"type":"appendEdge","nodeType":"Post","edge":{"cursor":"cursor-1","node":{"id":"1","title":"One"}}}}',
+            '',
+            'event: connection',
+            'data: {"kind":"connection","id":"1","event":{"type":"deleteEdge","nodeType":"Post","id":"1"}}',
+            '',
+            '',
+          ].join('\n'),
+        ),
+      );
+    },
+  });
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+    init?.method === 'GET'
+      ? new Response(stream)
+      : jsonResponse({
+          results: [{ data: null, id: '1', ok: true }],
+          version: 1,
+        }),
+  );
+  const onEvent = vi.fn();
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    fetch,
+    url: '/fate',
+  });
+
+  const dispose = transport.subscribeConnection?.(
+    'posts',
+    'Post',
+    { categoryId: 'fruit' },
+    new Set(['id', 'title']),
+    undefined,
+    { onEvent },
+  );
+
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(onEvent).toHaveBeenCalledWith({
+    edge: {
+      cursor: 'cursor-1',
+      node: { id: '1', title: 'One' },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+  expect(onEvent).toHaveBeenCalledWith({ id: '1', nodeType: 'Post', type: 'deleteEdge' });
+  const postCall = (fetch.mock.calls as unknown as Array<[string, RequestInit]>).find(
+    ([, init]) => init.method === 'POST',
+  );
+  expect(JSON.parse(String(postCall?.[1].body ?? '{}')).operations[0]).toMatchObject({
+    args: { categoryId: 'fruit' },
+    kind: 'subscribeConnection',
+    procedure: 'posts',
+    select: ['id', 'title'],
+    type: 'Post',
+  });
+
+  dispose?.();
+});
+
 test('preserves native SSE live URL query params', async () => {
   const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
     init?.method === 'GET'

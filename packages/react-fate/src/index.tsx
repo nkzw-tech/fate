@@ -22,6 +22,7 @@ export {
 
 export { FateClient, useFateClient } from './context.tsx';
 export { useLiveView } from './useLiveView.tsx';
+export { useLiveListView } from './useLiveListView.tsx';
 export { useView } from './useView.tsx';
 export { useRequest } from './useRequest.tsx';
 export { useListView } from './useListView.tsx';

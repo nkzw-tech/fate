@@ -428,6 +428,49 @@ test('routes live updates only to matching subscriptions on one SSE stream', asy
   await reader.cancel();
 });
 
+test('streams live connection events over SSE', async () => {
+  const { fate, live } = createServer();
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            args: { categoryId: 'fruit' },
+            id: 'sub-1',
+            kind: 'subscribeConnection',
+            procedure: 'posts',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 200);
+
+  live.connection('posts', { categoryId: 'fruit' }).appendEdge('Post', '1', {
+    cursor: 'cursor-1',
+    eventId: 'evt-1',
+  });
+  await reader.read();
+  const { value } = await reader.read();
+  const chunk = new TextDecoder().decode(value);
+
+  expect(chunk).toContain('id: evt-1');
+  expect(chunk).toContain('event: connection');
+  expect(chunk).toContain('"id":"sub-1"');
+  expect(chunk).toContain(
+    '"event":{"edge":{"cursor":"cursor-1","node":{"id":"1","title":"One"}},"nodeType":"Post","type":"appendEdge"}',
+  );
+  await reader.cancel();
+});
+
 test('creates fetch and Hono-compatible handlers', async () => {
   const { fate } = createServer();
   const fetchHandler = createFateFetchHandler(fate);

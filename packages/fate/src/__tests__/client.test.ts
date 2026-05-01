@@ -4,6 +4,7 @@ import { mutation } from '../mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
 import { FateRequestError } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
+import { createRequestDescriptor } from '../request-descriptor.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
 import { getListKey, List } from '../store.ts';
@@ -342,6 +343,1026 @@ test('live delete events remove records from lists', () => {
   expect(client.store.getList('posts')).toEqual([]);
 
   dispose();
+});
+
+test('live list subscriptions connection events', () => {
+  let handlers: any;
+  const subscribeConnection = vi.fn(
+    (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+      handlers = nextHandlers;
+      return vi.fn();
+    },
+  );
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postOneId = toEntityId('Post', 'post-1');
+  client.store.merge(
+    postOneId,
+    {
+      __typename: 'Post',
+      content: 'Apple',
+      id: 'post-1',
+    },
+    new Set(['__typename', 'content', 'id']),
+  );
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const dispose = client.subscribeLiveListView(PostView, {
+    args: { after: 'cursor-1', categoryId: 'fruit', first: 10 },
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  expect(subscribeConnection).toHaveBeenCalledWith(
+    'posts',
+    'Post',
+    { categoryId: 'fruit' },
+    expect.any(Set),
+    undefined,
+    expect.objectContaining({
+      onError: expect.any(Function),
+      onEvent: expect.any(Function),
+    }),
+  );
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1', 'cursor-2'],
+    ids: [postOneId, toEntityId('Post', 'post-2')],
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-0',
+      node: {
+        __typename: 'Post',
+        content: 'Apricot',
+        id: 'post-0',
+      },
+    },
+    nodeType: 'Post',
+    targetCursor: 'cursor-1',
+    type: 'insertEdgeBefore',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-0', 'cursor-1', 'cursor-2'],
+    ids: [toEntityId('Post', 'post-0'), postOneId, toEntityId('Post', 'post-2')],
+  });
+
+  handlers.onEvent({
+    id: 'post-1',
+    nodeType: 'Post',
+    type: 'deleteEdge',
+  });
+
+  expect(client.store.read(postOneId)).toMatchObject({ content: 'Apple' });
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-0', 'cursor-2'],
+    ids: [toEntityId('Post', 'post-0'), toEntityId('Post', 'post-2')],
+  });
+
+  dispose();
+});
+
+test('live list append visibly extends an unexhausted connection as a pending edge', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postOneId = toEntityId('Post', 'post-1');
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(PostView, {
+    field: 'posts',
+    key: 'posts',
+    live: { append: 'visible' },
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    liveAfterIds: undefined,
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+    },
+    pendingAfterIds: [toEntityId('Post', 'post-2')],
+  });
+});
+
+test('live list append fills underfull exhausted connection by default', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postOneId = toEntityId('Post', 'post-1');
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(PostView, {
+    args: { first: 2 },
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1', 'cursor-2'],
+    ids: [postOneId, toEntityId('Post', 'post-2')],
+    liveAfterIds: undefined,
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+    pendingAfterIds: undefined,
+  });
+});
+
+test('live list append exposes next page when exhausted connection is full', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postOneId = toEntityId('Post', 'post-1');
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(PostView, {
+    args: { first: 1 },
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    liveAfterIds: [toEntityId('Post', 'post-2')],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'cursor-1',
+    },
+    pendingAfterIds: undefined,
+  });
+});
+
+test('live nested list changes keep the owner field in sync', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ fields: { comments: { listOf: 'Comment' } }, type: 'Post' }, { type: 'Comment' }],
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  const commentOneId = toEntityId('Comment', 'comment-1');
+  const listKey = getListKey(postId, 'comments');
+  client.store.merge(
+    commentOneId,
+    {
+      __typename: 'Comment',
+      content: 'Apple',
+      id: 'comment-1',
+    },
+    new Set(['__typename', 'content', 'id']),
+  );
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      comments: createNodeRefs([commentOneId]),
+      id: 'post-1',
+    },
+    new Set(['__typename', 'comments', 'id']),
+  );
+  client.store.setList(listKey, {
+    cursors: ['cursor-1'],
+    ids: [commentOneId],
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(CommentView, {
+    args: { first: 2, id: 'post-1' },
+    field: 'comments',
+    key: listKey,
+    owner: postId,
+    procedure: 'Post.comments',
+    root: false,
+    type: 'Comment',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Comment',
+        content: 'Banana',
+        id: 'comment-2',
+      },
+    },
+    nodeType: 'Comment',
+    type: 'appendEdge',
+  });
+
+  const commentTwoId = toEntityId('Comment', 'comment-2');
+  expect(client.store.getList(listKey)).toEqual([commentOneId, commentTwoId]);
+  expect(getNodeRefIds(client.store.read(postId)?.comments)).toEqual([commentOneId, commentTwoId]);
+
+  handlers.onEvent({
+    id: 'comment-1',
+    nodeType: 'Comment',
+    type: 'deleteEdge',
+  });
+
+  expect(client.store.getList(listKey)).toEqual([commentTwoId]);
+  expect(getNodeRefIds(client.store.read(postId)?.comments)).toEqual([commentTwoId]);
+});
+
+test('hidden live nested list appends do not leak into the owner field', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ fields: { comments: { listOf: 'Comment' } }, type: 'Post' }, { type: 'Comment' }],
+  });
+
+  const postId = toEntityId('Post', 'post-1');
+  const commentOneId = toEntityId('Comment', 'comment-1');
+  const listKey = getListKey(postId, 'comments');
+  client.store.merge(
+    postId,
+    {
+      __typename: 'Post',
+      comments: createNodeRefs([commentOneId]),
+      id: 'post-1',
+    },
+    new Set(['__typename', 'comments', 'id']),
+  );
+  client.store.setList(listKey, {
+    cursors: ['cursor-1'],
+    ids: [commentOneId],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'cursor-1',
+    },
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(CommentView, {
+    args: { first: 1, id: 'post-1' },
+    field: 'comments',
+    key: listKey,
+    owner: postId,
+    procedure: 'Post.comments',
+    root: false,
+    type: 'Comment',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Comment',
+        content: 'Banana',
+        id: 'comment-2',
+      },
+    },
+    nodeType: 'Comment',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState(listKey)).toMatchObject({
+    ids: [commentOneId],
+    liveAfterIds: [toEntityId('Comment', 'comment-2')],
+  });
+  expect(getNodeRefIds(client.store.read(postId)?.comments)).toEqual([commentOneId]);
+});
+
+test('live list append preserves unexhausted edge by default', () => {
+  let handlers: any;
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const postOneId = toEntityId('Post', 'post-1');
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+
+  client.subscribeLiveListView(PostView, {
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1'],
+    ids: [postOneId],
+    liveAfterIds: [toEntityId('Post', 'post-2')],
+    pendingAfterIds: undefined,
+  });
+});
+
+test('live visible append preserves an existing pending trailing edge across load more', async () => {
+  let handlers: any;
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [
+      {
+        cursor: 'cursor-3',
+        node: {
+          __typename: 'Comment',
+          content: 'Cherry',
+          id: 'comment-3',
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Comment' }],
+  });
+
+  const commentOneId = toEntityId('Comment', 'comment-1');
+  const commentTwoId = toEntityId('Comment', 'comment-2');
+  client.store.setList('comments', {
+    cursors: ['cursor-1'],
+    ids: [commentOneId],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'cursor-1',
+    },
+    pendingAfterIds: [commentTwoId],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+  const metadata = {
+    args: { first: 1 },
+    field: 'comments',
+    key: 'comments',
+    live: { append: 'visible' },
+    owner: 'comments',
+    procedure: 'comments',
+    root: true,
+    type: 'Comment',
+  } satisfies ConnectionMetadata;
+
+  client.subscribeLiveListView(CommentView, metadata);
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Comment',
+        content: 'Banana',
+        id: 'comment-2',
+      },
+    },
+    nodeType: 'Comment',
+    type: 'appendEdge',
+  });
+
+  expect(client.store.getListState('comments')).toMatchObject({
+    ids: [commentOneId],
+    pendingAfterIds: [commentTwoId],
+  });
+
+  await client.loadConnection(CommentView, metadata, { after: 'cursor-1', first: 1 });
+
+  expect(client.store.getListState('comments')).toMatchObject({
+    ids: [commentOneId, toEntityId('Comment', 'comment-3')],
+    pendingAfterIds: [commentTwoId],
+  });
+});
+
+test('live visible append keeps remote trailing edge after loaded pages', async () => {
+  let handlers: any;
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [
+      {
+        cursor: 'cursor-3',
+        node: {
+          __typename: 'Comment',
+          content: 'Cherry',
+          id: 'comment-3',
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Comment' }],
+  });
+
+  const commentOneId = toEntityId('Comment', 'comment-1');
+  client.store.setList('comments', {
+    cursors: ['cursor-1'],
+    ids: [commentOneId],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'cursor-1',
+    },
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+  const metadata = {
+    args: { first: 1 },
+    field: 'comments',
+    key: 'comments',
+    live: { append: 'visible' },
+    owner: 'comments',
+    procedure: 'comments',
+    root: true,
+    type: 'Comment',
+  } satisfies ConnectionMetadata;
+
+  client.subscribeLiveListView(CommentView, metadata);
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Comment',
+        content: 'Banana',
+        id: 'comment-2',
+      },
+    },
+    nodeType: 'Comment',
+    type: 'appendEdge',
+  });
+
+  const commentTwoId = toEntityId('Comment', 'comment-2');
+  expect(client.store.getListState('comments')).toMatchObject({
+    ids: [commentOneId],
+    pendingAfterIds: [commentTwoId],
+  });
+
+  await client.loadConnection(CommentView, metadata, { after: 'cursor-1', first: 1 });
+
+  expect(client.store.getListState('comments')).toMatchObject({
+    ids: [commentOneId, toEntityId('Comment', 'comment-3')],
+    pendingAfterIds: [commentTwoId],
+  });
+});
+
+test('root list connection identity ignores page size arguments', () => {
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const PostConnectionView = {
+    items: {
+      node: PostView,
+    },
+  };
+
+  const firstPage = createRequestDescriptor(
+    {
+      posts: { args: { categoryId: 'fruit', first: 10 }, list: PostConnectionView },
+    },
+    () => 'Post',
+  );
+  const secondPage = createRequestDescriptor(
+    {
+      posts: { args: { categoryId: 'fruit', first: 20 }, list: PostConnectionView },
+    },
+    () => 'Post',
+  );
+  const differentFilter = createRequestDescriptor(
+    {
+      posts: { args: { categoryId: 'vegetable', first: 10 }, list: PostConnectionView },
+    },
+    () => 'Post',
+  );
+
+  const firstList = firstPage.items[0];
+  const secondList = secondPage.items[0];
+  const filteredList = differentFilter.items[0];
+  if (firstList?.kind !== 'list' || secondList?.kind !== 'list' || filteredList?.kind !== 'list') {
+    throw new Error('Expected list descriptors.');
+  }
+
+  expect(firstList.listKey).toBe(secondList.listKey);
+  expect(firstPage.key).not.toBe(secondPage.key);
+  expect(firstList.listKey).not.toBe(filteredList.listKey);
+});
+
+test('cache-first root lists fetch when the requested page is not covered', async () => {
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [
+        {
+          cursor: 'cursor-1',
+          node: { __typename: 'Post', content: 'Apple', id: 'post-1' },
+        },
+      ],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-1' },
+    })
+    .mockResolvedValueOnce({
+      items: [
+        {
+          cursor: 'cursor-1',
+          node: { __typename: 'Post', content: 'Apple', id: 'post-1' },
+        },
+        {
+          cursor: 'cursor-2',
+          node: { __typename: 'Post', content: 'Banana', id: 'post-2' },
+        },
+      ],
+      pagination: { hasNext: true, hasPrevious: false, nextCursor: 'cursor-2' },
+    })
+    .mockResolvedValueOnce({
+      items: [
+        {
+          cursor: 'cursor-3',
+          node: { __typename: 'Post', content: 'Cherry', id: 'post-3' },
+        },
+      ],
+      pagination: { hasNext: false, hasPrevious: true, previousCursor: 'cursor-3' },
+    });
+
+  const client = createClient({
+    roots: { posts: clientRoot('Post') },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const PostConnectionView = {
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+    pagination: {
+      hasNext: true,
+      hasPrevious: true,
+      nextCursor: true,
+      previousCursor: true,
+    },
+  };
+
+  await client.request({
+    posts: { args: { first: 1 }, list: PostConnectionView },
+  });
+
+  await client.request({
+    posts: { args: { first: 2 }, list: PostConnectionView },
+  });
+
+  await client.request({
+    posts: { args: { last: 1 }, list: PostConnectionView },
+  });
+
+  expect(fetchList).toHaveBeenCalledTimes(3);
+  expect(fetchList).toHaveBeenNthCalledWith(2, 'posts', new Set(['content', 'id']), { first: 2 });
+  expect(fetchList).toHaveBeenNthCalledWith(3, 'posts', new Set(['content', 'id']), { last: 1 });
+});
+
+test('live connection inserts invalidate when the target cursor is not loaded', async () => {
+  let handlers: any;
+  const fetchList = vi.fn(async () => ({
+    items: [
+      {
+        cursor: 'cursor-1',
+        node: {
+          __typename: 'Post',
+          content: 'Apple',
+          id: 'post-1',
+        },
+      },
+      {
+        cursor: 'cursor-2',
+        node: {
+          __typename: 'Post',
+          content: 'Banana',
+          id: 'post-2',
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  }));
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  client.store.setList('posts', {
+    cursors: ['cursor-1'],
+    ids: [toEntityId('Post', 'post-1')],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  client.subscribeLiveListView(PostView, {
+    args: { first: 1 },
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({
+    edge: {
+      cursor: 'cursor-2',
+      node: {
+        __typename: 'Post',
+        content: 'Banana',
+        id: 'post-2',
+      },
+    },
+    nodeType: 'Post',
+    targetCursor: 'missing-cursor',
+    type: 'insertEdgeAfter',
+  });
+
+  await vi.waitFor(() => expect(fetchList).toHaveBeenCalledTimes(1));
+  expect(client.store.getListState('posts')).toMatchObject({
+    cursors: ['cursor-1', 'cursor-2'],
+    ids: [toEntityId('Post', 'post-1'), toEntityId('Post', 'post-2')],
+  });
+});
+
+test('older failed live connection invalidations do not restore over newer results', async () => {
+  let handlers: any;
+  const pending: Array<{
+    reject: (error: Error) => void;
+    resolve: (value: {
+      items: Array<{ cursor: string; node: AnyRecord }>;
+      pagination: { hasNext: boolean; hasPrevious: boolean };
+    }) => void;
+  }> = [];
+  const fetchList = vi.fn(
+    () =>
+      new Promise<{
+        items: Array<{ cursor: string; node: AnyRecord }>;
+        pagination: { hasNext: boolean; hasPrevious: boolean };
+      }>((resolve, reject) => {
+        pending.push({ reject, resolve });
+      }),
+  );
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      subscribeConnection: vi.fn(
+        (_procedure, _type, _args, _select, _selectionArgs, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        },
+      ),
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  client.store.setList('posts', {
+    cursors: ['cursor-old'],
+    ids: [toEntityId('Post', 'post-old')],
+    pagination: {
+      hasNext: false,
+      hasPrevious: false,
+    },
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  client.subscribeLiveListView(PostView, {
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  handlers.onEvent({ type: 'invalidate' });
+  handlers.onEvent({ type: 'invalidate' });
+
+  await vi.waitFor(() => expect(fetchList).toHaveBeenCalledTimes(2));
+
+  pending[1]!.resolve({
+    items: [
+      {
+        cursor: 'cursor-new',
+        node: {
+          __typename: 'Post',
+          content: 'New',
+          id: 'post-new',
+        },
+      },
+    ],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+
+  await vi.waitFor(() =>
+    expect(client.store.getListState('posts')).toMatchObject({
+      ids: [toEntityId('Post', 'post-new')],
+    }),
+  );
+
+  pending[0]!.reject(new Error('stale failure'));
+  await Promise.resolve();
+
+  expect(client.store.getListState('posts')).toMatchObject({
+    ids: [toEntityId('Post', 'post-new')],
+  });
 });
 
 test(`'readView' returns the selected fields`, () => {

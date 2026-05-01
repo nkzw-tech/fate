@@ -31,6 +31,8 @@ const getListEntries = (
     | Readonly<{
         cursors?: ReadonlyArray<string | undefined>;
         ids: ReadonlyArray<string>;
+        liveAfterIds?: ReadonlyArray<string>;
+        liveBeforeIds?: ReadonlyArray<string>;
         pendingAfterIds?: ReadonlyArray<string>;
         pendingBeforeIds?: ReadonlyArray<string>;
       }>

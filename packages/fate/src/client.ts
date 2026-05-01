@@ -1,4 +1,10 @@
-import { combineArgsPayload, resolvedArgsFromPlan, scopeArgsPayload } from './args.ts';
+import {
+  combineArgsPayload,
+  filterConnectionArgs,
+  hashArgs,
+  resolvedArgsFromPlan,
+  scopeArgsPayload,
+} from './args.ts';
 import ViewDataCache from './cache.ts';
 import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import {
@@ -12,6 +18,7 @@ import {
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
+import type { FateLiveConnectionEvent } from './protocol.ts';
 import {
   assignViewTag,
   createRefWithViewNames,
@@ -108,17 +115,112 @@ const emptyDispose = () => undefined;
 
 type ListEntry = Readonly<{ cursor?: string; id: EntityId }>;
 
-const dropCanonicalPendingIds = (
-  pendingIds: ReadonlyArray<EntityId> | undefined,
+const dropCanonicalListIds = (
+  listIds: ReadonlyArray<EntityId> | undefined,
   ids: ReadonlyArray<EntityId>,
 ) => {
-  if (!pendingIds || pendingIds.length === 0) {
+  if (!listIds || listIds.length === 0) {
     return undefined;
   }
 
   const canonicalIds = new Set(ids);
-  const next = pendingIds.filter((id) => !canonicalIds.has(id));
+  const next = listIds.filter((id) => !canonicalIds.has(id));
   return next.length > 0 ? next : undefined;
+};
+
+const removeListId = (
+  listIds: ReadonlyArray<EntityId> | undefined,
+  entityId: EntityId,
+): ReadonlyArray<EntityId> | undefined =>
+  listIds?.includes(entityId) ? listIds.filter((id) => id !== entityId) : listIds;
+
+const getConnectionPageLimit = (args: AnyRecord | undefined, direction: 'forward' | 'backward') => {
+  const value = direction === 'forward' ? (args?.first ?? args?.last) : (args?.last ?? args?.first);
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+};
+
+const isConnectionWindowFull = (
+  listState: List,
+  connection: ConnectionMetadata,
+  direction: 'forward' | 'backward',
+) => {
+  const limit = getConnectionPageLimit(connection.args, direction);
+  return limit != null && listState.ids.length >= limit;
+};
+
+const hasConnectionPageCoverage = (
+  listState: List,
+  args: AnyRecord | undefined,
+  direction: 'forward' | 'backward',
+) => {
+  const limit = getConnectionPageLimit(args, direction);
+  const pagination = listState.pagination;
+
+  if (direction === 'forward') {
+    if (pagination?.hasPrevious) {
+      return false;
+    }
+
+    return (
+      limit == null ||
+      listState.ids.length >= limit ||
+      (listState.forwardPageLimit != null && listState.forwardPageLimit >= limit) ||
+      pagination?.hasNext === false
+    );
+  }
+
+  if (pagination?.hasNext) {
+    return false;
+  }
+
+  return (
+    limit == null ||
+    listState.ids.length >= limit ||
+    (listState.backwardPageLimit != null && listState.backwardPageLimit >= limit) ||
+    pagination?.hasPrevious === false
+  );
+};
+
+const getPaginationMergeInfo = (args: AnyRecord | undefined) => {
+  const paginationArgs = getPaginationArgsInfo(args);
+  return {
+    ...paginationArgs,
+    pageLimit: getConnectionPageLimit(args, paginationArgs.direction),
+  };
+};
+
+const getConnectionBoundaryCursor = (
+  listState: List,
+  direction: 'forward' | 'backward',
+): string | undefined => {
+  if (!listState.cursors || listState.cursors.length === 0) {
+    return undefined;
+  }
+
+  return direction === 'forward' ? listState.cursors.at(-1) : listState.cursors[0];
+};
+
+const markConnectionPageAvailable = (listState: List, direction: 'forward' | 'backward'): List => {
+  const pagination = {
+    hasNext: Boolean(listState.pagination?.hasNext),
+    hasPrevious: Boolean(listState.pagination?.hasPrevious),
+    nextCursor: listState.pagination?.nextCursor,
+    previousCursor: listState.pagination?.previousCursor,
+  };
+  const cursor = getConnectionBoundaryCursor(listState, direction);
+
+  if (direction === 'forward') {
+    pagination.hasNext = true;
+    pagination.nextCursor = cursor ?? pagination.nextCursor;
+  } else {
+    pagination.hasPrevious = true;
+    pagination.previousCursor = cursor ?? pagination.previousCursor;
+  }
+
+  return {
+    ...listState,
+    pagination,
+  };
 };
 
 const getListEntries = (listState: List | undefined): Array<ListEntry> => {
@@ -225,6 +327,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     string,
     { count: number; releaseScheduled?: boolean; unsubscribe: () => void }
   >();
+  private readonly liveConnectionInvalidations = new Map<string, number>();
   private readonly stableRefs = new Map<EntityId, Map<string, ViewRef<string>>>();
   private readonly requests = new Map<
     string,
@@ -239,6 +342,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   private readonly types: ReadonlyMap<string, TypeConfig>;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
   private readonly viewDataCache = new ViewDataCache();
+  private liveConnectionInvalidationToken = 0;
 
   readonly actions: MutationActionsFor<Mutations>;
   readonly mutations: MutationFunctionsFor<Mutations>;
@@ -689,6 +793,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     }
   }
 
+  assertLiveConnectionSupport() {
+    if (!this.transport.subscribeConnection) {
+      throw new Error(
+        `fate: transport does not support live list views. Please provide a 'subscribeConnection' implementation in your transport.`,
+      );
+    }
+  }
+
   subscribeLiveView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     view: V,
     ref: ViewRef<T['__typename']>,
@@ -775,12 +887,417 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     };
   }
 
+  subscribeLiveListView<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+  ): () => void {
+    this.assertLiveConnectionSupport();
+
+    const plan = getSelectionPlan(view, null);
+    const connectionArgs = filterConnectionArgs(connection.args);
+    const selectionArgs = resolvedArgsFromPlan(plan);
+    const key = this.liveConnectionSubscriptionKey(connection, plan, connectionArgs);
+    const existing = this.liveSubscriptions.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.releaseScheduled = false;
+      return () => {
+        this.releaseLiveSubscription(key);
+      };
+    }
+
+    let unsubscribe: () => void;
+    try {
+      unsubscribe = this.transport.subscribeConnection!(
+        connection.procedure,
+        connection.type,
+        connectionArgs,
+        plan.paths,
+        selectionArgs,
+        {
+          onError: (error) => this.reportLiveError(error),
+          onEvent: (event) => {
+            this.applyLiveConnectionEvent(view, connection, plan, event);
+          },
+        },
+      );
+    } catch (error) {
+      this.reportLiveError(error);
+      return emptyDispose;
+    }
+
+    this.liveSubscriptions.set(key, { count: 1, unsubscribe });
+
+    return () => {
+      this.releaseLiveSubscription(key);
+    };
+  }
+
+  private applyLiveConnectionEvent<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+    plan: SelectionPlan,
+    event: FateLiveConnectionEvent,
+  ) {
+    if (event.type === 'invalidate') {
+      this.invalidateLiveConnection(view, connection);
+      return;
+    }
+
+    if (event.type === 'deleteEdge') {
+      this.deleteConnectionEdge(connection, toEntityId(event.nodeType, event.id));
+      return;
+    }
+
+    const node = event.edge.node;
+    if (!node || typeof node !== 'object') {
+      return;
+    }
+
+    const nodeRecord = node as AnyRecord;
+    const nodeType = event.nodeType;
+    if (!nodeType) {
+      this.reportLiveError(
+        new Error(
+          `fate: Live connection event for '${connection.procedure}' did not include a node type.`,
+        ),
+      );
+      return;
+    }
+
+    const entityId = this.write(
+      nodeType,
+      nodeRecord,
+      plan.paths,
+      undefined,
+      plan,
+      null,
+      null,
+      'none',
+    );
+    this.insertConnectionEdge(
+      connection.key,
+      entityId,
+      event.edge.cursor,
+      event.type,
+      event.targetCursor,
+      view,
+      connection,
+    );
+  }
+
+  private invalidateLiveConnection<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+  ) {
+    const token = ++this.liveConnectionInvalidationToken;
+    this.liveConnectionInvalidations.set(connection.key, token);
+    const previous = this.store.getListState(connection.key);
+    this.store.restoreList(connection.key, undefined);
+    this.loadConnection(view, connection, connection.args ?? {})
+      .then(() => {
+        if (this.liveConnectionInvalidations.get(connection.key) === token) {
+          this.liveConnectionInvalidations.delete(connection.key);
+        }
+      })
+      .catch((error) => {
+        if (this.liveConnectionInvalidations.get(connection.key) === token) {
+          this.store.restoreList(connection.key, previous);
+          this.liveConnectionInvalidations.delete(connection.key);
+        }
+        this.reportLiveError(error);
+      });
+  }
+
+  private deleteConnectionEdge(connection: ConnectionMetadata, entityId: EntityId) {
+    const listState = this.store.getListState(connection.key);
+    if (!listState) {
+      this.syncNestedConnectionOwnerField(connection, entityId, undefined, 'delete');
+      return;
+    }
+
+    const ids: Array<EntityId> = [];
+    const cursors = listState.cursors ? ([] as Array<string | undefined>) : undefined;
+    let changed = false;
+
+    listState.ids.forEach((id, index) => {
+      if (id === entityId) {
+        changed = true;
+        return;
+      }
+      ids.push(id);
+      if (cursors) {
+        cursors.push(listState.cursors?.[index]);
+      }
+    });
+
+    const liveAfterIds = removeListId(listState.liveAfterIds, entityId);
+    const liveBeforeIds = removeListId(listState.liveBeforeIds, entityId);
+    const pendingAfterIds = removeListId(listState.pendingAfterIds, entityId);
+    const pendingBeforeIds = removeListId(listState.pendingBeforeIds, entityId);
+    changed =
+      changed ||
+      liveAfterIds?.length !== listState.liveAfterIds?.length ||
+      liveBeforeIds?.length !== listState.liveBeforeIds?.length ||
+      pendingAfterIds?.length !== listState.pendingAfterIds?.length ||
+      pendingBeforeIds?.length !== listState.pendingBeforeIds?.length;
+
+    if (changed) {
+      const nextListState = {
+        ...listState,
+        cursors,
+        ids,
+        liveAfterIds,
+        liveBeforeIds,
+        pendingAfterIds,
+        pendingBeforeIds,
+      };
+      this.store.setList(connection.key, nextListState);
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'delete');
+      return;
+    }
+
+    this.syncNestedConnectionOwnerField(connection, entityId, listState, 'delete');
+  }
+
+  private insertConnectionEdge(
+    key: string,
+    entityId: EntityId,
+    cursor: string | undefined,
+    type: Exclude<FateLiveConnectionEvent['type'], 'deleteEdge' | 'invalidate'>,
+    targetCursor: string | undefined,
+    view: View<any, any>,
+    connection: ConnectionMetadata,
+  ) {
+    const listState = this.store.getListState(key) ?? { ids: [] };
+    const isAppendEvent = type === 'appendEdge' || type === 'appendNode';
+    const isPrependEvent = type === 'prependEdge' || type === 'prependNode';
+
+    if (
+      (isAppendEvent && listState.pendingAfterIds?.includes(entityId)) ||
+      (isPrependEvent && listState.pendingBeforeIds?.includes(entityId))
+    ) {
+      this.syncNestedConnectionOwnerField(connection, entityId, listState, 'insert');
+      return;
+    }
+
+    const withoutExisting = this.removeEntityFromListState(listState, entityId);
+    const appendMode = connection.live?.append ?? 'edge';
+    const prependMode = connection.live?.prepend ?? 'edge';
+    const keepLiveBeforeHidden =
+      isPrependEvent &&
+      prependMode !== 'visible' &&
+      (Boolean(withoutExisting.pagination?.hasPrevious) ||
+        isConnectionWindowFull(withoutExisting, connection, 'backward'));
+    const keepLiveAfterHidden =
+      isAppendEvent &&
+      appendMode !== 'visible' &&
+      (Boolean(withoutExisting.pagination?.hasNext) ||
+        isConnectionWindowFull(withoutExisting, connection, 'forward'));
+    const keepVisibleBeforePending =
+      isPrependEvent &&
+      prependMode === 'visible' &&
+      (Boolean(withoutExisting.pagination?.hasPrevious) ||
+        isConnectionWindowFull(withoutExisting, connection, 'backward'));
+    const keepVisibleAfterPending =
+      isAppendEvent &&
+      appendMode === 'visible' &&
+      (Boolean(withoutExisting.pagination?.hasNext) ||
+        isConnectionWindowFull(withoutExisting, connection, 'forward'));
+
+    if (keepLiveBeforeHidden) {
+      const nextList = markConnectionPageAvailable(withoutExisting, 'backward');
+      const nextListState = {
+        ...nextList,
+        liveBeforeIds: [entityId, ...(nextList.liveBeforeIds ?? [])],
+      };
+      this.store.setList(key, nextListState);
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+      return;
+    }
+
+    if (keepLiveAfterHidden) {
+      const nextList = markConnectionPageAvailable(withoutExisting, 'forward');
+      const nextListState = {
+        ...nextList,
+        liveAfterIds: [...(nextList.liveAfterIds ?? []), entityId],
+      };
+      this.store.setList(key, nextListState);
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+      return;
+    }
+
+    if (keepVisibleBeforePending) {
+      const nextList = markConnectionPageAvailable(withoutExisting, 'backward');
+      const nextListState = {
+        ...nextList,
+        pendingBeforeIds: [entityId, ...(nextList.pendingBeforeIds ?? [])],
+      };
+      this.store.setList(key, nextListState);
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+      return;
+    }
+
+    if (keepVisibleAfterPending) {
+      const nextList = markConnectionPageAvailable(withoutExisting, 'forward');
+      const nextListState = {
+        ...nextList,
+        pendingAfterIds: [...(nextList.pendingAfterIds ?? []), entityId],
+      };
+      this.store.setList(key, nextListState);
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+      return;
+    }
+
+    const index = this.getConnectionInsertIndex(withoutExisting, type, targetCursor);
+    if (index == null) {
+      this.invalidateLiveConnection(view, connection);
+      return;
+    }
+    const ids = [...withoutExisting.ids];
+    ids.splice(index, 0, entityId);
+
+    const shouldStoreCursors = Boolean(withoutExisting.cursors) || cursor !== undefined;
+    const cursors = shouldStoreCursors ? [...(withoutExisting.cursors ?? [])] : undefined;
+    if (cursors) {
+      while (cursors.length < withoutExisting.ids.length) {
+        cursors.push(undefined);
+      }
+      cursors.splice(index, 0, cursor);
+    }
+
+    const nextListState = {
+      ...withoutExisting,
+      cursors,
+      ids,
+      liveAfterIds: removeListId(withoutExisting.liveAfterIds, entityId),
+      liveBeforeIds: removeListId(withoutExisting.liveBeforeIds, entityId),
+    };
+    this.store.setList(key, nextListState);
+    this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+  }
+
+  private syncNestedConnectionOwnerField(
+    connection: ConnectionMetadata,
+    entityId: EntityId,
+    listState: List | undefined,
+    action: 'delete' | 'insert',
+  ) {
+    if (connection.root) {
+      return;
+    }
+
+    const owner = this.store.read(connection.owner);
+    const current = Array.isArray(owner?.[connection.field])
+      ? (owner?.[connection.field] as Array<unknown>)
+      : [];
+    const currentIds = current
+      .map((item) => (isNodeRef(item) ? getNodeRefId(item) : null))
+      .filter((id): id is EntityId => id != null);
+    const nextIds = currentIds.filter((id) => id !== entityId);
+
+    if (action === 'insert' && listState) {
+      const visibleIds = getListEntries(listState).map(({ id }) => id);
+      const visibleIndex = visibleIds.indexOf(entityId);
+
+      if (visibleIndex >= 0) {
+        const nextIndexById = new Map(nextIds.map((id, index) => [id, index]));
+        let insertIndex: number | null = null;
+        for (let index = visibleIndex - 1; index >= 0; index -= 1) {
+          const currentIndex = nextIndexById.get(visibleIds[index]);
+          if (currentIndex != null) {
+            insertIndex = currentIndex + 1;
+            break;
+          }
+        }
+
+        if (insertIndex == null) {
+          for (let index = visibleIndex + 1; index < visibleIds.length; index += 1) {
+            const currentIndex = nextIndexById.get(visibleIds[index]);
+            if (currentIndex != null) {
+              insertIndex = currentIndex;
+              break;
+            }
+          }
+        }
+
+        nextIds.splice(insertIndex ?? (visibleIndex === 0 ? 0 : nextIds.length), 0, entityId);
+      }
+    }
+
+    if (
+      currentIds.length === nextIds.length &&
+      currentIds.every((id, index) => id === nextIds[index])
+    ) {
+      return;
+    }
+
+    this.viewDataCache.invalidate(connection.owner);
+    this.store.merge(
+      connection.owner,
+      { [connection.field]: nextIds.map((id) => createNodeRef(id)) },
+      [connection.field],
+    );
+  }
+
+  private getConnectionInsertIndex(
+    listState: List,
+    type: Exclude<FateLiveConnectionEvent['type'], 'deleteEdge' | 'invalidate'>,
+    targetCursor: string | undefined,
+  ): number | null {
+    if (type === 'prependEdge' || type === 'prependNode') {
+      return 0;
+    }
+
+    if (type === 'appendEdge' || type === 'appendNode') {
+      return listState.ids.length;
+    }
+
+    if (targetCursor && listState.cursors) {
+      const index = listState.cursors.indexOf(targetCursor);
+      if (index >= 0) {
+        return type === 'insertEdgeBefore' ? index : index + 1;
+      }
+    }
+
+    return null;
+  }
+
+  private removeEntityFromListState(listState: List, entityId: EntityId): List {
+    const ids: Array<EntityId> = [];
+    const cursors = listState.cursors ? ([] as Array<string | undefined>) : undefined;
+
+    listState.ids.forEach((id, index) => {
+      if (id === entityId) {
+        return;
+      }
+      ids.push(id);
+      if (cursors) {
+        cursors.push(listState.cursors?.[index]);
+      }
+    });
+
+    return {
+      ...listState,
+      cursors,
+      ids,
+      liveAfterIds: removeListId(listState.liveAfterIds, entityId),
+      liveBeforeIds: removeListId(listState.liveBeforeIds, entityId),
+      pendingAfterIds: removeListId(listState.pendingAfterIds, entityId),
+      pendingBeforeIds: removeListId(listState.pendingBeforeIds, entityId),
+    };
+  }
+
   private mergeListState(
     previous: List | undefined,
     incomingIds: ReadonlyArray<EntityId>,
     incomingCursors: ReadonlyArray<string | undefined>,
     incomingPagination: Pagination | undefined,
-    options: { direction: 'forward' | 'backward'; hasCursorArg: boolean },
+    options: {
+      direction: 'forward' | 'backward';
+      hasCursorArg: boolean;
+      pageLimit?: number | null;
+    },
   ): List {
     const existingIds = previous?.ids ?? [];
     const existingSet = new Set(existingIds);
@@ -834,11 +1351,21 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         : undefined;
 
     return {
+      backwardPageLimit:
+        !options.hasCursorArg && isBackward && options.pageLimit != null
+          ? Math.max(previous?.backwardPageLimit ?? 0, options.pageLimit)
+          : previous?.backwardPageLimit,
       cursors,
+      forwardPageLimit:
+        !options.hasCursorArg && !isBackward && options.pageLimit != null
+          ? Math.max(previous?.forwardPageLimit ?? 0, options.pageLimit)
+          : previous?.forwardPageLimit,
       ids,
+      liveAfterIds: dropCanonicalListIds(previous?.liveAfterIds, ids),
+      liveBeforeIds: dropCanonicalListIds(previous?.liveBeforeIds, ids),
       pagination,
-      pendingAfterIds: dropCanonicalPendingIds(previous?.pendingAfterIds, ids),
-      pendingBeforeIds: dropCanonicalPendingIds(previous?.pendingBeforeIds, ids),
+      pendingAfterIds: dropCanonicalListIds(previous?.pendingAfterIds, ids),
+      pendingBeforeIds: dropCanonicalListIds(previous?.pendingBeforeIds, ids),
     };
   }
 
@@ -1023,15 +1550,13 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
 
       const previous = this.store.getListState(connection.key);
-      const argsValue = args as AnyRecord | undefined;
-      const paginationArgs = getPaginationArgsInfo(argsValue);
 
       const nextListState = this.mergeListState(
         previous,
         incomingIds,
         incomingCursors,
         pagination,
-        paginationArgs,
+        getPaginationMergeInfo(requestArgs),
       );
 
       if (!connection.args) {
@@ -1114,7 +1639,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       incomingIds,
       incomingCursors,
       connectionPayload.pagination,
-      { direction, hasCursorArg: true },
+      { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true },
     );
 
     this.store.setList(connection.key, nextListState);
@@ -1442,6 +1967,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       return false;
     }
 
+    const paginationArgs = getPaginationArgsInfo(item.argsPayload);
+    if (
+      !paginationArgs.hasCursorArg &&
+      !hasConnectionPageCoverage(listState, item.argsPayload, paginationArgs.direction)
+    ) {
+      return false;
+    }
+
     for (const id of listState.ids) {
       if (this.store.missingForSelection(id, item.plan.paths).size > 0) {
         return false;
@@ -1619,8 +2152,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           args: item.argsPayload,
           field: item.name,
           key: item.listKey,
+          live: item.plan.live.get(''),
           owner: item.name,
-          procedure: `request.${item.name}`,
+          procedure: item.name,
           root: true,
           type: item.type,
         };
@@ -1715,7 +2249,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         ids,
         cursors,
         pagination,
-        getPaginationArgsInfo(item.argsPayload),
+        getPaginationMergeInfo(item.argsPayload),
       ),
     );
   }
@@ -1903,7 +2437,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
               ids,
               cursors,
               connection.pagination as List['pagination'],
-              getPaginationArgsInfo(argsValue),
+              getPaginationMergeInfo(argsValue),
             );
 
             result[key] = nextListState.ids.map((id) => createNodeRef(id));
@@ -2191,6 +2725,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
                   field: key,
                   hash: fieldArgs?.hash,
                   key: listKey,
+                  live: plan.live.get(fieldPath),
                   owner: parentId,
                   procedure: `${parentType}.${key}`,
                   root: false,
@@ -2284,6 +2819,19 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       .sort()
       .join('|');
     return `${entityId}|${paths}|${args}`;
+  }
+
+  private liveConnectionSubscriptionKey(
+    connection: ConnectionMetadata,
+    plan: SelectionPlan,
+    args: Record<string, unknown> | undefined,
+  ) {
+    const paths = [...plan.paths].sort().join('|');
+    const selectionArgs = [...plan.args.entries()]
+      .map(([path, entry]) => `${path}:${entry.hash}`)
+      .sort()
+      .join('|');
+    return `connection|${connection.procedure}|${connection.type}|${hashArgs(args ?? {})}|${paths}|${selectionArgs}`;
   }
 
   private releaseLiveSubscription(key: string) {

@@ -69,12 +69,23 @@ type WithNullish<T, R> = R | Nullish<T>;
 
 type SelectionArgs = Readonly<{ args: AnyRecord }>;
 
+export type ConnectionLivePolicy = Readonly<{
+  append?: 'edge' | 'visible';
+  prepend?: 'edge' | 'visible';
+}>;
+
+type ConnectionLiveSelectionPolicy = Readonly<{
+  append?: ConnectionLivePolicy['append'] | string;
+  prepend?: ConnectionLivePolicy['prepend'] | string;
+}>;
+
 /** Metadata stored alongside connection results to power pagination and cache updates. */
 export type ConnectionMetadata = Readonly<{
   args?: AnyRecord;
   field: string;
   hash?: string;
   key: string;
+  live?: ConnectionLivePolicy;
   owner: EntityId;
   procedure: string;
   root?: boolean;
@@ -145,6 +156,7 @@ type ConnectionSelectionBase<T extends Entity> = Readonly<{
     cursor?: true;
     node: Selection<T> | View<T, Selection<T>>;
   }>;
+  live?: ConnectionLiveSelectionPolicy;
   pagination?: Readonly<{
     hasNext?: true;
     hasPrevious?: true;
@@ -231,14 +243,18 @@ export type ViewSnapshot<T extends Entity, S extends Selection<T>> = Readonly<{
   data: ViewData<T, S>;
 }>;
 
+type ConnectionLikeSelection = {
+  readonly items: { readonly node: unknown };
+};
+
 type ConnectionMask<T extends Entity, S> = S extends {
-  items: infer ItemSelection;
-  pagination?: infer PaginationSelection;
+  readonly items: infer ItemSelection;
+  readonly pagination?: infer PaginationSelection;
 }
   ? {
       items: ItemSelection extends {
-        cursor?: infer CursorSelection;
-        node: unknown;
+        readonly cursor?: infer CursorSelection;
+        readonly node: unknown;
       }
         ? Array<
             (CursorSelection extends true ? { cursor: string } : Record<string, never>) & {
@@ -262,7 +278,7 @@ type MaskNonNullish<T, S> =
   T extends Array<infer U extends Entity>
     ? S extends true
       ? Array<U>
-      : S extends ConnectionSelection<U>
+      : S extends ConnectionLikeSelection
         ? ConnectionMask<U, S>
         : HasViewTag<S> extends true
           ? Array<ViewRef<U['__typename']>>

@@ -23,6 +23,27 @@ type LiveEventHandlers = Readonly<{
   onError?: (error: unknown) => void;
 }>;
 
+type LiveConnectionEvent =
+  | Readonly<{
+      edge: { cursor?: string; node: unknown };
+      nodeType: string;
+      targetCursor?: string;
+      type:
+        | 'appendEdge'
+        | 'appendNode'
+        | 'insertEdgeAfter'
+        | 'insertEdgeBefore'
+        | 'prependEdge'
+        | 'prependNode';
+    }>
+  | Readonly<{ id: string | number; nodeType: string; type: 'deleteEdge' }>
+  | Readonly<{ type: 'invalidate' }>;
+
+type LiveConnectionEventHandlers = Readonly<{
+  onError?: (error: unknown) => void;
+  onEvent: (event: LiveConnectionEvent) => void;
+}>;
+
 /**
  * Contract the fate client expects from a network transport. The transport is
  * responsible for fetching records by ID, fetching lists, and executing
@@ -55,6 +76,14 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     select: Iterable<string>,
     args: ResolvedArgsPayload | undefined,
     handlers: LiveEventHandlers,
+  ): () => void;
+  subscribeConnection?(
+    procedure: string,
+    type: string,
+    args: ResolvedArgsPayload | undefined,
+    select: Iterable<string>,
+    selectionArgs: ResolvedArgsPayload | undefined,
+    handlers: LiveConnectionEventHandlers,
   ): () => void;
 }
 

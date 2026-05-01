@@ -106,6 +106,53 @@ test('supports nested views and connection selections', () => {
   expectTypeOf<PostData['comments']['items'][number]['node']>().toEqualTypeOf<ViewRef<'Comment'>>();
 });
 
+test('infers view refs for standalone live connection selections', () => {
+  type User = { __typename: 'User'; id: string; name: string };
+
+  type Comment = {
+    __typename: 'Comment';
+    author: User;
+    content: string;
+    id: string;
+  };
+
+  type PostWithCommentConnection = {
+    __typename: 'Post';
+    comments: Array<Comment>;
+    id: string;
+  };
+
+  const AuthorView = view<User>()({
+    id: true,
+    name: true,
+  });
+
+  const CommentView = view<Comment>()({
+    author: AuthorView,
+    content: true,
+    id: true,
+  });
+
+  const CommentConnectionView = {
+    args: { first: 3 },
+    items: {
+      node: CommentView,
+    },
+    live: {
+      append: 'visible',
+    },
+  };
+
+  const PostView = view<PostWithCommentConnection>()({
+    comments: CommentConnectionView,
+    id: true,
+  });
+
+  type PostData = ViewData<PostWithCommentConnection, SelectionOf<typeof PostView>>;
+
+  expectTypeOf<PostData['comments']['items'][number]['node']>().toEqualTypeOf<ViewRef<'Comment'>>();
+});
+
 test('infer view refs for list selections', () => {
   type User = { __typename: 'User'; id: string; name: string };
 

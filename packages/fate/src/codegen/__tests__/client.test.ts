@@ -41,6 +41,9 @@ test('generates the same client source for the Prisma and Drizzle examples', asy
     expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
       'createHTTPTransport',
     );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
+      'transport.subscribeConnection = liveTransport.subscribeConnection;',
+    );
     expect(createClientSource({ moduleExports: prismaModule, moduleName })).not.toContain(
       'live.subscribe',
     );

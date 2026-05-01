@@ -36,7 +36,13 @@ export type {
   SourceRelation,
 } from './server/source.ts';
 export type { SourceRegistry } from './server/executor.ts';
-export type { LiveEventBus, LiveEventType, LiveSourceEvent } from './server/live.ts';
+export type {
+  LiveConnectionEventType,
+  LiveConnectionSourceEvent,
+  LiveEventBus,
+  LiveEventType,
+  LiveSourceEvent,
+} from './server/live.ts';
 export type { FateServer, FateServerManifest, InferFateAPI, NativeFateAPI } from './server/http.ts';
 
 export {

@@ -116,6 +116,7 @@ test('selection plan resolves arguments and hashes connection args', () => {
     comments: {
       args: { after: 'cursor-1', first: 5 },
       items: { node: CommentView },
+      live: { append: 'visible' },
     },
     content: { args: { format: 'md' } },
   });
@@ -130,9 +131,13 @@ test('selection plan resolves arguments and hashes connection args', () => {
     value: { format: 'md' },
   });
   expect(plan.args.get('comments')).toEqual({
-    hash: 'object:{"first":number:5}',
-    ignoreKeys: new Set(['after', 'before', 'cursor']),
+    hash: 'object:{}',
+    ignoreKeys: new Set(['after', 'before', 'cursor', 'first', 'last']),
     value: { after: 'cursor-1', first: 5 },
+  });
+  expect(plan.live.get('comments')).toEqual({
+    append: 'visible',
+    prepend: 'edge',
   });
 });
 
@@ -196,8 +201,8 @@ test('collects selections for root connections', () => {
   const selection = getSelectionPlan(ProjectConnection, null);
 
   expect(selection.args.get('')).toEqual({
-    hash: 'object:{"first":number:1}',
-    ignoreKeys: new Set(['after', 'before', 'cursor']),
+    hash: 'object:{}',
+    ignoreKeys: new Set(['after', 'before', 'cursor', 'first', 'last']),
     value: { first: 1 },
   });
   expect(selection.paths).toEqual(new Set(['id', 'name']));

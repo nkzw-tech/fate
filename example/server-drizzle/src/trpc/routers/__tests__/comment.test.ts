@@ -1,7 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 
-const { deleteCommentRecord, fetchById } = vi.hoisted(() => ({
+const { deleteCommentRecord, deleteEdge, fetchById } = vi.hoisted(() => ({
   deleteCommentRecord: vi.fn(),
+  deleteEdge: vi.fn(),
   fetchById: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock('../../init.ts', async () => {
       procedures: vi.fn(() => ({})),
     },
     live: {
+      connection: vi.fn(() => ({ deleteEdge })),
       update: vi.fn(),
     },
     middleware: t.middleware,
@@ -76,6 +78,7 @@ test('delete returns the post relation after the comment has been removed', asyn
   });
 
   expect(deleteCommentRecord).toHaveBeenCalledWith('comment-1');
+  expect(deleteEdge).toHaveBeenCalledWith('Comment', 'comment-1');
   expect(fetchById).toHaveBeenCalledWith(
     expect.objectContaining({
       id: 'post-1',

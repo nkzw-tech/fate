@@ -12,8 +12,12 @@ import { getNodeRefId, isNodeRef } from './node-ref.ts';
 import type { AnyRecord, EntityId, Pagination, Snapshot } from './types.ts';
 
 export type List = Readonly<{
+  backwardPageLimit?: number;
   cursors?: ReadonlyArray<string | undefined>;
+  forwardPageLimit?: number;
   ids: ReadonlyArray<EntityId>;
+  liveAfterIds?: ReadonlyArray<EntityId>;
+  liveBeforeIds?: ReadonlyArray<EntityId>;
   pagination?: Pagination;
   pendingAfterIds?: ReadonlyArray<EntityId>;
   pendingBeforeIds?: ReadonlyArray<EntityId>;
@@ -226,55 +230,52 @@ export class Store {
     for (const [key, list] of this.lists.entries()) {
       let changed = false;
 
-      const ids: Array<EntityId> = [];
-      const cursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
-      const seenIds = new Set<EntityId>();
-      list.ids.forEach((id, index) => {
-        const resolved = id === previousId ? nextId : id;
-        if (resolved !== id) {
-          changed = true;
-        }
-        if (seenIds.has(resolved)) {
-          changed = true;
-          return;
-        }
-        seenIds.add(resolved);
-        ids.push(resolved);
-        if (cursors) {
-          cursors.push(list.cursors?.[index]);
-        }
-      });
+      let ids = list.ids;
+      let cursors = list.cursors;
+      if (list.ids.includes(previousId)) {
+        const nextIds: Array<EntityId> = [];
+        const nextCursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
+        const seenIds = new Set<EntityId>();
+        list.ids.forEach((id, index) => {
+          const resolved = id === previousId ? nextId : id;
+          if (seenIds.has(resolved)) {
+            return;
+          }
+          seenIds.add(resolved);
+          nextIds.push(resolved);
+          if (nextCursors) {
+            nextCursors.push(list.cursors?.[index]);
+          }
+        });
+        changed = true;
+        ids = nextIds;
+        cursors = nextCursors;
+      }
 
       const dedupe = (values: ReadonlyArray<EntityId> | undefined) => {
-        if (!values) {
+        if (!values || !values.includes(previousId)) {
           return undefined;
         }
 
-        let updated = false;
         const seen = new Set<EntityId>();
         const next: Array<EntityId> = [];
         for (const value of values) {
           const resolved = value === previousId ? nextId : value;
-          if (resolved !== value) {
-            updated = true;
-          }
           if (seen.has(resolved)) {
-            updated = true;
             continue;
           }
           seen.add(resolved);
           next.push(resolved);
         }
 
-        if (updated) {
-          changed = true;
-        }
-
-        return updated ? next : values;
+        changed = true;
+        return next;
       };
 
-      const pendingBeforeIds = dedupe(list.pendingBeforeIds);
-      const pendingAfterIds = dedupe(list.pendingAfterIds);
+      const pendingBeforeIds = dedupe(list.pendingBeforeIds) ?? list.pendingBeforeIds;
+      const pendingAfterIds = dedupe(list.pendingAfterIds) ?? list.pendingAfterIds;
+      const liveBeforeIds = dedupe(list.liveBeforeIds) ?? list.liveBeforeIds;
+      const liveAfterIds = dedupe(list.liveAfterIds) ?? list.liveAfterIds;
 
       if (!changed) {
         continue;
@@ -282,8 +283,12 @@ export class Store {
 
       const canonicalIds = new Set(ids);
       this.setList(key, {
+        backwardPageLimit: list.backwardPageLimit,
         cursors,
+        forwardPageLimit: list.forwardPageLimit,
         ids,
+        liveAfterIds: liveAfterIds?.filter((id) => !canonicalIds.has(id)),
+        liveBeforeIds: liveBeforeIds?.filter((id) => !canonicalIds.has(id)),
         pagination: list.pagination,
         pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
         pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
@@ -371,9 +376,17 @@ export class Store {
   ) {
     for (const [key, list] of this.lists.entries()) {
       const { ids } = list;
+      const hasLiveAfter = Boolean(list.liveAfterIds?.includes(targetId));
+      const hasLiveBefore = Boolean(list.liveBeforeIds?.includes(targetId));
       const hasPendingAfter = Boolean(list.pendingAfterIds?.includes(targetId));
       const hasPendingBefore = Boolean(list.pendingBeforeIds?.includes(targetId));
-      if (!ids.includes(targetId) && !hasPendingAfter && !hasPendingBefore) {
+      if (
+        !ids.includes(targetId) &&
+        !hasLiveAfter &&
+        !hasLiveBefore &&
+        !hasPendingAfter &&
+        !hasPendingBefore
+      ) {
         continue;
       }
 
@@ -397,8 +410,12 @@ export class Store {
       }
 
       this.setList(key, {
+        backwardPageLimit: list.backwardPageLimit,
         cursors,
+        forwardPageLimit: list.forwardPageLimit,
         ids: entityIds,
+        liveAfterIds: list.liveAfterIds?.filter((id) => id !== targetId),
+        liveBeforeIds: list.liveBeforeIds?.filter((id) => id !== targetId),
         pagination: list.pagination,
         pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
         pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),

@@ -31,6 +31,8 @@ export const cloneArgs = (value: AnyRecord, path: string): AnyRecord => {
   return cloneValue(value, path) as AnyRecord;
 };
 
+export const paginationArgKeys = new Set(['after', 'before', 'cursor', 'first', 'last']);
+
 const stableSerialize = (value: unknown): string => {
   if (value === null) {
     return 'null';
@@ -80,6 +82,23 @@ export const hashArgs = (
     keys[key] = value;
   }
   return stableSerialize(keys);
+};
+
+export const filterConnectionArgs = (
+  argsValue: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined => {
+  if (!argsValue) {
+    return undefined;
+  }
+
+  const result: AnyRecord = {};
+  for (const [key, value] of Object.entries(argsValue)) {
+    if (!paginationArgKeys.has(key)) {
+      result[key] = value;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 };
 
 const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
