@@ -133,6 +133,78 @@ const removeListId = (
 ): ReadonlyArray<EntityId> | undefined =>
   listIds?.includes(entityId) ? listIds.filter((id) => id !== entityId) : listIds;
 
+const areArraysEqual = <T>(
+  left: ReadonlyArray<T> | undefined,
+  right: ReadonlyArray<T> | undefined,
+) => {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+};
+
+const arePaginationStatesEqual = (left: Pagination | undefined, right: Pagination | undefined) =>
+  left === right ||
+  (!left || !right
+    ? false
+    : left.hasNext === right.hasNext &&
+      left.hasPrevious === right.hasPrevious &&
+      left.nextCursor === right.nextCursor &&
+      left.previousCursor === right.previousCursor);
+
+const areListStatesEqual = (left: List | undefined, right: List) =>
+  Boolean(left) &&
+  areArraysEqual(left?.ids, right.ids) &&
+  areArraysEqual(left?.cursors, right.cursors) &&
+  areArraysEqual(left?.liveAfterIds, right.liveAfterIds) &&
+  areArraysEqual(left?.liveBeforeIds, right.liveBeforeIds) &&
+  areArraysEqual(left?.pendingAfterIds, right.pendingAfterIds) &&
+  areArraysEqual(left?.pendingBeforeIds, right.pendingBeforeIds) &&
+  left?.backwardPageLimit === right.backwardPageLimit &&
+  left?.forwardPageLimit === right.forwardPageLimit &&
+  arePaginationStatesEqual(left?.pagination, right.pagination);
+
+const createNodeRefsForIds = (
+  ids: ReadonlyArray<EntityId>,
+  current: unknown,
+  options: { reuseCurrentArray?: boolean } = {},
+): Array<ReturnType<typeof createNodeRef>> => {
+  if (
+    options.reuseCurrentArray !== false &&
+    Array.isArray(current) &&
+    current.length === ids.length
+  ) {
+    let matches = true;
+    for (let index = 0; index < ids.length; index += 1) {
+      const value = current[index];
+      if (!isNodeRef(value) || getNodeRefId(value) !== ids[index]) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      return current as Array<ReturnType<typeof createNodeRef>>;
+    }
+  }
+
+  const existingRefsById = new Map<EntityId, ReturnType<typeof createNodeRef>>();
+  if (Array.isArray(current)) {
+    for (const value of current) {
+      if (isNodeRef(value)) {
+        existingRefsById.set(getNodeRefId(value), value);
+      }
+    }
+  }
+
+  return ids.map((id) => existingRefsById.get(id) ?? createNodeRef(id));
+};
+
 const getConnectionPageLimit = (args: AnyRecord | undefined, direction: 'forward' | 'backward') => {
   const value = direction === 'forward' ? (args?.first ?? args?.last) : (args?.last ?? args?.first);
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
@@ -1212,7 +1284,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     this.viewDataCache.invalidate(connection.owner);
     this.store.merge(
       connection.owner,
-      { [connection.field]: nextIds.map((id) => createNodeRef(id)) },
+      { [connection.field]: createNodeRefsForIds(nextIds, current) },
       [connection.field],
     );
   }
@@ -1630,7 +1702,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const existingField = Array.isArray(current?.[connection.field])
       ? (current?.[connection.field] as Array<unknown>) || []
       : [];
-    const nodeRefs = newIds.map((id) => createNodeRef(id));
+    const nodeRefs = createNodeRefsForIds(newIds, undefined);
     const nextField =
       direction === 'forward' ? [...existingField, ...nodeRefs] : [...nodeRefs, ...existingField];
 
@@ -1833,8 +1905,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       }
     }
 
-    while (queue.length > 0) {
-      const entityId = queue.shift();
+    for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+      const entityId = queue[queueIndex];
       if (!entityId) {
         continue;
       }
@@ -2470,7 +2542,14 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
               getPaginationMergeInfo(argsValue),
             );
 
-            result[key] = nextListState.ids.map((id) => createNodeRef(id));
+            const listChanged = !areListStatesEqual(previousList, nextListState);
+            result[key] = createNodeRefsForIds(
+              nextListState.ids,
+              this.store.read(entityId)?.[key],
+              {
+                reuseCurrentArray: !listChanged,
+              },
+            );
 
             this.store.setList(listKey, nextListState);
           }
@@ -2566,7 +2645,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         const nextFieldIds = pending
           ? getListEntries(nextDefaultListState).map(({ id }) => id)
           : nextDefaultListState.ids;
-        nextField = nextFieldIds.map((id) => createNodeRef(id));
+        nextField = createNodeRefsForIds(nextFieldIds, current);
       } else {
         const currentIds = current
           .map((item) => (isNodeRef(item) ? getNodeRefId(item) : null))
@@ -2575,7 +2654,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         const nextDefaultListState = { ids } satisfies List;
         this.snapshotList(defaultListKey, listSnapshots);
         this.store.setList(defaultListKey, nextDefaultListState);
-        nextField = nextDefaultListState.ids.map((id) => createNodeRef(id));
+        nextField = createNodeRefsForIds(nextDefaultListState.ids, current);
       }
 
       const registeredLists = this.store

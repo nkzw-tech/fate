@@ -27,8 +27,39 @@ type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
 
 export type Subscriptions = Map<EntityId, Set<Subscription>>;
 
+const listKeySeparator = ' __fate__ ';
+
+type ListKeyParts = Readonly<{ field: string; ownerId: EntityId }>;
+
+const decodeListKeyPart = (part: string): string => {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+};
+
+const encodeListKeyPart = (part: string): string => encodeURIComponent(part);
+
 export const getListKey = (ownerId: EntityId, field: string, hash = 'default'): string =>
-  `${ownerId} __fate__ ${field} __fate__ ${hash}`;
+  `${encodeListKeyPart(ownerId)}${listKeySeparator}${encodeListKeyPart(field)}${listKeySeparator}${encodeListKeyPart(hash)}`;
+
+const getOwnerFieldKey = (ownerId: EntityId, field: string): string =>
+  JSON.stringify([ownerId, field]);
+
+const parseListKey = (key: string): ListKeyParts | null => {
+  const parts = key.split(listKeySeparator);
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [ownerId, field] = parts;
+
+  return {
+    field: decodeListKeyPart(field),
+    ownerId: decodeListKeyPart(ownerId),
+  };
+};
 
 const cloneValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -54,7 +85,11 @@ const emptyFunction = () => {};
 
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
+  private listKeysByOwnerField = new Map<string, Set<string>>();
+  private listKeysByReferencedEntity = new Map<EntityId, Set<string>>();
   private lists = new Map<string, List>();
+  private recordReferenceFields = new Map<EntityId, Map<string, Set<EntityId>>>();
+  private recordReferencesByTarget = new Map<EntityId, Map<EntityId, Set<string>>>();
   private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
   private listSubscriptions = new Map<string, Set<() => void>>();
@@ -99,15 +134,23 @@ export class Store {
         return null;
       }
 
-      this.records.set(id, { ...previous, ...partial });
+      const nextRecord = { ...previous, ...partial };
+      this.records.set(id, nextRecord);
+      this.updateRecordReferenceIndexes(id, previous, nextRecord, changedPaths);
     } else {
-      this.records.set(id, { ...partial });
+      const nextRecord = { ...partial };
+      this.records.set(id, nextRecord);
+      this.updateRecordReferenceIndexes(id, undefined, nextRecord, Object.keys(nextRecord));
     }
 
     return changedPaths;
   }
 
   deleteRecord(id: EntityId) {
+    const record = this.records.get(id);
+    if (record) {
+      this.removeRecordReferenceIndexes(id, record);
+    }
     this.records.delete(id);
     this.coverage.delete(id);
   }
@@ -212,22 +255,38 @@ export class Store {
 
   getListsForField(ownerId: EntityId, field: string): Array<readonly [string, List]> {
     const entries: Array<readonly [string, List]> = [];
-    const prefix = getListKey(ownerId, field, '');
-    for (const entry of this.lists.entries()) {
-      if (entry[0].startsWith(prefix)) {
-        entries.push(entry);
+    const keys = this.listKeysByOwnerField.get(getOwnerFieldKey(ownerId, field));
+    if (!keys) {
+      return entries;
+    }
+
+    for (const key of keys) {
+      const list = this.lists.get(key);
+      if (list) {
+        entries.push([key, list]);
       }
     }
     return entries;
   }
 
   setList(key: string, state: List) {
+    const previous = this.lists.get(key);
+    if (previous) {
+      this.removeListIndexes(key, previous);
+    }
     this.lists.set(key, state);
+    this.addListIndexes(key, state);
     this.notifyListSubscribers(key);
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
-    for (const [key, list] of this.lists.entries()) {
+    const keys = [...(this.listKeysByReferencedEntity.get(previousId) ?? [])];
+    for (const key of keys) {
+      const list = this.lists.get(key);
+      if (!list) {
+        continue;
+      }
+
       let changed = false;
 
       let ids = list.ids;
@@ -329,6 +388,10 @@ export class Store {
     }
 
     for (const id of records) {
+      const record = this.records.get(id);
+      if (record) {
+        this.removeRecordReferenceIndexes(id, record);
+      }
       this.records.delete(id);
       this.coverage.delete(id);
       options.onRecordDeleted?.(id);
@@ -342,6 +405,10 @@ export class Store {
   }
 
   private deleteList(key: string) {
+    const previous = this.lists.get(key);
+    if (previous) {
+      this.removeListIndexes(key, previous);
+    }
     this.lists.delete(key);
     this.notifyListSubscribers(key);
   }
@@ -374,7 +441,13 @@ export class Store {
     snapshots?: Map<EntityId, Snapshot>,
     listSnapshots?: Map<string, List>,
   ) {
-    for (const [key, list] of this.lists.entries()) {
+    const listKeys = [...(this.listKeysByReferencedEntity.get(targetId) ?? [])];
+    for (const key of listKeys) {
+      const list = this.lists.get(key);
+      if (!list) {
+        continue;
+      }
+
       const { ids } = list;
       const hasLiveAfter = Boolean(list.liveAfterIds?.includes(targetId));
       const hasLiveBefore = Boolean(list.liveBeforeIds?.includes(targetId));
@@ -424,12 +497,20 @@ export class Store {
 
     const ids = new Map<EntityId, Set<string>>();
 
-    for (const [id, record] of this.records.entries()) {
+    const recordEntries = [...(this.recordReferencesByTarget.get(targetId)?.entries() ?? [])];
+
+    for (const [id, fields] of recordEntries) {
+      const record = this.records.get(id);
+      if (!record) {
+        continue;
+      }
+
       let updated = false;
       const next: AnyRecord = {};
       const paths = new Set<string>();
 
-      for (const [key, value] of Object.entries(record)) {
+      for (const key of fields) {
+        const value = record[key];
         if (Array.isArray(value)) {
           const filtered = value.filter(
             (item) => !(isNodeRef(item) && getNodeRefId(item) === targetId),
@@ -475,10 +556,16 @@ export class Store {
   }
 
   restore(id: EntityId, snapshot: Snapshot) {
+    const previous = this.records.get(id);
+    if (previous) {
+      this.removeRecordReferenceIndexes(id, previous);
+    }
+
     if (snapshot.record === undefined) {
       this.records.delete(id);
     } else {
       this.records.set(id, snapshot.record);
+      this.addRecordReferenceIndexes(id, snapshot.record);
     }
 
     if (snapshot.mask === undefined) {
@@ -488,5 +575,180 @@ export class Store {
     }
 
     this.notify(id);
+  }
+
+  private addListIndexes(key: string, list: List) {
+    const parsed = parseListKey(key);
+    if (parsed) {
+      const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
+      let keys = this.listKeysByOwnerField.get(ownerFieldKey);
+      if (!keys) {
+        keys = new Set();
+        this.listKeysByOwnerField.set(ownerFieldKey, keys);
+      }
+      keys.add(key);
+    }
+
+    for (const id of this.getListReferencedEntityIds(list)) {
+      let keys = this.listKeysByReferencedEntity.get(id);
+      if (!keys) {
+        keys = new Set();
+        this.listKeysByReferencedEntity.set(id, keys);
+      }
+      keys.add(key);
+    }
+  }
+
+  private removeListIndexes(key: string, list: List) {
+    const parsed = parseListKey(key);
+    if (parsed) {
+      const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
+      const keys = this.listKeysByOwnerField.get(ownerFieldKey);
+      if (keys) {
+        keys.delete(key);
+        if (keys.size === 0) {
+          this.listKeysByOwnerField.delete(ownerFieldKey);
+        }
+      }
+    }
+
+    for (const id of this.getListReferencedEntityIds(list)) {
+      const keys = this.listKeysByReferencedEntity.get(id);
+      if (!keys) {
+        continue;
+      }
+
+      keys.delete(key);
+      if (keys.size === 0) {
+        this.listKeysByReferencedEntity.delete(id);
+      }
+    }
+  }
+
+  private getListReferencedEntityIds(list: List): Set<EntityId> {
+    const ids = new Set<EntityId>();
+    for (const id of list.ids) {
+      ids.add(id);
+    }
+    for (const id of list.liveAfterIds ?? []) {
+      ids.add(id);
+    }
+    for (const id of list.liveBeforeIds ?? []) {
+      ids.add(id);
+    }
+    for (const id of list.pendingAfterIds ?? []) {
+      ids.add(id);
+    }
+    for (const id of list.pendingBeforeIds ?? []) {
+      ids.add(id);
+    }
+    return ids;
+  }
+
+  private getRecordFieldReferences(value: unknown): Set<EntityId> | null {
+    if (Array.isArray(value)) {
+      let ids: Set<EntityId> | null = null;
+      for (const item of value) {
+        if (!isNodeRef(item)) {
+          continue;
+        }
+
+        if (!ids) {
+          ids = new Set();
+        }
+        ids.add(getNodeRefId(item));
+      }
+      return ids;
+    }
+
+    if (isNodeRef(value)) {
+      return new Set([getNodeRefId(value)]);
+    }
+
+    return null;
+  }
+
+  private addRecordFieldReferenceIndex(id: EntityId, field: string, value: unknown) {
+    const targets = this.getRecordFieldReferences(value);
+    if (!targets || targets.size === 0) {
+      return;
+    }
+
+    let fields = this.recordReferenceFields.get(id);
+    if (!fields) {
+      fields = new Map();
+      this.recordReferenceFields.set(id, fields);
+    }
+    fields.set(field, targets);
+
+    for (const targetId of targets) {
+      let records = this.recordReferencesByTarget.get(targetId);
+      if (!records) {
+        records = new Map();
+        this.recordReferencesByTarget.set(targetId, records);
+      }
+
+      let targetFields = records.get(id);
+      if (!targetFields) {
+        targetFields = new Set();
+        records.set(id, targetFields);
+      }
+      targetFields.add(field);
+    }
+  }
+
+  private removeRecordFieldReferenceIndex(id: EntityId, field: string) {
+    const fields = this.recordReferenceFields.get(id);
+    const targets = fields?.get(field);
+    if (!fields || !targets) {
+      return;
+    }
+
+    for (const targetId of targets) {
+      const records = this.recordReferencesByTarget.get(targetId);
+      const targetFields = records?.get(id);
+      if (!records || !targetFields) {
+        continue;
+      }
+
+      targetFields.delete(field);
+      if (targetFields.size === 0) {
+        records.delete(id);
+      }
+      if (records.size === 0) {
+        this.recordReferencesByTarget.delete(targetId);
+      }
+    }
+
+    fields.delete(field);
+    if (fields.size === 0) {
+      this.recordReferenceFields.delete(id);
+    }
+  }
+
+  private addRecordReferenceIndexes(id: EntityId, record: AnyRecord) {
+    for (const [field, value] of Object.entries(record)) {
+      this.addRecordFieldReferenceIndex(id, field, value);
+    }
+  }
+
+  private removeRecordReferenceIndexes(id: EntityId, record: AnyRecord) {
+    for (const field of Object.keys(record)) {
+      this.removeRecordFieldReferenceIndex(id, field);
+    }
+  }
+
+  private updateRecordReferenceIndexes(
+    id: EntityId,
+    previous: AnyRecord | undefined,
+    next: AnyRecord,
+    fields: Iterable<string>,
+  ) {
+    for (const field of fields) {
+      if (previous) {
+        this.removeRecordFieldReferenceIndex(id, field);
+      }
+      this.addRecordFieldReferenceIndex(id, field, next[field]);
+    }
   }
 }

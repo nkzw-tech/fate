@@ -5034,6 +5034,82 @@ test('mutations do not reset previously loaded connection entries', async () => 
   });
 });
 
+test('notifies parent subscribers when nested connection metadata changes', () => {
+  type CommentConnectionResult = {
+    items: Array<{ cursor?: string; node: Comment | null }>;
+    pagination?: { hasNext?: boolean; nextCursor?: string };
+  };
+
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+    },
+    types: [{ fields: { comments: { listOf: 'Comment' } }, type: 'Post' }, { type: 'Comment' }],
+  });
+
+  const CommentView = view<Comment>()({ content: true, id: true });
+  const PostView = view<Post>()({
+    comments: {
+      args: { first: 1 },
+      items: { cursor: true, node: CommentView },
+      pagination: { hasNext: true, nextCursor: true },
+    },
+    id: true,
+  });
+  const plan = getSelectionPlan(PostView, null);
+
+  const writePost = (cursor: string, pagination: { hasNext: boolean; nextCursor: string }) =>
+    client.write(
+      'Post',
+      {
+        __typename: 'Post',
+        comments: {
+          items: [
+            {
+              cursor,
+              node: {
+                __typename: 'Comment',
+                author: null,
+                content: 'Comment',
+                id: 'comment-1',
+              },
+            },
+          ],
+          pagination: { hasPrevious: false, ...pagination },
+        },
+        id: 'post-1',
+      },
+      plan.paths,
+      undefined,
+      plan,
+    );
+
+  writePost('cursor-1', { hasNext: true, nextCursor: 'cursor-1' });
+
+  const postId = toEntityId('Post', 'post-1');
+  const subscriber = vi.fn();
+  client.store.subscribe(postId, new Set(['comments']), subscriber);
+
+  writePost('cursor-2', { hasNext: false, nextCursor: 'cursor-2' });
+
+  expect(subscriber).toHaveBeenCalledTimes(1);
+
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  const comments = post.comments as unknown as CommentConnectionResult;
+
+  expect(comments.items[0]?.cursor).toBe('cursor-2');
+  expect(comments.pagination).toEqual({
+    hasNext: false,
+    nextCursor: 'cursor-2',
+  });
+});
+
 test(`'write' registers list state for entity lists`, () => {
   const client = createClient({
     roots: {},
