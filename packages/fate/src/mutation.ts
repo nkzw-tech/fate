@@ -210,6 +210,10 @@ export function wrapMutation<
           ])
         : new Set<string>();
 
+    if (deleteRecord && id == null) {
+      throw new Error(`fate: Mutation '${identifier.key}' requires an 'id' to delete.`);
+    }
+
     const optimisticToken = optimisticEntityId
       ? client.registerOptimisticUpdate(optimisticEntityId, optimisticSelection ?? emptySet)
       : null;
@@ -228,11 +232,7 @@ export function wrapMutation<
       );
     }
 
-    if (deleteRecord) {
-      if (id == null) {
-        throw new Error(`fate: Mutation '${identifier.key}' requires an 'id' to delete.`);
-      }
-
+    if (deleteRecord && id != null) {
       client.deleteRecord(identifier.entity, id, snapshots, listSnapshots);
     }
 

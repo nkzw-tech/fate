@@ -46,6 +46,9 @@ export { createClient, FateClient } from './client.ts';
 export { ConnectionTag, isViewTag } from './types.ts';
 export { createTRPCTransport } from './transport.ts';
 export { createHTTPTransport } from './httpTransport.ts';
+export { getListEntries } from './list.ts';
+export type { ListEntry } from './list.ts';
+export type { List } from './store.ts';
 export type { InferFateAPI } from './server/http.ts';
 export type {
   FateLiveConnectionEvent,

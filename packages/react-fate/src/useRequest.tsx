@@ -27,20 +27,20 @@ export function useRequest<R extends Request, O extends FateRoots = Roots>(
   options?: RequestOptions,
 ): RequestResult<O, R> {
   const client = useFateClient();
-  const promise = client.request(request, options);
   const mode = options?.mode ?? 'cache-first';
+  const { promise, requestKey } = client.prepareRequestForRender(request, options);
 
   useEffect(() => {
-    const retained = client.retain(request);
+    const retained = client.retainRequestKey(requestKey, mode);
 
     return () => {
       retained.dispose();
 
       if (mode === 'network-only' || mode === 'stale-while-revalidate') {
-        client.releaseRequest(request, mode);
+        client.releaseRequestKey(requestKey, mode);
       }
     };
-  }, [client, mode, request]);
+  }, [client, mode, requestKey]);
 
   return use(useDeferredValue(promise)) as unknown as RequestResult<O, R>;
 }

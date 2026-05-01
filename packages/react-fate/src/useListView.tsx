@@ -1,63 +1,13 @@
-import { ConnectionMetadata, ConnectionTag, isViewTag, Pagination, type View } from '@nkzw/fate';
+import type { Pagination } from '@nkzw/fate';
+import { getListEntries } from '@nkzw/fate/list';
 import { useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
 import { useFateClient } from './context.tsx';
-
-type ListEntry = Readonly<{ cursor?: string; id: string }>;
-
-type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
-  ? ReadonlyArray<Item>
-  : ReadonlyArray<never>;
-
-type LoadMoreFn = () => Promise<void>;
-
-type ConnectionSelection = { items?: { node?: unknown } };
-
-const getNodeView = (view: ConnectionSelection) => {
-  const maybeView = (view as ConnectionSelection)?.items?.node;
-
-  if (maybeView) {
-    for (const key of Object.keys(maybeView)) {
-      if (isViewTag(key)) {
-        return maybeView as View<any, any>;
-      }
-    }
-  }
-
-  return view;
-};
-
-const getListEntries = (
-  listState:
-    | Readonly<{
-        cursors?: ReadonlyArray<string | undefined>;
-        ids: ReadonlyArray<string>;
-        liveAfterIds?: ReadonlyArray<string>;
-        liveBeforeIds?: ReadonlyArray<string>;
-        pendingAfterIds?: ReadonlyArray<string>;
-        pendingBeforeIds?: ReadonlyArray<string>;
-      }>
-    | undefined,
-): Array<ListEntry> => {
-  if (!listState) {
-    return [];
-  }
-
-  const entries: Array<ListEntry> = [];
-
-  for (const id of listState.pendingBeforeIds ?? []) {
-    entries.push({ id });
-  }
-
-  listState.ids.forEach((id, index) => {
-    entries.push({ cursor: listState.cursors?.[index], id });
-  });
-
-  for (const id of listState.pendingAfterIds ?? []) {
-    entries.push({ id });
-  }
-
-  return entries;
-};
+import {
+  useListViewInfo,
+  type ConnectionItems,
+  type ConnectionSelection,
+  type LoadMoreFn,
+} from './listView.ts';
 
 /**
  * Subscribes to a connection field, returning the current items and pagination
@@ -70,11 +20,7 @@ export function useListView<
   connection: C,
 ): [ConnectionItems<NonNullable<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
-  const nodeView = useMemo(() => getNodeView(selection), [selection]);
-  const metadata =
-    connection && typeof connection === 'object'
-      ? ((connection as Record<symbol, unknown>)[ConnectionTag] as ConnectionMetadata | undefined)
-      : null;
+  const { metadata, nodeView } = useListViewInfo(selection, connection);
 
   const subscribe = useCallback(
     (onStoreChange: () => void) =>

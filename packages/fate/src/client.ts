@@ -6,6 +6,7 @@ import {
   scopeArgsPayload,
 } from './args.ts';
 import ViewDataCache from './cache.ts';
+import { getListEntries } from './list.ts';
 import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import {
   FateMutations,
@@ -113,8 +114,6 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
 const emptySet = new Set<string>();
 const emptyDispose = () => undefined;
 
-type ListEntry = Readonly<{ cursor?: string; id: EntityId }>;
-
 const dropCanonicalListIds = (
   listIds: ReadonlyArray<EntityId> | undefined,
   ids: ReadonlyArray<EntityId>,
@@ -221,28 +220,6 @@ const markConnectionPageAvailable = (listState: List, direction: 'forward' | 'ba
     ...listState,
     pagination,
   };
-};
-
-const getListEntries = (listState: List | undefined): Array<ListEntry> => {
-  if (!listState) {
-    return [];
-  }
-
-  const entries: Array<ListEntry> = [];
-
-  for (const id of listState.pendingBeforeIds ?? []) {
-    entries.push({ id });
-  }
-
-  listState.ids.forEach((id, index) => {
-    entries.push({ cursor: listState.cursors?.[index], id });
-  });
-
-  for (const id of listState.pendingAfterIds ?? []) {
-    entries.push({ id });
-  }
-
-  return entries;
 };
 
 const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
@@ -1297,6 +1274,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       direction: 'forward' | 'backward';
       hasCursorArg: boolean;
       pageLimit?: number | null;
+      replace?: boolean;
     },
   ): List {
     const existingIds = previous?.ids ?? [];
@@ -1305,6 +1283,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
     const mergeIds = () => {
       if (!previous) {
+        return [...incomingIds];
+      }
+
+      if (!options.hasCursorArg && options.replace) {
         return [...incomingIds];
       }
 
@@ -1556,7 +1538,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         incomingIds,
         incomingCursors,
         pagination,
-        getPaginationMergeInfo(requestArgs),
+        { ...getPaginationMergeInfo(requestArgs), replace: true },
       );
 
       if (!connection.args) {
@@ -1639,7 +1621,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       incomingIds,
       incomingCursors,
       connectionPayload.pagination,
-      { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true },
+      { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
     );
 
     this.store.setList(connection.key, nextListState);
@@ -1663,15 +1645,48 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     options?: RequestOptions,
   ): Promise<RequestResult<Roots, R>> {
     const mode = options?.mode ?? 'cache-first';
+    return this.requestWithDescriptor(this.createRequestDescriptor(request), mode, {
+      revalidateExisting: true,
+    });
+  }
+
+  requestForRender<R extends Request>(
+    request: R,
+    options?: RequestOptions,
+  ): Promise<RequestResult<Roots, R>> {
+    return this.prepareRequestForRender(request, options).promise;
+  }
+
+  prepareRequestForRender<R extends Request>(
+    request: R,
+    options: RequestOptions | undefined,
+  ): Readonly<{ promise: Promise<RequestResult<Roots, R>>; requestKey: string }> {
+    const mode = options?.mode ?? 'cache-first';
     const descriptor = this.createRequestDescriptor(request);
+
+    return {
+      promise: this.requestWithDescriptor(descriptor, mode, { revalidateExisting: false }),
+      requestKey: descriptor.key,
+    };
+  }
+
+  private requestWithDescriptor<R extends Request>(
+    descriptor: RequestDescriptor,
+    mode: RequestMode,
+    { revalidateExisting }: { revalidateExisting: boolean },
+  ): Promise<RequestResult<Roots, R>> {
     const requestKey = descriptor.key;
     const existingRequest = this.requests.get(requestKey)?.get(mode);
     if (existingRequest) {
       if (
-        mode === 'cache-first' &&
-        (existingRequest.status === 'rejected' ||
-          (existingRequest.status === 'fulfilled' &&
-            !this.hasRequestData(existingRequest.descriptor)))
+        revalidateExisting &&
+        existingRequest.status !== 'pending' &&
+        (mode === 'network-only' ||
+          mode === 'stale-while-revalidate' ||
+          (mode === 'cache-first' &&
+            (existingRequest.status === 'rejected' ||
+              (existingRequest.status === 'fulfilled' &&
+                !this.hasRequestData(existingRequest.descriptor)))))
       ) {
         this.executeRequestHandle(existingRequest, mode);
       }
@@ -1697,7 +1712,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   }
 
   releaseRequest(request: Request, mode: RequestMode): void {
-    const requestKey = this.createRequestDescriptor(request).key;
+    this.releaseRequestKey(this.createRequestDescriptor(request).key, mode);
+  }
+
+  releaseRequestKey(requestKey: string, mode: RequestMode): void {
     const requests = this.requests.get(requestKey);
     if (!requests) {
       return;
@@ -1707,6 +1725,17 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     if (requests.size === 0) {
       this.requests.delete(requestKey);
     }
+  }
+
+  retainRequestKey(requestKey: string, mode?: RequestMode): RetainHandle {
+    const requests = this.requests.get(requestKey);
+    const descriptor =
+      (mode ? requests?.get(mode)?.descriptor : undefined) ??
+      requests?.values().next().value?.descriptor;
+
+    return descriptor
+      ? this.operationLifetime.retain(descriptor, () => this.scheduleGarbageCollection())
+      : { dispose: emptyDispose };
   }
 
   /**
@@ -1959,6 +1988,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
   private createRequestDescriptor(request: Request): RequestDescriptor {
     return createRequestDescriptor(request, (name) => this.getRootType(name));
+  }
+
+  getRequestKey(request: Request): string {
+    return this.createRequestDescriptor(request).key;
   }
 
   private hasRootListData(item: ListRequestDescriptor): boolean {
@@ -2244,13 +2277,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const previous = this.store.getListState(item.listKey);
     this.store.setList(
       item.listKey,
-      this.mergeListState(
-        previous,
-        ids,
-        cursors,
-        pagination,
-        getPaginationMergeInfo(item.argsPayload),
-      ),
+      this.mergeListState(previous, ids, cursors, pagination, {
+        ...getPaginationMergeInfo(item.argsPayload),
+        replace: true,
+      }),
     );
   }
 

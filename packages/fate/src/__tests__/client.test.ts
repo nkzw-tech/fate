@@ -2445,6 +2445,37 @@ test('mutations roll back optimistic updates when requests fail', async () => {
   });
 });
 
+test('mutations roll back optimistic writes when delete validation fails before the request', async () => {
+  type DeleteCommentInput = { content: string };
+  type DeleteCommentResult = { __typename: 'Comment'; content: string; id: string };
+
+  const mutate = vi.fn();
+  const mutations = {
+    deleteComment: mutation<Comment, DeleteCommentInput, DeleteCommentResult>('Comment'),
+  };
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      mutate,
+    },
+    types: [{ type: 'Comment' }],
+  });
+
+  const promise = client.mutations.deleteComment({
+    delete: true,
+    input: { content: 'Pending' },
+    optimistic: { content: 'Pending', id: 'comment-temp' },
+  });
+
+  await expect(promise).rejects.toThrow("requires an 'id' to delete");
+  expect(mutate).not.toHaveBeenCalled();
+  expect(client.store.read(toEntityId('Comment', 'comment-temp'))).toBeUndefined();
+});
+
 test('Fate request errors with call-site status codes return at the call site', async () => {
   type UpdateUserMutationInput = { id: string; name: string };
   type UpdateUserMutationResult = { __typename: 'User'; id: string; name: string };
@@ -3489,6 +3520,58 @@ test(`'request' returns connection metadata for root lists and paginates via 'lo
   expect(updated.items[0]?.node).toBe(firstPostRef);
 });
 
+test(`cursorless root list refetches replace the canonical window`, async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const fetchList = vi
+    .fn()
+    .mockResolvedValueOnce({
+      items: [
+        { cursor: 'cursor-1', node: { __typename: 'Post', id: 'post-1', title: 'Stale' } },
+        { cursor: 'cursor-2', node: { __typename: 'Post', id: 'post-2', title: 'Fresh' } },
+      ],
+      pagination: { hasNext: false, hasPrevious: false },
+    })
+    .mockResolvedValueOnce({
+      items: [{ cursor: 'cursor-2', node: { __typename: 'Post', id: 'post-2', title: 'Fresh' } }],
+      pagination: { hasNext: false, hasPrevious: false },
+    });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    args: { first: 2 },
+    items: {
+      cursor: true,
+      node: PostView,
+    },
+    pagination: { hasNext: true, hasPrevious: true },
+  };
+  const request = { posts: { list: PostConnectionView } };
+  const { posts } = await client.request<typeof request>(request);
+  const metadata = (posts as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+
+  await client.loadConnection(PostConnectionView, metadata, { first: 2 });
+
+  expect(fetchList).toHaveBeenCalledTimes(2);
+  expect(client.getRequestResult(request).posts.items.map(({ node }) => node.id)).toEqual([
+    'post-2',
+  ]);
+  expect(client.store.getListState(metadata.key)?.ids).toEqual([toEntityId('Post', 'post-2')]);
+});
+
 test(`'request' keys root connection cache by nested node view`, async () => {
   type Post = { __typename: 'Post'; id: string; summary: string; title: string };
 
@@ -3957,6 +4040,64 @@ test(`'request' waits for a network response when using 'network' mode`, async (
   resolveFetch?.([{ __typename: 'Post', content: 'Banana', id: 'post-1' }]);
 
   expect(await promise).toBe(true);
+});
+
+test(`'request' refetches every time for 'network-only' mode`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValueOnce([{ __typename: 'Post', content: 'First', id: 'post-1' }])
+    .mockResolvedValueOnce([{ __typename: 'Post', content: 'Second', id: 'post-1' }]);
+
+  const client = createClient({
+    roots: { post: clientRoot('Post') },
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const request = { post: { ids: ['post-1'], view: PostView } };
+
+  await client.request(request, { mode: 'network-only' });
+  await client.request(request, { mode: 'network-only' });
+
+  expect(fetchById).toHaveBeenCalledTimes(2);
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({
+    content: 'Second',
+  });
+});
+
+test(`'request' revalidates every time for 'stale-while-revalidate' mode`, async () => {
+  type Post = { __typename: 'Post'; content: string; id: string };
+
+  const fetchById = vi
+    .fn()
+    .mockResolvedValueOnce([{ __typename: 'Post', content: 'First', id: 'post-1' }])
+    .mockResolvedValueOnce([{ __typename: 'Post', content: 'Second', id: 'post-1' }]);
+
+  const client = createClient({
+    roots: { post: clientRoot('Post') },
+    transport: { fetchById },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const request = { post: { ids: ['post-1'], view: PostView } };
+
+  await client.request(request, { mode: 'stale-while-revalidate' });
+  await client.request(request, { mode: 'stale-while-revalidate' });
+
+  expect(fetchById).toHaveBeenCalledTimes(2);
+  expect(client.store.read(toEntityId('Post', 'post-1'))).toMatchObject({
+    content: 'Second',
+  });
 });
 
 test(`'request' retries cache-first requests after a rejection`, async () => {

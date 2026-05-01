@@ -33,6 +33,11 @@
       "@nkzw/source": "./src/clientStub.ts",
       "default": "./lib/clientStub.mjs"
     },
+    "./list": {
+      "types": "./src/list.ts",
+      "@nkzw/source": "./src/list.ts",
+      "default": "./lib/list.mjs"
+    },
     "./cli": {
       "types": "./lib/cli.d.mts",
       "@nkzw/source": "./src/cli.ts",
@@ -60,7 +65,7 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/vite.ts"
+    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/vite.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",
