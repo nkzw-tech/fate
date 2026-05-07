@@ -119,11 +119,11 @@ export default function HomeRoute() {
           </Stack>
           <div className="space-y-3">
             <h1 className="text-3xl leading-tight font-semibold text-balance lg:text-4xl">
-              fate is a modern data client for React and tRPC inspired by Relay and GraphQL.
+              fate is a modern data client for React inspired by Relay and GraphQL.
             </h1>
             <p className="text-sm text-white/80 lg:text-base">
               fate combines view composition, normalized caching, data masking, Async React
-              features, and tRPC&apos;s type safety.
+              features, and type-safe data fetching.
             </p>
           </div>
           <Stack alignCenter gap={12} wrap>

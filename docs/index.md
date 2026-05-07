@@ -2,8 +2,8 @@
 layout: home
 
 hero:
-  text: A modern data client for React & tRPC
-  tagline: Inspired by Relay and GraphQL, fate combines view composition, normalized caching, data masking, Async React features, and tRPC's type safety.
+  text: A modern data client for React
+  tagline: Inspired by Relay and GraphQL, fate combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.
   image:
     dark: /fate-logo-dark.svg
     light: /fate-logo.svg

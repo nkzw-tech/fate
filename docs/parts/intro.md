@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-**_fate_** is a modern data client for React and tRPC inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and tRPC's type safety.
+**_fate_** is a modern data client for React inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.
 
 ## Features
 
@@ -19,7 +19,7 @@
 - **Live Views:** fate can keep individual view refs up to date through a single native Server-Sent Events stream, merging updates into the normalized cache.
 - **AI-Ready:** fate's minimal, predictable API and explicit data selection enable local reasoning, enabling humans and AI tools to generate stable, type-safe data-fetching code.
 
-## A modern data client for React & tRPC
+## A modern data client for React
 
 **_fate_** is designed to make data fetching and state management in React applications more composable, declarative, and predictable. The framework has a minimal API, no DSL, and no magic—_it's just JavaScript_.
 
@@ -31,7 +31,7 @@ However, GraphQL comes with its own type system and query language. If you are a
 
 Many React data frameworks lack Relay's ergonomics, especially fragment composition, co-located data requirements, predictable caching, and deep integration with modern React features. Optimistic updates usually require manually managing keys and imperative data updates, which is error-prone and tedious.
 
-_fate_ takes the great ideas from Relay and puts them on top of tRPC. You get the best of both worlds: type safety between the client and server, and GraphQL-like ergonomics for data fetching. Using _fate_ usually looks like this:
+_fate_ takes the great ideas from Relay and applies them to plain TypeScript data fetching. You get type safety between the client and server, a native protocol with optional adapters such as tRPC, and GraphQL-like ergonomics for data fetching. Using _fate_ usually looks like this:
 
 ```tsx
 export const PostView = view<Post>()({
