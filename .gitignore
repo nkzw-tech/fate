@@ -1,6 +1,10 @@
 .vite-hooks/_/
 .fate/
 **/.fate/
+.void/
+**/.void/
+.wrangler/
+**/.wrangler/
 .pnpm-debug.log
 .vitepress/cache
 **/node_modules/

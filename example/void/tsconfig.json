@@ -1,0 +1,21 @@
+{
+  "extends": ["../../tsconfig.json", "./.void/tsconfig.json"],
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "types": ["vite/client", "void/env"]
+  },
+  "include": [
+    ".fate/**/*.ts",
+    ".void/**/*.d.ts",
+    "db/**/*.ts",
+    "db/**/*.tsx",
+    "middleware/**/*.ts",
+    "pages/**/*.ts",
+    "pages/**/*.tsx",
+    "routes/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}

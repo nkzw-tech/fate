@@ -5,9 +5,12 @@ packages:
 allowBuilds:
   '@prisma/engines': true
   '@swc/core': true
+  better-sqlite3: true
   esbuild: true
   prisma: true
+  sharp: true
   unrs-resolver: true
+  workerd: true
 
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.1.20
@@ -19,10 +22,13 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - '@swc/core'
   - '@tailwindcss/oxide'
+  - better-sqlite3
   - esbuild
   - msgpackr-extract
   - prisma
+  - sharp
   - unrs-resolver
+  - workerd
 
 overrides:
   vite: 'catalog:'

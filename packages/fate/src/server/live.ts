@@ -14,6 +14,7 @@ export type LiveConnectionEventType =
   | 'prependNode';
 
 export type LiveSourceEvent = Readonly<{
+  data?: unknown;
   eventId?: string;
   id: string | number;
   type: LiveEventType;
@@ -73,8 +74,19 @@ export type LiveEventBus = Readonly<{
   emit: (
     type: string,
     id: string | number,
-    options?: { eventId?: string; type?: LiveEventType },
+    options?: { data?: unknown; eventId?: string; type?: LiveEventType },
   ) => void;
+  listen?: (
+    type: string,
+    id: string | number,
+    handler: (event: LiveSourceEvent) => void,
+    options?: { lastEventId?: string; signal?: AbortSignal },
+  ) => () => void;
+  listenConnection?: (
+    target: LiveConnectionTarget,
+    handler: (event: LiveConnectionSourceEvent) => void,
+    options?: { lastEventId?: string; signal?: AbortSignal },
+  ) => () => void;
   subscribe: (
     type: string,
     id: string | number,
@@ -84,7 +96,11 @@ export type LiveEventBus = Readonly<{
     target: LiveConnectionTarget,
     options?: { lastEventId?: string; signal?: AbortSignal },
   ) => AsyncIterable<readonly [LiveConnectionSourceEvent]>;
-  update: (type: string, id: string | number, options?: { eventId?: string }) => void;
+  update: (
+    type: string,
+    id: string | number,
+    options?: { data?: unknown; eventId?: string },
+  ) => void;
 }>;
 
 const eventName = (type: string, id: string | number) => `${type}:${String(id)}`;
@@ -161,10 +177,31 @@ export function createLiveEventBus(): LiveEventBus {
 
   const emit: LiveEventBus['emit'] = (type, id, options = {}) => {
     emitter.emit(eventName(type, id), {
+      data: options.data,
       eventId: options.eventId,
       id,
       type: options.type ?? 'update',
     } satisfies LiveSourceEvent);
+  };
+  const listen = <T>(
+    names: ReadonlyArray<string>,
+    handler: (event: T) => void,
+    signal?: AbortSignal,
+  ) => {
+    const listener = (event: T) => handler(event);
+    const cleanup = () => {
+      for (const name of names) {
+        emitter.off(name, listener);
+      }
+      signal?.removeEventListener('abort', cleanup);
+    };
+
+    for (const name of names) {
+      emitter.on(name, listener);
+    }
+    signal?.addEventListener('abort', cleanup, { once: true });
+
+    return cleanup;
   };
 
   return {
@@ -222,6 +259,19 @@ export function createLiveEventBus(): LiveEventBus {
       emit(type, id, { ...options, type: 'delete' });
     },
     emit,
+    listen(type, id, handler, options) {
+      return listen<LiveSourceEvent>([eventName(type, id)], handler, options?.signal);
+    },
+    listenConnection(target, handler, options) {
+      return listen<LiveConnectionSourceEvent>(
+        [
+          connectionEventName(target.procedure, target.args),
+          globalConnectionEventName(target.procedure),
+        ],
+        handler,
+        options?.signal,
+      );
+    },
     subscribe(type, id, options) {
       return on(emitter, eventName(type, id), {
         signal: options?.signal,

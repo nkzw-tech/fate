@@ -22,6 +22,7 @@
     "dev:drizzle-server": "cd example/server-drizzle && vp run dev",
     "dev:server": "cd example/server-prisma && vp run dev",
     "dev:setup": "vp run --filter '@nkzw/fate' build && vp run --filter react-fate build && (cd example/server-prisma && vp run dev:setup) && vp run fate:generate",
+    "dev:void": "cd example/void && vp dev",
     "fate:generate": "(cd example/client && node --conditions=development --no-warnings --loader ts-node/esm ../../packages/fate/src/cli.ts generate)",
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "prepare": "vp config",

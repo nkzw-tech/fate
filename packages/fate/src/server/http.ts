@@ -18,7 +18,7 @@ import { isDataView, type DataView, type DataViewResult } from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
-import type { SourceDefinition } from './source.ts';
+import { createSourcePlan, type SourceDefinition } from './source.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -98,6 +98,7 @@ type ContextOptions<AdapterContext> = {
 
 type LiveServerSubscription = {
   abort: () => void;
+  active: boolean;
 };
 
 type LiveConnection<Context> = {
@@ -105,8 +106,29 @@ type LiveConnection<Context> = {
   closed: boolean;
   controller?: ReadableStreamDefaultController<Uint8Array>;
   ctx: Context;
+  draining?: boolean;
+  drainInterval?: ReturnType<typeof setInterval>;
+  heartbeat?: ReturnType<typeof setInterval>;
+  lastHeartbeat: number;
+  queue: Array<
+    | {
+        event: LiveSourceEvent;
+        kind: 'entity';
+        operation: FateLiveSubscribeOperation;
+        source: SourceDefinition<AnyRecord>;
+        subscription: LiveServerSubscription;
+      }
+    | {
+        event: LiveConnectionSourceEvent;
+        kind: 'connection';
+        operation: FateLiveConnectionSubscribeOperation;
+        subscription: LiveServerSubscription;
+      }
+  >;
   subscriptions: Map<string, LiveServerSubscription>;
 };
+
+type WaitUntil = (promise: Promise<unknown>) => void;
 
 type FateServerOptions<
   Context,
@@ -239,6 +261,31 @@ const getLiveBus = (live: false | LiveConfig | undefined): LiveEventBus | null =
   }
 
   return live.bus;
+};
+
+const getWaitUntil = <AdapterContext>(adapterContext?: AdapterContext): WaitUntil | undefined => {
+  const context = adapterContext as
+    | { executionCtx?: { waitUntil?: WaitUntil }; waitUntil?: WaitUntil }
+    | undefined;
+  if (!context) {
+    return undefined;
+  }
+
+  try {
+    const executionCtx = context.executionCtx;
+    const waitUntil = executionCtx?.waitUntil;
+    if (waitUntil) {
+      return waitUntil.bind(executionCtx);
+    }
+  } catch {
+    // Some adapters expose throwing getters when an ExecutionContext is unavailable.
+  }
+
+  try {
+    return context.waitUntil?.bind(context);
+  } catch {
+    return undefined;
+  }
 };
 
 const parseJSON = async (request: Request): Promise<unknown> => {
@@ -404,8 +451,81 @@ const sse = (message: FateLiveMessage, eventId?: string): string => {
   return `${lines.join('\n')}\n\n`;
 };
 
+const sseComment = (message: string): string => `: ${message}\n\n`;
+
 const livePayload = (event: LiveSourceEvent, data: unknown): FateLiveEvent =>
   event.type === 'delete' || data == null ? { delete: true, id: event.id } : { data };
+
+const hasSelectedDataPath = (value: unknown, segments: Array<string>): boolean => {
+  if (segments.length === 0) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((entry) => hasSelectedDataPath(entry, segments));
+  }
+
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const [field, ...rest] = segments;
+  return field in value && hasSelectedDataPath(value[field], rest);
+};
+
+const canUseLiveEventData = (data: unknown, selectedPaths: ReadonlySet<string>): boolean => {
+  if (!isRecord(data)) {
+    return false;
+  }
+
+  for (const path of selectedPaths) {
+    if (!hasSelectedDataPath(data, path.split('.'))) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const resolveLiveSourceData = async <Context>({
+  ctx,
+  data,
+  id,
+  input,
+  registry,
+  source,
+}: {
+  ctx: Context;
+  data?: unknown;
+  id?: string | number;
+  input: {
+    args?: Record<string, unknown>;
+    select: Iterable<string>;
+  };
+  registry: SourceRegistry<Context>;
+  source: SourceDefinition<AnyRecord>;
+}): Promise<unknown> => {
+  if (data !== undefined) {
+    if (data == null) {
+      return data;
+    }
+
+    const plan = createSourcePlan({ ...input, ctx, source });
+    if (canUseLiveEventData(data, plan.selectedPaths)) {
+      return await plan.resolve(data as AnyRecord);
+    }
+  }
+
+  return id == null
+    ? null
+    : await resolveSourceById({
+        ctx,
+        id: String(id),
+        input,
+        registry,
+        source,
+      });
+};
 
 const liveConnectionPayload = (
   event: LiveConnectionSourceEvent,
@@ -428,6 +548,9 @@ const liveConnectionPayload = (
       };
   }
 };
+
+const sourceScore = (source: SourceDefinition<AnyRecord>) =>
+  Object.keys(source.view.fields).length + Object.keys(source.relations ?? {}).length;
 
 export function createFateServer<
   Context = unknown,
@@ -457,10 +580,16 @@ export function createFateServer<
     { source: SourceDefinition<AnyRecord>; view: DataView<AnyRecord> }
   >();
   const sourcesByType = new Map<string, SourceDefinition<AnyRecord>>();
+  const registerSourceByType = (source: SourceDefinition<AnyRecord>) => {
+    const existing = sourcesByType.get(source.view.typeName);
+    if (!existing || sourceScore(source) > sourceScore(existing)) {
+      sourcesByType.set(source.view.typeName, source);
+    }
+  };
 
   const visit = (view: DataView<AnyRecord>) => {
     const source = sources.getSource(view);
-    sourcesByType.set(view.typeName, source);
+    registerSourceByType(source);
 
     for (const field of Object.values(view.fields)) {
       if (isDataView(field)) {
@@ -665,6 +794,14 @@ export function createFateServer<
       subscription.abort();
     }
     connection.subscriptions.clear();
+    if (connection.drainInterval) {
+      clearInterval(connection.drainInterval);
+      connection.drainInterval = undefined;
+    }
+    if (connection.heartbeat) {
+      clearInterval(connection.heartbeat);
+      connection.heartbeat = undefined;
+    }
     try {
       connection.controller?.close();
     } catch {
@@ -689,39 +826,50 @@ export function createFateServer<
     }
   };
 
-  const subscribeLiveOperation = (
-    connection: LiveConnection<Context>,
-    operation: FateLiveSubscribeOperation,
-  ) => {
-    const source = sourcesByType.get(operation.type);
-    if (!source) {
-      throw new FateRequestError('NOT_FOUND', `No source registered for '${operation.type}'.`);
+  const sendLiveComment = (connection: LiveConnection<Context>, message: string) => {
+    if (connection.closed || !connection.controller) {
+      return;
     }
 
-    connection.subscriptions.get(operation.id)?.abort();
+    try {
+      connection.controller.enqueue(encoder.encode(sseComment(message)));
+    } catch {
+      connection.closed = true;
+    }
+  };
 
-    const subscriptionController = new AbortController();
-    const abort = () => subscriptionController.abort();
-    connection.subscriptions.set(operation.id, { abort });
+  const drainLiveConnection = async (connection: LiveConnection<Context>) => {
+    if (connection.closed || connection.draining) {
+      return;
+    }
 
-    void (async () => {
-      try {
-        const iterable = liveBus!.subscribe(operation.type, operation.entityId, {
-          lastEventId: operation.lastEventId,
-          signal: subscriptionController.signal,
-        });
+    connection.draining = true;
+    let activeOperationId: string | null = null;
+    try {
+      while (!connection.closed && connection.queue.length > 0) {
+        const item = connection.queue.shift()!;
+        activeOperationId = item.operation.id;
+        if (
+          !item.subscription.active ||
+          connection.subscriptions.get(item.operation.id) !== item.subscription
+        ) {
+          continue;
+        }
 
-        for await (const [event] of iterable) {
+        if (item.kind === 'entity') {
+          const { event, operation, source } = item;
+          const input = {
+            args: operation.args,
+            select: operation.select,
+          };
           const data =
             event.type === 'delete'
               ? null
-              : await resolveSourceById({
+              : await resolveLiveSourceData({
                   ctx: connection.ctx,
-                  id: String(event.id),
-                  input: {
-                    args: operation.args,
-                    select: operation.select,
-                  },
+                  data: event.data,
+                  id: event.id,
+                  input,
                   registry: sources.registry,
                   source,
                 });
@@ -735,6 +883,163 @@ export function createFateServer<
             },
             event.eventId,
           );
+          continue;
+        }
+
+        const { event, operation } = item;
+        const nodeType = event.nodeType ?? operation.type;
+        const source = nodeType ? sourcesByType.get(nodeType) : null;
+        const node =
+          event.type === 'deleteEdge' || event.type === 'invalidate'
+            ? null
+            : source
+              ? await resolveLiveSourceData({
+                  ctx: connection.ctx,
+                  data: event.node,
+                  id: event.id,
+                  input: {
+                    args: operation.selectionArgs,
+                    select: operation.select,
+                  },
+                  registry: sources.registry,
+                  source,
+                })
+              : null;
+
+        if (
+          event.type !== 'invalidate' &&
+          (!nodeType || (event.type !== 'deleteEdge' && node == null))
+        ) {
+          throw new FateRequestError(
+            'NOT_FOUND',
+            `No source registered for live connection node type '${nodeType}'.`,
+          );
+        }
+
+        sendLiveMessage(
+          connection,
+          {
+            event: liveConnectionPayload(event, node),
+            id: operation.id,
+            kind: 'connection',
+          },
+          event.eventId,
+        );
+      }
+
+      const now = Date.now();
+      if (!connection.closed && now - connection.lastHeartbeat >= 25_000) {
+        connection.lastHeartbeat = now;
+        sendLiveComment(connection, 'heartbeat');
+      }
+    } catch (error) {
+      sendLiveMessage(connection, {
+        error: toProtocolError(error),
+        id: activeOperationId ?? 'live',
+        kind: 'error',
+      });
+    } finally {
+      connection.draining = false;
+    }
+  };
+
+  const subscribeLiveOperation = (
+    connection: LiveConnection<Context>,
+    operation: FateLiveSubscribeOperation,
+    waitUntil?: WaitUntil,
+  ) => {
+    const source = sourcesByType.get(operation.type);
+    if (!source) {
+      throw new FateRequestError('NOT_FOUND', `No source registered for '${operation.type}'.`);
+    }
+
+    connection.subscriptions.get(operation.id)?.abort();
+
+    const subscriptionController = new AbortController();
+    const subscription: LiveServerSubscription = {
+      abort: () => {
+        subscription.active = false;
+        subscriptionController.abort();
+      },
+      active: true,
+    };
+    connection.subscriptions.set(operation.id, subscription);
+
+    const handleEvent = async (event: LiveSourceEvent) => {
+      try {
+        const input = {
+          args: operation.args,
+          select: operation.select,
+        };
+        const data =
+          event.type === 'delete'
+            ? null
+            : await resolveLiveSourceData({
+                ctx: connection.ctx,
+                data: event.data,
+                id: event.id,
+                input,
+                registry: sources.registry,
+                source,
+              });
+
+        sendLiveMessage(
+          connection,
+          {
+            event: livePayload(event, data),
+            id: operation.id,
+            kind: 'next',
+          },
+          event.eventId,
+        );
+      } catch (error) {
+        if (!subscriptionController.signal.aborted) {
+          sendLiveMessage(connection, {
+            error: toProtocolError(error),
+            id: operation.id,
+            kind: 'error',
+          });
+        }
+      }
+    };
+
+    if (liveBus!.listen) {
+      const unsubscribe = liveBus!.listen(
+        operation.type,
+        operation.entityId,
+        (event) => {
+          connection.queue.push({
+            event,
+            kind: 'entity',
+            operation,
+            source,
+            subscription,
+          });
+        },
+        {
+          lastEventId: operation.lastEventId,
+          signal: subscriptionController.signal,
+        },
+      );
+      const abort = () => {
+        subscription.active = false;
+        unsubscribe();
+        subscriptionController.abort();
+      };
+      subscription.abort = abort;
+      connection.subscriptions.set(operation.id, subscription);
+      return;
+    }
+
+    const task = (async () => {
+      try {
+        const iterable = liveBus!.subscribe(operation.type, operation.entityId, {
+          lastEventId: operation.lastEventId,
+          signal: subscriptionController.signal,
+        });
+
+        for await (const [event] of iterable) {
+          await handleEvent(event);
         }
       } catch (error) {
         if (!subscriptionController.signal.aborted) {
@@ -745,24 +1050,109 @@ export function createFateServer<
           });
         }
       } finally {
-        if (connection.subscriptions.get(operation.id)?.abort === abort) {
+        if (connection.subscriptions.get(operation.id) === subscription) {
           connection.subscriptions.delete(operation.id);
         }
       }
     })();
+    waitUntil?.(task);
   };
 
   const subscribeLiveConnectionOperation = (
     connection: LiveConnection<Context>,
     operation: FateLiveConnectionSubscribeOperation,
+    waitUntil?: WaitUntil,
   ) => {
     connection.subscriptions.get(operation.id)?.abort();
 
     const subscriptionController = new AbortController();
-    const abort = () => subscriptionController.abort();
-    connection.subscriptions.set(operation.id, { abort });
+    const subscription: LiveServerSubscription = {
+      abort: () => {
+        subscription.active = false;
+        subscriptionController.abort();
+      },
+      active: true,
+    };
+    connection.subscriptions.set(operation.id, subscription);
 
-    void (async () => {
+    const handleEvent = async (event: LiveConnectionSourceEvent) => {
+      try {
+        const nodeType = event.nodeType ?? operation.type;
+        const source = nodeType ? sourcesByType.get(nodeType) : null;
+        const node =
+          event.type === 'deleteEdge' || event.type === 'invalidate'
+            ? null
+            : source
+              ? await resolveLiveSourceData({
+                  ctx: connection.ctx,
+                  data: event.node,
+                  id: event.id,
+                  input: {
+                    args: operation.selectionArgs,
+                    select: operation.select,
+                  },
+                  registry: sources.registry,
+                  source,
+                })
+              : null;
+
+        if (
+          event.type !== 'invalidate' &&
+          (!nodeType || (event.type !== 'deleteEdge' && node == null))
+        ) {
+          throw new FateRequestError(
+            'NOT_FOUND',
+            `No source registered for live connection node type '${nodeType}'.`,
+          );
+        }
+
+        sendLiveMessage(
+          connection,
+          {
+            event: liveConnectionPayload(event, node),
+            id: operation.id,
+            kind: 'connection',
+          },
+          event.eventId,
+        );
+      } catch (error) {
+        if (!subscriptionController.signal.aborted) {
+          sendLiveMessage(connection, {
+            error: toProtocolError(error),
+            id: operation.id,
+            kind: 'error',
+          });
+        }
+      }
+    };
+
+    if (liveBus!.listenConnection) {
+      const unsubscribe = liveBus!.listenConnection(
+        { args: operation.args, procedure: operation.procedure },
+        (event) => {
+          connection.queue.push({
+            event,
+            kind: 'connection',
+            operation,
+            subscription,
+          });
+        },
+        {
+          lastEventId: operation.lastEventId,
+          signal: subscriptionController.signal,
+        },
+      );
+      const abort = () => {
+        subscription.active = false;
+        unsubscribe();
+        subscriptionController.abort();
+      };
+      subscription.abort = abort;
+      connection.subscriptions.set(operation.id, subscription);
+      return;
+    }
+
+    const task = (async () => {
       try {
         const iterable = liveBus!.subscribeConnection(
           { args: operation.args, procedure: operation.procedure },
@@ -773,45 +1163,7 @@ export function createFateServer<
         );
 
         for await (const [event] of iterable) {
-          const nodeType = event.nodeType ?? operation.type;
-          const source = nodeType ? sourcesByType.get(nodeType) : null;
-          const node =
-            event.type === 'deleteEdge' || event.type === 'invalidate'
-              ? null
-              : event.node !== undefined
-                ? event.node
-                : event.id != null && source
-                  ? await resolveSourceById({
-                      ctx: connection.ctx,
-                      id: String(event.id),
-                      input: {
-                        args: operation.selectionArgs,
-                        select: operation.select,
-                      },
-                      registry: sources.registry,
-                      source,
-                    })
-                  : null;
-
-          if (
-            event.type !== 'invalidate' &&
-            (!nodeType || (event.type !== 'deleteEdge' && node == null))
-          ) {
-            throw new FateRequestError(
-              'NOT_FOUND',
-              `No source registered for live connection node type '${nodeType}'.`,
-            );
-          }
-
-          sendLiveMessage(
-            connection,
-            {
-              event: liveConnectionPayload(event, node),
-              id: operation.id,
-              kind: 'connection',
-            },
-            event.eventId,
-          );
+          await handleEvent(event);
         }
       } catch (error) {
         if (!subscriptionController.signal.aborted) {
@@ -822,14 +1174,18 @@ export function createFateServer<
           });
         }
       } finally {
-        if (connection.subscriptions.get(operation.id)?.abort === abort) {
+        if (connection.subscriptions.get(operation.id) === subscription) {
           connection.subscriptions.delete(operation.id);
         }
       }
     })();
+    waitUntil?.(task);
   };
 
-  const controlLiveConnection = async (request: Request): Promise<FateProtocolResponse> => {
+  const controlLiveConnection = async (
+    request: Request,
+    adapterContext?: AdapterContext,
+  ): Promise<FateProtocolResponse> => {
     const body = assertLiveControlRequest(await parseJSON(request));
     const connection = liveConnections.get(body.connectionId);
     if (!connection || connection.closed) {
@@ -837,12 +1193,13 @@ export function createFateServer<
     }
 
     const results: Array<FateOperationResult> = [];
+    const waitUntil = getWaitUntil(adapterContext);
     for (const operation of body.operations) {
       try {
         if (operation.kind === 'subscribe') {
-          subscribeLiveOperation(connection, operation);
+          subscribeLiveOperation(connection, operation, waitUntil);
         } else if (operation.kind === 'subscribeConnection') {
-          subscribeLiveConnectionOperation(connection, operation);
+          subscribeLiveConnectionOperation(connection, operation, waitUntil);
         } else {
           connection.subscriptions.get(operation.id)?.abort();
           connection.subscriptions.delete(operation.id);
@@ -865,7 +1222,9 @@ export function createFateServer<
         }
 
         if (request.method === 'POST') {
-          return Response.json(await controlLiveConnection(request), { headers: jsonHeaders });
+          return Response.json(await controlLiveConnection(request, adapterContext), {
+            headers: jsonHeaders,
+          });
         }
 
         if (request.method !== 'GET') {
@@ -892,16 +1251,25 @@ export function createFateServer<
           cancel() {
             cleanupLiveConnection(connectionId);
           },
+          pull() {
+            const connection = liveConnections.get(connectionId);
+            if (connection) {
+              void drainLiveConnection(connection);
+            }
+          },
           start(controller) {
             const connection: LiveConnection<Context> = {
               abort: abortLive,
               closed: false,
               controller,
               ctx,
+              lastHeartbeat: Date.now(),
+              queue: [],
               subscriptions: new Map(),
             };
+            connection.drainInterval = setInterval(() => void drainLiveConnection(connection), 100);
             liveConnections.set(connectionId, connection);
-            controller.enqueue(encoder.encode(': connected\n\n'));
+            controller.enqueue(encoder.encode(sseComment('connected')));
           },
         });
 

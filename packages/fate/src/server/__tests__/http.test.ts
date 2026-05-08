@@ -1,9 +1,10 @@
 import { expect, test } from 'vite-plus/test';
 import { z } from 'zod';
+import { FateRequestError } from '../../protocol.ts';
 import type { AnyRecord } from '../../types.ts';
 import { dataView, list } from '../dataView.ts';
 import type { DataView } from '../dataView.ts';
-import { createSourceRegistry } from '../executor.ts';
+import { createSourceRegistry, type SourceByIdsHandler } from '../executor.ts';
 import { createFateFetchHandler, createFateServer, createHonoFateHandler } from '../http.ts';
 import { createLiveEventBus } from '../live.ts';
 import type { SourceDefinition } from '../source.ts';
@@ -52,13 +53,16 @@ const userSource: SourceDefinition<User> = {
   view: userView,
 };
 
-const createServer = () => {
+const createServer = (
+  options: { postByIds?: SourceByIdsHandler<TestContext, unknown, Post> } = {},
+) => {
   const live = createLiveEventBus();
   const registry = createSourceRegistry([
     [
       postSource,
       {
-        byIds: async ({ ids }) => posts.filter((post) => ids.includes(post.id)),
+        byIds:
+          options.postByIds ?? (async ({ ids }) => posts.filter((post) => ids.includes(post.id))),
         connection: async ({ take }) => posts.slice(0, take),
       },
     ],
@@ -107,6 +111,12 @@ const createServer = () => {
           post.likes += 1;
           expect(select).toContain('likes');
           return post;
+        },
+        type: 'Post',
+      },
+      'post.requireUser': {
+        resolve: () => {
+          throw new FateRequestError('UNAUTHORIZED', 'You must be logged in.');
         },
         type: 'Post',
       },
@@ -197,6 +207,92 @@ test('handles native batched operations', async () => {
   });
 });
 
+test('keeps the richest source for native by-id operations when a type has nested views', async () => {
+  type NestedPost = Post & { related?: NestedPost | null };
+
+  const summaryPostView = dataView<NestedPost>('Post')({
+    id: true,
+    title: true,
+  });
+  const fullPostView = dataView<NestedPost>('Post')({
+    id: true,
+    likes: true,
+    related: summaryPostView,
+    title: true,
+  });
+  const fullPostSource: SourceDefinition<NestedPost> = {
+    id: 'id',
+    relations: {
+      related: {
+        foreignKey: 'id',
+        kind: 'one',
+        localKey: 'relatedId',
+        source: () => summaryPostSource,
+      },
+    },
+    view: fullPostView,
+  };
+  const summaryPostSource: SourceDefinition<NestedPost> = {
+    id: 'id',
+    view: summaryPostView,
+  };
+  const registry = createSourceRegistry([
+    [
+      fullPostSource,
+      {
+        byIds: async ({ ids }) => posts.filter((post) => ids.includes(post.id)),
+      },
+    ],
+    [
+      summaryPostSource,
+      {
+        byIds: async () => {
+          throw new Error('Summary source should not handle root by-id requests.');
+        },
+      },
+    ],
+  ]);
+  const sourcesByView = new Map<DataView<AnyRecord>, SourceDefinition<AnyRecord>>([
+    [fullPostView as DataView<AnyRecord>, fullPostSource as SourceDefinition<AnyRecord>],
+    [summaryPostView as DataView<AnyRecord>, summaryPostSource as SourceDefinition<AnyRecord>],
+  ]);
+  const fate = createFateServer({
+    roots: {
+      posts: list(fullPostView),
+    },
+    sources: {
+      getSource: <Item extends AnyRecord>(target: DataView<Item> | SourceDefinition<Item>) => {
+        if ('view' in target && 'id' in target) {
+          return target;
+        }
+        return (sourcesByView.get(target as DataView<AnyRecord>) ??
+          fullPostSource) as SourceDefinition<Item>;
+      },
+      registry,
+    },
+  });
+
+  const response = await fate.handleRequest(
+    postJSON('http://local/fate', {
+      operations: [
+        {
+          id: 'post',
+          ids: ['1'],
+          kind: 'byId',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  await expect(response.json()).resolves.toMatchObject({
+    results: [{ data: [{ id: '1', title: 'One' }], id: 'post', ok: true }],
+    version: 1,
+  });
+});
+
 test('returns per-operation protocol errors', async () => {
   const { fate } = createServer();
   const response = await fate.handleRequest(
@@ -253,6 +349,38 @@ test('maps native mutation validation errors to protocol validation errors', asy
           message: 'Validation failed.',
         },
         id: 'invalid-input',
+        ok: false,
+      },
+    ],
+    version: 1,
+  });
+});
+
+test('preserves explicit native operation protocol errors', async () => {
+  const { fate } = createServer();
+  const response = await fate.handleRequest(
+    postJSON('http://local/fate', {
+      operations: [
+        {
+          id: 'require-user',
+          input: {},
+          kind: 'mutation',
+          name: 'post.requireUser',
+          select: ['id'],
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  await expect(response.json()).resolves.toMatchObject({
+    results: [
+      {
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'You must be logged in.',
+        },
+        id: 'require-user',
         ok: false,
       },
     ],
@@ -387,6 +515,86 @@ test('streams live updates over SSE', async () => {
   await reader.cancel();
 });
 
+test('shapes supplied live update data for the subscription selection', async () => {
+  const { fate, live } = createServer();
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          entityId: '1',
+          id: 'sub-1',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.update('Post', '1', {
+    data: { __typename: 'Post', id: '1', likes: 99, title: 'One from event' },
+    eventId: 'evt-1',
+  });
+  await reader.read();
+  const first = new TextDecoder().decode((await reader.read()).value);
+
+  expect(first).toContain('"event":{"data":{"id":"1","title":"One from event"}}');
+  expect(first).not.toContain('likes');
+  expect(first).not.toContain('__typename');
+
+  live.update('Post', '1', {
+    data: { id: '1', likes: 100 },
+    eventId: 'evt-2',
+  });
+  const second = new TextDecoder().decode((await reader.read()).value);
+
+  expect(second).toContain('"event":{"data":{"id":"1","title":"One"}}');
+  expect(second).not.toContain('likes');
+  await reader.cancel();
+});
+
+test('sends queued live errors to the affected subscription', async () => {
+  const { fate, live } = createServer({
+    postByIds: async () => {
+      throw new Error('Database unavailable.');
+    },
+  });
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          entityId: '1',
+          id: 'sub-1',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.update('Post', '1', { eventId: 'evt-error' });
+  await reader.read();
+  const chunk = new TextDecoder().decode((await reader.read()).value);
+
+  expect(chunk).toContain('event: error');
+  expect(chunk).toContain('"id":"sub-1"');
+  expect(chunk).not.toContain('"id":"live"');
+  await reader.cancel();
+});
+
 test('routes live updates only to matching subscriptions on one SSE stream', async () => {
   const { fate, live } = createServer();
   const response = await fate.handleLiveRequest(
@@ -425,6 +633,58 @@ test('routes live updates only to matching subscriptions on one SSE stream', asy
   expect(chunk).toContain('"id":"sub-2"');
   expect(chunk).toContain('"event":{"data":{"id":"2","title":"Two"}}');
   expect(chunk).not.toContain('"id":"sub-1"');
+  await reader.cancel();
+});
+
+test('skips queued live events for replaced subscriptions', async () => {
+  const { fate, live } = createServer();
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          entityId: '1',
+          id: 'sub-1',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.update('Post', '1', { eventId: 'evt-old' });
+
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          entityId: '2',
+          id: 'sub-1',
+          kind: 'subscribe',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.update('Post', '2', { eventId: 'evt-new' });
+  await reader.read();
+  const chunk = new TextDecoder().decode((await reader.read()).value);
+
+  expect(chunk).toContain('id: evt-new');
+  expect(chunk).toContain('"event":{"data":{"id":"2","title":"Two"}}');
+  expect(chunk).not.toContain('evt-old');
+  expect(chunk).not.toContain('"title":"One"');
   await reader.cancel();
 });
 
@@ -471,6 +731,89 @@ test('streams live connection events over SSE', async () => {
   await reader.cancel();
 });
 
+test('controls live subscriptions when adapter execution context is unavailable', async () => {
+  const { fate } = createServer();
+  const adapterContext = Object.defineProperty({}, 'executionCtx', {
+    get() {
+      throw new Error('This context has no ExecutionContext');
+    },
+  });
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            args: { categoryId: 'fruit' },
+            id: 'sub-1',
+            kind: 'subscribeConnection',
+            procedure: 'posts',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+      adapterContext,
+    ),
+  ).resolves.toHaveProperty('status', 200);
+
+  await reader.cancel();
+});
+
+test('shapes supplied live connection nodes for the subscription selection', async () => {
+  const { fate, live } = createServer();
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await fate.handleLiveRequest(
+    postJSON('http://local/fate/live', {
+      connectionId: 'c1',
+      operations: [
+        {
+          args: { categoryId: 'fruit' },
+          id: 'sub-1',
+          kind: 'subscribeConnection',
+          procedure: 'posts',
+          select: ['id', 'title'],
+          type: 'Post',
+        },
+      ],
+      version: 1,
+    }),
+  );
+
+  live.connection('posts', { categoryId: 'fruit' }).appendEdge('Post', '1', {
+    cursor: 'cursor-1',
+    eventId: 'evt-1',
+    node: { __typename: 'Post', id: '1', likes: 99, title: 'One from event' },
+  });
+  await reader.read();
+  const first = new TextDecoder().decode((await reader.read()).value);
+
+  expect(first).toContain('"node":{"id":"1","title":"One from event"}');
+  expect(first).not.toContain('likes');
+  expect(first).not.toContain('__typename');
+
+  live.connection('posts', { categoryId: 'fruit' }).appendEdge('Post', '1', {
+    cursor: 'cursor-2',
+    eventId: 'evt-2',
+    node: { id: '1', likes: 100 },
+  });
+  const second = new TextDecoder().decode((await reader.read()).value);
+
+  expect(second).toContain('"node":{"id":"1","title":"One"}');
+  expect(second).not.toContain('likes');
+  await reader.cancel();
+});
+
 test('creates fetch and Hono-compatible handlers', async () => {
   const { fate } = createServer();
   const fetchHandler = createFateFetchHandler(fate);
@@ -496,6 +839,7 @@ test('exposes a manifest for code generation', () => {
     mutations: {
       'post.explode': { type: 'Post' },
       'post.like': { type: 'Post' },
+      'post.requireUser': { type: 'Post' },
       'post.validate': { type: 'Post' },
     },
     queries: { viewer: { type: 'User' } },

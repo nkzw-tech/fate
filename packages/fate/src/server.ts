@@ -45,6 +45,7 @@ export type {
 } from './server/live.ts';
 export type { FateServer, FateServerManifest, InferFateAPI, NativeFateAPI } from './server/http.ts';
 
+export { FateRequestError } from './protocol.ts';
 export {
   computed,
   count,

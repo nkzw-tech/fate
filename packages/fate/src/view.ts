@@ -51,7 +51,13 @@ export const getSelectionViewNames = <T extends Entity, S extends Selection<T>>(
 };
 
 let id = 0;
-const isDevelopment = import.meta?.env?.DEV || import.meta?.env?.NODE_ENV !== 'production';
+const importMetaEnvironment = import.meta.env;
+const isDevelopment =
+  typeof importMetaEnvironment?.DEV === 'boolean'
+    ? importMetaEnvironment.DEV
+    : typeof process !== 'undefined'
+      ? process.env.NODE_ENV !== 'production'
+      : false;
 let viewModulePath: string | null = null;
 
 const getStableId = () => {
