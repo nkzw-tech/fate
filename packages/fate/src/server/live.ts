@@ -105,8 +105,19 @@ export type LiveEventBus = Readonly<{
 
 const eventName = (type: string, id: string | number) => `${type}:${String(id)}`;
 const globalConnectionEventName = (procedure: string) => `connection:${procedure}:*`;
+const normalizeConnectionArgs = (args?: Record<string, unknown>) => {
+  const filtered = filterConnectionArgs(args);
+  if (!filtered) {
+    return undefined;
+  }
+
+  const id = filtered.id;
+  return typeof id === 'string' || typeof id === 'number'
+    ? { ...filtered, id: String(id) }
+    : filtered;
+};
 const connectionEventName = (procedure: string, args?: Record<string, unknown>) =>
-  `connection:${procedure}:${hashArgs(filterConnectionArgs(args) ?? {})}`;
+  `connection:${procedure}:${hashArgs(normalizeConnectionArgs(args) ?? {})}`;
 
 const mergeEvents = <T>(
   emitter: EventEmitter,
@@ -170,10 +181,13 @@ const mergeEvents = <T>(
  * Creates a small in-memory event bus for Fate live view subscriptions.
  *
  * The bus only signals that an entity changed. The native live handler refetches
- * the selected record before sending it to clients.
+ * the selected record before sending it to clients. It does not persist events
+ * or replay events after reconnects; provide a durable custom bus for lossless
+ * `lastEventId` resume behavior.
  */
 export function createLiveEventBus(): LiveEventBus {
   const emitter = new EventEmitter();
+  emitter.setMaxListeners(0);
 
   const emit: LiveEventBus['emit'] = (type, id, options = {}) => {
     emitter.emit(eventName(type, id), {

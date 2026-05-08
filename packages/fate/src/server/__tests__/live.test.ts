@@ -1,4 +1,4 @@
-import { expect, test } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import { createLiveEventBus } from '../live.ts';
 
 test('live event bus yields update events', async () => {
@@ -41,6 +41,21 @@ test('live event bus yields delete events', async () => {
   });
 
   await iterator.return?.();
+});
+
+test('live event bus supports popular fanout without listener warnings', async () => {
+  const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+  const live = createLiveEventBus();
+  const iterators = Array.from({ length: 11 }, () =>
+    live.subscribe('Post', 'post-1')[Symbol.asyncIterator](),
+  );
+
+  expect(emitWarning).not.toHaveBeenCalled();
+
+  for (const iterator of iterators) {
+    await iterator.return?.();
+  }
+  emitWarning.mockRestore();
 });
 
 test('live event bus yields scoped and global connection events', async () => {
@@ -88,4 +103,32 @@ test('live event bus yields scoped and global connection events', async () => {
 
   await scopedIterator.return?.();
   await otherIterator.return?.();
+});
+
+test('live event bus matches numeric and string connection id args', async () => {
+  const live = createLiveEventBus();
+  const subscription = live.subscribeConnection({
+    args: { id: '123' },
+    procedure: 'Post.comments',
+  });
+  const iterator = subscription[Symbol.asyncIterator]();
+  const next = iterator.next();
+
+  live.connection('Post.comments', { id: 123 }).appendNode('Comment', 'comment-1', {
+    eventId: 'event-5',
+  });
+
+  await expect(next).resolves.toEqual({
+    done: false,
+    value: [
+      {
+        eventId: 'event-5',
+        id: 'comment-1',
+        nodeType: 'Comment',
+        type: 'appendNode',
+      },
+    ],
+  });
+
+  await iterator.return?.();
 });

@@ -292,6 +292,8 @@ export const fate = createFateServer({
 live.update('Post', post.id, { eventId: `post:${post.id}:${Date.now()}` });
 ```
 
+`createLiveEventBus` is an in-memory fanout bus. It forwards `eventId` to SSE clients, but it does not replay events after reconnects. If your app needs lossless reconnect behavior, provide a durable live bus implementation that uses the `lastEventId` passed to `listen`, `listenConnection`, `subscribe`, and `subscribeConnection`.
+
 ## tRPC Fate Setup
 
 The Prisma and Drizzle tRPC integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.

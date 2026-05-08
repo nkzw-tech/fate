@@ -80,6 +80,10 @@ const publish = (message: PublishMessage) => {
     return false;
   }
 
+  if (!getInternalToken(context.env, context.origin)) {
+    return false;
+  }
+
   context.pending.push(publishToLiveRoute(message, context));
   return true;
 };
@@ -140,7 +144,7 @@ export const withFateLiveContext = <T>(
     if (isPromiseLike(result) || liveContext.pending.length > 0) {
       return Promise.resolve(result).then(async (value) => {
         if (liveContext.pending.length > 0) {
-          await Promise.all(liveContext.pending);
+          await Promise.allSettled(liveContext.pending);
         }
         return value;
       }) as T;

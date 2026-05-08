@@ -201,11 +201,13 @@ If deleting the object also changes another object, emit an update for that obje
 live.update('Post', postId);
 ```
 
-You can pass an `eventId` when emitting. fate sends it on the native SSE event so clients can resume from the last received event when supported by your deployment:
+You can pass an `eventId` when emitting. fate sends it on the native SSE event and includes the last received event ID when it resubscribes after a reconnect:
 
 ```tsx
 live.update('Post', input.id, { eventId: `post:${input.id}:${Date.now()}` });
 ```
+
+The default `createLiveEventBus` is an in-memory fanout bus and does not replay events that were emitted while a client was disconnected. Use a durable custom live bus if your deployment needs reconnects to catch up from `lastEventId`; otherwise the client receives future live events after it reconnects.
 
 ## Error Handling
 
@@ -215,10 +217,15 @@ Pass `onLiveError` when creating the client to send those failures to your logge
 
 ```tsx
 const fate = createFateClient({
-  links,
+  fetch: (input, init) =>
+    fetch(input, {
+      ...init,
+      credentials: 'include',
+    }),
   onLiveError(error) {
     captureException(error);
   },
+  url: `${env('SERVER_URL')}/fate`,
 });
 ```
 
