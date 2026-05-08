@@ -1121,6 +1121,8 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const listState = this.store.getListState(key) ?? { ids: [] };
     const isAppendEvent = type === 'appendEdge' || type === 'appendNode';
     const isPrependEvent = type === 'prependEdge' || type === 'prependNode';
+    const appendMode = connection.live?.append ?? 'edge';
+    const prependMode = connection.live?.prepend ?? 'edge';
 
     if (
       (isAppendEvent && listState.pendingAfterIds?.includes(entityId)) ||
@@ -1130,9 +1132,28 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       return;
     }
 
+    const visibleIndex = listState.ids.indexOf(entityId);
+    const isVisibleAppendEvent = isAppendEvent && appendMode === 'visible';
+    const isVisiblePrependEvent = isPrependEvent && prependMode === 'visible';
+    if (visibleIndex >= 0 && (isVisibleAppendEvent || isVisiblePrependEvent)) {
+      const nextListState =
+        cursor === undefined
+          ? listState
+          : {
+              ...listState,
+              cursors: listState.ids.map((_, index) =>
+                index === visibleIndex ? cursor : listState.cursors?.[index],
+              ),
+            };
+
+      if (nextListState !== listState) {
+        this.store.setList(key, nextListState);
+      }
+      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'insert');
+      return;
+    }
+
     const withoutExisting = this.removeEntityFromListState(listState, entityId);
-    const appendMode = connection.live?.append ?? 'edge';
-    const prependMode = connection.live?.prepend ?? 'edge';
     const keepLiveBeforeHidden =
       isPrependEvent &&
       prependMode !== 'visible' &&
@@ -1146,13 +1167,15 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     const keepVisibleBeforePending =
       isPrependEvent &&
       prependMode === 'visible' &&
-      (Boolean(withoutExisting.pagination?.hasPrevious) ||
-        isConnectionWindowFull(withoutExisting, connection, 'backward'));
+      (withoutExisting.pagination?.hasPrevious === true ||
+        (withoutExisting.pagination?.hasPrevious === undefined &&
+          isConnectionWindowFull(withoutExisting, connection, 'backward')));
     const keepVisibleAfterPending =
       isAppendEvent &&
       appendMode === 'visible' &&
-      (Boolean(withoutExisting.pagination?.hasNext) ||
-        isConnectionWindowFull(withoutExisting, connection, 'forward'));
+      (withoutExisting.pagination?.hasNext === true ||
+        (withoutExisting.pagination?.hasNext === undefined &&
+          isConnectionWindowFull(withoutExisting, connection, 'forward')));
 
     if (keepLiveBeforeHidden) {
       const nextList = markConnectionPageAvailable(withoutExisting, 'backward');
