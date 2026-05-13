@@ -60,7 +60,6 @@
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitepress": "2.0.0-alpha.15",
-    "vitepress-plugin-llms": "^1.12.2",
     "vitest": "catalog:"
   },
   "engines": {

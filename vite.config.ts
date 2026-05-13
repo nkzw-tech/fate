@@ -3,6 +3,7 @@ import findWorkspaces from '@nkzw/find-workspaces';
 import nkzw from '@nkzw/oxlint-config';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
+import { configDefaults } from 'vitest/config';
 
 const root = process.cwd();
 
@@ -33,7 +34,6 @@ export default defineConfig({
       'example/client/src/translations/',
       'example/server-prisma/dist',
       'pnpm-lock.yaml',
-      'templates/',
     ],
     singleQuote: true,
   },
@@ -48,8 +48,8 @@ export default defineConfig({
       'example/server-prisma/src/prisma/pothos-types.ts',
       'example/server-prisma/src/prisma/prisma-client/*',
       'example/server-drizzle/src/drizzle/migrations/**',
+      'packages/create-fate/templates',
       'packages/**/lib',
-      'templates',
     ],
     jsPlugins: [
       'eslint-plugin-workspaces',
@@ -107,5 +107,11 @@ export default defineConfig({
   },
   staged: {
     '*': 'vp check --fix',
+  },
+  test: {
+    exclude: [
+      ...configDefaults.exclude,
+      'packages/create-fate/templates/fate/{drizzle,http,prisma,void}/**',
+    ],
   },
 });

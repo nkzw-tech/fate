@@ -20,6 +20,9 @@ packages/react-fate/docs/
 packages/**/lib/
 packages/**/LICENSE
 packages/**/README.md
+!packages/create-fate/LICENSE
+!packages/create-fate/README.md
+!packages/create-fate/templates/**/README.md
 !packages/void-fate/README.md
 tsconfig.tsbuildinfo
 vite.config.ts.timestamp-*

@@ -40,7 +40,7 @@ features:
   - title: AI-Ready
     icon: ✨
     details: fate's minimal, predictable API and explicit data selection enable local reasoning, enabling humans and AI tools to generate stable, type-safe data-fetching code.
-    link: https://github.com/nkzw-tech/fate/blob/main/templates/fate/default/AGENTS.md
+    link: https://github.com/nkzw-tech/fate/blob/main/packages/create-fate/templates/fate/drizzle/AGENTS.md
     linkText: AGENTS.md
 ---
 

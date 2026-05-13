@@ -20,7 +20,7 @@
     "target": "es2017",
     "types": ["vite/client", "vitepress/client"]
   },
-  "exclude": ["node_modules", "templates"],
+  "exclude": ["node_modules", "packages/create-fate/templates"],
   "include": ["**/.fate/*.ts", "**/*.d.ts", "**/*.ts", "**/*.tsx"],
   "ts-node": {
     "transpileOnly": true,

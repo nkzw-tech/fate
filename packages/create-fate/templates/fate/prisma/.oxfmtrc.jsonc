@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "experimentalSortImports": {
+    "newlinesBetween": false,
+  },
+  "experimentalSortPackageJson": {
+    "sortScripts": true,
+  },
+  "experimentalTailwindcss": {
+    "stylesheet": "client/src/App.css",
+  },
+  "ignorePatterns": [
+    "client/dist/",
+    "client/index.html",
+    "client/src/fate.ts",
+    "client/src/translations/",
+    "coverage/",
+    "dist/",
+    "pnpm-lock.yaml",
+    "server/dist",
+  ],
+}

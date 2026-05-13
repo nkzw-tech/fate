@@ -1,0 +1,46 @@
+{
+  "name": "fate-app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "fate is a modern data client for React.",
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nkzw-tech/fate.git"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "dotenv -e server/.env -- vp run --filter '@app/client' --filter '@app/server' build",
+    "dev": "npm-run-all --parallel dev:client dev:server",
+    "dev:client": "cd client && vp dev",
+    "dev:server": "cd server && vp run dev",
+    "dev:setup": "vp run --filter '@app/client' --filter '@app/server' dev:setup",
+    "drizzle": "vp run --filter '@app/server' drizzle",
+    "fate:generate": "vp run --filter '@app/client' fate:generate",
+    "prepare": "vp config"
+  },
+  "devDependencies": {
+    "@app/server": "workspace:*",
+    "@nkzw/eslint-plugin": "^2.0.0",
+    "@nkzw/oxlint-config": "^1.2.1",
+    "@swc/core": "^1.15.33",
+    "@types/node": "^25.6.0",
+    "@typescript/native-preview": "7.0.0-dev.20260505.1",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "dotenv": "^17.4.2",
+    "dotenv-cli": "^11.0.0",
+    "eslint-plugin-no-only-tests": "^3.4.0",
+    "eslint-plugin-perfectionist": "^5.9.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "npm-run-all2": "^8.0.4",
+    "ts-node": "^10.9.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "packageManager": "pnpm@11.0.6"
+}

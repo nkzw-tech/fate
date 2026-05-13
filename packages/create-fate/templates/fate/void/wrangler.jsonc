@@ -1,0 +1,16 @@
+{
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VOID_LIVE",
+        "class_name": "VoidLiveStreamDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "live-v1",
+      "new_sqlite_classes": ["VoidLiveStreamDurableObject"],
+    },
+  ],
+}

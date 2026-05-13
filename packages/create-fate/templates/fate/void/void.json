@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/void/schema.json",
+  "auth": {
+    "providers": ["email"]
+  },
+  "head": {
+    "title": "fate",
+    "titleTemplate": "%s | fate",
+    "htmlAttrs": {
+      "lang": "en"
+    },
+    "meta": [
+      {
+        "charset": "utf-8"
+      },
+      {
+        "name": "viewport",
+        "content": "width=device-width, initial-scale=1"
+      }
+    ],
+    "link": [
+      {
+        "rel": "icon",
+        "href": "/icon.svg"
+      }
+    ]
+  },
+  "worker": {
+    "compatibility_date": "2025-12-01",
+    "compatibility_flags": ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
+  }
+}

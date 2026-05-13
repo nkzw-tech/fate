@@ -180,13 +180,13 @@ Finally, by using modern Async React, the latest React DevTools features for Sus
 
 ### Get Started
 
-Create a new fate app from the default template with Vite+:
+Create a new fate app with Vite+:
 
 ```bash
-vp create @nkzw:fate fate-app
+vp create fate my-app
 ```
 
-The default template lives in the fate repo at [`templates/fate/default`](https://github.com/nkzw-tech/fate/tree/main/templates/fate/default). It currently includes a tRPC backend, Prisma, and a React frontend using **_fate_**. It features modern tools to deliver an incredibly fast development experience.
+The template selector can create a Void app with Drizzle, a tRPC app with Drizzle, or a tRPC app with Prisma. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.
 
 Read about the [Core Concepts](/guide/core-concepts), or jump right in and learn about [Views](/guide/views).
 

@@ -20,7 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         template:
-          - default
+          - void
+          - drizzle
+          - http
+          - prisma
 
     steps:
       - uses: actions/checkout@v5
