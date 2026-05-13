@@ -6,64 +6,15 @@
       "idx": 0,
       "version": "6",
       "when": 1778225637900,
-      "tag": "20260508073357_bored_martin_li",
+      "tag": "20260508073357_initial_schema",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
       "when": 1778232300000,
-      "tag": "20260508120500_seed_void_demo_users",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1778232301000,
-      "tag": "20260508120501_seed_void_demo_posts",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1778232302000,
-      "tag": "20260508120502_seed_void_demo_cleanup",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1778232303000,
-      "tag": "20260508120503_seed_void_demo_users_final",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1778232304000,
-      "tag": "20260508120504_seed_void_demo_posts_final",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1778232305000,
-      "tag": "20260508120505_seed_void_demo_comments_a",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1778232306000,
-      "tag": "20260508120506_seed_void_demo_comments_b",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1778232307000,
-      "tag": "20260508120507_seed_void_demo_events_final",
-      "breakpoints": true
+      "tag": "20260508120500_seed_void_demo",
+      "breakpoints": false
     }
   ]
 }

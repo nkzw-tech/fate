@@ -823,11 +823,13 @@ test('creates fetch and Hono-compatible handlers', async () => {
     version: 1,
   });
 
-  await expect(fetchHandler(request.clone())).resolves.toHaveProperty('status', 200);
-  await expect(honoHandler({ req: { raw: request.clone() } })).resolves.toHaveProperty(
+  await expect(fetchHandler(request.clone() as unknown as Request)).resolves.toHaveProperty(
     'status',
     200,
   );
+  await expect(
+    honoHandler({ req: { raw: request.clone() as unknown as Request } }),
+  ).resolves.toHaveProperty('status', 200);
 });
 
 test('exposes a manifest for code generation', () => {

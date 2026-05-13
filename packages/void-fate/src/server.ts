@@ -1,51 +1,58 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   createFateFetchHandler,
-  createLiveEventBus,
   type FateServer,
   type LiveConnectionEventType,
-  type LiveConnectionSourceEvent,
   type LiveEventBus,
   type LiveEventType,
-  type LiveSourceEvent,
+  liveConnectionTopic,
+  liveEntityTopic,
+  liveGlobalConnectionTopic,
 } from '@nkzw/fate/server';
 import { defineHandler } from 'void';
 
 type VoidEnv = Record<string, unknown>;
 type MaybePromiseLike = PromiseLike<unknown>;
 
+type VoidFatePublishOptions = {
+  eventId?: string;
+  type?: string;
+};
+
+export type VoidFateLiveStream = {
+  connect(context: unknown, options?: unknown): Promise<Response>;
+  control(context: unknown, options?: unknown): Promise<Response>;
+  withEnv(env: unknown): {
+    publish(topic: string, data: unknown, options?: VoidFatePublishOptions): Promise<void>;
+  };
+};
+
 type FateLiveContext = {
   env: VoidEnv;
-  origin: string;
   pending: Array<Promise<void>>;
+  stream: VoidFateLiveStream;
 };
 
-type PublishMessage =
-  | {
-      event: LiveSourceEvent;
-      kind: 'entity';
-      type: string;
-    }
-  | {
-      args?: Record<string, unknown>;
-      event: LiveConnectionSourceEvent;
-      kind: 'connection';
-      procedure: string;
-    };
+type EntityPayload = Readonly<{
+  data?: unknown;
+  id: string | number;
+}>;
 
-export type VoidFateLiveOptions = {
-  devInternalToken?: string;
-  internalHeader?: string;
-  livePath?: string;
-  publishHeader?: string;
-};
+type ConnectionPayload = Readonly<{
+  cursor?: string;
+  id?: string | number;
+  node?: unknown;
+  nodeType?: string;
+  targetCursor?: string;
+}>;
+
+export type VoidFateLiveOptions = Record<never, never>;
 
 export type VoidFateRouteOptions = {
-  origin?: (request: Request) => string;
+  stream: VoidFateLiveStream;
 };
 
 export type VoidFateLive = Readonly<{
-  handlePublish: (request: Request, env: VoidEnv) => Promise<Response | null>;
   live: LiveEventBus;
   withContext: <T>(context: Omit<FateLiveContext, 'pending'>, callback: () => T) => T;
 }>;
@@ -53,73 +60,30 @@ export type VoidFateLive = Readonly<{
 export const defaultVoidFateRpcPath = '/fate';
 export const defaultVoidFateLivePath = '/fate-live';
 
-const defaultDevInternalToken = 'fate-live-dev';
-const defaultInternalHeader = 'x-void-internal';
-const defaultPublishHeader = 'x-fate-live-publish';
-
 const isPromiseLike = (value: unknown): value is MaybePromiseLike =>
   (typeof value === 'object' || typeof value === 'function') &&
   value !== null &&
   typeof (value as { then?: unknown }).then === 'function';
 
-const isLocalOrigin = (origin: string) => {
-  const hostname = new URL(origin).hostname;
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-};
-
-const defaultOrigin = (request: Request): string => new URL(request.url).origin;
-
-export function createVoidFateLive({
-  devInternalToken = defaultDevInternalToken,
-  internalHeader = defaultInternalHeader,
-  livePath = defaultVoidFateLivePath,
-  publishHeader = defaultPublishHeader,
-}: VoidFateLiveOptions = {}): VoidFateLive {
+export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFateLive {
   const contextStore = new AsyncLocalStorage<FateLiveContext>();
-  const localLive = createLiveEventBus();
 
-  const getInternalToken = (env: VoidEnv, origin: string) => {
-    const token = env.__VOID_PROXY_TOKEN;
-    if (typeof token === 'string') {
-      return token;
-    }
-
-    return isLocalOrigin(origin) ? devInternalToken : null;
-  };
-
-  const publishToLiveRoute = async (message: PublishMessage, context: FateLiveContext) => {
-    const token = getInternalToken(context.env, context.origin);
-    if (!token) {
-      throw new Error('Fate live publish requires __VOID_PROXY_TOKEN outside local dev.');
-    }
-
-    const response = await fetch(new URL(livePath, context.origin), {
-      body: JSON.stringify(message),
-      headers: {
-        'content-type': 'application/json',
-        [internalHeader]: token,
-        [publishHeader]: '1',
-      },
-      method: 'POST',
-    });
-
-    if (!response.ok) {
-      throw new Error(`Fate live publish failed with HTTP ${response.status}.`);
-    }
-  };
-
-  const publish = (message: PublishMessage) => {
+  const publish = (
+    topic: string,
+    data: EntityPayload | ConnectionPayload,
+    options: { eventId?: string; type: LiveConnectionEventType | LiveEventType },
+  ) => {
     const context = contextStore.getStore();
     if (!context) {
-      return false;
+      return;
     }
 
-    if (!getInternalToken(context.env, context.origin)) {
-      return false;
-    }
+    const promise = context.stream
+      .withEnv(context.env)
+      .publish(topic, data, options)
+      .catch(() => undefined);
 
-    context.pending.push(publishToLiveRoute(message, context));
-    return true;
+    context.pending.push(promise);
   };
 
   const publishEntity = (
@@ -127,16 +91,17 @@ export function createVoidFateLive({
     id: string | number,
     options: { data?: unknown; eventId?: string; type?: LiveEventType } = {},
   ) => {
-    const event = {
-      data: options.data,
-      eventId: options.eventId,
-      id,
-      type: options.type ?? 'update',
-    } satisfies LiveSourceEvent;
-
-    if (!publish({ event, kind: 'entity', type })) {
-      localLive.emit(type, id, options);
-    }
+    publish(
+      liveEntityTopic(type, id),
+      {
+        data: options.data,
+        id,
+      },
+      {
+        eventId: options.eventId,
+        type: options.type ?? 'update',
+      },
+    );
   };
 
   const publishConnection = (
@@ -152,19 +117,21 @@ export function createVoidFateLive({
       targetCursor?: string;
     } = {},
   ) => {
-    const event = {
-      cursor: options.cursor,
-      eventId: options.eventId,
-      id: options.id,
-      node: options.node,
-      nodeType: options.nodeType,
-      targetCursor: options.targetCursor,
-      type,
-    } satisfies LiveConnectionSourceEvent;
+    const topic = args
+      ? liveConnectionTopic(procedure, args)
+      : liveGlobalConnectionTopic(procedure);
 
-    if (!publish({ args, event, kind: 'connection', procedure })) {
-      localLive.connection(procedure, args).emit(type, options);
-    }
+    publish(
+      topic,
+      {
+        cursor: options.cursor,
+        id: options.id,
+        node: options.node,
+        nodeType: options.nodeType,
+        targetCursor: options.targetCursor,
+      },
+      { eventId: options.eventId, type },
+    );
   };
 
   const withContext: VoidFateLive['withContext'] = (context, callback) =>
@@ -184,39 +151,7 @@ export function createVoidFateLive({
       return result;
     });
 
-  const handlePublish: VoidFateLive['handlePublish'] = async (request, env) => {
-    if (request.headers.get(publishHeader) !== '1') {
-      return null;
-    }
-
-    const token = getInternalToken(env, new URL(request.url).origin);
-    if (!token || request.headers.get(internalHeader) !== token) {
-      return Response.json({ error: 'unauthorized' }, { status: 401 });
-    }
-
-    const message = (await request.json()) as PublishMessage;
-    if (message.kind === 'entity') {
-      localLive.emit(message.type, message.event.id, {
-        data: message.event.data,
-        eventId: message.event.eventId,
-        type: message.event.type,
-      });
-    } else {
-      localLive.connection(message.procedure, message.args).emit(message.event.type, {
-        cursor: message.event.cursor,
-        eventId: message.event.eventId,
-        id: message.event.id,
-        node: message.event.node,
-        nodeType: message.event.nodeType,
-        targetCursor: message.event.targetCursor,
-      });
-    }
-
-    return Response.json({ ok: true });
-  };
-
-  return {
-    handlePublish,
+  const live: VoidFateLive = {
     live: {
       connection(procedure, args) {
         return {
@@ -263,31 +198,31 @@ export function createVoidFateLive({
         publishEntity(type, id, { ...options, type: 'delete' });
       },
       emit: publishEntity,
-      listen: localLive.listen,
-      listenConnection: localLive.listenConnection,
-      subscribe: localLive.subscribe,
-      subscribeConnection: localLive.subscribeConnection,
+      subscribe() {
+        throw new Error('void-fate: direct live subscriptions are handled by void/live.');
+      },
+      subscribeConnection() {
+        throw new Error('void-fate: direct live subscriptions are handled by void/live.');
+      },
       update(type, id, options) {
         publishEntity(type, id, { ...options, type: 'update' });
       },
     },
     withContext,
   };
+
+  return live;
 }
 
 export function defineVoidFateRoute<AdapterContext>(
   server: FateServer<unknown, AdapterContext>,
   live: VoidFateLive,
-  { origin = defaultOrigin }: VoidFateRouteOptions = {},
+  options: VoidFateRouteOptions,
 ) {
   const handleFate = createFateFetchHandler(server);
   const handle = (context: { env: VoidEnv; req: { raw: Request } }) =>
-    live.withContext(
-      {
-        env: context.env,
-        origin: origin(context.req.raw),
-      },
-      () => handleFate(context.req.raw, context as AdapterContext),
+    live.withContext({ env: context.env, stream: options.stream }, () =>
+      handleFate(context.req.raw, context as AdapterContext),
     );
 
   return {
@@ -296,28 +231,9 @@ export function defineVoidFateRoute<AdapterContext>(
   };
 }
 
-export function defineVoidFateLiveRoute<AdapterContext>(
-  server: FateServer<unknown, AdapterContext>,
-  live: VoidFateLive,
-  { origin = defaultOrigin }: VoidFateRouteOptions = {},
-) {
-  const handle = async (context: { env: VoidEnv; req: { raw: Request } }) => {
-    const publishResponse = await live.handlePublish(context.req.raw, context.env);
-    if (publishResponse) {
-      return publishResponse;
-    }
-
-    return live.withContext(
-      {
-        env: context.env,
-        origin: origin(context.req.raw),
-      },
-      () => server.handleLiveRequest(context.req.raw, context as AdapterContext),
-    );
-  };
-
+export function defineVoidFateLiveRoute(stream: VoidFateLiveStream) {
   return {
-    GET: defineHandler(handle),
-    POST: defineHandler(handle),
+    GET: defineHandler((context) => stream.connect(context)),
+    POST: defineHandler((context) => stream.control(context)),
   };
 }

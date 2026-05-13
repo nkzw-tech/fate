@@ -32,9 +32,22 @@ export default defineConfig({
 
 ## Server
 
-Create a Void live transport and pass its `live` instance to the fate server.
+Create a Fate live publish facade and pass its `live` instance to the fate
+server. Define the Void stream separately so `defineLiveStream` is called once
+from a single server-only module.
 
 ```ts
+// src/fate/live.ts
+import { defineLiveStream } from 'void/live';
+
+export const fateStream = defineLiveStream({
+  allowAnonymousControl: true,
+  id: 'fate',
+});
+```
+
+```ts
+// src/fate/server.ts
 import { createFateServer } from '@nkzw/fate/server';
 import { createVoidFateLive } from 'void-fate/server';
 
@@ -55,17 +68,20 @@ Add one route for RPC requests and one route for the SSE live transport.
 ```ts
 // routes/fate.ts
 import { defineVoidFateRoute } from 'void-fate/server';
+import { fateStream } from '../src/fate/live.ts';
 import { fateLive, fateServer } from '../src/fate/server.ts';
 
-export const { GET, POST } = defineVoidFateRoute(fateServer, fateLive);
+export const { GET, POST } = defineVoidFateRoute(fateServer, fateLive, {
+  stream: fateStream,
+});
 ```
 
 ```ts
 // routes/fate-live.ts
 import { defineVoidFateLiveRoute } from 'void-fate/server';
-import { fateLive, fateServer } from '../src/fate/server.ts';
+import { fateStream } from '../src/fate/live.ts';
 
-export const { GET, POST } = defineVoidFateLiveRoute(fateServer, fateLive);
+export const { GET, POST } = defineVoidFateLiveRoute(fateStream);
 ```
 
 The default paths are `/fate` for RPC and `/fate-live` for live updates.
@@ -100,12 +116,6 @@ export default function Layout({
 
 The defaults are intended to work without configuration. If your Void routes use
 different paths, pass the same values to the server and client helpers.
-
-```ts
-export const fateLive = createVoidFateLive({
-  livePath: '/custom-live',
-});
-```
 
 ```tsx
 <VoidFateClient livePath="/custom-live" origin={origin} rpcPath="/custom-fate" userId={userId}>

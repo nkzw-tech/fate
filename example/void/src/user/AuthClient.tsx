@@ -1,3 +1,1 @@
-import { createAuthClient } from 'better-auth/react';
-
-export default createAuthClient();
+export { auth as default } from 'void/client';

@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'void';
-import { getAuthSession } from '../src/lib/auth.ts';
+import { getSession } from 'void/auth';
 import type { SharedData } from '../src/lib/shared.ts';
 
 declare module 'void' {
@@ -9,7 +9,7 @@ declare module 'void' {
 }
 
 export default defineMiddleware(async (context, next) => {
-  const session = await getAuthSession(context.req.raw);
+  const session = getSession();
   const url = new URL(context.req.raw.url);
 
   context.set('shared', {

@@ -1,11 +1,12 @@
+import { liveConnectionTopic, liveEntityTopic, liveGlobalConnectionTopic } from './liveTopics.ts';
 import type {
-  FateLiveControlOperation,
-  FateLiveControlRequest,
-  FateLiveConnectionEvent,
-  FateLiveEvent,
-  FateLiveMessage,
   FateOperation,
   FateOperationResult,
+  FateLiveConnectionSubscribeOperation,
+  FateLiveControlOperation,
+  FateLiveControlRequest,
+  FateLiveMessage,
+  FateLiveSubscribeOperation,
   FateProtocolRequest,
   FateProtocolResponse,
 } from './protocol.ts';
@@ -31,6 +32,35 @@ type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<
 
 type HeadersFactory = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 
+type EventSourceConstructor = new (
+  url: string,
+  options?: { withCredentials?: boolean },
+) => {
+  addEventListener(type: string, listener: (event: Event) => void): void;
+  close(): void;
+  removeEventListener(type: string, listener: (event: Event) => void): void;
+};
+
+type LiveConnectorOptions = {
+  eventSource?: EventSourceConstructor;
+  fetch?: typeof fetch;
+  headers?: HeadersFactory;
+  onError?: (error: Error | Event) => void;
+  retryDelay?: number;
+  withCredentials?: boolean;
+};
+
+type LiveConnectorClient = {
+  subscribe<Data = unknown>(options: {
+    id: string;
+    lastEventId?: string;
+    onEvent?: (event: VoidLiveClientEvent<Data>) => void;
+    topic: string;
+  }): Promise<() => Promise<void> | void>;
+};
+
+type LiveConnector = (url: string | URL, options?: LiveConnectorOptions) => LiveConnectorClient;
+
 type PendingOperation = {
   operation: FateOperation;
   reject: (error: unknown) => void;
@@ -42,8 +72,6 @@ type LiveSubscription = {
   handlers:
     | Parameters<NonNullable<Transport['subscribeById']>>[4]
     | Parameters<NonNullable<Transport['subscribeConnection']>>[5];
-  id: string;
-  lastEventId?: string;
   procedure?: string;
   select: Array<string>;
   selectionArgs?: Record<string, unknown> | undefined;
@@ -51,11 +79,22 @@ type LiveSubscription = {
   type: string;
 };
 
-type SSEMessage = {
-  data: string;
-  event?: string;
-  id?: string;
+type VoidLiveClientEvent<Data = unknown> = {
+  data: Data;
+  eventId?: string;
+  subscriptionId: string;
+  topic: string;
+  type?: string;
 };
+
+const reportSubscriptionError = (subscription: LiveSubscription, error: unknown) => {
+  subscription.handlers.onError?.(error);
+};
+
+const protocolError = (message: FateLiveMessage & { kind: 'error' }) =>
+  new FateRequestError(message.error.code, message.error.message, {
+    issues: message.error.issues,
+  });
 
 const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
@@ -79,23 +118,6 @@ const requestHeaders = async (
 const normalizeEndpoint = (url: string | URL): string => String(url).replace(/\/$/, '');
 
 const liveEndpoint = (url: string): string => `${normalizeEndpoint(url)}/live`;
-
-const createConnectionId = (): string =>
-  typeof crypto === 'object' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-
-const appendSearchParam = (url: string, key: string, value: string): string => {
-  const hashIndex = url.indexOf('#');
-  const base = hashIndex === -1 ? url : url.slice(0, hashIndex);
-  const hash = hashIndex === -1 ? '' : url.slice(hashIndex);
-  const separator = base.includes('?')
-    ? base.endsWith('?') || base.endsWith('&')
-      ? ''
-      : '&'
-    : '?';
-  return `${base}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}${hash}`;
-};
 
 const responseError = async (response: Response): Promise<Error> => {
   let message = response.statusText || `HTTP ${response.status}`;
@@ -149,45 +171,11 @@ const resultValue = (result: FateOperationResult): unknown => {
   });
 };
 
-const parseSSEMessages = (buffer: string): { messages: Array<SSEMessage>; rest: string } => {
-  const messages: Array<SSEMessage> = [];
-  const parts = buffer.split(/\r?\n\r?\n/);
-  const rest = parts.pop() ?? '';
-
-  for (const part of parts) {
-    const message: SSEMessage = { data: '' };
-    const data: Array<string> = [];
-
-    for (const line of part.split(/\r?\n/)) {
-      if (!line || line.startsWith(':')) {
-        continue;
-      }
-
-      const separator = line.indexOf(':');
-      const field = separator === -1 ? line : line.slice(0, separator);
-      const rawValue = separator === -1 ? '' : line.slice(separator + 1);
-      const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue;
-
-      if (field === 'data') {
-        data.push(value);
-      } else if (field === 'event') {
-        message.event = value;
-      } else if (field === 'id') {
-        message.id = value;
-      }
-    }
-
-    message.data = data.join('\n');
-    messages.push(message);
-  }
-
-  return { messages, rest };
-};
-
 export function createHTTPTransport<
   API extends FateAPIShape,
   Mutations extends TransportMutations = MutationMapFromAPI<API>,
 >({
+  eventSource,
   fetch: fetchImpl = defaultFetch,
   headers,
   live = true,
@@ -195,15 +183,18 @@ export function createHTTPTransport<
   liveUrl,
   url,
 }: {
+  eventSource?: EventSourceConstructor;
   fetch?: FetchLike;
   headers?: HeadersFactory;
-  live?: boolean;
+  live?: boolean | LiveConnector;
   liveRetryMs?: number;
   liveUrl?: string | URL;
   url: string | URL;
 }): Transport<Mutations> {
   const endpoint = normalizeEndpoint(url);
   const liveEndpointUrl = liveUrl ? String(liveUrl) : liveEndpoint(endpoint);
+  const liveConnector = typeof live === 'function' ? live : undefined;
+  const liveEnabled = live !== false;
   let nextId = 0;
   let pending: Array<PendingOperation> = [];
   let scheduled = false;
@@ -310,434 +301,406 @@ export function createHTTPTransport<
     },
   };
 
-  if (live) {
-    const connectionId = createConnectionId();
+  if (liveEnabled) {
     const liveSubscriptions = new Map<string, LiveSubscription>();
-    let liveController: AbortController | undefined;
-    let liveEverConnected = false;
+    let liveClient: LiveConnectorClient | undefined;
+    let nativeLiveClient:
+      | {
+          add(operation: FateLiveConnectionSubscribeOperation | FateLiveSubscribeOperation): void;
+          remove(id: string): void;
+        }
+      | undefined;
     let liveNextId = 0;
-    let liveNeedsResubscribe = false;
-    let liveReadyPromise: Promise<void> | undefined;
-    let liveRetry: ReturnType<typeof setTimeout> | undefined;
-    let liveResubscribeRetry: ReturnType<typeof setTimeout> | undefined;
-    let liveControlRetry: ReturnType<typeof setTimeout> | undefined;
-    let failedLiveOperations: Array<FateLiveControlOperation> = [];
-    let pendingLiveOperations: Array<FateLiveControlOperation> = [];
-    let liveOperationScheduled = false;
-
-    const liveError = (error: unknown) => {
-      for (const subscription of liveSubscriptions.values()) {
-        subscription.handlers.onError?.(error);
+    const getLiveClient = () => {
+      if (!liveConnector) {
+        throw new Error('fate(http): A live connector is required for topic subscriptions.');
       }
+
+      return (liveClient ??= liveConnector(liveEndpointUrl, {
+        eventSource,
+        fetch: fetchImpl as typeof fetch,
+        headers,
+        onError(error) {
+          for (const subscription of new Set(liveSubscriptions.values())) {
+            subscription.handlers.onError?.(error);
+          }
+        },
+        retryDelay: liveRetryMs,
+        withCredentials: true,
+      }));
     };
 
-    const stopLiveStream = () => {
-      if (liveRetry) {
-        clearTimeout(liveRetry);
-        liveRetry = undefined;
-      }
-      if (liveResubscribeRetry) {
-        clearTimeout(liveResubscribeRetry);
-        liveResubscribeRetry = undefined;
-      }
-      if (liveControlRetry) {
-        clearTimeout(liveControlRetry);
-        liveControlRetry = undefined;
-      }
-      liveController?.abort();
-      liveController = undefined;
-      liveReadyPromise = undefined;
-    };
-
-    const sendLiveControl = async (
-      operations: Array<FateLiveControlOperation>,
-      options: { ensureStream: boolean },
-    ) => {
-      if (!operations.length) {
-        return;
+    const getNativeLiveClient = () => {
+      if (nativeLiveClient) {
+        return nativeLiveClient;
       }
 
-      if (options.ensureStream) {
-        await startLiveStream();
+      const EventSourceCtor =
+        eventSource ??
+        (globalThis as typeof globalThis & { EventSource?: EventSourceConstructor }).EventSource;
+      if (!EventSourceCtor) {
+        throw new Error('fate(http): EventSource is required for live views.');
       }
 
-      const response = await fetchImpl(liveEndpointUrl, {
-        body: JSON.stringify({
-          connectionId,
-          operations,
-          version: 1,
-        } satisfies FateLiveControlRequest),
-        headers: await requestHeaders(
-          {
-            'content-type': 'application/json',
-          },
-          headers,
-        ),
-        method: 'POST',
+      const connectionId =
+        globalThis.crypto?.randomUUID?.() ??
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const operations = new Map<
+        string,
+        FateLiveConnectionSubscribeOperation | FateLiveSubscribeOperation
+      >();
+      const lastEventIds = new Map<string, string>();
+      let opened = false;
+      let resolveOpen: (() => void) | undefined;
+      let rejectOpen: ((error: Error | Event) => void) | undefined;
+      const open = new Promise<void>((resolve, reject) => {
+        resolveOpen = resolve;
+        rejectOpen = reject;
       });
+      const sourceUrl = new URL(
+        liveEndpointUrl,
+        typeof globalThis.location === 'object' ? globalThis.location.href : 'http://local',
+      );
+      sourceUrl.searchParams.set('connectionId', connectionId);
+      const source = new EventSourceCtor(sourceUrl.href, { withCredentials: true });
 
-      if (!response.ok) {
-        throw await responseError(response);
-      }
-
-      const payload = assertProtocolResponse(await response.json());
-      const results = new Map(payload.results.map((result) => [result.id, result]));
-
-      for (const operation of operations) {
-        const result = results.get(operation.id);
-        if (!result) {
-          liveSubscriptions
-            .get(operation.id)
-            ?.handlers.onError?.(
-              new Error(`fate(http): Missing live result for operation '${operation.id}'.`),
-            );
-          continue;
+      const control = async (controlOperations: Array<FateLiveControlOperation>) => {
+        const response = await fetchImpl(liveEndpointUrl, {
+          body: JSON.stringify({
+            connectionId,
+            operations: controlOperations,
+            version: 1,
+          } satisfies FateLiveControlRequest),
+          headers: await requestHeaders({ 'content-type': 'application/json' }, headers),
+          method: 'POST',
+        });
+        if (!response.ok) {
+          throw await responseError(response);
         }
 
-        try {
+        const payload = assertProtocolResponse(await response.json());
+        for (const result of payload.results) {
           resultValue(result);
-        } catch (error) {
-          liveSubscriptions.get(operation.id)?.handlers.onError?.(error);
-        }
-      }
-    };
-
-    const flushLiveOperations = async () => {
-      liveOperationScheduled = false;
-      const operations = pendingLiveOperations;
-      pendingLiveOperations = [];
-
-      try {
-        await sendLiveControl(operations, { ensureStream: true });
-      } catch (error) {
-        if (operations.length) {
-          liveNeedsResubscribe = true;
-          failedLiveOperations.push(...operations);
-          scheduleLiveControlRetry();
-        }
-        liveError(error);
-      }
-    };
-
-    const enqueueLiveOperation = (operation: FateLiveControlOperation) => {
-      pendingLiveOperations.push(operation);
-
-      if (!liveOperationScheduled) {
-        liveOperationScheduled = true;
-        queueMicrotask(() => void flushLiveOperations());
-      }
-    };
-
-    const resubscribeLive = async () => {
-      if (liveResubscribeRetry) {
-        clearTimeout(liveResubscribeRetry);
-        liveResubscribeRetry = undefined;
-      }
-
-      const operations = [...liveSubscriptions.values()].map(
-        (subscription): FateLiveControlOperation =>
-          subscription.procedure
-            ? {
-                args: subscription.args,
-                id: subscription.id,
-                kind: 'subscribeConnection',
-                lastEventId: subscription.lastEventId,
-                procedure: subscription.procedure,
-                select: subscription.select,
-                selectionArgs: subscription.selectionArgs,
-                type: subscription.type,
-              }
-            : {
-                args: subscription.args,
-                entityId: subscription.targetId!,
-                id: subscription.id,
-                kind: 'subscribe',
-                lastEventId: subscription.lastEventId,
-                select: subscription.select,
-                type: subscription.type,
-              },
-      );
-
-      try {
-        await sendLiveControl(operations, { ensureStream: false });
-        liveNeedsResubscribe = false;
-        failedLiveOperations = [];
-      } catch (error) {
-        liveNeedsResubscribe = true;
-        scheduleLiveResubscribe();
-        liveError(error);
-      }
-    };
-
-    const scheduleLiveResubscribe = () => {
-      if (!liveController || liveController.signal.aborted || liveResubscribeRetry) {
-        return;
-      }
-
-      liveResubscribeRetry = setTimeout(() => void resubscribeLive(), liveRetryMs);
-    };
-
-    const retryFailedLiveOperations = async () => {
-      liveControlRetry = undefined;
-      const operations = failedLiveOperations.filter(
-        (operation) => operation.kind === 'unsubscribe' || liveSubscriptions.has(operation.id),
-      );
-      failedLiveOperations = [];
-
-      if (!operations.length) {
-        return;
-      }
-
-      try {
-        await sendLiveControl(operations, { ensureStream: true });
-      } catch (error) {
-        failedLiveOperations.push(...operations);
-        liveNeedsResubscribe = true;
-        scheduleLiveControlRetry();
-        liveError(error);
-      }
-    };
-
-    const scheduleLiveControlRetry = () => {
-      if (!liveController || liveController.signal.aborted || liveControlRetry) {
-        return;
-      }
-
-      liveControlRetry = setTimeout(() => void retryFailedLiveOperations(), liveRetryMs);
-    };
-
-    function startLiveStream(): Promise<void> {
-      if (liveReadyPromise) {
-        return liveReadyPromise;
-      }
-
-      if (liveRetry) {
-        clearTimeout(liveRetry);
-        liveRetry = undefined;
-      }
-
-      const controller = new AbortController();
-      liveController = controller;
-      let readySettled = false;
-      let resolveReady!: () => void;
-      let rejectReady!: (error: unknown) => void;
-      liveReadyPromise = new Promise<void>((resolve, reject) => {
-        resolveReady = () => {
-          readySettled = true;
-          resolve();
-        };
-        rejectReady = (error) => {
-          readySettled = true;
-          reject(error);
-        };
-      });
-
-      const connect = async () => {
-        let shouldReconnect = true;
-        try {
-          const response = await fetchImpl(
-            appendSearchParam(liveEndpointUrl, 'connectionId', connectionId),
-            {
-              headers: await requestHeaders(
-                {
-                  accept: 'text/event-stream',
-                },
-                headers,
-              ),
-              method: 'GET',
-              signal: controller.signal,
-            },
-          );
-
-          if (!response.ok) {
-            throw await responseError(response);
-          }
-
-          if (!response.body) {
-            throw new Error('fate(http): Live response did not include a body.');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          const cancelReader = () => {
-            void reader.cancel().catch(() => undefined);
-          };
-          let buffer = '';
-
-          controller.signal.addEventListener('abort', cancelReader, { once: true });
-          resolveReady();
-          if (liveEverConnected || liveNeedsResubscribe) {
-            void resubscribeLive();
-          }
-          liveEverConnected = true;
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) {
-                break;
-              }
-
-              buffer += decoder.decode(value, { stream: true });
-              const parsed = parseSSEMessages(buffer);
-              buffer = parsed.rest;
-
-              for (const message of parsed.messages) {
-                if (!message.data) {
-                  continue;
-                }
-
-                const event = JSON.parse(message.data) as FateLiveMessage;
-                const subscription = liveSubscriptions.get(event.id);
-                if (!subscription) {
-                  continue;
-                }
-
-                if (message.id) {
-                  subscription.lastEventId = message.id;
-                }
-
-                if (event.kind === 'error') {
-                  subscription.handlers.onError?.(
-                    new FateRequestError(event.error.code, event.error.message, {
-                      issues: event.error.issues,
-                    }),
-                  );
-                  continue;
-                }
-
-                if (event.kind === 'connection') {
-                  const handlers = subscription.handlers as Parameters<
-                    NonNullable<Transport['subscribeConnection']>
-                  >[5];
-                  handlers.onEvent(event.event as FateLiveConnectionEvent);
-                  continue;
-                }
-
-                const liveEvent = event.event as FateLiveEvent;
-                const handlers = subscription.handlers as Parameters<
-                  NonNullable<Transport['subscribeById']>
-                >[4];
-                if (liveEvent.delete === true) {
-                  handlers.onDelete?.(liveEvent.id ?? subscription.targetId);
-                } else if ('data' in liveEvent) {
-                  handlers.onData(liveEvent.data);
-                }
-              }
-            }
-          } finally {
-            controller.signal.removeEventListener('abort', cancelReader);
-          }
-        } catch (error) {
-          const wasReady = readySettled;
-          if (!readySettled) {
-            rejectReady(error);
-          }
-
-          if (!controller.signal.aborted) {
-            if (error instanceof FateRequestError && error.status >= 400 && error.status < 500) {
-              shouldReconnect = false;
-            }
-            if (wasReady) {
-              liveError(error);
-            }
-          }
-        } finally {
-          if (liveController === controller) {
-            liveController = undefined;
-            liveReadyPromise = undefined;
-          }
-
-          if (!controller.signal.aborted && shouldReconnect && liveSubscriptions.size > 0) {
-            liveRetry = setTimeout(
-              () => void startLiveStream().catch(() => undefined),
-              liveRetryMs,
-            );
-          }
         }
       };
 
-      void connect();
-      return liveReadyPromise;
-    }
+      const withLastEventId = <
+        Operation extends FateLiveConnectionSubscribeOperation | FateLiveSubscribeOperation,
+      >(
+        operation: Operation,
+      ): Operation => {
+        const lastEventId = lastEventIds.get(operation.id);
+        return lastEventId ? { ...operation, lastEventId } : operation;
+      };
+
+      const reportError = (error: Error | Event) => {
+        for (const subscription of new Set(liveSubscriptions.values())) {
+          reportSubscriptionError(subscription, error);
+        }
+      };
+
+      source.addEventListener('open', () => {
+        if (!opened) {
+          opened = true;
+          resolveOpen?.();
+          return;
+        }
+
+        const resubscribe = [...operations.values()].map(withLastEventId);
+        if (resubscribe.length > 0) {
+          void control(resubscribe).catch(reportError);
+        }
+      });
+      source.addEventListener('error', (event) => {
+        if (!opened) {
+          rejectOpen?.(event);
+        }
+        reportError(event);
+      });
+      source.addEventListener('message', (event) => {
+        const message = JSON.parse((event as MessageEvent).data as string) as FateLiveMessage;
+        const subscription = liveSubscriptions.get(message.id);
+        if (!subscription) {
+          return;
+        }
+
+        const lastEventId = (event as MessageEvent).lastEventId;
+        if (lastEventId) {
+          lastEventIds.set(message.id, lastEventId);
+        }
+
+        if (message.kind === 'error') {
+          reportSubscriptionError(subscription, protocolError(message));
+          return;
+        }
+
+        if (message.kind === 'connection') {
+          if ('onEvent' in subscription.handlers) {
+            subscription.handlers.onEvent(message.event);
+          }
+          return;
+        }
+
+        if ('delete' in message.event && message.event.delete) {
+          if ('onDelete' in subscription.handlers) {
+            subscription.handlers.onDelete?.(message.event.id ?? subscription.targetId!);
+          }
+          return;
+        }
+
+        if ('onData' in subscription.handlers) {
+          subscription.handlers.onData(message.event.data);
+        }
+      });
+
+      nativeLiveClient = {
+        add(operation) {
+          operations.set(operation.id, operation);
+          void open
+            .then(() => control([withLastEventId(operation)]))
+            .catch((error) => {
+              operations.delete(operation.id);
+              liveSubscriptions.delete(operation.id);
+              reportError(error);
+            });
+        },
+        remove(id) {
+          operations.delete(id);
+          lastEventIds.delete(id);
+          void open
+            .then(() =>
+              control([
+                {
+                  id,
+                  kind: 'unsubscribe',
+                },
+              ]),
+            )
+            .catch(reportError);
+          if (operations.size === 0) {
+            source.close();
+            nativeLiveClient = undefined;
+          }
+        },
+      };
+
+      return nativeLiveClient;
+    };
+
+    const fetchLiveRecord = async (subscription: LiveSubscription) => {
+      const [record] = await transport.fetchById(
+        subscription.type,
+        [subscription.targetId!],
+        subscription.select,
+        subscription.args,
+      );
+      return record;
+    };
+
+    const resolveConnectionNode = async (subscription: LiveSubscription, id: string | number) => {
+      const [record] = await transport.fetchById(
+        subscription.type,
+        [id],
+        subscription.select,
+        subscription.selectionArgs,
+      );
+      return record;
+    };
 
     transport.subscribeById = (type, id, select, args, handlers) => {
       const liveId = String(++liveNextId);
-      liveSubscriptions.set(liveId, {
+      const subscription: LiveSubscription = {
         args,
         handlers,
-        id: liveId,
         select: [...select],
         targetId: id,
         type,
-      });
+      };
+      liveSubscriptions.set(liveId, subscription);
+      if (!liveConnector) {
+        getNativeLiveClient().add({
+          args,
+          entityId: id,
+          id: liveId,
+          kind: 'subscribe',
+          select: [...select],
+          type,
+        });
 
-      enqueueLiveOperation({
-        args,
-        entityId: id,
-        id: liveId,
-        kind: 'subscribe',
-        select: [...select],
-        type,
-      });
+        return () => {
+          if (!liveSubscriptions.delete(liveId)) {
+            return;
+          }
+          getNativeLiveClient().remove(liveId);
+        };
+      }
+
+      const unsubscribePromise = getLiveClient()
+        .subscribe<{ data?: unknown; id?: string | number }>({
+          id: liveId,
+          onEvent(event) {
+            if (event.type === 'delete') {
+              handlers.onDelete?.(event.data.id ?? id);
+              return;
+            }
+
+            if ('data' in event.data && event.data.data !== undefined) {
+              handlers.onData(event.data.data);
+              return;
+            }
+
+            void fetchLiveRecord(subscription)
+              .then((record) => {
+                if (record == null) {
+                  handlers.onDelete?.(id);
+                } else {
+                  handlers.onData(record);
+                }
+              })
+              .catch((error) => reportSubscriptionError(subscription, error));
+          },
+          topic: liveEntityTopic(type, id),
+        })
+        .catch((error) => {
+          liveSubscriptions.delete(liveId);
+          reportSubscriptionError(subscription, error);
+          return null;
+        });
 
       return () => {
         if (!liveSubscriptions.delete(liveId)) {
           return;
         }
-
-        if (liveSubscriptions.size === 0) {
-          pendingLiveOperations = [];
-          liveOperationScheduled = false;
-          stopLiveStream();
-          return;
-        }
-
-        enqueueLiveOperation({
-          id: liveId,
-          kind: 'unsubscribe',
-        });
+        void unsubscribePromise.then((unsubscribe) => unsubscribe?.());
       };
     };
 
     transport.subscribeConnection = (procedure, type, args, select, selectionArgs, handlers) => {
       const liveId = String(++liveNextId);
-      liveSubscriptions.set(liveId, {
+      const globalLiveId = `${liveId}:global`;
+      const subscription: LiveSubscription = {
         args,
         handlers,
-        id: liveId,
         procedure,
         select: [...select],
         selectionArgs,
         type,
-      });
+      };
+      const handleEvent = (event: VoidLiveClientEvent) => {
+        const data = isRecord(event.data) ? event.data : {};
+        if (event.type === 'invalidate') {
+          handlers.onEvent({ type: 'invalidate' });
+          return;
+        }
 
-      enqueueLiveOperation({
-        args,
+        const nodeType = typeof data.nodeType === 'string' ? data.nodeType : type;
+        const id = data.id;
+        if (event.type === 'deleteEdge') {
+          if (typeof id === 'string' || typeof id === 'number') {
+            handlers.onEvent({ id, nodeType, type: 'deleteEdge' });
+          } else {
+            reportSubscriptionError(
+              subscription,
+              new Error(
+                `fate(http): Live connection delete event for '${procedure}' missed an id.`,
+              ),
+            );
+          }
+          return;
+        }
+
+        if (
+          event.type !== 'appendEdge' &&
+          event.type !== 'appendNode' &&
+          event.type !== 'insertEdgeAfter' &&
+          event.type !== 'insertEdgeBefore' &&
+          event.type !== 'prependEdge' &&
+          event.type !== 'prependNode'
+        ) {
+          return;
+        }
+
+        const eventType = event.type;
+        const sendNode = (node: unknown) => {
+          handlers.onEvent({
+            edge: {
+              cursor: typeof data.cursor === 'string' ? data.cursor : undefined,
+              node,
+            },
+            nodeType,
+            targetCursor: typeof data.targetCursor === 'string' ? data.targetCursor : undefined,
+            type: eventType,
+          });
+        };
+
+        if ('node' in data && data.node !== undefined) {
+          sendNode(data.node);
+          return;
+        }
+
+        if (typeof id !== 'string' && typeof id !== 'number') {
+          reportSubscriptionError(
+            subscription,
+            new Error(`fate(http): Live connection event for '${procedure}' missed a node id.`),
+          );
+          return;
+        }
+
+        void resolveConnectionNode(subscription, id)
+          .then(sendNode)
+          .catch((error) => reportSubscriptionError(subscription, error));
+      };
+
+      liveSubscriptions.set(liveId, subscription);
+      if (!liveConnector) {
+        getNativeLiveClient().add({
+          args,
+          id: liveId,
+          kind: 'subscribeConnection',
+          procedure,
+          select: [...select],
+          selectionArgs,
+          type,
+        });
+
+        return () => {
+          if (!liveSubscriptions.delete(liveId)) {
+            return;
+          }
+          getNativeLiveClient().remove(liveId);
+        };
+      }
+
+      liveSubscriptions.set(globalLiveId, subscription);
+      const client = getLiveClient();
+      const unsubscribeSpecific = client.subscribe({
         id: liveId,
-        kind: 'subscribeConnection',
-        procedure,
-        select: [...select],
-        selectionArgs,
-        type,
+        onEvent: handleEvent,
+        topic: liveConnectionTopic(procedure, args),
       });
+      const unsubscribeGlobal = client.subscribe({
+        id: globalLiveId,
+        onEvent: handleEvent,
+        topic: liveGlobalConnectionTopic(procedure),
+      });
+      const unsubscribePromise = Promise.all([unsubscribeSpecific, unsubscribeGlobal]).catch(
+        (error) => {
+          liveSubscriptions.delete(liveId);
+          liveSubscriptions.delete(globalLiveId);
+          reportSubscriptionError(subscription, error);
+          return [];
+        },
+      );
 
       return () => {
-        if (!liveSubscriptions.delete(liveId)) {
+        const deleted = liveSubscriptions.delete(liveId) || liveSubscriptions.delete(globalLiveId);
+        if (!deleted) {
           return;
         }
-
-        if (liveSubscriptions.size === 0) {
-          pendingLiveOperations = [];
-          liveOperationScheduled = false;
-          stopLiveStream();
-          return;
-        }
-
-        enqueueLiveOperation({
-          id: liveId,
-          kind: 'unsubscribe',
-        });
+        liveSubscriptions.delete(globalLiveId);
+        void unsubscribePromise.then((unsubscribers) =>
+          Promise.all(unsubscribers.map((unsubscribe) => unsubscribe())),
+        );
       };
     };
   }

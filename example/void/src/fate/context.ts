@@ -1,9 +1,9 @@
+import { getSession } from 'void/auth';
 import { db } from 'void/db';
-import { getAuthSession } from '../lib/auth.ts';
 import { toSessionUser } from '../user/SessionUser.tsx';
 
 export const createContext = async ({ request }: { request: Request }) => {
-  const session = await getAuthSession(request);
+  const session = getSession();
 
   return {
     db,

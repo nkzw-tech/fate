@@ -43,4 +43,5 @@ export default defineConfig({
   ],
   resolve: { conditions: ['@nkzw/source'] },
   server: { port: 6001 },
+  ssr: { noExternal: ['void-fate'] },
 });

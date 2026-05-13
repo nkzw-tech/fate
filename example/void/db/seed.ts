@@ -2,12 +2,12 @@ import { styleText } from 'node:util';
 import randomEntry from '@nkzw/core/randomEntry.js';
 import { defineSeed } from 'void/seed';
 import { categories, comments, events, posts, tags, users } from '../../seedData.ts';
-import { createAuth } from '../src/lib/auth.ts';
 import { createEventRecord, createPostRecord } from './queries.ts';
 import { category, comment, post, tag } from './schema.ts';
+import { createSeedAuth } from './seed-auth.ts';
 
 export default defineSeed<typeof import('./schema.ts')>(async ({ db }) => {
-  const auth = createAuth(db);
+  const auth = createSeedAuth(db);
   const queryDb = db as unknown as Parameters<typeof createPostRecord>[1];
   const [existingPost] = await db.select({ id: post.id }).from(post).limit(1);
 

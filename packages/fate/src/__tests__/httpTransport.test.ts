@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createHTTPTransport } from '../httpTransport.ts';
+import { liveConnectionTopic, liveEntityTopic, liveGlobalConnectionTopic } from '../liveTopics.ts';
 
 const jsonResponse = (data: unknown) =>
   new Response(JSON.stringify(data), {
@@ -25,6 +26,153 @@ const requestHeadersFor = async (
 
   const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
   return new Headers(calls[0]?.[1].headers);
+};
+
+type TestLiveConnector = Exclude<
+  NonNullable<Parameters<typeof createHTTPTransport>[0]['live']>,
+  boolean
+>;
+
+class MockEventSource {
+  static instances: Array<MockEventSource> = [];
+
+  readonly listeners = new Map<string, Set<(event: Event) => void>>();
+  closed = false;
+
+  constructor(
+    readonly url: string,
+    readonly options?: { withCredentials?: boolean },
+  ) {
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: Event) => void) {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, event: Event = new Event(type)) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+
+  message(data: unknown) {
+    this.emit('message', { data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  removeEventListener(type: string, listener: (event: Event) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+}
+
+const resetMockEventSource = () => {
+  MockEventSource.instances = [];
+  return MockEventSource;
+};
+
+const liveControlFetch = () =>
+  vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    return jsonResponse({
+      accepted: true,
+      connectionId: body.connectionId,
+      results: body.operations.map(
+        (operation: { id: string; kind: 'subscribe' | 'unsubscribe'; topic?: string }) => ({
+          id: operation.id,
+          kind: operation.kind,
+          ok: true,
+          ...(operation.topic && { topic: operation.topic }),
+        }),
+      ),
+    });
+  });
+
+const liveConnector = () =>
+  ((url, options) => {
+    const EventSourceCtor = options?.eventSource ?? MockEventSource;
+    const fetch = options?.fetch ?? globalThis.fetch;
+    const connectionId = crypto.randomUUID();
+    const sourceUrl = new URL(String(url), 'http://local');
+    sourceUrl.searchParams.set('connectionId', connectionId);
+    const source = new EventSourceCtor(sourceUrl.href, {
+      withCredentials: options?.withCredentials,
+    });
+    const open = new Promise<void>((resolve, reject) => {
+      source.addEventListener('open', () => resolve());
+      source.addEventListener('error', (event) => {
+        options?.onError?.(event);
+        reject(new Error('live: stream failed to open.'));
+      });
+    });
+    const subscriptions = new Map<string, { onEvent?: (event: any) => void; topic: string }>();
+    let pending: Array<{ id: string; resolve: () => void; topic: string }> = [];
+    let scheduled = false;
+    const enqueue = (id: string, topic: string) =>
+      new Promise<void>((resolve) => {
+        pending.push({ id, resolve, topic });
+        if (scheduled) {
+          return;
+        }
+        scheduled = true;
+        queueMicrotask(async () => {
+          scheduled = false;
+          const batch = pending;
+          pending = [];
+          await fetch(String(url), {
+            body: JSON.stringify({
+              connectionId,
+              operations: batch.map((entry) => ({
+                id: entry.id,
+                kind: 'subscribe',
+                topic: entry.topic,
+              })),
+            }),
+            method: 'POST',
+          });
+          for (const entry of batch) {
+            entry.resolve();
+          }
+        });
+      });
+    source.addEventListener('message', (event) => {
+      const data = JSON.parse(String((event as MessageEvent).data));
+      const subscription = subscriptions.get(data.subscriptionId);
+      if (subscription && subscription.topic === data.topic) {
+        subscription.onEvent?.(data);
+      }
+    });
+
+    return {
+      async subscribe({ id, onEvent, topic }) {
+        subscriptions.set(id, { onEvent, topic });
+        await open;
+        await enqueue(id, topic);
+        return async () => {
+          subscriptions.delete(id);
+          await fetch(String(url), {
+            body: JSON.stringify({
+              connectionId,
+              operations: [{ id, kind: 'unsubscribe' }],
+            }),
+            method: 'POST',
+          });
+          source.close();
+        };
+      },
+    };
+  }) satisfies TestLiveConnector;
+
+const openLiveStream = async () => {
+  await vi.waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  const source = MockEventSource.instances[0]!;
+  source.emit('open');
+  return source;
 };
 
 test('batches native HTTP operations in the same microtask', async () => {
@@ -126,86 +274,73 @@ test('omits native SSE live support when disabled', () => {
   expect(transport.subscribeById).toBeUndefined();
 });
 
-test('subscribes to native SSE live events', async () => {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(
-        new TextEncoder().encode(
-          [
-            'id: evt-1',
-            'event: next',
-            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
-            '',
-            'event: next',
-            'data: {"kind":"next","id":"1","event":{"delete":true,"id":"1"}}',
-            '',
-            '',
-          ].join('\n'),
-        ),
-      );
-    },
-  });
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
-    init?.method === 'GET'
-      ? new Response(stream)
-      : jsonResponse({
-          results: [{ data: null, id: '1', ok: true }],
-          version: 1,
-        }),
+test('supports native SSE live subscriptions by default', async () => {
+  const fetch = vi.fn(async () =>
+    jsonResponse({
+      results: [{ data: null, id: '1', ok: true }],
+      version: 1,
+    }),
   );
   const onData = vi.fn();
   const onDelete = vi.fn();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
     fetch,
-    url: '/fate',
+    url: 'http://local/fate',
   });
 
   const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
     onData,
     onDelete,
   });
-  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
-  expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(postCall[0]).toBe('http://local/fate/live');
+  expect(JSON.parse(String(postCall[1].body ?? '{}'))).toEqual({
+    connectionId: expect.any(String),
+    operations: [
+      {
+        entityId: '1',
+        id: '1',
+        kind: 'subscribe',
+        select: ['id', 'title'],
+        type: 'Post',
+      },
+    ],
+    version: 1,
+  });
+
+  source.message({
+    event: { data: { id: '1', title: 'One' }, type: 'update' },
+    id: '1',
+    kind: 'next',
+  });
+  source.message({
+    event: { delete: true, id: '1', type: 'delete' },
+    id: '1',
+    kind: 'next',
+  });
+
   expect(onData).toHaveBeenCalledWith({ id: '1', title: 'One' });
   expect(onDelete).toHaveBeenCalledWith('1');
   dispose?.();
 });
 
-test('subscribes to native SSE live connection events', async () => {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(
-        new TextEncoder().encode(
-          [
-            'id: evt-1',
-            'event: connection',
-            'data: {"kind":"connection","id":"1","event":{"type":"appendEdge","nodeType":"Post","edge":{"cursor":"cursor-1","node":{"id":"1","title":"One"}}}}',
-            '',
-            'event: connection',
-            'data: {"kind":"connection","id":"1","event":{"type":"deleteEdge","nodeType":"Post","id":"1"}}',
-            '',
-            '',
-          ].join('\n'),
-        ),
-      );
-    },
-  });
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
-    init?.method === 'GET'
-      ? new Response(stream)
-      : jsonResponse({
-          results: [{ data: null, id: '1', ok: true }],
-          version: 1,
-        }),
+test('supports native SSE live connection subscriptions', async () => {
+  const fetch = vi.fn(async () =>
+    jsonResponse({
+      results: [{ data: null, id: '1', ok: true }],
+      version: 1,
+    }),
   );
   const onEvent = vi.fn();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
     fetch,
-    url: '/fate',
+    live: true,
+    url: 'http://local/fate',
   });
 
   const dispose = transport.subscribeConnection?.(
@@ -217,7 +352,133 @@ test('subscribes to native SSE live connection events', async () => {
     { onEvent },
   );
 
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(postCall[1].body ?? '{}')).operations).toEqual([
+    {
+      args: { categoryId: 'fruit' },
+      id: '1',
+      kind: 'subscribeConnection',
+      procedure: 'posts',
+      select: ['id', 'title'],
+      type: 'Post',
+    },
+  ]);
+
+  source.message({
+    event: {
+      edge: {
+        cursor: 'cursor-1',
+        node: { id: '1', title: 'One' },
+      },
+      nodeType: 'Post',
+      type: 'appendEdge',
+    },
+    id: '1',
+    kind: 'connection',
+  });
+
+  expect(onEvent).toHaveBeenCalledWith({
+    edge: {
+      cursor: 'cursor-1',
+      node: { id: '1', title: 'One' },
+    },
+    nodeType: 'Post',
+    type: 'appendEdge',
+  });
+  dispose?.();
+});
+
+test('subscribes to live connector entity topics', async () => {
+  const fetch = liveControlFetch();
+  const onData = vi.fn();
+  const onDelete = vi.fn();
+  const topic = liveEntityTopic('Post', '1');
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
+    fetch,
+    live: liveConnector(),
+    url: 'http://local/fate',
+  });
+
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
+    onData,
+    onDelete,
+  });
+
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  expect(JSON.parse(String(calls[0]?.[1].body ?? '{}')).operations).toEqual([
+    { id: '1', kind: 'subscribe', topic },
+  ]);
+
+  source.message({
+    data: { data: { id: '1', title: 'One' }, id: '1' },
+    subscriptionId: '1',
+    topic,
+    type: 'update',
+  });
+  source.message({
+    data: { id: '1' },
+    subscriptionId: '1',
+    topic,
+    type: 'delete',
+  });
+
+  expect(onData).toHaveBeenCalledWith({ id: '1', title: 'One' });
+  expect(onDelete).toHaveBeenCalledWith('1');
+  dispose?.();
+});
+
+test('subscribes to live connector connection topics', async () => {
+  const fetch = liveControlFetch();
+  const onEvent = vi.fn();
+  const specificTopic = liveConnectionTopic('posts', { categoryId: 'fruit' });
+  const globalTopic = liveGlobalConnectionTopic('posts');
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
+    fetch,
+    live: liveConnector(),
+    url: 'http://local/fate',
+  });
+
+  const dispose = transport.subscribeConnection?.(
+    'posts',
+    'Post',
+    { categoryId: 'fruit' },
+    new Set(['id', 'title']),
+    undefined,
+    { onEvent },
+  );
+
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(postCall[1].body ?? '{}')).operations).toEqual([
+    { id: '1', kind: 'subscribe', topic: specificTopic },
+    { id: '1:global', kind: 'subscribe', topic: globalTopic },
+  ]);
+
+  source.message({
+    data: {
+      cursor: 'cursor-1',
+      id: '1',
+      node: { id: '1', title: 'One' },
+      nodeType: 'Post',
+    },
+    subscriptionId: '1',
+    topic: specificTopic,
+    type: 'appendEdge',
+  });
+  source.message({
+    data: { id: '1', nodeType: 'Post' },
+    subscriptionId: '1',
+    topic: specificTopic,
+    type: 'deleteEdge',
+  });
+
   expect(onEvent).toHaveBeenCalledWith({
     edge: {
       cursor: 'cursor-1',
@@ -227,310 +488,100 @@ test('subscribes to native SSE live connection events', async () => {
     type: 'appendEdge',
   });
   expect(onEvent).toHaveBeenCalledWith({ id: '1', nodeType: 'Post', type: 'deleteEdge' });
-  const postCall = (fetch.mock.calls as unknown as Array<[string, RequestInit]>).find(
-    ([, init]) => init.method === 'POST',
-  );
-  expect(JSON.parse(String(postCall?.[1].body ?? '{}')).operations[0]).toMatchObject({
-    args: { categoryId: 'fruit' },
-    kind: 'subscribeConnection',
-    procedure: 'posts',
-    select: ['id', 'title'],
-    type: 'Post',
-  });
 
   dispose?.();
 });
 
-test('preserves native SSE live URL query params', async () => {
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
-    init?.method === 'GET'
-      ? new Response(new ReadableStream<Uint8Array>())
-      : jsonResponse({
-          results: [{ data: null, id: '1', ok: true }],
-          version: 1,
-        }),
-  );
-  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
-    fetch,
-    liveUrl: '/fate/live?token=apple',
-    url: '/fate',
-  });
-
-  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
-    onData: vi.fn(),
-  });
-
-  await vi.waitFor(() => {
-    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-    expect(calls.find(([, init]) => init.method === 'GET')?.[0]).toMatch(
-      /^\/fate\/live\?token=apple&connectionId=/,
-    );
-  });
-  dispose?.();
-});
-
-test('retries failed native SSE live control operations while the stream stays open', async () => {
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-    if (init?.method === 'GET') {
-      return new Response(new ReadableStream<Uint8Array>());
-    }
-
-    if (fetch.mock.calls.filter(([, callInit]) => callInit?.method === 'POST').length === 1) {
-      return new Response('temporary', { status: 503 });
-    }
-
-    const body = JSON.parse(String(init?.body ?? '{}'));
-    return jsonResponse({
-      results: body.operations.map((operation: { id: string }) => ({
-        data: null,
-        id: operation.id,
-        ok: true,
-      })),
-      version: 1,
-    });
-  });
+test('reports live connector connection errors once per subscription', async () => {
+  const fetch = liveControlFetch();
   const onError = vi.fn();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
     fetch,
-    liveRetryMs: 0,
-    url: '/fate',
+    live: liveConnector(),
+    url: 'http://local/fate',
   });
 
-  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
-    onData: vi.fn(),
-    onError,
-  });
+  const dispose = transport.subscribeConnection?.(
+    'posts',
+    'Post',
+    { categoryId: 'fruit' },
+    new Set(['id']),
+    undefined,
+    { onError, onEvent: vi.fn() },
+  );
 
-  await vi.waitFor(() => {
-    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
-    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2);
-  });
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  source.emit('error');
 
-  const postBodies = (fetch.mock.calls as unknown as Array<[string, RequestInit]>)
-    .filter(([, init]) => init.method === 'POST')
-    .map(([, init]) => JSON.parse(String(init.body)));
-  expect(postBodies[0].operations).toEqual(postBodies[1].operations);
   expect(onError).toHaveBeenCalledTimes(1);
   dispose?.();
 });
 
-test('resends native SSE live subscriptions after the initial stream setup retries', async () => {
-  let streamRequests = 0;
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-    if (init?.method === 'GET') {
-      streamRequests += 1;
-      if (streamRequests === 1) {
-        return new Response('temporary', { status: 500 });
-      }
-
-      return new Response(new ReadableStream<Uint8Array>());
+test('fetches entity records for live connector events without data', async () => {
+  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (String(input) === 'http://local/fate/live') {
+      return jsonResponse({
+        accepted: true,
+        connectionId: body.connectionId,
+        results: body.operations.map((operation: { id: string; kind: 'subscribe' }) => ({
+          id: operation.id,
+          kind: operation.kind,
+          ok: true,
+        })),
+      });
     }
 
-    const body = JSON.parse(String(init?.body ?? '{}'));
     return jsonResponse({
-      results: body.operations.map((operation: { id: string }) => ({
-        data: null,
-        id: operation.id,
-        ok: true,
-      })),
-      version: 1,
-    });
-  });
-  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
-    fetch,
-    liveRetryMs: 0,
-    url: '/fate',
-  });
-
-  const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
-    onData: vi.fn(),
-  });
-
-  await vi.waitFor(() => {
-    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
-    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
-  });
-  dispose?.();
-
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  const postCall = calls.find(([, init]) => init.method === 'POST');
-  expect(JSON.parse((postCall?.[1].body as string) ?? '{}').operations).toEqual([
-    {
-      entityId: '1',
-      id: '1',
-      kind: 'subscribe',
-      select: ['id', 'title'],
-      type: 'Post',
-    },
-  ]);
-});
-
-test('multiplexes native SSE live subscriptions over one stream', async () => {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(
-        new TextEncoder().encode(
-          [
-            'event: next',
-            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
-            '',
-            'event: next',
-            'data: {"kind":"next","id":"2","event":{"data":{"id":"2","title":"Two"}}}',
-            '',
-            '',
-          ].join('\n'),
-        ),
-      );
-    },
-  });
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
-    init?.method === 'GET'
-      ? new Response(stream)
-      : jsonResponse({
-          results: [
-            { data: null, id: '1', ok: true },
-            { data: null, id: '2', ok: true },
-          ],
-          version: 1,
-        }),
-  );
-  const onPostOne = vi.fn();
-  const onPostTwo = vi.fn();
-  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
-    fetch,
-    url: '/fate',
-  });
-
-  const disposeOne = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
-    onData: onPostOne,
-  });
-  const disposeTwo = transport.subscribeById?.('Post', '2', new Set(['id', 'title']), undefined, {
-    onData: onPostTwo,
-  });
-
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  const postBody = JSON.parse(
-    (calls.find(([, init]) => init.method === 'POST')?.[1].body as string) ?? '{}',
-  );
-  expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1);
-  expect(postBody.operations).toHaveLength(2);
-  expect(onPostOne).toHaveBeenCalledWith({ id: '1', title: 'One' });
-  expect(onPostTwo).toHaveBeenCalledWith({ id: '2', title: 'Two' });
-  disposeOne?.();
-  disposeTwo?.();
-});
-
-test('reconnects native SSE live events with the last received event id', async () => {
-  const firstStream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(
-        new TextEncoder().encode(
-          [
-            'id: evt-1',
-            'event: next',
-            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"One"}}}',
-            '',
-            '',
-          ].join('\n'),
-        ),
-      );
-      controller.close();
-    },
-  });
-  const secondStream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(
-        new TextEncoder().encode(
-          [
-            'event: next',
-            'data: {"kind":"next","id":"1","event":{"data":{"id":"1","title":"Two"}}}',
-            '',
-            '',
-          ].join('\n'),
-        ),
-      );
-    },
-  });
-  let streamCount = 0;
-  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-    if (init?.method === 'GET') {
-      streamCount += 1;
-      return new Response(streamCount === 1 ? firstStream : secondStream);
-    }
-
-    const body = JSON.parse(String(init?.body ?? '{}'));
-    return jsonResponse({
-      results: body.operations.map((operation: { id: string }) => ({
-        data: null,
-        id: operation.id,
-        ok: true,
-      })),
+      results: [{ data: [{ id: '1', title: 'Fetched' }], id: body.operations[0].id, ok: true }],
       version: 1,
     });
   });
   const onData = vi.fn();
+  const topic = liveEntityTopic('Post', '1');
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
     fetch,
-    liveRetryMs: 0,
-    url: '/fate',
+    live: liveConnector(),
+    url: 'http://local/fate',
   });
 
-  const dispose = transport.subscribeById?.('Post', '1', new Set(['id', 'title']), undefined, {
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
     onData,
   });
-  await vi.waitFor(() => {
-    const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-    expect(calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
-    expect(calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2);
-  });
-  dispose?.();
 
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  const postCalls = calls.filter(([, init]) => init.method === 'POST');
-  expect(JSON.parse((postCalls[1]?.[1].body as string) ?? '{}').operations[0]).toMatchObject({
-    lastEventId: 'evt-1',
+  const source = await openLiveStream();
+  source.message({
+    data: { id: '1' },
+    subscriptionId: '1',
+    topic,
+    type: 'update',
   });
-  expect(onData).toHaveBeenCalledWith({ id: '1', title: 'One' });
-  expect(onData).toHaveBeenCalledWith({ id: '1', title: 'Two' });
+
+  await vi.waitFor(() => expect(onData).toHaveBeenCalledWith({ id: '1', title: 'Fetched' }));
+  dispose?.();
 });
 
-test('does not reconnect native SSE live events after permanent protocol errors', async () => {
-  const fetch = vi.fn(
-    async () =>
-      new Response(
-        JSON.stringify({
-          results: [
-            {
-              error: { code: 'NOT_FOUND', message: 'Live views are not enabled.' },
-              id: 'live',
-              ok: false,
-            },
-          ],
-          version: 1,
-        }),
-        {
-          headers: { 'content-type': 'application/json' },
-          status: 404,
-        },
-      ),
-  );
-  const onError = vi.fn();
+test('passes live URL query params to the live connector EventSource', async () => {
+  const fetch = liveControlFetch();
   const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
     fetch,
-    liveRetryMs: 0,
-    url: '/fate',
+    live: liveConnector(),
+    liveUrl: 'http://local/fate/live?token=apple',
+    url: 'http://local/fate',
   });
 
-  transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
+  const dispose = transport.subscribeById?.('Post', '1', new Set(['id']), undefined, {
     onData: vi.fn(),
-    onError,
   });
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await openLiveStream();
+  dispose?.();
 
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(MockEventSource.instances[0]?.url).toMatch(
+    /^http:\/\/local\/fate\/live\?token=apple&connectionId=/,
+  );
+  expect(MockEventSource.instances[0]?.options).toEqual({ withCredentials: true });
 });

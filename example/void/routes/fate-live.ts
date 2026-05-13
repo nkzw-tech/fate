@@ -1,4 +1,8 @@
 import { defineVoidFateLiveRoute } from 'void-fate/server';
-import { fateLive, fateServer } from '../src/fate/server.ts';
+import 'void/live';
+import { fateStream } from '../src/fate/live.ts';
 
-export const { GET, POST } = defineVoidFateLiveRoute(fateServer, fateLive);
+const route = defineVoidFateLiveRoute(fateStream);
+
+export const GET = route.GET;
+export const POST = route.POST;

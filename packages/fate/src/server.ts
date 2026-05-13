@@ -57,6 +57,7 @@ export {
 } from './server/dataView.ts';
 export { withConnection, connectionArgs } from './server/connection.ts';
 export { createLiveEventBus } from './server/live.ts';
+export { liveConnectionTopic, liveEntityTopic, liveGlobalConnectionTopic } from './liveTopics.ts';
 export { createFateFetchHandler, createFateServer, createHonoFateHandler } from './server/http.ts';
 export {
   resolveSourceById,

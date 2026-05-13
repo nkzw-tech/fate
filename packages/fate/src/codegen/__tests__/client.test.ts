@@ -242,10 +242,11 @@ test('generates a Void client source with endpoint defaults and server fetch', (
   expect(sourceText).toContain("const defaultVoidFateRpcPath = '/fate';");
   expect(sourceText).toContain("const defaultVoidFateLivePath = '/fate-live';");
   expect(sourceText).toContain("import type { fateServer, Post } from '@org/server/http.ts';");
+  expect(sourceText).toContain("import { connectLiveStream } from 'void/live/client';");
   expect(sourceText).toContain("import('@nkzw/fate/server')");
   expect(sourceText).toContain("import('/src/fate/server.ts')");
   expect(sourceText).toContain('import.meta.env.SSR');
   expect(sourceText).toContain('credentials: options.userId ?');
   expect(sourceText).toContain('url: toEndpointUrl(options.url');
-  expect(sourceText).toContain('live: true');
+  expect(sourceText).toContain('live: connectLiveStream');
 });
