@@ -43,7 +43,7 @@ export default defineConfig({
       { link: '/', text: 'Home' },
       { link: '/guide/getting-started', text: 'Guide' },
       { link: '/api', text: 'API' },
-      { link: '/posts/introducing-fate', text: 'Blog' },
+      { link: '/posts/fate-1.0', text: 'Blog' },
       {
         items: [
           {
@@ -84,7 +84,7 @@ export default defineConfig({
       {
         collapsed: true,
         items: [
-          //{ link: '/posts/fate-1.0', text: 'Fate 1.0' },
+          { link: '/posts/fate-1.0', text: 'Fate 1.0' },
           { link: '/posts/introducing-fate', text: 'Introducing Fate' },
         ],
         text: 'Blog',

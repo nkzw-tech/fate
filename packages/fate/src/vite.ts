@@ -206,6 +206,13 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
         this.addWatchFile(dependency);
       }
     },
+    config: () => ({
+      ssr: {
+        noExternal: [
+          ...new Set([defaultClientRuntime, options.clientModule ?? defaultClientRuntime]),
+        ],
+      },
+    }),
     configResolved: (resolvedConfig) => {
       config = resolvedConfig;
     },

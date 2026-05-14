@@ -9,7 +9,7 @@ import {
   findCommentPostId,
   postExists,
 } from '../../drizzle/queries.ts';
-import { fate, procedure, router } from '../init.ts';
+import { fate, live, procedure, router } from '../init.ts';
 import type { CommentItem } from '../views.ts';
 import { commentDataView, postSummaryDataView } from '../views.ts';
 
@@ -68,6 +68,9 @@ export const commentRouter = router({
         });
       }
 
+      live.connection('Post.comments', { id: input.postId }).appendNode('Comment', commentId);
+      live.update('Post', input.postId, { changed: ['commentCount', 'comments'] });
+
       return result as CommentItem & { post?: { commentCount: number } };
     }),
   delete: procedure
@@ -101,6 +104,9 @@ export const commentRouter = router({
         input: { args: input.args, select: ['commentCount', 'id'] },
         view: postSummaryDataView,
       });
+
+      live.connection('Post.comments', { id: postId }).deleteEdge('Comment', input.id);
+      live.update('Post', postId, { changed: ['commentCount', 'comments'] });
 
       return {
         id: input.id,

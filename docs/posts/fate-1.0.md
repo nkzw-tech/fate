@@ -22,13 +22,81 @@ _May 14<sup>th</sup> 2026 by [<img src="https://gravatar.com/avatar/77a332a7da77
 
 ## Why _fate_
 
-React data fetching is still largely centered around requests. Components fetch independently, requests happen at every level of the component tree, and keeping client state consistent often requires imperative cache invalidation, defensive refetching, or detailed mutation patching logic. As coding agents write more and more of our code, reducing imperative cache management and request-centric state handling becomes more important, not less. _fate_ is designed to make those patterns unnecessary and fix it at the framework level.
+React data fetching is still largely centered around requests. Components fetch independently, requests happen at every level of the component tree, and keeping client state consistent often requires imperative cache invalidation, defensive refetching, or detailed mutation patching logic. As coding agents write more and more of our code, reducing imperative cache management and request-centric state handling becomes more important, not less. _fate_ is designed to eliminate those patterns at the framework level.
 
 _fate_ takes a different approach: Instead of caching requests, _fate_ caches normalized objects, shifts thinking to what data is required, and composes declarative view requirements into a single request at the application root. This enables precise optimistic updates, efficient live subscriptions, predictable cache behavior, and deep integration with modern Async React features through a minimal, composable API.
 
 Check out the [initial announcement](/posts/introducing-fate#a-modern-data-client-for-react-trpc) if you'd like to learn more about why _fate_ exists!
 
-## New Features
+## How does _fate_ work?
+
+_fate_ composes `Views` up to a single `Request` per screen at the root of your application. Actions can be used to issue data mutations. A typical component tree in a React application using _fate_ might look like this:
+
+<p align="center">
+  <picture class="fate-tree">
+    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-tree-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="/public/fate-tree.svg">
+    <img alt="Tree" src="/public/fate-tree.svg" width="90%">
+  </picture>
+</p>
+
+A `View` is co-located with your React Components and might look like this:
+
+```tsx
+import type { Post } from '@org/server/views.ts';
+import { UserView } from './UserCard.tsx';
+import { useView, view, ViewRef } from 'react-fate';
+
+export const PostView = view<Post>()({
+  author: UserView,
+  content: true,
+  id: true,
+  title: true,
+});
+
+export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
+  const post = useView(PostView, postRef);
+
+  return (
+    <Card>
+      <h2>{post.title}</h2>
+      <p>{post.content}</p>
+      <UserCard user={post.author} />
+    </Card>
+  );
+};
+```
+
+A `ViewRef` is a reference to a concrete object of a specific type, for example a `Post` with id `7`. It contains the unique ID of the object, the type name and some _fate_-specific metadata. _fate_ creates and manages these references for you, and you can pass them around your components as needed to resolve them against their views.
+
+Then you pass the composed views to `useRequest` at the root of your app. _fate_ will suspend and fetch data in a single request.
+
+```tsx
+import { useRequest } from 'react-fate';
+import { PostCard, PostView } from './PostCard.tsx';
+
+export function App() {
+  const { posts } = useRequest({ posts: { list: PostView } });
+  return posts.map((post) => <PostCard key={post.id} post={post} />);
+}
+```
+
+_fate_ does not provide hooks for data mutations. Instead you can use actions directly with [React's `useActionState`](https://react.dev/reference/react/useActionState) and React Actions. A `LikeButton` component with optimistic updates using _fate_ Actions and an async component library might look like this:
+
+```tsx
+const LikeButton = ({ post }) => {
+  const fate = useFateClient();
+  const [result, like] = useActionState(fate.actions.post.like, null);
+
+  return (
+    <Button action={() => like({ input: { id: post.id }, optimistic: { likes: post.likes + 1 } })}>
+      {result?.error ? 'Oops!' : 'Like'}
+    </Button>
+  );
+};
+```
+
+## New Features in 1.0
 
 ### Live Views & Lists
 
@@ -53,7 +121,7 @@ live.update('Post', input.id, { changed: ['likes'] });
 
 Similarly, you can replace `useListView` with `useLiveListView` to automatically receive updates for new or removed items in a list.
 
-_fate_ was built with this use case in mind from the beginning, and it naturally works well because of the normalized cache. It efficiently subscribes to changes for specific objects or lists, and only updates the components where data has changed. This system uses the mutations pipeline, so adding the live features was mostly about adding support for SSE and keeping the API and setup to a minimum instead of changing the core of _fate_.
+_fate_ was built with this use case in mind from the beginning, and it naturally works well because of the normalized cache. It efficiently subscribes to changes for specific objects or lists, and only updates the components where data has changed. Because subscriptions are tied to normalized objects and lists rather than requests, _fate_ can update only the components affected by a change without refetching entire queries. This system uses the mutations pipeline, so adding the live features was mostly about adding support for SSE and keeping the API and setup to a minimum instead of changing the core of _fate_.
 
 You can try out an example at [fate-void-example.void.app](https://fate-void-example.void.app/). Open two tabs, and like a post or add a comment to see the updates live.
 
@@ -86,9 +154,20 @@ Codegen through the CLI remains available for CI or custom workflows.
 
 Inspired by [Relay](https://relay.dev/), _fate_ now includes garbage collection for data in the client cache and list state. Mounted components retain the data they are currently using, and when the components are unmounted, _fate_ will eventually release them for garbage collection. By default, this keeps data from the last 10 released requests (usually 10 page transitions with fresh data), which makes normal back-and-forth navigation feel instant while still allowing older or unreachable data to be removed from memory.
 
-### App Scaffolding with `create-fate`
+### Fixes
 
-You can now get started using [`create-fate`](https://www.npmjs.com/package/create-fate), which simplifies scaffolding of new projects. We recommend using it with [Vite+](https://viteplus.dev/):
+Besides all the features above, there are also many fixes that went into this release:
+
+- Improved ordering of optimistic and committed list updates with respect to pagination.
+- Improved request promise and lifetime handling, so completed request data is no longer retained unnecessarily.
+- Added stable view refs to reduce transient ref allocation and avoid unnecessary re-renders.
+- Fixed removal of invalid optimistic updates.
+- Fixed list cache scoping for arguments, cursors, and nested node views.
+- Improved large-list update performance.
+
+## App Scaffolding with `create-fate`
+
+You can get started using the new [`create-fate`](https://www.npmjs.com/package/create-fate) package. I recommend using it with [Vite+](https://viteplus.dev/):
 
 ```bash
 vp create fate my-app
@@ -103,17 +182,6 @@ vp create fate my-app --template prisma # prisma + trpc
 ```
 
 These templates let you start with the stack that best matches your preferences.
-
-### Fixes
-
-Besides all the features above, there are also many fixes that went into this release:
-
-- Improved ordering of optimistic and committed list updates with respect to pagination.
-- Improved request promise and lifetime handling, so completed request data is no longer retained unnecessarily.
-- Added stable view refs to reduce transient ref allocation and avoid unnecessary re-renders.
-- Fixed removal of invalid optimistic updates.
-- Fixed list cache scoping for arguments, cursors, and nested node views.
-- Improved large-list update performance.
 
 ## Stepping Into the Void
 

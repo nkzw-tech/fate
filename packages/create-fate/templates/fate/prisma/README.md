@@ -57,10 +57,25 @@ Next to [_fate_](https://fate.technology), it comes with the following technolog
 
 You'll need Node.js 24+ and [Vite+](https://viteplus.dev/guide/).
 
-- Dependencies, the Prisma client, and the fate client were generated when the app was created.
-- Review `server/.env`, which is copied from `server/.env.example` when the app is created.
-- Set up a Postgres database locally or run `docker-compose up -d` to start Postgres in a Docker container.
-- Postgres setup:
+Install dependencies:
+
+```bash
+vp install
+```
+
+Review `server/.env`, which is copied from `server/.env.example` when the app is created. The default local values expect:
+
+- Postgres at `postgresql://fate:echo@localhost:5432/fate`.
+- The server at `http://localhost:9000`.
+- The client at `http://localhost:5173`.
+
+Start Postgres with Docker:
+
+```bash
+docker-compose up -d
+```
+
+Alternatively, create the database manually:
 
 ```SQL
 CREATE ROLE fate WITH LOGIN PASSWORD 'echo';
@@ -68,11 +83,44 @@ CREATE DATABASE fate;
 ALTER DATABASE fate OWNER TO fate;
 ```
 
-Then, at the root of the project, run:
+For local development, push the Prisma schema and seed the database:
 
-- `vp run prisma migrate dev` to create the database and run the migrations.
-- You might want to run `vp run prisma migrate reset` and `vp run prisma db seed` to seed the database with initial data.
-- Run `vp run dev:setup` to generate the Prisma client and regenerate the fate client code.
-- Run `vp test` to run all tests.
-- Run `vp run dev` to run the client and server.
-- Visit `http://localhost:5173` to see the app in action.
+```bash
+vp run prisma db push
+vp run prisma db seed
+```
+
+If you prefer migration files, use Prisma's migration workflow instead:
+
+```bash
+vp run prisma migrate dev --name init
+vp run prisma db seed
+```
+
+Then generate local files:
+
+```bash
+vp run dev:setup
+```
+
+Start the app:
+
+```bash
+vp run dev
+```
+
+The client runs at `http://localhost:5173` and the server runs at `http://localhost:9000`. tRPC requests go to `/trpc`.
+
+## Development
+
+Common commands from the project root:
+
+- `vp run dev` starts the client and server together.
+- `vp run dev:client` starts only the client.
+- `vp run dev:server` starts only the server.
+- `vp run dev:setup` generates the Prisma client, runs fbtee setup, and regenerates the fate client.
+- `vp run fate:generate` regenerates `client/.fate/client.generated.ts` after changing server views, roots, or routers.
+- `vp run prisma` runs Prisma CLI commands in the server package.
+- `vp check --fix` formats, lints, and type-checks the workspace.
+- `vp test` runs the test suite.
+- `vp run build` builds the client and server.

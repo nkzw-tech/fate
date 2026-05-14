@@ -39,6 +39,20 @@ test('runs before Vite resolves package exports', () => {
   ).toBe('pre');
 });
 
+test('keeps the generated client runtime inside Vite during SSR', () => {
+  const getSsrNoExternal = (clientModule?: '@nkzw/fate' | 'react-fate') => {
+    const plugin = fate({
+      clientModule,
+      module: './server.ts',
+    });
+
+    return (plugin.config as () => { ssr?: { noExternal?: Array<string> } })().ssr?.noExternal;
+  };
+
+  expect(getSsrNoExternal()).toEqual(['@nkzw/fate']);
+  expect(getSsrNoExternal('react-fate')).toEqual(['@nkzw/fate', 'react-fate']);
+});
+
 test('serves the generated client as JavaScript', async () => {
   setExampleEnv();
 

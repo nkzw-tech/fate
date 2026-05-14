@@ -6,7 +6,7 @@ import { reactCompilerPreset } from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
-import { defineConfig } from 'vite-plus';
+import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 
 const root = process.cwd();
@@ -24,12 +24,14 @@ if (!process.env.VITE_SERVER_URL) {
 export default defineConfig({
   build: { outDir: join(root, '../dist/client') },
   plugins: [
-    babel({
-      presets: [fbteePreset, reactCompilerPreset()],
-    }),
-    tailwindcss(),
-    voidPlugin(),
-    voidReact(),
+    ...(lazyPlugins(() => [
+      babel({
+        presets: [fbteePreset, reactCompilerPreset()],
+      }),
+      tailwindcss(),
+      voidPlugin(),
+      voidReact(),
+    ]) ?? []),
     fate({
       module: '@app/server/src/router.ts',
     }),

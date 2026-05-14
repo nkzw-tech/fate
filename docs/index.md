@@ -17,7 +17,7 @@ hero:
       link: /api
     - theme: alt
       text: Read the Announcement
-      link: /posts/introducing-fate
+      link: /posts/fate-1.0
     - theme: alt
       text: View on GitHub
       link: https://github.com/nkzw-tech/fate

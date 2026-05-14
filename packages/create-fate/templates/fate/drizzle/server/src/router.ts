@@ -11,4 +11,5 @@ export const appRouter = router({
 
 export type AppRouter = typeof appRouter;
 
+export { fateServer } from './trpc/init.ts';
 export * from './trpc/views.ts';

@@ -1,6 +1,6 @@
 {
   "name": "void-fate",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0",
   "description": "Void adapter for fate.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "license": "MIT",

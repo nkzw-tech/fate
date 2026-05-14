@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { useFateClient, useListView, useView, view, ViewRef } from 'react-fate';
+import { useFateClient, useLiveListView, useLiveView, useView, view, ViewRef } from 'react-fate';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import AuthClient from '../user/AuthClient.tsx';
@@ -24,6 +24,9 @@ const CommentConnectionView = {
   args: { first: 3 },
   items: {
     node: CommentView,
+  },
+  live: {
+    append: 'visible',
   },
 };
 
@@ -123,9 +126,9 @@ const CommentInput = ({
 
 export function PostCard({ detail, post: postRef }: { detail?: boolean; post: ViewRef<'Post'> }) {
   const fate = useFateClient();
-  const post = useView(PostView, postRef);
+  const post = useLiveView(PostView, postRef);
   const author = useView(UserView, post.author);
-  const [comments, loadNext] = useListView(CommentConnectionView, post.comments);
+  const [comments, loadNext] = useLiveListView(CommentConnectionView, post.comments);
 
   const [likeResult, likeAction, likeIsPending] = useActionState(fate.actions.post.like, null);
 

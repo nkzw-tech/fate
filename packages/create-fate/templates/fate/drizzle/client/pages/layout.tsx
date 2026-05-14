@@ -53,6 +53,16 @@ export default function Layout({ children }: { children: ReactNode }) {
             url: `${env('SERVER_URL')}/trpc`,
           }),
         ],
+        liveUrl: `${env('SERVER_URL')}/fate`,
+        ...(userId
+          ? {
+              fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+                fetch(input, {
+                  ...init,
+                  credentials: 'include',
+                }),
+            }
+          : null),
       }),
     [userId],
   );

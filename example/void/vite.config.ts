@@ -1,7 +1,9 @@
+import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
+import { reactCompilerPreset } from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
-import { defineConfig } from 'vite-plus';
+import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
@@ -33,9 +35,14 @@ export default defineConfig({
     },
   },
   plugins: [
-    tailwindcss(),
-    voidPlugin(),
-    voidReact(),
+    ...(lazyPlugins(() => [
+      babel({
+        presets: [reactCompilerPreset()],
+      }),
+      tailwindcss(),
+      voidPlugin(),
+      voidReact(),
+    ]) ?? []),
     fate({
       module: './src/fate/server.ts',
       transport: 'void',

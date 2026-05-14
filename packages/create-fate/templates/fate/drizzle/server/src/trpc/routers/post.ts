@@ -2,7 +2,7 @@ import { connectionArgs } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { likePostRecord, unlikePostRecord } from '../../drizzle/queries.ts';
-import { fate, procedure, router } from '../init.ts';
+import { fate, live, procedure, router } from '../init.ts';
 import { Post, postDataView } from '../views.ts';
 
 export const postRouter = router({
@@ -58,6 +58,8 @@ export const postRouter = router({
         });
       }
 
+      live.update('Post', input.id, { changed: ['likes'] });
+
       return post as Post;
     }),
   unlike: procedure
@@ -89,6 +91,8 @@ export const postRouter = router({
           message: 'Post not found',
         });
       }
+
+      live.update('Post', input.id, { changed: ['likes'] });
 
       return post as Post;
     }),

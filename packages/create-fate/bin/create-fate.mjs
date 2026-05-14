@@ -328,6 +328,17 @@ const setupProject = (targetPath, selectedVariant) => {
   }
 };
 
+const printReadme = (targetPath) => {
+  const readmePath = path.join(targetPath, 'README.md');
+  if (!fs.existsSync(readmePath)) {
+    return;
+  }
+
+  process.stdout.write(`\nNext steps are in README.md. Follow these instructions:\n\n`);
+  process.stdout.write(fs.readFileSync(readmePath, 'utf8'));
+  process.stdout.write('\n');
+};
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const resolveTemplateRoot = (template) => {
@@ -389,6 +400,8 @@ const main = async () => {
   } else {
     process.stdout.write(`${message}\n`);
   }
+
+  printReadme(targetPath);
 };
 
 try {
