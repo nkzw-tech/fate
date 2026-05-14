@@ -27,7 +27,7 @@
     "generate-readme": "node --conditions=development --no-warnings --loader ts-node/esm scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",
-    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && pnpm publish -r --access public"
+    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public"
   },
   "devDependencies": {
     "@fontsource/fira-code": "^5.2.7",
