@@ -89,6 +89,7 @@ type LiveConfig =
   | LiveEventBus
   | {
       bus: LiveEventBus;
+      maxQueueSize?: number;
     };
 
 type ContextOptions<AdapterContext> = {
@@ -110,24 +111,27 @@ type LiveConnection<Context> = {
   drainInterval?: ReturnType<typeof setInterval>;
   drainTimeout?: ReturnType<typeof setTimeout>;
   heartbeat?: ReturnType<typeof setInterval>;
+  id: string;
   lastHeartbeat: number;
-  queue: Array<
-    | {
-        event: LiveSourceEvent;
-        kind: 'entity';
-        operation: FateLiveSubscribeOperation;
-        source: SourceDefinition<AnyRecord>;
-        subscription: LiveServerSubscription;
-      }
-    | {
-        event: LiveConnectionSourceEvent;
-        kind: 'connection';
-        operation: FateLiveConnectionSubscribeOperation;
-        subscription: LiveServerSubscription;
-      }
-  >;
+  queue: Array<LiveQueueItem>;
+  queueHead: number;
   subscriptions: Map<string, LiveServerSubscription>;
 };
+
+type LiveQueueItem =
+  | {
+      event: LiveSourceEvent;
+      kind: 'entity';
+      operation: FateLiveSubscribeOperation;
+      source: SourceDefinition<AnyRecord>;
+      subscription: LiveServerSubscription;
+    }
+  | {
+      event: LiveConnectionSourceEvent;
+      kind: 'connection';
+      operation: FateLiveConnectionSubscribeOperation;
+      subscription: LiveServerSubscription;
+    };
 
 type WaitUntil = (promise: Promise<unknown>) => void;
 
@@ -262,6 +266,44 @@ const getLiveBus = (live: false | LiveConfig | undefined): LiveEventBus | null =
   }
 
   return live.bus;
+};
+
+const defaultLiveMaxQueueSize = 1000;
+
+const getLiveMaxQueueSize = (live: false | LiveConfig | undefined): number => {
+  if (!live || 'subscribe' in live) {
+    return defaultLiveMaxQueueSize;
+  }
+
+  const value = live.maxQueueSize;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : defaultLiveMaxQueueSize;
+};
+
+const compactLiveQueue = <Context>(connection: LiveConnection<Context>) => {
+  if (connection.queueHead === 0) {
+    return;
+  }
+
+  connection.queue = connection.queue.slice(connection.queueHead);
+  connection.queueHead = 0;
+};
+
+const getLiveQueueSize = <Context>(connection: LiveConnection<Context>) =>
+  connection.queue.length - connection.queueHead;
+
+const dequeueLiveItem = <Context>(connection: LiveConnection<Context>): LiveQueueItem | null => {
+  if (connection.queueHead >= connection.queue.length) {
+    compactLiveQueue(connection);
+    return null;
+  }
+
+  const item = connection.queue[connection.queueHead++]!;
+  if (connection.queueHead > 64 && connection.queueHead * 2 >= connection.queue.length) {
+    compactLiveQueue(connection);
+  }
+  return item;
 };
 
 const getWaitUntil = <AdapterContext>(adapterContext?: AdapterContext): WaitUntil | undefined => {
@@ -671,6 +713,7 @@ export function createFateServer<
   }
 
   const liveBus = getLiveBus(live);
+  const liveMaxQueueSize = getLiveMaxQueueSize(live);
   const getContext = async (request: Request, adapterContext?: AdapterContext): Promise<Context> =>
     context ? await context({ adapterContext, request }) : (undefined as Context);
 
@@ -893,6 +936,20 @@ export function createFateServer<
     }
   };
 
+  const enqueueLiveItem = (connection: LiveConnection<Context>, item: LiveQueueItem) => {
+    if (connection.closed) {
+      return;
+    }
+
+    if (getLiveQueueSize(connection) >= liveMaxQueueSize) {
+      cleanupLiveConnection(connection.id);
+      return;
+    }
+
+    connection.queue.push(item);
+    scheduleLiveDrain(connection);
+  };
+
   const drainLiveConnection = async (connection: LiveConnection<Context>) => {
     if (connection.closed || connection.draining) {
       return;
@@ -901,8 +958,8 @@ export function createFateServer<
     connection.draining = true;
     let activeOperationId: string | null = null;
     try {
-      while (!connection.closed && connection.queue.length > 0) {
-        const item = connection.queue.shift()!;
+      let item: LiveQueueItem | null;
+      while (!connection.closed && (item = dequeueLiveItem(connection))) {
         activeOperationId = item.operation.id;
         if (
           !item.subscription.active ||
@@ -1084,14 +1141,13 @@ export function createFateServer<
         operation.type,
         operation.entityId,
         (event) => {
-          connection.queue.push({
+          enqueueLiveItem(connection, {
             event,
             kind: 'entity',
             operation,
             source,
             subscription,
           });
-          scheduleLiveDrain(connection);
         },
         {
           lastEventId: operation.lastEventId,
@@ -1207,13 +1263,12 @@ export function createFateServer<
       const unsubscribe = liveBus!.listenConnection(
         { args: operation.args, procedure: operation.procedure },
         (event) => {
-          connection.queue.push({
+          enqueueLiveItem(connection, {
             event,
             kind: 'connection',
             operation,
             subscription,
           });
-          scheduleLiveDrain(connection);
         },
         {
           lastEventId: operation.lastEventId,
@@ -1341,8 +1396,10 @@ export function createFateServer<
               closed: false,
               controller,
               ctx,
+              id: connectionId,
               lastHeartbeat: Date.now(),
               queue: [],
+              queueHead: 0,
               subscriptions: new Map(),
             };
             connection.drainInterval = setInterval(() => void drainLiveConnection(connection), 100);

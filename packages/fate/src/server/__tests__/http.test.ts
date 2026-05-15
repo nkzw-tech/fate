@@ -54,7 +54,10 @@ const userSource: SourceDefinition<User> = {
 };
 
 const createServer = (
-  options: { postByIds?: SourceByIdsHandler<TestContext, unknown, Post> } = {},
+  options: {
+    liveMaxQueueSize?: number;
+    postByIds?: SourceByIdsHandler<TestContext, unknown, Post>;
+  } = {},
 ) => {
   const live = createLiveEventBus();
   const registry = createSourceRegistry<TestContext>([
@@ -93,7 +96,10 @@ const createServer = (
       request,
       user: { __typename: 'User' as const, id: 'u1', name: 'Ada' },
     }),
-    live,
+    live:
+      options.liveMaxQueueSize == null
+        ? live
+        : { bus: live, maxQueueSize: options.liveMaxQueueSize },
     mutations: {
       'post.explode': {
         resolve: () => {
@@ -732,6 +738,106 @@ test('skips queued live events for replaced subscriptions', async () => {
   expect(chunk).toContain('"event":{"data":{"id":"2","title":"Two"}}');
   expect(chunk).not.toContain('evt-old');
   expect(chunk).not.toContain('"title":"One"');
+  await reader.cancel();
+});
+
+test('closes live entity streams when the queued event limit is exceeded', async () => {
+  const { fate, live } = createServer({ liveMaxQueueSize: 1 });
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            entityId: '1',
+            id: 'sub-1',
+            kind: 'subscribe',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 200);
+
+  live.update('Post', '1', { eventId: 'evt-1' });
+  live.update('Post', '1', { eventId: 'evt-2' });
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            entityId: '1',
+            id: 'sub-2',
+            kind: 'subscribe',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 404);
+
+  await reader.cancel();
+});
+
+test('closes live connection streams when the queued event limit is exceeded', async () => {
+  const { fate, live } = createServer({ liveMaxQueueSize: 1 });
+  const response = await fate.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=c1'),
+  );
+  const reader = response.body!.getReader();
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            args: { categoryId: 'fruit' },
+            id: 'sub-1',
+            kind: 'subscribeConnection',
+            procedure: 'posts',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 200);
+
+  live.connection('posts', { categoryId: 'fruit' }).appendEdge('Post', '1');
+  live.connection('posts', { categoryId: 'fruit' }).appendEdge('Post', '2');
+
+  await expect(
+    fate.handleLiveRequest(
+      postJSON('http://local/fate/live', {
+        connectionId: 'c1',
+        operations: [
+          {
+            args: { categoryId: 'fruit' },
+            id: 'sub-2',
+            kind: 'subscribeConnection',
+            procedure: 'posts',
+            select: ['id', 'title'],
+            type: 'Post',
+          },
+        ],
+        version: 1,
+      }),
+    ),
+  ).resolves.toHaveProperty('status', 404);
+
   await reader.cancel();
 });
 

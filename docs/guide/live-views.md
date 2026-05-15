@@ -83,6 +83,19 @@ export const fate = createFateServer<AppContext>({
 app.all('/fate/*', createHonoFateHandler(fate));
 ```
 
+Fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, Fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
+
+```tsx
+export const fate = createFateServer<AppContext>({
+  live: {
+    bus: live,
+    maxQueueSize: 500,
+  },
+  roots: Root,
+  sources,
+});
+```
+
 Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
 
 ## Live List Views
