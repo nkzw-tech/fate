@@ -61,9 +61,9 @@ export default function Header() {
               <span className="hidden sm:inline">Search</span>
             </Link>
           </Button>
-          {session ? (
-            <>
-              <Button asChild size="sm" variant="ghost">
+          <div className="flex w-9 justify-end sm:w-24">
+            {session ? (
+              <Button asChild className="w-full" size="sm" variant="ghost">
                 <Stack
                   alignCenter
                   as="a"
@@ -75,14 +75,16 @@ export default function Header() {
                   <span className="hidden sm:inline">Logout</span>
                 </Stack>
               </Button>
-            </>
-          ) : !isPending ? (
-            <Button asChild size="sm" variant="ghost">
-              <Link to="/login">
-                <LogIn className="h-4 w-4" /> Login
-              </Link>
-            </Button>
-          ) : null}
+            ) : !isPending ? (
+              <Button asChild className="w-full" size="sm" variant="ghost">
+                <Link to="/login">
+                  <LogIn className="h-4 w-4" /> Login
+                </Link>
+              </Button>
+            ) : (
+              <div aria-hidden className="h-9 w-full" />
+            )}
+          </div>
         </Stack>
       </Stack>
     </header>

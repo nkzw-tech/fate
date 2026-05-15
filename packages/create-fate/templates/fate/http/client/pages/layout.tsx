@@ -52,38 +52,30 @@ export default function Layout({ children }: { children: ReactNode }) {
     [userId],
   );
 
-  if (isPending) {
-    return (
-      <LocaleContext>
-        <div className="min-h-screen bg-background text-foreground">
-          <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
-            <Thinking />
-          </div>
-        </div>
-      </LocaleContext>
-    );
-  }
-
   return (
     <LocaleContext>
-      <FateClient client={fate} key={userId}>
-        <div className="min-h-screen bg-background text-foreground">
-          <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
-            <Header />
-            <ErrorBoundary
-              fallbackRender={({ error }) => (
-                <Section>
-                  <Card>
-                    <Error error={error} />
-                  </Card>
-                </Section>
-              )}
-            >
-              <Suspense fallback={<Thinking />}>{children}</Suspense>
-            </ErrorBoundary>
-          </div>
+      <div className="min-h-screen bg-background text-foreground">
+        <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
+          <Header />
+          {isPending ? (
+            <Thinking />
+          ) : (
+            <FateClient client={fate} key={userId}>
+              <ErrorBoundary
+                fallbackRender={({ error }) => (
+                  <Section>
+                    <Card>
+                      <Error error={error} />
+                    </Card>
+                  </Section>
+                )}
+              >
+                <Suspense fallback={<Thinking />}>{children}</Suspense>
+              </ErrorBoundary>
+            </FateClient>
+          )}
         </div>
-      </FateClient>
+      </div>
     </LocaleContext>
   );
 }
