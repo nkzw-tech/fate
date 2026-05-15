@@ -118,8 +118,8 @@ Common commands from the project root:
 - `vp run dev` starts the client and server together.
 - `vp run dev:client` starts only the client.
 - `vp run dev:server` starts only the server.
-- `vp run dev:setup` generates the Prisma client, runs fbtee setup, and regenerates the fate client.
-- `vp run fate:generate` regenerates `client/.fate/client.generated.ts` after changing server views, roots, or routers.
+- `vp run dev:setup` generates the Prisma client, runs fbtee setup, and prepares fate client support.
+- `vp run fate:generate` refreshes fate client support after changing server views, roots, or routers.
 - `vp run prisma` runs Prisma CLI commands in the server package.
 - `vp check --fix` formats, lints, and type-checks the workspace.
 - `vp test` runs the test suite.

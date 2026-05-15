@@ -25,7 +25,7 @@ Install dependencies:
 vp install
 ```
 
-Set up Void local files, seed the local database, and regenerate the fate client:
+Set up Void local files, seed the local database, and prepare fate client support:
 
 ```bash
 vp run dev:setup
@@ -37,16 +37,16 @@ Start the app:
 vp run dev
 ```
 
-The app runs at `http://localhost:6001`. Fate RPC requests go to `/fate`; live updates use the SSE route at `/fate-live`.
+The app runs at `http://localhost:6001`. fate RPC requests go to `/fate`; live updates use the SSE route at `/fate-live`.
 
 ## Development
 
 Common commands from the project root:
 
 - `vp run dev` starts the Void app.
-- `vp run dev:setup` prepares Void, seeds the local database, and regenerates the fate client.
+- `vp run dev:setup` prepares Void, seeds the local database, and prepares fate client support.
 - `vp run prepare:void` regenerates Void local files.
-- `vp run fate:generate` regenerates `.fate/client.generated.ts` after changing `src/fate/server.ts` or views.
+- `vp run fate:generate` refreshes fate client support after changing `src/fate/server.ts` or views.
 - `vp run db:generate` generates Drizzle migration files from `db/schema.ts`.
 - `vp run db:migrate` applies database migrations.
 - `vp run db:seed` seeds the local database.

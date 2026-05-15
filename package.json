@@ -39,7 +39,7 @@
     "@rolldown/plugin-babel": "^0.2.3",
     "@swc/core": "^1.15.33",
     "@types/node": "^25.7.0",
-    "@typescript/native-preview": "7.0.0-dev.20260512.1",
+    "@typescript/native-preview": "7.0.0-dev.20260513.1",
     "@vitest/coverage-v8": "4.1.6",
     "babel-plugin-react-compiler": "^1.0.0",
     "dotenv": "^17.4.2",

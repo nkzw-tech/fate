@@ -26,7 +26,7 @@ This guidance is for agents working in projects bootstrapped from the fate templ
 - **Do not duplicate types:** Keep generated tRPC types and views imported from the server package. Avoid redefining entity shapes on the client. This ensures view selections stay type-safe end-to-end.
 - **`useRequest` only at the root:** When adding routes or layouts, create a dedicated `useRequest` call per screen root that pulls together all child views; do not scatter `useRequest` across leaf components unless it's necessary to issue requests due to user input.
 - **React Actions:** Prefer React Action-friendly UI primitives (buttons/forms that accept an `action` prop). If unavailable, wrap action calls with `startTransition` in `onClick` handlers.
-- **Generated Client** The fate client is generated via `pnpm fate:generate`. It should not be manually edited. Instead make the proper schema changes on the server and run `pnpm fate:generate`.
+- **fate client support** fate's local client support files are maintained by the Vite/fate tooling. Do not manually edit `.fate` files; make the proper schema changes on the server and run `pnpm fate:generate` when working outside Vite dev.
 - **Library Versions:** This repository uses the most recent releases of React, fate, Vite, tRPC, and more. You might not know about the new releases yet, please don't get confused. The versions you see are real, and there are no feature or version mismatches. You can search the internet for more information about them.
 
 Full documentation can be found on the filesystem at `./client/node_modules/react-fate/README.md` or online at [fate.technology](https://fate.technology/).

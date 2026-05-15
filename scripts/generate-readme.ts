@@ -39,7 +39,7 @@ for (const file of files) {
   let content = await fs.readFile(file, 'utf8');
 
   if (content.includes(`(/guide/`)) {
-    content = content.replaceAll(/\(\/guide\/([^\s)]+?)\)/g, '(/docs/guide/$1.md)');
+    content = content.replaceAll(/\(\/guide\/([^)#]+?)(#[^)]+?)?\)/g, '(/docs/guide/$1.md$2)');
   }
 
   segments.push(shiftHeadings(stripFrontmatter(content).trim()));

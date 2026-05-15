@@ -245,7 +245,7 @@ This code fetches the author associated with the Post and makes it available to 
 In fate, views are composable and reusable. Instead of inlining the selection, we can define a `UserView` and compose it into the `PostView` like this:
 
 ```tsx
-import type { Post, User } from '@your-org/server/trpc/views';
+import type { Post, User } from '@your-org/server/views';
 import { view } from 'react-fate';
 
 export const UserView = view<User>()({
@@ -446,7 +446,7 @@ This component suspends or throws errors, which bubble up to the nearest error b
 
 > [!NOTE]
 >
-> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink) into a single network request.
+> `useRequest` may issue multiple operations in the same render pass. fate transports can batch those operations into fewer network requests: the native HTTP transport batches same-microtask operations into one `POST /fate` request, and the tRPC adapter can use tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
 
 ### Requesting Objects by ID
 
@@ -660,7 +660,7 @@ The API mirrors `useView`: pass a view and a ref, and get back the same masked d
 
 ### How Live Updates Work
 
-The native HTTP transport opens one Server-Sent Events (SSE) connection per Fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
+The native HTTP transport opens one Server-Sent Events (SSE) connection per fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
 
 When the server sends an update, fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
 
@@ -670,7 +670,7 @@ Live deletion events remove the record from the normalized cache in the same way
 
 ### Client Setup
 
-Generate the client with the native transport and point it at your Fate endpoint:
+Configure the native transport and point the client at your fate endpoint:
 
 ```tsx
 import { FateClient } from 'react-fate';
@@ -719,6 +719,19 @@ export const fate = createFateServer<AppContext>({
 });
 
 app.all('/fate/*', createHonoFateHandler(fate));
+```
+
+fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
+
+```tsx
+export const fate = createFateServer<AppContext>({
+  live: {
+    bus: live,
+    maxQueueSize: 500,
+  },
+  roots: Root,
+  sources,
+});
 ```
 
 Once this is in place, components can switch from `useView` to `useLiveView` without changing their view definitions or return types.
@@ -889,9 +902,13 @@ fate does not provide hooks for mutations like traditional data fetching librari
 - `fate.actions` for use with [`useActionState`](https://react.dev/reference/react/useActionState) and React Actions.
 - `fate.mutations` for traditional imperative mutation calls.
 
-Mutations in your tRPC backend are made available as actions and mutations by fate's generated client.
+Server mutations are exposed automatically as actions and mutations by fate's Vite plugin. The transport determines where those mutations are declared:
 
-Let's assume that our `Post` entity has a tRPC mutation for liking a post called `post.like`. A `LikeButton` component using fate Actions and an async component library could then look like this:
+- With the [native HTTP transport](/docs/guide/server-integration.md#native-fate-protocol), mutations come from the `mutations` object passed to `createFateServer`.
+- With the [tRPC adapter](/docs/guide/server-integration.md#trpc-fate-setup), mutations come from tRPC mutation procedures exposed through your fate-enabled router.
+- With [Void](/docs/guide/void-integration.md), mutations use the same native fate server shape and are exposed through the Void route helpers.
+
+If you have a mutation named `post.like`, a `LikeButton` component using fate Actions and an async component library could look like this:
 
 ```tsx
 import { useActionState } from 'react';
@@ -1026,7 +1043,45 @@ You can call mutations from anywhere, and without waiting for previous mutations
 
 ### Mutation Server Implementation
 
-fate Actions & Mutations are backed by regular tRPC mutations on the server. Here is an example implementation of the `like` mutation in the `postRouter`.
+fate Actions & Mutations are backed by regular server mutations. If you already know how your fate server is wired, the client-side API above is the same regardless of transport. If not, start with the server setup for your environment:
+
+- [Native HTTP custom mutations](/docs/guide/server-integration.md#custom-mutations) use `createFateServer({ mutations })`.
+- [tRPC fate setup](/docs/guide/server-integration.md#trpc-fate-setup) wires fate into your tRPC router; custom writes can use the same `fate.createPlan` and `fate.resolveById` helpers shown there.
+- [Void integration](/docs/guide/void-integration.md) exposes a native fate server from Void routes; define mutations with the native `createFateServer({ mutations })` API and serve them through `defineVoidFateRoute`.
+
+Here is a native HTTP mutation for `post.like`:
+
+```tsx
+export const fate = createFateServer({
+  mutations: {
+    'post.like': {
+      input: likeInput,
+      resolve: async ({ ctx, input, select }) => {
+        await ctx.prisma.post.update({
+          data: {
+            likes: {
+              increment: 1,
+            },
+          },
+          where: { id: input.id },
+        });
+
+        return sources.resolveById({
+          ctx,
+          id: input.id,
+          input: { select },
+          view: postDataView,
+        });
+      },
+      type: 'Post',
+    },
+  },
+  roots: Root,
+  sources,
+});
+```
+
+The equivalent tRPC mutation lives in your router and returns the selected shape that the client asked for:
 
 ```tsx
 import { z } from 'zod';
@@ -1065,7 +1120,7 @@ export const postRouter = router({
 });
 ```
 
-See the [Server Integration](#server-integration) section for more details on how to integrate tRPC routers with fate.
+See [Server Integration](/docs/guide/server-integration.md) for complete native HTTP and tRPC setup examples, and [Void Integration](/docs/guide/void-integration.md) for route helpers when your app runs on Void.
 
 ### Action & Mutation Error Handling
 
@@ -1148,9 +1203,9 @@ addComment({
 
 ## Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so the Vite plugin can provide a typed client module. _fate_ currently ships two server paths:
+Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so the Vite plugin can wire the typed fate APIs into your app. _fate_ currently ships two server paths:
 
-- The native Fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
+- The native fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
 - The tRPC adapter, which keeps compatibility with existing tRPC backends.
 
 _fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters plug into the same source execution runtime and can be exposed through the native protocol or through tRPC.
@@ -1164,7 +1219,7 @@ fate expects that data is served by a backend that follows these conventions:
 
 Objects are identified by their ID and type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
 
-fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily generate this code for you, or you can let the Vite plugin provide the typed client module for your app.
+fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily write this code for you, and the Vite plugin takes care of connecting it to your app.
 
 > [!NOTE]
 > You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
@@ -1260,9 +1315,9 @@ export const Root = {
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name sent by the generated client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. If you omit `list(...)`, fate treats the entry as a standard query.
+Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. If you omit `list(...)`, fate treats the entry as a standard query.
 
-You can pass default list options such as `orderBy` to `list(...)`. Ordering is scoped to that specific list wrapper: `Root.posts` can order posts by `createdAt desc`, while `categoryDataView.posts` or `postDataView.comments` can choose their own order. If no order is provided, Fate orders by `id asc`. Fate always appends `id asc` as a tie-breaker when no `id` order is present; include `id` yourself when you need a different tie-breaker direction such as `id desc`. Use the array form when ordering by multiple fields so the priority is unambiguous.
+You can pass default list options such as `orderBy` to `list(...)`. Ordering is scoped to that specific list wrapper: `Root.posts` can order posts by `createdAt desc`, while `categoryDataView.posts` or `postDataView.comments` can choose their own order. If no order is provided, fate orders by `id asc`. fate always appends `id asc` as a tie-breaker when no `id` order is present; include `id` yourself when you need a different tie-breaker direction such as `id desc`. Use the array form when ordering by multiple fields so the priority is unambiguous.
 
 For the above `Root` definitions, you can make the following requests using `useRequest`:
 
@@ -1283,7 +1338,7 @@ const { posts, categories, viewer } = useRequest({
 });
 ```
 
-### Native Fate Protocol
+### Native fate protocol
 
 The native protocol keeps tRPC optional. Create a source adapter from your ORM integration, pass it to `createFateServer`, and expose the returned server through a Fetch-compatible handler.
 
@@ -1346,7 +1401,7 @@ export default defineConfig({
 });
 ```
 
-The generated client uses `createHTTPTransport`:
+With the native transport, the Vite plugin handles the HTTP transport setup. If you need to create a client manually, use `createFateClient` with the same route:
 
 ```tsx
 import { createFateClient } from 'react-fate/client';
@@ -1356,7 +1411,7 @@ const client = createFateClient({
 });
 ```
 
-The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use one `GET /fate/live` SSE stream per Fate client and `POST /fate/live` control messages when views subscribe or unsubscribe.
+The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use one `GET /fate/live` SSE stream per fate client and `POST /fate/live` control messages when views subscribe or unsubscribe.
 
 #### Custom Queries
 
@@ -1445,15 +1500,17 @@ live.update('Post', post.id, {
 
 `changed` is optional. When provided, fate resolves only the changed fields selected by each live subscription and skips subscriptions that do not select those fields. `createLiveEventBus` is an in-memory fanout bus. It forwards `eventId` to SSE clients, but it does not replay events after reconnects. If your app needs lossless reconnect behavior, provide a durable live bus implementation that uses the `lastEventId` passed to `listen`, `listenConnection`, `subscribe`, and `subscribeConnection`.
 
-### tRPC Fate Setup
+Native SSE connections keep a bounded in-memory queue while events are waiting to be resolved and sent. The default is `1000` queued events per connection. If a client falls behind and exceeds that limit, fate closes the live connection instead of buffering indefinitely. Configure it with `live: { bus: live, maxQueueSize: 500 }`.
+
+### tRPC fate setup
 
 The Prisma and Drizzle tRPC integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.
 
-Pass the `Root` export from `views.ts` to Fate in your tRPC `init.ts` file. Fate walks that view graph to find the data views it needs. `id` defaults to `"id"`, and Fate uses it as the fallback ordering for cursor pagination. Relations are inferred from the data view and ORM schema: a nested data view is loaded as a singular relation, `list(view)` is loaded as a list relation, and Drizzle join tables are discovered from relation metadata.
+Pass the `Root` export from `views.ts` to fate in your tRPC `init.ts` file. fate walks that view graph to find the data views it needs. `id` defaults to `"id"`, and fate uses it as the fallback ordering for cursor pagination. Relations are inferred from the data view and ORM schema: a nested data view is loaded as a singular relation, `list(view)` is loaded as a list relation, and Drizzle join tables are discovered from relation metadata.
 
 #### Prisma
 
-Use `createPrismaFate` from `@nkzw/fate/server/prisma` next to your tRPC helpers. By default, Fate reads Prisma delegates from `ctx.prisma` using each data view's type name:
+Use `createPrismaFate` from `@nkzw/fate/server/prisma` next to your tRPC helpers. By default, fate reads Prisma delegates from `ctx.prisma` using each data view's type name:
 
 ```tsx
 import { initTRPC } from '@trpc/server';
@@ -1502,7 +1559,7 @@ return plan.resolve(post);
 
 #### Drizzle
 
-Use `createDrizzleFate` from `@nkzw/fate/server/drizzle`. Fate matches data view type names to Drizzle tables from your schema. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
+Use `createDrizzleFate` from `@nkzw/fate/server/drizzle`. fate matches data view type names to Drizzle tables from your schema. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
 
 ```tsx
 import { initTRPC } from '@trpc/server';
@@ -1541,9 +1598,21 @@ export const fate = createDrizzleFate<AppContext, typeof procedure>({
 
 The Drizzle adapter builds SQL queries from your registered data views. It selects only requested columns, hydrates singular, list, and many-to-many relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts. Count filters may be plain equality objects or Drizzle SQL predicates written as `(columns) => eq(columns.status, 'GOING')`.
 
+Nested paginated relations are resolved with one child-page query per parent row. fate runs those child queries with a default concurrency limit of `10` so a single request cannot flood the database connection pool. Tune this with `nestedPaginationConcurrency` if your database pool or workload needs a different limit:
+
+```tsx
+export const fate = createDrizzleFate<AppContext, typeof procedure>({
+  db,
+  nestedPaginationConcurrency: 5,
+  procedure,
+  schema,
+  views: Root,
+});
+```
+
 For request-specific sorting, prefer a custom root query that validates and translates explicit sort args.
 
-For many-to-many relations, define the join table relations in your Drizzle schema. Fate discovers a join table that points at both the source table and the target table:
+For many-to-many relations, define the join table relations in your Drizzle schema. fate discovers a join table that points at both the source table and the target table:
 
 ```tsx
 export const fate = createDrizzleFate<AppContext, typeof procedure>({
@@ -1601,7 +1670,7 @@ return post;
 
 ### tRPC Procedures
 
-Use `fate.procedures` to build the standard `byId` and `list` procedures expected by the generated fate client:
+Use `fate.procedures` to build the standard `byId` and `list` procedures expected by fate's request APIs:
 
 ```tsx
 import { fate, router } from '../init.ts';
@@ -1695,11 +1764,11 @@ export const postDataView = dataView<PostItem>('Post')({
 
 The adapters fetch the hidden `field(...)` and `count(...)` dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
 
-### Configuring the typed client
+### Connecting the Client
 
-Now that we have defined our client views and our tRPC server, we need to connect them with some glue code. We recommend using fate's Vite plugin for convenience.
+Now that we have defined our client views and our server module, add fate's Vite plugin to the client app. The plugin reads your server exports and wires the typed fate APIs into your app.
 
-First, make sure our tRPC `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views we have defined:
+For tRPC, make sure the `router.ts` file exports the `appRouter` object, `AppRouter` type and all the views we have defined:
 
 ```tsx
 import { router } from './init.ts';
@@ -1731,11 +1800,11 @@ export default defineConfig({
 });
 ```
 
-_Note: fate uses the specified server module name to extract the server types it needs and uses the same module name in the generated client. Make sure that the module is available to the client package's Vite config._
+_Note: fate uses the specified server module name to find the server types it needs. Make sure that the module is available to the client package's Vite config._
 
-During development, the plugin watches the server module and the files it imports. When one of those files changes, fate regenerates the project-local client and invalidates `@nkzw/fate/client` in Vite's module graph.
+During development, the plugin watches the server module and the files it imports. When one of those files changes, fate updates the internal client wiring and invalidates `@nkzw/fate/client` in Vite's module graph.
 
-For a barebones client without React, import the plugin from `@nkzw/fate/vite` and the generated client from `@nkzw/fate/client`. The plugin writes the project-local client for the selected client module path.
+For a barebones client without React, import the plugin from `@nkzw/fate/vite` and the client APIs from `@nkzw/fate/client`. The plugin wires the same server types for the selected import path.
 
 The plugin writes project-local types under `.fate/`. If your TypeScript config does not already include dot-directories, extend the generated config:
 
@@ -1747,7 +1816,7 @@ The plugin writes project-local types under `.fate/`. If your TypeScript config 
 
 ### Creating a _fate_ Client
 
-Now that the Vite plugin provides the client types, all that remains is creating an instance of the fate client, and using it in our React app using the `FateClient` context provider:
+Now that the Vite plugin has connected the types, create a fate client instance and provide it to your React app with the `FateClient` context provider:
 
 ```tsx
 import { httpBatchLink } from '@trpc/client';

@@ -22,7 +22,7 @@ The API mirrors `useView`: pass a view and a ref, and get back the same masked d
 
 ## How Live Updates Work
 
-The native HTTP transport opens one Server-Sent Events (SSE) connection per Fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
+The native HTTP transport opens one Server-Sent Events (SSE) connection per fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
 
 When the server sends an update, fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
 
@@ -32,7 +32,7 @@ Live deletion events remove the record from the normalized cache in the same way
 
 ## Client Setup
 
-Generate the client with the native transport and point it at your Fate endpoint:
+Configure the native transport and point the client at your fate endpoint:
 
 ```tsx
 import { FateClient } from 'react-fate';
@@ -83,7 +83,7 @@ export const fate = createFateServer<AppContext>({
 app.all('/fate/*', createHonoFateHandler(fate));
 ```
 
-Fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, Fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
+fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
 
 ```tsx
 export const fate = createFateServer<AppContext>({

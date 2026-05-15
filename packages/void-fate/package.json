@@ -40,19 +40,19 @@
     "build": "vp pack -d lib --target=node24 src/index.ts src/react.tsx src/server.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "workspace:^",
-    "react-fate": "workspace:^"
+    "@nkzw/fate": "1.0.0-rc.0",
+    "react-fate": "1.0.0-rc.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
     "react": "^19.2.6",
-    "void": "^0.7.5"
+    "void": "^0.7.6"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",
     "react": "^19.2.0",
     "react-fate": "^1.0.0-rc.0",
-    "void": "^0.7.5"
+    "void": "^0.7.6"
   },
   "peerDependenciesMeta": {
     "react": {

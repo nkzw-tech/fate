@@ -126,7 +126,7 @@ export const posts = [
   {
     authorEmail: 'alex@example.com',
     content:
-      'The launch post introduced fate with tRPC, but the repo now includes a native HTTP transport too. The generated client can point at a fate endpoint, send requests through the protocol package, and use GET and POST routes for live updates.',
+      'The launch post introduced fate with tRPC, but the repo now includes a native HTTP transport too. The Vite plugin wires the client to a fate endpoint, sends requests through the protocol package, and uses GET and POST routes for live updates.',
     likes: 88,
     title: 'Native HTTP transport after the alpha launch',
   },
@@ -191,7 +191,7 @@ export const comments = [
   'The stable ref change sounds small, but it explains a lot of the rerender fixes in the history.',
   'I used the strict selection post to explain why overfetching is not just a network problem.',
   'The native protocol should make it easier to build examples outside of Hono and tRPC.',
-  'The Vite plugin note clarifies why the generated client is still present without making codegen feel mandatory.',
+  'The Vite plugin note clarifies how fate connects the client APIs without making codegen part of the app workflow.',
   'The migration sequence matches how we would try this inside an existing dashboard.',
   'The comments list is long enough now to exercise load-more behavior without creating fake lorem ipsum.',
   'Seeing optimistic actions and live updates use the same normalized cache is the key idea.',

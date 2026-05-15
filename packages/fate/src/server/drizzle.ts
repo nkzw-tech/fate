@@ -1,5 +1,5 @@
 /**
- * Fate's Drizzle integration.
+ * fate's Drizzle integration.
  *
  * @example
  * import { createDrizzleFate } from '@nkzw/fate/server/drizzle';

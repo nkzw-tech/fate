@@ -26,7 +26,7 @@ This component suspends or throws errors, which bubble up to the nearest error b
 
 > [!NOTE]
 >
-> `useRequest` might issue multiple requests which are automatically batched together by tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink) into a single network request.
+> `useRequest` may issue multiple operations in the same render pass. fate transports can batch those operations into fewer network requests: the native HTTP transport batches same-microtask operations into one `POST /fate` request, and the tRPC adapter can use tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
 
 ## Requesting Objects by ID
 

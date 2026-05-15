@@ -83,7 +83,7 @@ CREATE DATABASE fate;
 ALTER DATABASE fate OWNER TO fate;
 ```
 
-Then set up the schema, seed data, translations, and generated fate client:
+Then set up the schema, seed data, translations, and fate client support:
 
 ```bash
 vp run dev:setup
@@ -104,8 +104,8 @@ Common commands from the project root:
 - `vp run dev` starts the client and server together.
 - `vp run dev:client` starts only the client.
 - `vp run dev:server` starts only the server.
-- `vp run dev:setup` pushes the Drizzle schema, seeds the database, runs fbtee setup, and regenerates the fate client.
-- `vp run fate:generate` regenerates `client/.fate/client.generated.ts` after changing server views, roots, or mutations.
+- `vp run dev:setup` pushes the Drizzle schema, seeds the database, runs fbtee setup, and prepares fate client support.
+- `vp run fate:generate` refreshes fate client support after changing server views, roots, or mutations.
 - `vp run drizzle` opens Drizzle Kit commands for the server package.
 - `vp check --fix` formats, lints, and type-checks the workspace.
 - `vp test` runs the test suite.

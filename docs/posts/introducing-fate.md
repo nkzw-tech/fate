@@ -7,7 +7,7 @@
   </picture>
   <div style="display: none">
 
-# Introducing Fate
+# Introducing fate
 
   </div>
 </h1>
@@ -131,7 +131,7 @@ _fate_ creates and manages these references for you, and you can pass them aroun
 
 ### Requests
 
-Pass the composed views to `useRequest` at the root of your app, and it'll suspend and fetch data in a single request using tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+Pass the composed views to `useRequest` at the root of your app, and it'll suspend while your configured fate transport fetches the selected data. Transports can batch compatible operations so the component tree can describe data needs without coordinating network requests manually.
 
 ```tsx
 import { useRequest } from 'react-fate';
@@ -145,7 +145,7 @@ export function App() {
 
 ### Actions
 
-_fate_ does not provide hooks for mutations like traditional data fetching libraries do. Instead, all tRPC mutations are exposed as actions for use with [`useActionState`](https://react.dev/reference/react/useActionState) and React Actions. They support optimistic updates out of the box.
+_fate_ does not provide hooks for mutations like traditional data fetching libraries do. Instead, server mutations are exposed as actions for use with [`useActionState`](https://react.dev/reference/react/useActionState) and React Actions. They support optimistic updates out of the box.
 
 A `LikeButton` component using _fate_ Actions and an async component library might look like this:
 
@@ -164,7 +164,7 @@ const LikeButton = ({ post }) => {
 
 When this action is called, _fate_ automatically updates all views that depend on the `likes` field of the particular `Post` object. It doesn't re-render components that didn't select that field. There's no need to manually patch or invalidate cache entries. If the action fails, _fate_ rolls back the optimistic update automatically and re-renders all affected components.
 
-All of the above works because _fate_ has a normalized data cache under the hood, with objects stored by their ID and type name (`__typename`, e.g. `Post` or `User`), and a [tRPC backend conforming to _fate_'s requirements](/guide/server-integration), exposing `byId` and `list` queries for each data type.
+All of the above works because _fate_ has a normalized data cache under the hood, with objects stored by their ID and type name (`__typename`, e.g. `Post` or `User`), and a [backend conforming to _fate_'s data protocol](/guide/server-integration), exposing `byId` and `list` queries for each data type.
 
 You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
 

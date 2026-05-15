@@ -33,7 +33,7 @@ export default defineConfig({
 });
 ```
 
-The generated client uses `/fate` for RPC requests and `/fate-live` for live
+The Void transport uses `/fate` for RPC requests and `/fate-live` for live
 updates by default. In SSR, it calls the exported fate server directly. In the
 browser, it uses fetch and the SSE live endpoint.
 
@@ -106,8 +106,8 @@ control messages. `void-fate` does not use WebSockets.
 
 ## React Layout
 
-Wrap your app with `VoidFateClient` from `void-fate/react`. It creates the
-generated fate client and provides it through `react-fate`:
+Wrap your app with `VoidFateClient` from `void-fate/react`. It creates and
+provides the fate client through `react-fate`:
 
 ```tsx
 import { useShared } from '@void/react';

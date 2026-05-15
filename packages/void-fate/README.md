@@ -32,7 +32,7 @@ export default defineConfig({
 
 ## Server
 
-Create a Fate live publish facade and pass its `live` instance to the fate
+Create a fate live publish facade and pass its `live` instance to the fate
 server. Define the Void stream separately so `defineLiveStream` is called once
 from a single server-only module.
 
@@ -88,8 +88,8 @@ The default paths are `/fate` for RPC and `/fate-live` for live updates.
 
 ## React
 
-Use `VoidFateClient` in your app layout. The generated fate client is still
-provided by the `react-fate` Vite plugin.
+Use `VoidFateClient` in your app layout. The `react-fate` Vite plugin wires the
+fate client APIs for the Void transport.
 
 ```tsx
 import type { ReactNode } from 'react';

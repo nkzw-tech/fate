@@ -23,7 +23,7 @@
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.2.4",
     "@trpc/client": "^11.17.0",
-    "@void/react": "^0.7.5",
+    "@void/react": "^0.7.6",
     "better-auth": "^1.6.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -34,7 +34,7 @@
     "react-error-boundary": "^6.1.1",
     "react-fate": "latest",
     "tailwind-merge": "^3.5.0",
-    "void": "^0.7.5"
+    "void": "^0.7.6"
   },
   "devDependencies": {
     "@nkzw/babel-preset-fbtee": "^1.7.4",

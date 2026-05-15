@@ -184,7 +184,7 @@ const mergeEvents = <T>(
 });
 
 /**
- * Creates a small in-memory event bus for Fate live view subscriptions.
+ * Creates a small in-memory event bus for fate live view subscriptions.
  *
  * The bus signals that an entity changed and can optionally include changed
  * field paths. The native live handler refetches the selected record, or only

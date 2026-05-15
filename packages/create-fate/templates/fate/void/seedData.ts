@@ -251,7 +251,7 @@ export const posts = [
     authorEmail: 'ari@nakazawa.dev',
     category: 'Server Integrations',
     content:
-      'The launch post introduced fate with tRPC, but the repo now includes a native HTTP transport too. The generated client can point at a fate endpoint, send requests through the protocol package, and use GET and POST routes for live updates. tRPC remains a supported adapter, but the core model no longer depends on it.',
+      'The launch post introduced fate with tRPC, but the repo now includes a native HTTP transport too. The Vite plugin wires the client to a fate endpoint, sends requests through the protocol package, and uses GET and POST routes for live updates. tRPC remains a supported adapter, but the core model no longer depends on it.',
     likes: 88,
     tags: ['http-transport', 'server-adapters'],
     title: 'Native HTTP transport after the alpha launch',
@@ -365,7 +365,7 @@ export const comments = [
   'The live deletion path matters for moderation workflows where comments disappear from multiple views.',
   'The native protocol should make it easier to build examples outside of Hono and tRPC.',
   'This makes me want a small debugging panel that shows which views selected a field.',
-  'The Vite plugin note clarifies why the generated client is still present without making codegen feel mandatory.',
+  'The Vite plugin note clarifies how fate connects the client APIs without making codegen part of the app workflow.',
   'The migration sequence matches how we would try this inside an existing dashboard.',
   'The comments list is long enough now to exercise load-more behavior without creating fake lorem ipsum.',
   'The category descriptions make the sidebar useful for navigating the demo.',
@@ -510,7 +510,7 @@ export const events = [
         userEmail: 'sora@nakazawa.dev',
       },
       {
-        notes: 'Testing the generated client in a full-stack app.',
+        notes: 'Testing fate client wiring in a full-stack app.',
         status: 'GOING',
         userEmail: 'jamal@nakazawa.dev',
       },

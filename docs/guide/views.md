@@ -104,7 +104,7 @@ This code fetches the author associated with the Post and makes it available to 
 In fate, views are composable and reusable. Instead of inlining the selection, we can define a `UserView` and compose it into the `PostView` like this:
 
 ```tsx
-import type { Post, User } from '@your-org/server/trpc/views';
+import type { Post, User } from '@your-org/server/views';
 import { view } from 'react-fate';
 
 export const UserView = view<User>()({

@@ -1,5 +1,5 @@
 /**
- * Fate's Prisma integration.
+ * fate's Prisma integration.
  *
  * @example
  * import { createPrismaFate } from '@nkzw/fate/server/prisma';

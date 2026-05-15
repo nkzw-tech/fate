@@ -99,7 +99,7 @@ const normalizeSourceOptions = <
   'source' in input ? input : { source: input };
 
 /**
- * Creates standard `byId` and `list` procedures for a Fate source.
+ * Creates standard `byId` and `list` procedures for a fate source.
  *
  * Use this when a router also has custom mutations or custom queries and you
  * want to spread the generated source procedures into that router.
