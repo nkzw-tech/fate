@@ -1,6 +1,7 @@
+import type { FateClient as FateClientType } from '@nkzw/fate';
 import { type ReactNode, useMemo } from 'react';
 import { FateClient } from 'react-fate';
-import { createFateClient } from 'react-fate/client';
+import { createFateClient as createGeneratedFateClient } from 'react-fate/client';
 
 export type VoidFateClientProps = {
   children: ReactNode;
@@ -15,6 +16,12 @@ export type VoidFateClientProps = {
   url?: string | URL;
   userId?: null | string;
 };
+
+type CreateVoidFateClientOptions = Omit<VoidFateClientProps, 'children'>;
+
+const createVoidFateClient = createGeneratedFateClient as unknown as (
+  options?: CreateVoidFateClientOptions,
+) => FateClientType<any, any>;
 
 export function VoidFateClient({
   children,
@@ -31,7 +38,7 @@ export function VoidFateClient({
 }: VoidFateClientProps) {
   const fate = useMemo(
     () =>
-      createFateClient({
+      createVoidFateClient({
         fetch,
         headers,
         livePath,

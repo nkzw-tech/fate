@@ -53,13 +53,5 @@
     "react": "^19.2.0",
     "react-fate": "^1.0.0-rc.0",
     "void": "^0.7.6"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-fate": {
-      "optional": true
-    }
   }
 }
