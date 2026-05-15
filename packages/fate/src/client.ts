@@ -1634,7 +1634,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         { ...getPaginationMergeInfo(requestArgs), replace: true },
       );
 
-      if (!connection.args) {
+      if (!filterConnectionArgs(connection.args)) {
         this.registerRootList(connection.type, connection.key);
       }
       this.store.setList(connection.key, nextListState);
@@ -2363,7 +2363,7 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       ids.push(id);
       cursors.push(entry.cursor);
     }
-    if (!item.argsPayload) {
+    if (!filterConnectionArgs(item.argsPayload)) {
       this.registerRootList(item.type, item.listKey);
     }
 

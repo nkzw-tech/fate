@@ -2763,6 +2763,70 @@ test('mutations insert records into root lists optimistically', async () => {
   ]);
 });
 
+test('mutations insert records into paginated root lists optimistically', async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const mutate = vi.fn().mockResolvedValue({
+    __typename: 'Post',
+    id: 'post-2',
+    title: 'Published',
+  });
+
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [{ cursor: 'cursor-1', node: { __typename: 'Post', id: 'post-1', title: 'Existing' } }],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+
+  const mutations = { createPost: mutation<Post, { title: string }, Post>('Post') };
+
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: { posts: clientRoot('Post') },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+      mutate,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const PostConnectionView = {
+    items: { cursor: true, node: PostView },
+    pagination: { hasNext: true },
+  };
+
+  const request = {
+    posts: { args: { first: 10 }, list: PostConnectionView },
+  };
+
+  await client.request(request);
+
+  const optimisticId = 'optimistic:post-2';
+
+  const mutationPromise = client.mutations.createPost({
+    input: { title: 'Draft' },
+    optimistic: { id: optimisticId, title: 'Draft' },
+    view: PostView,
+  });
+
+  const { posts: optimisticPosts } = client.getRequestResult(request);
+  expect(optimisticPosts.items.map(({ node }) => toEntityId('Post', node.id))).toEqual([
+    toEntityId('Post', 'post-1'),
+    toEntityId('Post', optimisticId),
+  ]);
+
+  await mutationPromise;
+
+  const { posts: resolvedPosts } = client.getRequestResult(request);
+  expect(resolvedPosts.items.map(({ node }) => toEntityId('Post', node.id))).toEqual([
+    toEntityId('Post', 'post-1'),
+    toEntityId('Post', 'post-2'),
+  ]);
+});
+
 test('mutations can control root list insertion order', async () => {
   type Post = { __typename: 'Post'; id: string; title: string };
 
@@ -3693,6 +3757,51 @@ test(`'request' keys root connection cache by nested node view`, async () => {
 
   expect(fetchList).toHaveBeenCalledTimes(2);
   expect(posts.items[0]?.node[ViewsTag]).toEqual(tagsFor(FullView));
+});
+
+test(`'request' keeps entity root lists and root connections in separate cache entries`, async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+
+  const fetchList = vi.fn().mockResolvedValue({
+    items: [{ cursor: 'cursor-1', node: { __typename: 'Post', id: 'post-1', title: 'Hello' } }],
+    pagination: { hasNext: false, hasPrevious: false },
+  });
+
+  const roots = { posts: clientRoot('Post') };
+  const mutations = {};
+
+  const client = createClient<[typeof roots, typeof mutations]>({
+    roots,
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      fetchList,
+    },
+    types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({ id: true, title: true });
+  const plainRequest = {
+    posts: { list: PostView },
+  };
+  const connectionRequest = {
+    posts: {
+      list: {
+        items: { cursor: true, node: PostView },
+        pagination: { hasNext: true },
+      },
+    },
+  };
+
+  const plainResult = await client.request<typeof plainRequest>(plainRequest);
+  const connectionResult = await client.request<typeof connectionRequest>(connectionRequest);
+
+  expect(client.getRequestKey(plainRequest)).not.toBe(client.getRequestKey(connectionRequest));
+  expect(fetchList).toHaveBeenCalledTimes(1);
+  expect(Array.isArray(plainResult.posts)).toBe(true);
+  expect(connectionResult.posts.items.map(({ node }) => node.id)).toEqual(['post-1']);
+  expect(connectionResult.posts.pagination?.hasNext).toBe(false);
 });
 
 test(`'request' refetches root lists when existing ids are missing requested fields`, async () => {

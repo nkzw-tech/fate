@@ -157,7 +157,7 @@ const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): s
 
     if (item.kind === 'list') {
       parts.push(
-        `list:${item.name}:${item.viewSignature}:${
+        `list:${item.name}:${item.hasItems ? 'connection' : 'entity'}:${item.viewSignature}:${
           item.argsPayload ? hashArgs(item.argsPayload) : ''
         }`,
       );
