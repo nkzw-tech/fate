@@ -17,8 +17,10 @@ import {
   getTableColumns,
   gt,
   inArray,
+  is,
   isTable,
   lt,
+  Many,
   normalizeRelation,
   or,
   sql,
@@ -641,6 +643,87 @@ const inferDirectRelation = ({
   };
 };
 
+const getComputedCountRelations = (view: DataView<AnyRecord>): Set<string> => {
+  const relations = new Set<string>();
+
+  for (const field of Object.values(view.fields)) {
+    if (!isRecord(field) || field.kind !== 'computed' || !isRecord(field.select)) {
+      continue;
+    }
+
+    for (const selection of Object.values(field.select)) {
+      if (
+        isRecord(selection) &&
+        selection.kind === 'count' &&
+        typeof selection.relation === 'string'
+      ) {
+        relations.add(selection.relation);
+      }
+    }
+  }
+
+  return relations;
+};
+
+const getTableConfigIfAvailable = ({
+  config,
+  metadata,
+}: {
+  config: DrizzleViewConfig<AnyRecord>;
+  metadata: DrizzleSchemaMetadata;
+}): TableRelationalConfig | null => {
+  try {
+    return getTableConfig({ config, metadata });
+  } catch {
+    return null;
+  }
+};
+
+const inferHiddenCountRelation = ({
+  field,
+  metadata,
+  sourceConfig,
+  viewConfigs,
+}: {
+  field: string;
+  metadata: DrizzleSchemaMetadata;
+  sourceConfig: DrizzleViewConfig<AnyRecord>;
+  viewConfigs: Array<DrizzleViewConfig<AnyRecord>>;
+}) => {
+  const sourceTableConfig = getTableConfigIfAvailable({ config: sourceConfig, metadata });
+  const relation = sourceTableConfig?.relations[field];
+
+  if (!sourceTableConfig || !relation || !is(relation, Many)) {
+    return null;
+  }
+
+  const normalized = normalizeRelation(metadata.schema, metadata.tableNamesMap, relation);
+  const localColumn = normalized.fields[0] as AnyColumn | undefined;
+  const foreignColumn = normalized.references[0] as AnyColumn | undefined;
+
+  if (!localColumn || !foreignColumn) {
+    return null;
+  }
+
+  for (const [index, targetConfig] of viewConfigs.entries()) {
+    const targetTableConfig = getTableConfigIfAvailable({ config: targetConfig, metadata });
+
+    if (!targetTableConfig || !includesColumn(targetTableConfig.columns, foreignColumn)) {
+      continue;
+    }
+
+    return {
+      index,
+      relation: {
+        foreignKey: getColumnKey(targetTableConfig.columns, foreignColumn),
+        localKey: getColumnKey(sourceTableConfig.columns, localColumn),
+      },
+    };
+  }
+
+  return null;
+};
+
 const inferManyToManyRelation = ({
   field,
   metadata,
@@ -797,6 +880,40 @@ export function createDrizzleSourceAdapter<Context>({
       );
     },
   });
+
+  if (metadata) {
+    for (const [index, config] of viewConfigs.entries()) {
+      const source = sourceDefinitions[index] as Source;
+
+      for (const field of getComputedCountRelations(config.view)) {
+        if (source.relations?.[field]) {
+          continue;
+        }
+
+        const hidden = inferHiddenCountRelation({
+          field,
+          metadata,
+          sourceConfig: config,
+          viewConfigs,
+        });
+        const targetSource = hidden && (sourceDefinitions[hidden.index] as Source | undefined);
+
+        if (!hidden || !targetSource) {
+          continue;
+        }
+
+        source.relations = {
+          ...source.relations,
+          [field]: {
+            ...hidden.relation,
+            kind: 'many',
+            source: targetSource,
+          },
+        };
+      }
+    }
+  }
+
   const sourcesByView = new Map<DataView<AnyRecord>, Source>(
     sourceDefinitions.map((source) => [source.view, source]),
   );

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, relations } from 'drizzle-orm';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { expect, test } from 'vite-plus/test';
 import { computed, count, dataView, list } from '../dataView.ts';
@@ -551,6 +551,86 @@ test('Drizzle many-to-many relations support nested pagination', async () => {
           nextCursor: 'tag-1',
           previousCursor: undefined,
         },
+      },
+    },
+  ]);
+});
+
+test('Drizzle computed counts can use hidden schema relations', async () => {
+  const postTable = pgTable('Post', {
+    id: text('id').notNull(),
+  });
+  const commentTable = pgTable('Comment', {
+    id: text('id').notNull(),
+    postId: text('postId').notNull(),
+  });
+  const postRelations = relations(postTable, ({ many }) => ({
+    comments: many(commentTable),
+  }));
+  const commentRelations = relations(commentTable, ({ one }) => ({
+    post: one(postTable, {
+      fields: [commentTable.postId],
+      references: [postTable.id],
+    }),
+  }));
+
+  const postSummaryView = dataView<{ commentCount?: number; id: string }>('Post')({
+    commentCount: computed<{ commentCount?: number; id: string }, number>({
+      resolve: (_item, deps) => (deps.count as number) ?? 0,
+      select: {
+        count: count('comments'),
+      },
+    }),
+    id: true,
+  });
+  const commentView = dataView<{
+    id: string;
+    post?: { commentCount?: number; id: string } | null;
+    postId: string;
+  }>('Comment')({
+    id: true,
+    post: postSummaryView,
+  });
+  const db = {
+    select: (selection?: Record<string, unknown>) => ({
+      from: (table: unknown) => {
+        const builder = {
+          groupBy: () => [{ count: 2, parentKey: 'post-1' }],
+          orderBy: () =>
+            table === commentTable ? [{ id: 'comment-1', postId: 'post-1' }] : [{ id: 'post-1' }],
+          where: () => builder,
+        };
+
+        return selection?.count ? { ...builder, orderBy: () => [] } : builder;
+      },
+    }),
+  };
+  const adapter = createDrizzleSourceAdapter({
+    db,
+    schema: {
+      comment: commentTable,
+      commentRelations,
+      post: postTable,
+      postRelations,
+    },
+    views: [commentView, postSummaryView],
+  });
+  const plan = createSourcePlan({
+    select: ['post.commentCount'],
+    source: adapter.getSource(commentView),
+  });
+
+  const items = await adapter.fetchByIds({
+    ids: ['comment-1'],
+    plan,
+  });
+
+  expect(await plan.resolveMany(items)).toEqual([
+    {
+      id: 'comment-1',
+      post: {
+        commentCount: 2,
+        id: 'post-1',
       },
     },
   ]);
