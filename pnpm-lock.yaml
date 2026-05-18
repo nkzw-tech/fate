@@ -136,8 +136,8 @@ importers:
         specifier: ^11.17.0
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
       '@void/react':
-        specifier: ^0.7.6
-        version: 0.7.6(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.6(9640f474e1339a328e82c04f661768fd))
+        specifier: ^0.7.13
+        version: 0.7.13(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.13(9640f474e1339a328e82c04f661768fd))
       better-auth:
         specifier: ^1.6.11
         version: 1.6.11(3d469c62c2f345f8267825ce7b5d7ae1)
@@ -166,8 +166,8 @@ importers:
         specifier: ^3.6.0
         version: 3.6.0
       void:
-        specifier: ^0.7.6
-        version: 0.7.6(9640f474e1339a328e82c04f661768fd)
+        specifier: ^0.7.13
+        version: 0.7.13(9640f474e1339a328e82c04f661768fd)
     devDependencies:
       '@nkzw/fate':
         specifier: workspace:*
@@ -310,8 +310,8 @@ importers:
         specifier: ^1.2.4
         version: 1.2.4(@types/react@19.2.14)(react@19.2.6)
       '@void/react':
-        specifier: ^0.7.6
-        version: 0.7.6(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.6(9640f474e1339a328e82c04f661768fd))
+        specifier: ^0.7.13
+        version: 0.7.13(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.13(9640f474e1339a328e82c04f661768fd))
       better-auth:
         specifier: ^1.6.11
         version: 1.6.11(3d469c62c2f345f8267825ce7b5d7ae1)
@@ -343,8 +343,8 @@ importers:
         specifier: ^3.6.0
         version: 3.6.0
       void:
-        specifier: ^0.7.6
-        version: 0.7.6(9640f474e1339a328e82c04f661768fd)
+        specifier: ^0.7.13
+        version: 0.7.13(9640f474e1339a328e82c04f661768fd)
       void-fate:
         specifier: workspace:*
         version: link:../../packages/void-fate
@@ -446,8 +446,8 @@ importers:
         specifier: npm:@voidzero-dev/vite-plus-core@0.1.21
         version: '@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)'
       void:
-        specifier: ^0.7.6
-        version: 0.7.6(9640f474e1339a328e82c04f661768fd)
+        specifier: ^0.7.13
+        version: 0.7.13(9640f474e1339a328e82c04f661768fd)
 
 packages:
 
@@ -2963,13 +2963,13 @@ packages:
   '@vitest/utils@4.1.6':
     resolution: {integrity: sha512-FxIY+U81R3LGKCxaHHFRQ5+g6/iRgGLmeHWdp2Amj4ljQRrEIWHmZyDfDYBRZlpyqA7qKxtS9DD1dhk8RnRIVQ==}
 
-  '@void/react@0.7.6':
-    resolution: {integrity: sha512-P24MYvb0RC+hS93EFvtQbqns343pvd/eJG+UniPauPOYbLcxASAD47ElRqYBxyYW3Ry2QVLa7It7q/1q41uxtw==}
+  '@void/react@0.7.13':
+    resolution: {integrity: sha512-V1fjrUKxZ2EIh0X01Wslv5iL5hepW6CvPC2ysBKdI7BCHFkIvHi1NZQv13TE0T7oYDALHZdWZPKXljVbColhAQ==}
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
-      vite: npm:@voidzero-dev/vite-plus-core@0.1.20
-      void: 0.7.6
+      vite: ^8.0.0
+      void: 0.7.13
 
   '@voidzero-dev/vite-plus-core@0.1.21':
     resolution: {integrity: sha512-BEnqw8h2vxgKkzBjmmW4e1kwPwzoWc+jXJQB+7e0Dm1/1AkdTaQ9FgUMFzDfYrwTDkGzCZHSSsHDOl3RERQFTA==}
@@ -4998,11 +4998,11 @@ packages:
       postcss:
         optional: true
 
-  void@0.7.6:
-    resolution: {integrity: sha512-m4Clyjj2M7ciHFt70nhJCPRCGkKVS2sccPaZb8/0EzKBXMP4T9wivm7IUvwcJ8lesL6VeWUp/B90rsReccAdfQ==}
+  void@0.7.13:
+    resolution: {integrity: sha512-zqagCIyJ/TjBZZeaYQp9utPWN9Jim9Bi0Zd/6XWPNKwa62S+owEgRzXWaMIP4sS5GD9dczEcnLMsBJs6czNs1g==}
     hasBin: true
     peerDependencies:
-      '@void/md': 0.7.6
+      '@void/md': 0.7.13
       arktype: '>=2.0.0'
       valibot: '>=1.0.0-beta.7'
       vite: ^8.0.0
@@ -6901,13 +6901,13 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@void/react@0.7.6(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.6(9640f474e1339a328e82c04f661768fd))':
+  '@void/react@0.7.13(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(void@0.7.13(9640f474e1339a328e82c04f661768fd))':
     dependencies:
       '@vitejs/plugin-react': 6.0.2(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(rolldown@1.0.0))(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
       vite: '@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)'
-      void: 0.7.6(9640f474e1339a328e82c04f661768fd)
+      void: 0.7.13(9640f474e1339a328e82c04f661768fd)
     transitivePeerDependencies:
       - '@rolldown/plugin-babel'
       - babel-plugin-react-compiler
@@ -8983,7 +8983,7 @@ snapshots:
       - unrun
       - yaml
 
-  void@0.7.6(9640f474e1339a328e82c04f661768fd):
+  void@0.7.13(9640f474e1339a328e82c04f661768fd):
     dependencies:
       '@cloudflare/sandbox': 0.10.1
       '@cloudflare/vite-plugin': 1.36.4(@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0))(workerd@1.20260508.1)(wrangler@4.90.1(@cloudflare/workers-types@4.20260511.1))

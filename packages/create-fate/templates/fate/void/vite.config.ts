@@ -77,7 +77,6 @@ export default defineConfig({
       transport: 'void',
     }),
   ],
-  resolve: { conditions: ['@nkzw/source'] },
   server: { port: 6001 },
   ssr: { noExternal: ['void-fate'] },
 });

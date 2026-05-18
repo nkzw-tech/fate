@@ -47,12 +47,12 @@
     "@types/react": "^19.2.14",
     "react": "^19.2.6",
     "vite": "catalog:",
-    "void": "^0.7.6"
+    "void": "^0.7.13"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",
     "react": "^19.2.0",
     "react-fate": "^1.0.0-rc.0",
-    "void": "^0.7.6"
+    "void": "^0.7.13"
   }
 }
