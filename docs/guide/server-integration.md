@@ -1,9 +1,10 @@
 # Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a backend that follows fate's data protocol so the Vite plugin can wire the typed fate APIs into your app. _fate_ currently ships two server paths:
+Until now, we have focused on the client-side API of fate. You'll need a backend that can be wired into fate's typed request model so the Vite plugin can connect the typed fate APIs to your app. _fate_ currently ships three integration paths:
 
 - The native fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
 - The tRPC adapter, which keeps compatibility with existing tRPC backends.
+- The [GraphQL transport](/guide/graphql-integration), which maps fate views and roots to an existing GraphQL schema.
 
 _fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters plug into the same source execution runtime and can be exposed through the native protocol or through tRPC.
 

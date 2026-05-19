@@ -48,4 +48,19 @@ describe('create-fate templates', () => {
     expect(voidGitignore).toContain('.fate/');
     expect(voidGitignore).toContain('.void/');
   });
+
+  test('ships a GraphQL client template for existing servers', () => {
+    const templateRoot = join(packageRoot, 'templates/fate/graphql-client');
+    const readme = readFileSync(join(templateRoot, 'README.md'), 'utf8');
+    const viteConfig = readFileSync(join(templateRoot, 'vite.config.ts'), 'utf8');
+    const fateManifest = readFileSync(join(templateRoot, 'src/fate/graphql.ts'), 'utf8');
+    const packageJson = readFileSync(join(templateRoot, 'package.json'), 'utf8');
+
+    expect(readme).toContain('existing GraphQL server');
+    expect(viteConfig).toContain("module: './src/fate/graphql.ts'");
+    expect(viteConfig).toContain("transport: 'graphql'");
+    expect(fateManifest).toContain('export const Root');
+    expect(fateManifest).toContain('export const fateGraphQL');
+    expect(packageJson).not.toContain('@app/server');
+  });
 });

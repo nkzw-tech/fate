@@ -3,7 +3,6 @@ packages:
 
 allowBuilds:
   '@swc/core': true
-  better-sqlite3: true
   esbuild: true
   sharp: true
   workerd: true
@@ -16,7 +15,6 @@ catalog:
 onlyBuiltDependencies:
   - '@swc/core'
   - '@tailwindcss/oxide'
-  - better-sqlite3
   - esbuild
   - msgpackr-extract
   - sharp

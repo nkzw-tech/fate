@@ -15,6 +15,7 @@ const files = [
   'docs/guide/list-views.md',
   'docs/guide/live-views.md',
   'docs/guide/actions.md',
+  'docs/guide/graphql-integration.md',
   'docs/guide/server-integration.md',
   'docs/parts/outro.md',
 ].map((file) => path.join(root, file));

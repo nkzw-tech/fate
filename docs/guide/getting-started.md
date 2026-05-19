@@ -8,7 +8,7 @@ Create a new fate app with Vite+:
 vp create fate my-app
 ```
 
-The template selector can create a Void app with Drizzle, a tRPC app with Drizzle, or a tRPC app with Prisma. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.
+The template selector can create a Void app with Drizzle, a tRPC app with Drizzle or Prisma, a GraphQL app with Prisma, or a fate client for an existing GraphQL server. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.
 
 ## Manual Installation
 

@@ -1,0 +1,14 @@
+.fate/
+**/.fate/
+.void/
+**/.void/
+.eslintcache
+.pnpm-debug.log
+**/node_modules/
+node_modules/
+.env
+coverage/
+dist/
+pnpm-lock.yaml
+tsconfig.tsbuildinfo
+vite.config.ts.timestamp-*

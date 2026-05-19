@@ -1,16 +1,10 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="/public/fate-logo.svg">
-    <img alt="Logo" src="/public/fate-logo.svg" width="50%">
-  </picture>
-</p>
+# _fate_
 
 **_fate_** is a modern data client for React inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.
 
 Check out [fate.technology](https://fate.technology) for documentation, examples, and guides.
 
-# _fate_ Quick Start Template
+## Quick Start Template
 
 Create a new fate app with Vite+:
 

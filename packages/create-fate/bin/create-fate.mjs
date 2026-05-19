@@ -17,6 +17,11 @@ const variants = {
     label: 'GraphQL',
     template: 'graphql',
   },
+  'graphql-client': {
+    description: 'Existing GraphQL server',
+    label: 'GraphQL Client',
+    template: 'graphql-client',
+  },
   http: {
     description: 'Native HTTP with Drizzle',
     label: 'Native HTTP',
@@ -37,7 +42,8 @@ const variants = {
 const fateDependencyNames = ['@nkzw/fate', 'react-fate', 'void-fate'];
 
 const usage = () => {
-  process.stdout.write(`Usage: create-fate [directory] [--template void|drizzle|graphql|http|prisma]
+  process.stdout
+    .write(`Usage: create-fate [directory] [--template void|drizzle|graphql|graphql-client|http|prisma]
 
 Create a new fate app.
 
@@ -322,6 +328,10 @@ const setupProject = (targetPath, selectedVariant) => {
     case 'graphql':
     case 'prisma':
       runCommand('vp', ['run', '--filter', '@app/server', 'dev:setup'], targetPath);
+      runCommand('vp', ['run', 'fate:generate'], targetPath);
+      break;
+    case 'graphql-client':
+      runCommand('vp', ['run', 'prepare:void'], targetPath);
       runCommand('vp', ['run', 'fate:generate'], targetPath);
       break;
     case 'void':

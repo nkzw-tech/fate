@@ -41,7 +41,7 @@ export default defineConfig({
       'client/dist',
       'server/dist',
       'server/src/prisma/pothos-types.ts',
-      'server/src/prisma/prisma-client/*',
+      'server/src/prisma/prisma-client/**',
       'vite.config.ts.timestamp-*',
       'client/vite.config.ts.timestamp-*',
       'server/vite.config.ts.timestamp-*',

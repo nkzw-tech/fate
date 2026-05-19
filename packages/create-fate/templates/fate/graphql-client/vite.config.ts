@@ -11,24 +11,21 @@ const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
 
 export default defineConfig({
   optimizeDeps: {
-    exclude: ['@nkzw/fate/client', 'react-fate/client', 'void-fate/react'],
+    exclude: ['@nkzw/fate/client', 'react-fate/client'],
   },
   environments: {
     void_worker: {
       optimizeDeps: {
         exclude: [
+          '@nkzw/fate',
           '@nkzw/fate/client',
           '@nkzw/fate/server',
-          '@nkzw/stack',
-          '@radix-ui/react-slot',
           '@void/react',
           '@void/react/pages-server',
           'lucide-react',
           'react-error-boundary',
           'react-fate',
           'react-fate/client',
-          'void-fate/react',
-          'void-fate/server',
         ],
       },
     },
@@ -52,7 +49,7 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: true },
     overrides: [
       {
-        files: ['db/seed.ts', 'src/fate/__tests__/**'],
+        files: ['src/fate/graphql.ts'],
         rules: {
           'no-console': 'off',
         },
@@ -71,12 +68,19 @@ export default defineConfig({
       ...(isTest ? [] : [voidPlugin(), voidReact()]),
     ]) ?? []),
     fate({
-      module: './src/fate/server.ts',
-      transport: 'void',
+      module: './src/fate/graphql.ts',
+      transport: 'graphql',
     }),
   ],
+  run: {
+    tasks: {
+      'test:all': {
+        command: 'vp check && vp test',
+      },
+    },
+  },
   server: { port: 6001 },
-  ssr: { noExternal: ['void-fate'] },
+  ssr: { noExternal: ['@nkzw/fate', 'react-fate'] },
   staged: {
     '*': 'vp check --fix',
   },

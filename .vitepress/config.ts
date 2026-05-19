@@ -75,6 +75,7 @@ export default defineConfig({
           { link: '/guide/live-views', text: 'Live Views' },
           { link: '/guide/actions', text: 'Actions' },
           { link: '/guide/requests', text: 'Requests' },
+          { link: '/guide/graphql-integration', text: 'GraphQL Integration' },
           { link: '/guide/server-integration', text: 'Server Integration' },
           { link: '/guide/void-integration', text: 'Void Integration' },
         ],

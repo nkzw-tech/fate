@@ -128,7 +128,7 @@ export default defineConfig({
   test: {
     exclude: [
       ...configDefaults.exclude,
-      'packages/create-fate/templates/fate/{drizzle,graphql,http,prisma,void}/**',
+      'packages/create-fate/templates/fate/{drizzle,graphql,graphql-client,http,prisma,void}/**',
     ],
   },
 });
