@@ -41,6 +41,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@nkzw/oxlint-config": "^1.2.1",
     "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",

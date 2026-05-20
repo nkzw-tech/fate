@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const builtinModules = new Set(['node:fs', 'node:path', 'node:url']);
 
 const findViteConfigs = (dir: string): Array<string> =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -16,6 +17,19 @@ const findViteConfigs = (dir: string): Array<string> =>
     return entry.name === 'vite.config.ts' ? [entryPath] : [];
   });
 
+const getPackageName = (specifier: string): string => {
+  if (!specifier.startsWith('@')) {
+    return specifier.split('/')[0]!;
+  }
+
+  return specifier.split('/').slice(0, 2).join('/');
+};
+
+const getViteConfigImports = (source: string): Array<string> =>
+  Array.from(source.matchAll(/import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/g), ([, specifier]) =>
+    getPackageName(specifier!),
+  ).filter((specifier) => !specifier.startsWith('.') && !builtinModules.has(specifier));
+
 describe('create-fate templates', () => {
   test('do not resolve workspace-only source exports', () => {
     const viteConfigs = findViteConfigs(join(packageRoot, 'templates/fate'));
@@ -24,6 +38,34 @@ describe('create-fate templates', () => {
 
     for (const viteConfigPath of viteConfigs) {
       expect(readFileSync(viteConfigPath, 'utf8')).not.toContain('@nkzw/source');
+    }
+  });
+
+  test('declare packages imported by root vite configs', () => {
+    for (const template of readdirSync(join(packageRoot, 'templates/fate'), {
+      withFileTypes: true,
+    })) {
+      if (!template.isDirectory()) {
+        continue;
+      }
+
+      const templateRoot = join(packageRoot, 'templates/fate', template.name);
+      const packageJson = JSON.parse(readFileSync(join(templateRoot, 'package.json'), 'utf8')) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const dependencies = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      for (const specifier of getViteConfigImports(
+        readFileSync(join(templateRoot, 'vite.config.ts'), 'utf8'),
+      )) {
+        expect
+          .soft(dependencies, `${template.name} is missing ${specifier}`)
+          .toHaveProperty(specifier);
+      }
     }
   });
 
