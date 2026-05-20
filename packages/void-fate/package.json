@@ -40,11 +40,11 @@
     "build": "vp pack -d lib --target=node24 src/index.ts src/react.tsx src/server.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "^1.0.2",
-    "react-fate": "^1.0.2"
+    "@nkzw/fate": "^1.0.3",
+    "react-fate": "^1.0.3"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.15",
     "react": "^19.2.6",
     "vite": "catalog:",
     "void": "^0.7.13"
