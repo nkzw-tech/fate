@@ -5,6 +5,7 @@ import { reactCompilerPreset } from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
+import type { PluginOption } from 'vite';
 import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 
@@ -22,17 +23,19 @@ if (!process.env.VITE_SERVER_URL) {
 
 process.env.VITE_FATE_TRANSPORT = 'graphql';
 
+const lazyClientPlugins = (): Array<PluginOption> => [
+  babel({
+    presets: [reactCompilerPreset()],
+  }) as PluginOption,
+  tailwindcss() as PluginOption,
+  voidPlugin() as PluginOption,
+  voidReact() as PluginOption,
+];
+
 export default defineConfig({
   build: { outDir: join(root, '../dist/client') },
   plugins: [
-    ...(lazyPlugins(() => [
-      babel({
-        presets: [reactCompilerPreset()],
-      }),
-      tailwindcss(),
-      voidPlugin(),
-      voidReact(),
-    ]) ?? []),
+    ...(lazyPlugins(lazyClientPlugins) ?? []),
     fate({
       module: '@nkzw/fate-server-graphql/src/graphql/fate.ts',
       transport: 'graphql',

@@ -3,8 +3,18 @@ import tailwindcss from '@tailwindcss/vite';
 import { reactCompilerPreset } from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
+import type { PluginOption } from 'vite';
 import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
+
+const lazyVoidPlugins = (): Array<PluginOption> => [
+  babel({
+    presets: [reactCompilerPreset()],
+  }) as PluginOption,
+  tailwindcss() as PluginOption,
+  voidPlugin() as PluginOption,
+  voidReact() as PluginOption,
+];
 
 export default defineConfig({
   environments: {
@@ -35,14 +45,7 @@ export default defineConfig({
     },
   },
   plugins: [
-    ...(lazyPlugins(() => [
-      babel({
-        presets: [reactCompilerPreset()],
-      }),
-      tailwindcss(),
-      voidPlugin(),
-      voidReact(),
-    ]) ?? []),
+    ...(lazyPlugins(lazyVoidPlugins) ?? []),
     fate({
       module: './src/fate/server.ts',
       transport: 'void',
