@@ -36,7 +36,7 @@ const LocaleContext = createLocaleContext({
 });
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { data: session, isPending } = AuthClient.useSession();
+  const { data: session } = AuthClient.useSession();
   const userId = session?.user.id;
 
   const fate = useMemo(
@@ -57,7 +57,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-background text-foreground">
         <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
           <Header />
-          {isPending ? (
+          {session ? (
             <Thinking />
           ) : (
             <FateClient client={fate} key={userId}>
