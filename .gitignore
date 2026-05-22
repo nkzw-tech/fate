@@ -29,5 +29,6 @@ packages/**/README.md
 !packages/create-fate/README.md
 !packages/create-fate/templates/**/README.md
 !packages/void-fate/README.md
+!packages/py-fate/README.md
 tsconfig.tsbuildinfo
 vite.config.ts.timestamp-*
