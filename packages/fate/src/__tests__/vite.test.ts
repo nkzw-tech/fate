@@ -20,6 +20,15 @@ const resolveId = (id: string, clientModule?: '@nkzw/fate' | 'react-fate') => {
   return (plugin.resolveId as (id: string) => string | undefined)(id);
 };
 
+const getSsrNoExternal = (clientModule?: '@nkzw/fate' | 'react-fate') => {
+  const plugin = fate({
+    clientModule,
+    module: './server.ts',
+  });
+
+  return (plugin.config as () => { ssr?: { noExternal?: Array<string> } })().ssr?.noExternal;
+};
+
 test('resolves the core client entry to the generated Vite module', () => {
   expect(resolveId('@nkzw/fate/client')).toBe('\0@nkzw/fate/client.ts');
   expect(resolveId('react-fate/client')).toBeUndefined();
@@ -40,15 +49,6 @@ test('runs before Vite resolves package exports', () => {
 });
 
 test('keeps the generated client runtime inside Vite during SSR', () => {
-  const getSsrNoExternal = (clientModule?: '@nkzw/fate' | 'react-fate') => {
-    const plugin = fate({
-      clientModule,
-      module: './server.ts',
-    });
-
-    return (plugin.config as () => { ssr?: { noExternal?: Array<string> } })().ssr?.noExternal;
-  };
-
   expect(getSsrNoExternal()).toEqual(['@nkzw/fate']);
   expect(getSsrNoExternal('react-fate')).toEqual(['@nkzw/fate', 'react-fate']);
 });
