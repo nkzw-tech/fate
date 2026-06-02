@@ -34,6 +34,35 @@ const indentBlock = (value: string, spaces: number) =>
     .map((line) => (line.length ? `${' '.repeat(spaces)}${line}` : line))
     .join('\n');
 
+const compareStrings = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
+
+const canonicalizeHydrationScopeValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeHydrationScopeValue);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => compareStrings(left, right))
+      .map(([key, entry]) => [key, canonicalizeHydrationScopeValue(entry)]),
+  );
+};
+
+const getHydrationScope = (
+  moduleName: string,
+  roots: Record<string, unknown>,
+  types: ReadonlyArray<{ type: string }>,
+) =>
+  JSON.stringify(
+    canonicalizeHydrationScopeValue({
+      moduleName,
+      roots,
+      types: [...types].sort((left, right) => compareStrings(left.type, right.type)),
+    }),
+  );
+
 export const createClientSource = ({
   clientModule = 'react-fate',
   moduleExports,
@@ -304,6 +333,7 @@ ${rootsBlock}
 
 export type GeneratedClientMutations = typeof mutations;
 export type GeneratedClientRoots = typeof roots;
+const hydrationScope = ${JSON.stringify(getHydrationScope(moduleName, roots, types))} as const;
 
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
@@ -326,7 +356,8 @@ ${queriesBlock}${listsBlock}    mutations: trpcMutations,
   });
 ${liveTransportAssignment}
 
-  return createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
+  return createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
+    hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
     roots,
@@ -508,6 +539,7 @@ ${rootBlock}
 
 export type GeneratedClientMutations = typeof mutations;
 export type GeneratedClientRoots = typeof roots;
+const hydrationScope = ${JSON.stringify(getHydrationScope(moduleName, roots, types))} as const;
 
 export const createFateClient = (options: {
   decodeNodeId?: (type: string, id: string | number) => string | number;
@@ -519,7 +551,8 @@ export const createFateClient = (options: {
   onLiveError?: (error: unknown) => void;
   url: string | URL;
 }) =>
-  createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
+  createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
+    hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
     roots,
@@ -718,7 +751,8 @@ const createVoidFetch = (options: {
     ? ` => {
   const origin = options.origin ?? getDefaultOrigin();
 
-  return createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
+  return createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
+    hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
     roots,
@@ -738,7 +772,8 @@ const createVoidFetch = (options: {
   });
 }`
     : ` =>
-  createClient<[GeneratedClientRoots, GeneratedClientMutations]>({
+  createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
+    hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
     roots,
@@ -781,6 +816,7 @@ ${rootBlock}
 
 export type GeneratedClientMutations = typeof mutations;
 export type GeneratedClientRoots = typeof roots;
+const hydrationScope = ${JSON.stringify(getHydrationScope(moduleName, roots, types))} as const;
 
 export const createFateClient = (${createClientOptions})${clientSetup};
 

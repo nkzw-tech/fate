@@ -39,6 +39,7 @@ export type {
   ViewTag,
 } from './types.ts';
 export type { RequestMode, RequestOptions } from './client.ts';
+export type { FateDehydratedState, HydrationLimits, HydrateOptions } from './hydration.ts';
 export type { FateMutations } from './mutation.ts';
 export type { Transport } from './transport.ts';
 export type {

@@ -61,6 +61,26 @@ export function fromPaths(paths: Iterable<string>): FieldMask {
   return mask;
 }
 
+export function toPaths(mask: FieldMask): Array<string> {
+  const paths: Array<string> = [];
+
+  const visit = (current: FieldMask, prefix: string | null) => {
+    if (current.all) {
+      if (prefix) {
+        paths.push(prefix);
+      }
+      return;
+    }
+
+    for (const [key, child] of current.children) {
+      visit(child, prefix ? `${prefix}.${key}` : key);
+    }
+  };
+
+  visit(mask, null);
+  return paths;
+}
+
 export function isCovered(mask: FieldMask, path: string): boolean {
   if (mask.all) {
     return true;

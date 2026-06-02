@@ -6,6 +6,7 @@ import {
   FieldMask,
   fromPaths,
   intersects,
+  toPaths,
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
@@ -26,6 +27,12 @@ export type List = Readonly<{
 type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
 
 export type Subscriptions = Map<EntityId, Set<Subscription>>;
+
+export type StoreHydrationState = Readonly<{
+  coverage: ReadonlyArray<readonly [EntityId, ReadonlyArray<string>]>;
+  lists: ReadonlyArray<readonly [string, List]>;
+  records: ReadonlyArray<readonly [EntityId, AnyRecord]>;
+}>;
 
 const listKeySeparator = ' __fate__ ';
 
@@ -81,6 +88,95 @@ const cloneValue = (value: unknown): unknown => {
   return value;
 };
 
+const isPlainRecord = (value: unknown): value is AnyRecord => {
+  if (value == null || typeof value !== 'object' || Array.isArray(value) || isNodeRef(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const isDate = (value: unknown): value is Date =>
+  value != null &&
+  typeof value === 'object' &&
+  Object.prototype.toString.call(value) === '[object Date]' &&
+  typeof (value as Date).getTime === 'function';
+
+const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
+  if (!isPlainRecord(incoming) || !isPlainRecord(existing)) {
+    return existing;
+  }
+
+  const result: AnyRecord = Object.create(null);
+  for (const [key, value] of Object.entries(incoming)) {
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
+  }
+  for (const [key, value] of Object.entries(existing)) {
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      value: Object.hasOwn(result, key) ? mergePreservingExisting(result[key], value) : value,
+      writable: true,
+    });
+  }
+  return result;
+};
+
+const areHydrationValuesEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) {
+    return true;
+  }
+
+  if (isNodeRef(left) || isNodeRef(right)) {
+    return isNodeRef(left) && isNodeRef(right) && getNodeRefId(left) === getNodeRefId(right);
+  }
+
+  if (isDate(left) || isDate(right)) {
+    return isDate(left) && isDate(right) && left.getTime() === right.getTime();
+  }
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => areHydrationValuesEqual(value, right[index]))
+    );
+  }
+
+  if (!isPlainRecord(left) || !isPlainRecord(right)) {
+    return false;
+  }
+
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) => Object.hasOwn(right, key) && areHydrationValuesEqual(left[key], right[key]),
+    )
+  );
+};
+
+const areMasksEqual = (left: FieldMask | undefined, right: FieldMask | undefined): boolean => {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  const leftPaths = toPaths(left).sort();
+  const rightPaths = toPaths(right).sort();
+  return (
+    leftPaths.length === rightPaths.length &&
+    leftPaths.every((path, index) => path === rightPaths[index])
+  );
+};
+
 const emptyFunction = () => {};
 
 export class Store {
@@ -93,6 +189,105 @@ export class Store {
   private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
   private listSubscriptions = new Map<string, Set<() => void>>();
+
+  dehydrate(): StoreHydrationState {
+    return {
+      coverage: [...this.coverage].map(([id, mask]) => [id, toPaths(mask)]),
+      lists: [...this.lists],
+      records: [...this.records],
+    };
+  }
+
+  hydrate(
+    state: StoreHydrationState,
+    mode: 'preserve-existing' | 'replace',
+    options: { deferNotifications?: boolean } = {},
+  ) {
+    const previousCoverage = this.coverage;
+    const previousLists = this.lists;
+    const previousRecords = this.records;
+    const coverage =
+      mode === 'replace'
+        ? new Map<EntityId, FieldMask>()
+        : new Map([...previousCoverage].map(([id, mask]) => [id, cloneMask(mask)]));
+    const lists = mode === 'replace' ? new Map<string, List>() : new Map(previousLists);
+    const records = mode === 'replace' ? new Map<EntityId, AnyRecord>() : new Map(previousRecords);
+
+    for (const [id, incoming] of state.records) {
+      const previous = records.get(id);
+      const next =
+        previous && mode === 'preserve-existing'
+          ? (mergePreservingExisting(incoming, previous) as AnyRecord)
+          : incoming;
+      records.set(id, previous && areHydrationValuesEqual(previous, next) ? previous : next);
+    }
+
+    for (const [id, paths] of state.coverage) {
+      const incoming = fromPaths(paths);
+      const previous = coverage.get(id);
+      if (previous && mode === 'preserve-existing') {
+        union(previous, incoming);
+      } else {
+        coverage.set(id, incoming);
+      }
+    }
+
+    for (const [key, list] of state.lists) {
+      const previous = lists.get(key);
+      if (mode === 'replace' || !previous) {
+        lists.set(key, previous && areHydrationValuesEqual(previous, list) ? previous : list);
+      }
+    }
+
+    this.coverage = coverage;
+    this.lists = lists;
+    this.records = records;
+    this.rebuildIndexes();
+
+    const changedRecordIds = new Set<EntityId>();
+    for (const id of new Set([...previousRecords.keys(), ...records.keys()])) {
+      if (
+        !areHydrationValuesEqual(previousRecords.get(id), records.get(id)) ||
+        !areMasksEqual(previousCoverage.get(id), coverage.get(id))
+      ) {
+        changedRecordIds.add(id);
+      }
+    }
+    const changedListKeys = new Set<string>();
+    for (const key of new Set([...previousLists.keys(), ...lists.keys()])) {
+      if (!areHydrationValuesEqual(previousLists.get(key), lists.get(key))) {
+        changedListKeys.add(key);
+      }
+    }
+
+    const notify = () => {
+      for (const id of changedRecordIds) {
+        this.notify(id);
+      }
+      for (const key of changedListKeys) {
+        this.notifyListSubscribers(key);
+      }
+    };
+
+    if (!options.deferNotifications) {
+      notify();
+    }
+    return notify;
+  }
+
+  private rebuildIndexes() {
+    this.listKeysByOwnerField.clear();
+    this.listKeysByReferencedEntity.clear();
+    this.recordReferenceFields.clear();
+    this.recordReferencesByTarget.clear();
+
+    for (const [id, record] of this.records) {
+      this.addRecordReferenceIndexes(id, record);
+    }
+    for (const [key, list] of this.lists) {
+      this.addListIndexes(key, list);
+    }
+  }
 
   read(id: EntityId) {
     return this.records.get(id);

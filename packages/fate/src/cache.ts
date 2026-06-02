@@ -17,6 +17,12 @@ export default class ViewDataCache {
   private rootDependencies = new Map<EntityId, Set<EntityId>>();
   private dependencyIndex = new Map<EntityId, Set<EntityId>>();
 
+  clear() {
+    this.cache.clear();
+    this.rootDependencies.clear();
+    this.dependencyIndex.clear();
+  }
+
   get<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     entityId: EntityId,
     view: V,
