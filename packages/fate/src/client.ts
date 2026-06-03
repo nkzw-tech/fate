@@ -6,6 +6,14 @@ import {
   scopeArgsPayload,
 } from './args.ts';
 import ViewDataCache from './cache.ts';
+import {
+  decodeClientHydrationState,
+  encodeHydrationValue,
+  resolveHydrationLimits,
+  type FateDehydratedState,
+  type HydrationLimits,
+  type HydrateOptions,
+} from './hydration.ts';
 import { getListEntries } from './list.ts';
 import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import {
@@ -83,7 +91,11 @@ export type RequestMode =
  */
 export type RequestOptions = Readonly<{ mode?: RequestMode }>;
 
-type FateClientOptions<Roots extends FateRoots, Mutations extends FateMutations> = {
+type FateClientOptions<
+  Roots extends FateRoots,
+  Mutations extends FateMutations,
+  HydrationScope extends string,
+> = {
   /**
    * Number of recently released requests to keep retained before their records
    * and lists are eligible for garbage collection.
@@ -91,6 +103,15 @@ type FateClientOptions<Roots extends FateRoots, Mutations extends FateMutations>
    * @defaultValue 10
    */
   gcReleaseBufferSize?: number;
+  /**
+   * Bounds hydration snapshot encoding and decoding work.
+   */
+  hydrationLimits?: Partial<HydrationLimits>;
+  /**
+   * Identifies snapshots compatible with this client. Change this value when
+   * deploying an incompatible cache schema or separating cache namespaces.
+   */
+  hydrationScope?: HydrationScope;
   mutations?: Mutations;
   onLiveError?: (error: unknown) => void;
   roots: Roots;
@@ -113,6 +134,25 @@ const getId: TypeConfig['getId'] = (record: unknown) => {
 
 const emptySet = new Set<string>();
 const emptyDispose = () => undefined;
+const compareStrings = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
+
+const getDefaultHydrationScope = (
+  roots: FateRoots | undefined,
+  types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<{ getId: TypeConfig['getId'] }>>,
+) =>
+  JSON.stringify({
+    roots: Object.entries(roots ?? {})
+      .map(([name, root]) => [name, root.type])
+      .sort(([left], [right]) => compareStrings(left, right)),
+    types: types
+      .map(({ fields, type }) => ({
+        fields: Object.entries(fields ?? {})
+          .map(([field, descriptor]) => [field, descriptor] as const)
+          .sort(([left], [right]) => compareStrings(left, right)),
+        type,
+      }))
+      .sort((left, right) => compareStrings(left.type, right.type)),
+  });
 
 const dropCanonicalListIds = (
   listIds: ReadonlyArray<EntityId> | undefined,
@@ -358,7 +398,11 @@ const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string
  * Core client that normalizes records, manages the view cache, and coordinates
  * data fetching.
  */
-export class FateClient<Roots extends FateRoots, Mutations extends FateMutations> {
+export class FateClient<
+  Roots extends FateRoots,
+  Mutations extends FateMutations,
+  HydrationScope extends string = string,
+> {
   private readonly mutationMap: Record<string, MutationFunction<any>>;
   private readonly parentLists = new Map<
     string,
@@ -386,8 +430,11 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   private readonly stalledRequests = new Set<string>();
   private gcPending = false;
   private gcScheduled = false;
+  private pendingNetworkRequests = 0;
   readonly store = new Store();
   private readonly operationLifetime: OperationLifetime;
+  private readonly hydrationLimits: HydrationLimits;
+  private readonly hydrationScope: HydrationScope;
   private readonly types: ReadonlyMap<string, TypeConfig>;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
   private readonly viewDataCache = new ViewDataCache();
@@ -397,12 +444,19 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
   readonly mutations: MutationFunctionsFor<Mutations>;
   readonly roots: Roots;
 
-  constructor(options: FateClientOptions<Roots, Mutations>) {
+  constructor(options: FateClientOptions<Roots, Mutations, HydrationScope>) {
     this.actions = Object.create(null) as MutationActionsFor<Mutations>;
     this.mutationMap = Object.create(null);
     this.mutations = Object.create(null) as MutationFunctionsFor<Mutations>;
     this.onLiveError = options.onLiveError;
     this.operationLifetime = new OperationLifetime(options.gcReleaseBufferSize ?? 10);
+    this.hydrationLimits = resolveHydrationLimits(options.hydrationLimits);
+    const hydrationScope =
+      options.hydrationScope ?? getDefaultHydrationScope(options.roots, options.types);
+    if (typeof hydrationScope !== 'string' || hydrationScope.length === 0) {
+      throw new Error(`fate: Hydration scope must be a non-empty string.`);
+    }
+    this.hydrationScope = hydrationScope as HydrationScope;
     this.roots = options.roots;
     this.transport = options.transport;
     this.types = new Map(options.types.map((entity) => [entity.type, { getId, ...entity }]));
@@ -475,6 +529,89 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         }
       }
     }
+  }
+
+  /**
+   * Exports the durable normalized cache as an opaque JSON-safe value for SSR
+   * transfer or persistence. Runtime requests, subscriptions, retainers, and
+   * optimistic state are intentionally excluded.
+   */
+  dehydrate(): FateDehydratedState<HydrationScope> {
+    if (this.hasActiveOptimisticUpdates()) {
+      throw new Error(`fate: Cannot dehydrate while optimistic updates are active.`);
+    }
+    if (this.hasPendingRequests()) {
+      throw new Error(`fate: Cannot dehydrate while requests are pending.`);
+    }
+
+    return {
+      data: encodeHydrationValue(
+        {
+          rootLists: [...this.rootLists].map(([type, keys]) => [type, [...keys]]),
+          rootRequests: [...this.rootRequests],
+          store: this.store.dehydrate(),
+        },
+        this.hydrationLimits,
+      ),
+      scope: this.hydrationScope,
+      version: 1,
+    };
+  }
+
+  /**
+   * Restores a durable normalized cache snapshot without restoring runtime
+   * request handles, retainers, subscriptions, or optimistic update state.
+   * Hydrate before rendering SSR content. Replaying the same snapshot is safe.
+   */
+  hydrate(state: FateDehydratedState<HydrationScope>, options: HydrateOptions = {}): void {
+    if (!state || typeof state !== 'object' || state.version !== 1) {
+      throw new Error(`fate: Unsupported hydration state version.`);
+    }
+    if (state.scope !== this.hydrationScope) {
+      throw new Error(`fate: Hydration state scope does not match this client.`);
+    }
+
+    if (this.hasActiveOptimisticUpdates()) {
+      throw new Error(`fate: Cannot hydrate while optimistic updates are active.`);
+    }
+    if (this.hasPendingRequests()) {
+      throw new Error(`fate: Cannot hydrate while requests are pending.`);
+    }
+
+    const mode = options.merge ?? 'preserve-existing';
+    if (mode !== 'preserve-existing' && mode !== 'replace') {
+      throw new Error(`fate: Unsupported hydration merge mode.`);
+    }
+    const decoded = decodeClientHydrationState(state.data, this.hydrationLimits);
+
+    const notify = this.store.hydrate(decoded.store, mode, { deferNotifications: true });
+
+    if (mode === 'replace') {
+      this.rootLists.clear();
+      this.rootRequests.clear();
+      this.stableRefs.clear();
+    }
+
+    for (const [type, incomingKeys] of decoded.rootLists) {
+      let keys = this.rootLists.get(type);
+      if (!keys) {
+        keys = new Set();
+        this.rootLists.set(type, keys);
+      }
+      for (const key of incomingKeys) {
+        keys.add(key);
+      }
+    }
+
+    for (const [key, entityId] of decoded.rootRequests) {
+      if (mode === 'replace' || !this.rootRequests.has(key)) {
+        this.rootRequests.set(key, entityId);
+      }
+    }
+
+    this.stalledRequests.clear();
+    this.viewDataCache.clear();
+    notify();
   }
 
   private registerRootList(type: string, key: string) {
@@ -620,7 +757,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
           ? ({ args: argsPayload } as AnyRecord)
           : input;
 
-    return await this.transport.mutate(key as any, requestInput as any, select);
+    return await this.trackPendingRequest(() =>
+      this.transport.mutate!(key as any, requestInput as any, select),
+    );
   }
 
   write(
@@ -813,9 +952,9 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
         return pendingPromise as FateThenable<ViewSnapshot<T, S>>;
       }
 
-      const promise = this.fetchByIdAndNormalize(type, [id], missing, plan)
-        .finally(() => this.pending.delete(key))
-        .then(() => {
+      const promise = this.trackPendingRequest(async () => {
+        await this.fetchByIdAndNormalize(type, [id], missing, plan);
+        try {
           const remainingMissing = this.store.missingForSelection(entityId, selectedPaths);
 
           if (remainingMissing.size > 0) {
@@ -825,7 +964,10 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
 
           this.stalledRequests.delete(key);
           return this.readView<T, S, V>(view, ref);
-        });
+        } finally {
+          this.pending.delete(key);
+        }
+      });
 
       this.pending.set(key, promise);
 
@@ -1586,6 +1728,17 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     args: Record<string, unknown>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
+    return await this.trackPendingRequest(() =>
+      this.loadConnectionInternal(view, connection, args, options),
+    );
+  }
+
+  private async loadConnectionInternal<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+    args: Record<string, unknown>,
+    options: { direction?: 'forward' | 'backward' } = {},
+  ) {
     const direction = options.direction ?? 'forward';
     if (connection.root) {
       if (!this.transport.fetchList) {
@@ -2052,6 +2205,19 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     );
   }
 
+  private hasPendingRequests(): boolean {
+    return this.pendingNetworkRequests > 0;
+  }
+
+  async trackPendingRequest<T>(request: () => Promise<T>): Promise<T> {
+    this.pendingNetworkRequests += 1;
+    try {
+      return await request();
+    } finally {
+      this.pendingNetworkRequests -= 1;
+    }
+  }
+
   private runPendingGarbageCollection() {
     if (this.gcPending && !this.hasActiveOptimisticUpdates()) {
       this.gc();
@@ -2312,10 +2478,12 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
     prefix: string | null = null,
   ) {
     const resolvedArgs = resolvedArgsFromPlan(plan);
-    const records = await this.transport.fetchById(type, ids, select, resolvedArgs);
-    for (const record of records) {
-      this.writeEntity(type, record as AnyRecord, select, undefined, plan, prefix);
-    }
+    await this.trackPendingRequest(async () => {
+      const records = await this.transport.fetchById(type, ids, select, resolvedArgs);
+      for (const record of records) {
+        this.writeEntity(type, record as AnyRecord, select, undefined, plan, prefix);
+      }
+    });
   }
 
   private async fetchQueryAndNormalize(item: QueryRequestDescriptor) {
@@ -2325,20 +2493,22 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       );
     }
 
-    const record = await this.transport.fetchQuery(item.name, item.plan.paths, item.argsPayload);
-    if (!record || typeof record !== 'object') {
-      this.rootRequests.set(item.queryKey, null);
-      return;
-    }
+    await this.trackPendingRequest(async () => {
+      const record = await this.transport.fetchQuery!(item.name, item.plan.paths, item.argsPayload);
+      if (!record || typeof record !== 'object') {
+        this.rootRequests.set(item.queryKey, null);
+        return;
+      }
 
-    const entityId = this.writeEntity(
-      item.type,
-      record as AnyRecord,
-      item.plan.paths,
-      undefined,
-      item.plan,
-    );
-    this.rootRequests.set(item.queryKey, entityId);
+      const entityId = this.writeEntity(
+        item.type,
+        record as AnyRecord,
+        item.plan.paths,
+        undefined,
+        item.plan,
+      );
+      this.rootRequests.set(item.queryKey, entityId);
+    });
   }
 
   private async fetchListAndNormalize(item: ListRequestDescriptor) {
@@ -2348,36 +2518,38 @@ export class FateClient<Roots extends FateRoots, Mutations extends FateMutations
       );
     }
 
-    const { items, pagination } = await this.transport.fetchList(
-      item.name,
-      item.plan.paths,
-      item.argsPayload,
-    );
-    const ids: Array<EntityId> = [];
-    const cursors: Array<string | undefined> = [];
-    for (const entry of items) {
-      const id = this.writeEntity(
-        item.type,
-        entry.node as AnyRecord,
+    await this.trackPendingRequest(async () => {
+      const { items, pagination } = await this.transport.fetchList!(
+        item.name,
         item.plan.paths,
-        undefined,
-        item.plan,
+        item.argsPayload,
       );
-      ids.push(id);
-      cursors.push(entry.cursor);
-    }
-    if (!filterConnectionArgs(item.argsPayload)) {
-      this.registerRootList(item.type, item.listKey);
-    }
+      const ids: Array<EntityId> = [];
+      const cursors: Array<string | undefined> = [];
+      for (const entry of items) {
+        const id = this.writeEntity(
+          item.type,
+          entry.node as AnyRecord,
+          item.plan.paths,
+          undefined,
+          item.plan,
+        );
+        ids.push(id);
+        cursors.push(entry.cursor);
+      }
+      if (!filterConnectionArgs(item.argsPayload)) {
+        this.registerRootList(item.type, item.listKey);
+      }
 
-    const previous = this.store.getListState(item.listKey);
-    this.store.setList(
-      item.listKey,
-      this.mergeListState(previous, ids, cursors, pagination, {
-        ...getPaginationMergeInfo(item.argsPayload),
-        replace: true,
-      }),
-    );
+      const previous = this.store.getListState(item.listKey);
+      this.store.setList(
+        item.listKey,
+        this.mergeListState(previous, ids, cursors, pagination, {
+          ...getPaginationMergeInfo(item.argsPayload),
+          replace: true,
+        }),
+      );
+    });
   }
 
   private writeEntity(
@@ -3011,6 +3183,7 @@ export function createClient<
     Record<never, RootDefinition<any, any>>,
     Record<never, MutationDefinition<any, any, any>>,
   ],
->(options: FateClientOptions<T[0], T[1]>) {
-  return new FateClient<T[0], T[1]>(options);
+  HydrationScope extends string = string,
+>(options: FateClientOptions<T[0], T[1], HydrationScope>) {
+  return new FateClient<T[0], T[1], HydrationScope>(options);
 }

@@ -549,6 +549,58 @@ try {
 
 Garbage collection waits for active optimistic updates to settle before sweeping records. This keeps temporary optimistic records and their list positions stable while mutations are still pending.
 
+### SSR and Hydration
+
+Create a request-scoped fate client on the server, preload the route data, and dehydrate its normalized cache:
+
+```tsx
+const fate = createFateClient();
+await fate.request({ post: { id: '12', view: PostView } });
+
+return {
+  fate: fate.dehydrate(),
+};
+```
+
+Transport the returned value through your framework's loader serialization, React Server Component props, or a safely escaped JSON bootstrap script. The snapshot contains plain serializable values, so serializers such as Seroval can carry it without fate-specific integration. Treat the snapshot as opaque: hydrate it through fate rather than reading or editing its internal data.
+
+On the browser, hydrate the new client before rendering components that call `useRequest`:
+
+```tsx
+const fate = createFateClient();
+fate.hydrate(loaderData.fate);
+
+hydrateRoot(
+  document,
+  <FateClient client={fate}>
+    <App />
+  </FateClient>,
+);
+```
+
+Hydrated `cache-first` requests resolve from the normalized cache without refetching. Hydration restores records, selected-field coverage, root queries, and list pagination state. It intentionally does not restore active requests, subscriptions, retainers, timers, or optimistic mutation state.
+
+Snapshots carry a hydration scope and are rejected by clients with a different scope. Generated clients set a stable scope automatically. When constructing a client directly, pass `hydrationScope` and rotate it when deploying an incompatible cache schema or when separating cache namespaces:
+
+```tsx
+const fate = createClient({
+  hydrationScope: 'storefront-v2',
+  // ...
+});
+```
+
+Use `hydrationLimits` when an application needs stricter bootstrap payload limits. fate applies conservative defaults for total encoded values, collection sizes, and string lengths.
+
+By default, hydration preserves values already present in the browser cache while adding missing server data. Pass `{ merge: 'replace' }` only when the snapshot should authoritatively reset the durable cache:
+
+```tsx
+fate.hydrate(loaderData.fate, { merge: 'replace' });
+```
+
+`preserve-existing` recursively combines plain scalar objects while keeping browser values on conflicts. Arrays, dates, entity references, and list windows are atomic: an existing browser value wins as a whole. Replaying a snapshot is safe and does not notify subscribers when durable cache state is unchanged.
+
+Do not reuse request-scoped snapshots across users. Dehydrate after awaited route preloading: snapshots are point-in-time values and do not stream cache patches for data that resolves later. Hydration and dehydration reject clients with in-flight requests, so hydrate the initial snapshot before rendering.
+
 ## List Views
 
 ### Pagination with `useListView`

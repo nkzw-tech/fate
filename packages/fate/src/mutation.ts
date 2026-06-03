@@ -316,7 +316,7 @@ export function wrapMutation<
       }
     };
 
-    const mutationPromise = performMutation();
+    const mutationPromise = client.trackPendingRequest(performMutation);
 
     if (optimisticEntityId) {
       client.registerPendingOptimisticMutation(optimisticEntityId, mutationPromise);

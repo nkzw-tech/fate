@@ -17,6 +17,11 @@ type Post = { __typename: 'Post'; content: string; id: string };
 
 const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+const jsonRoundTrip = <T,>(value: T): T => {
+  // eslint-disable-next-line unicorn/prefer-structured-clone -- Verify JSON transport compatibility.
+  return JSON.parse(JSON.stringify(value)) as T;
+};
+
 test('releases network-only requests on unmount', async () => {
   const fetchById = vi.fn().mockResolvedValue([
     {
@@ -178,6 +183,59 @@ test('supports requesting a single node through `byId` calls', async () => {
 
   expect(renders).toEqual(['Apple']);
   expect(fetchById).toHaveBeenCalledTimes(1);
+});
+
+test('renders cache-first requests from hydrated SSR state without refetching', async () => {
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const roots = {
+    post: clientRoot('Post'),
+  };
+  const server = createClient({
+    roots,
+    transport: { fetchById: vi.fn() },
+    types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+  });
+  server.write(
+    'Post',
+    {
+      __typename: 'Post',
+      content: 'Hydrated',
+      id: 'post-1',
+    },
+    new Set(['content', 'id']),
+  );
+
+  const fetchById = vi.fn();
+  const browser = createClient({
+    roots,
+    transport: { fetchById },
+    types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+  });
+  browser.hydrate(jsonRoundTrip(server.dehydrate()));
+
+  const Component = () => {
+    const { post } = useRequest({ post: { id: 'post-1', view: PostView } });
+    return <span>{useView(PostView, post).content}</span>;
+  };
+
+  const container = document.createElement('div');
+  const reactRoot = createRoot(container);
+
+  await act(async () => {
+    reactRoot.render(
+      <FateClient client={browser}>
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </FateClient>,
+    );
+  });
+
+  expect(container.textContent).toBe('Hydrated');
+  expect(fetchById).not.toHaveBeenCalled();
 });
 
 test('does not refetch network-only inline requests during rerenders with the same key', async () => {
