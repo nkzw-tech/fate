@@ -26,6 +26,7 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  kysely: 0.28.17
   vite: 'catalog:'
   vitest: 'catalog:'
 

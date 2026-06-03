@@ -75,7 +75,7 @@
     "@trpc/client": "^11.17.0",
     "@trpc/server": "^11.17.0",
     "drizzle-orm": "^0.45.2",
-    "vite": "^8.0.13"
+    "vite": "^8.0.16"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0",

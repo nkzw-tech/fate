@@ -44,10 +44,10 @@
     "react-fate": "^1.0.3"
   },
   "devDependencies": {
-    "@types/react": "^19.2.15",
-    "react": "^19.2.6",
+    "@types/react": "^19.2.16",
+    "react": "^19.2.7",
     "vite": "catalog:",
-    "void": "^0.7.13"
+    "void": "^0.9.0"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",
