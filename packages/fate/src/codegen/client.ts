@@ -2,7 +2,7 @@ import type { FateViteTransport } from '../viteTypes.ts';
 import { createSchema, isDataView } from './schema.ts';
 
 type ModuleExports = Record<string, any>;
-type ClientModule = '@nkzw/fate' | 'react-fate';
+type ClientModule = '@nkzw/fate' | 'react-fate' | 'vue-fate';
 
 const formatRelation = (value: { listOf?: string; type?: string }) =>
   'listOf' in value ? `{ listOf: '${value.listOf}' }` : `{ type: '${value.type}' }`;

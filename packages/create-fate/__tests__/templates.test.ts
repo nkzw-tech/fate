@@ -1,4 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
@@ -17,6 +19,11 @@ const findViteConfigs = (dir: string): Array<string> =>
     return entry.name === 'vite.config.ts' ? [entryPath] : [];
   });
 
+const templateNames = () =>
+  readdirSync(join(packageRoot, 'templates/fate'), { withFileTypes: true })
+    .filter((template) => template.isDirectory() && !template.name.startsWith('_'))
+    .map((template) => template.name);
+
 const getPackageName = (specifier: string): string => {
   if (!specifier.startsWith('@')) {
     return specifier.split('/')[0]!;
@@ -32,7 +39,9 @@ const getViteConfigImports = (source: string): Array<string> =>
 
 describe('create-fate templates', () => {
   test('do not resolve workspace-only source exports', () => {
-    const viteConfigs = findViteConfigs(join(packageRoot, 'templates/fate'));
+    const viteConfigs = findViteConfigs(join(packageRoot, 'templates/fate')).filter(
+      (configPath) => !configPath.includes('/_shared/'),
+    );
 
     expect(viteConfigs.length).toBeGreaterThan(0);
 
@@ -42,14 +51,8 @@ describe('create-fate templates', () => {
   });
 
   test('declare packages imported by root vite configs', () => {
-    for (const template of readdirSync(join(packageRoot, 'templates/fate'), {
-      withFileTypes: true,
-    })) {
-      if (!template.isDirectory()) {
-        continue;
-      }
-
-      const templateRoot = join(packageRoot, 'templates/fate', template.name);
+    for (const templateName of templateNames()) {
+      const templateRoot = join(packageRoot, 'templates/fate', templateName);
       const packageJson = JSON.parse(readFileSync(join(templateRoot, 'package.json'), 'utf8')) as {
         dependencies?: Record<string, string>;
         devDependencies?: Record<string, string>;
@@ -63,7 +66,7 @@ describe('create-fate templates', () => {
         readFileSync(join(templateRoot, 'vite.config.ts'), 'utf8'),
       )) {
         expect
-          .soft(dependencies, `${template.name} is missing ${specifier}`)
+          .soft(dependencies, `${templateName} is missing ${specifier}`)
           .toHaveProperty(specifier);
       }
     }
@@ -104,5 +107,166 @@ describe('create-fate templates', () => {
     expect(fateManifest).toContain('export const Root');
     expect(fateManifest).toContain('export const fateGraphQL');
     expect(packageJson).not.toContain('@app/server');
+  });
+
+  test('generates Vue projects for every backend template', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-vue-'));
+    try {
+      for (const templateName of templateNames()) {
+        const target = join(tempRoot, templateName);
+        const result = spawnSync(
+          process.execPath,
+          [
+            join(packageRoot, 'bin/create-fate.mjs'),
+            target,
+            '--template',
+            templateName,
+            '--framework',
+            'vue',
+            '--no-setup',
+          ],
+          {
+            cwd: tempRoot,
+            encoding: 'utf8',
+          },
+        );
+
+        expect.soft(result.status, result.stderr).toBe(0);
+
+        const appRoot =
+          templateName === 'void' || templateName === 'graphql-client'
+            ? target
+            : join(target, 'client');
+        const packageJson = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
+          dependencies?: Record<string, string>;
+          description?: string;
+          devDependencies?: Record<string, string>;
+          engines?: Record<string, string>;
+          packageManager?: string;
+          scripts?: Record<string, string>;
+        };
+        const dependencies = {
+          ...packageJson.dependencies,
+          ...packageJson.devDependencies,
+        };
+        const rootPackageJson = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as {
+          dependencies?: Record<string, string>;
+          description?: string;
+          devDependencies?: Record<string, string>;
+        };
+        const rootDependencies = {
+          ...rootPackageJson.dependencies,
+          ...rootPackageJson.devDependencies,
+        };
+        const viteConfig = readFileSync(join(appRoot, 'vite.config.ts'), 'utf8');
+        const layout = readFileSync(join(appRoot, 'pages/layout.vue'), 'utf8');
+        const agents = readFileSync(join(target, 'AGENTS.md'), 'utf8');
+        const readme = readFileSync(join(target, 'README.md'), 'utf8');
+
+        expect.soft(packageJson.description, templateName).toContain('Vue');
+        expect.soft(packageJson.description, templateName).not.toContain('React');
+        expect.soft(rootPackageJson.description, templateName).toContain('Vue');
+        expect.soft(rootPackageJson.description, templateName).not.toContain('React');
+        expect.soft(dependencies, templateName).toHaveProperty('vue');
+        expect.soft(dependencies, templateName).toHaveProperty('vue-fate');
+        expect.soft(dependencies, templateName).toHaveProperty('@void/vue');
+        expect.soft(dependencies, templateName).not.toHaveProperty('react');
+        expect.soft(dependencies, templateName).not.toHaveProperty('react-dom');
+        expect.soft(dependencies, templateName).not.toHaveProperty('react-fate');
+        expect.soft(dependencies, templateName).not.toHaveProperty('@void/react');
+        expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/stack');
+        expect.soft(dependencies, templateName).not.toHaveProperty('@rolldown/plugin-babel');
+        expect
+          .soft(rootDependencies, templateName)
+          .not.toHaveProperty('babel-plugin-react-compiler');
+        expect.soft(rootDependencies, templateName).not.toHaveProperty('eslint-plugin-react-hooks');
+        expect.soft(viteConfig, templateName).toContain("from 'vue-fate/vite'");
+        expect.soft(viteConfig, templateName).toContain("from '@void/vue/plugin'");
+        expect.soft(viteConfig, templateName).not.toContain(';;');
+        expect.soft(layout, templateName).not.toContain(';;');
+        expect.soft(layout, templateName).not.toContain('\n;\n');
+        expect.soft(readme, templateName).toContain(`--template ${templateName} --framework vue`);
+        expect.soft(readme, templateName).toContain('Vue');
+        expect.soft(readme, templateName).not.toContain('react-fate');
+        expect.soft(readme, templateName).not.toContain('React Compiler');
+        expect.soft(agents, templateName).toContain('Vue applications');
+        expect.soft(agents, templateName).toContain('vue-fate');
+        expect.soft(agents, templateName).not.toContain('React applications');
+        expect.soft(agents, templateName).not.toContain('React Actions');
+        expect.soft(agents, templateName).not.toContain('Async React');
+        expect.soft(agents, templateName).not.toContain('react-fate');
+        expect
+          .soft(readFileSync(join(appRoot, 'pages/index.vue'), 'utf8'), templateName)
+          .toContain('useRequest');
+
+        expect(() => readFileSync(join(appRoot, 'pages/index.tsx'), 'utf8')).toThrow();
+
+        if (templateName === 'void') {
+          const seedData = readFileSync(join(target, 'seedData.ts'), 'utf8');
+          const seedMigration = readFileSync(
+            join(target, 'db/migrations/20260508120500_seed_void_demo.sql'),
+            'utf8',
+          );
+
+          expect
+            .soft(readFileSync(join(target, 'src/fate/server.ts'), 'utf8'))
+            .toContain('createFateServer');
+          expect
+            .soft(readFileSync(join(target, 'src/fate/context.ts'), 'utf8'))
+            .toContain('../user/SessionUser.ts');
+          expect
+            .soft(readFileSync(join(target, 'src/fate/context.ts'), 'utf8'))
+            .not.toContain('../user/SessionUser.tsx');
+          expect.soft(seedData).toContain('Vue Integration');
+          expect.soft(seedData).toContain('vue-fate');
+          expect.soft(seedData).not.toContain('React');
+          expect.soft(seedData).not.toContain('react-fate');
+          expect.soft(seedMigration).toContain('Vue Integration');
+          expect.soft(seedMigration).toContain('vue-fate');
+          expect.soft(seedMigration).not.toContain('React');
+          expect.soft(seedMigration).not.toContain('react-fate');
+        }
+
+        if (templateName === 'graphql-client') {
+          expect.soft(packageJson.dependencies, templateName).toHaveProperty('@nkzw/fate');
+          expect.soft(packageJson.scripts, templateName).toHaveProperty('test:all');
+          expect.soft(packageJson.engines, templateName).toHaveProperty('node');
+          expect.soft(packageJson.packageManager, templateName).toBeTruthy();
+          expect
+            .soft(readFileSync(join(target, 'src/fate/graphql.ts'), 'utf8'), templateName)
+            .toContain('fateGraphQL');
+        }
+      }
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  test('uses React as the default UI framework', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-default-'));
+    try {
+      const target = join(tempRoot, 'app');
+      const result = spawnSync(
+        process.execPath,
+        [join(packageRoot, 'bin/create-fate.mjs'), target, '--template', 'http', '--no-setup'],
+        {
+          cwd: tempRoot,
+          encoding: 'utf8',
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+
+      const packageJson = JSON.parse(readFileSync(join(target, 'client/package.json'), 'utf8')) as {
+        dependencies?: Record<string, string>;
+      };
+
+      expect(packageJson.dependencies).toHaveProperty('react');
+      expect(packageJson.dependencies).toHaveProperty('react-fate');
+      expect(packageJson.dependencies).not.toHaveProperty('vue');
+      expect(packageJson.dependencies).not.toHaveProperty('vue-fate');
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
   });
 });

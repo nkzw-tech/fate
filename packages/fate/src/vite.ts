@@ -11,7 +11,7 @@ import {
 import { createClientSource } from './codegen/client.ts';
 import type { FateViteTransport } from './viteTypes.ts';
 
-type ClientRuntime = '@nkzw/fate' | 'react-fate';
+type ClientRuntime = '@nkzw/fate' | 'react-fate' | 'vue-fate';
 
 type ModuleExports = Record<string, unknown>;
 

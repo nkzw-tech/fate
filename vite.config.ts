@@ -82,6 +82,15 @@ export default defineConfig({
           'react-hooks-js/globals': 'off',
         },
       },
+      {
+        files: ['packages/vue-fate/**', 'example/client-vue/**'],
+        rules: {
+          'no-undef': 'off',
+          'react-hooks-js/globals': 'off',
+          'react-hooks-js/immutability': 'off',
+          'react-hooks/rules-of-hooks': 'off',
+        },
+      },
     ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
@@ -93,6 +102,7 @@ export default defineConfig({
             './oxlint.config.ts',
             './example/client/vite.config.ts',
             './example/client/vite.graphql.config.ts',
+            './example/client-vue/vite.config.ts',
             './example/server-graphql/prisma.config.ts',
             './example/server-graphql/scripts/**/*.tsx',
             './example/server-graphql/src/index.test.tsx',
