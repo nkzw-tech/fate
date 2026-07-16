@@ -13,9 +13,10 @@ allowBuilds:
   workerd: true
 
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.1.24
-  vite-plus: 0.1.24
-  vitest: npm:@voidzero-dev/vite-plus-test@0.1.24
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
+  vite-plus: 0.2.4
+  vitest: 4.1.10
+  '@vitest/coverage-v8': 4.1.10
 
 onlyBuiltDependencies:
   - '@prisma/client'

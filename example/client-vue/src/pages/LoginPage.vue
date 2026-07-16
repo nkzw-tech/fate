@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLinkIcon } from 'lucide-vue-next';
+import { ExternalLinkIcon } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { visit } from '../router.ts';
 import Button from '../ui/Button.vue';

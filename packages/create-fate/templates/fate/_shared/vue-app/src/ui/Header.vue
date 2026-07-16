@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { Search } from '@lucide/vue';
 import { Link } from '@void/vue';
-import { Search } from 'lucide-vue-next';
 import Button from './Button.vue';
 </script>
 

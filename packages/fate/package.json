@@ -72,10 +72,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@trpc/client": "^11.17.0",
-    "@trpc/server": "^11.17.0",
+    "@trpc/client": "^11.18.0",
+    "@trpc/server": "^11.18.0",
     "drizzle-orm": "^0.45.2",
-    "vite": "^8.0.16"
+    "vite": "catalog:"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0",

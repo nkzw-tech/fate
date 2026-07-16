@@ -3,7 +3,7 @@ import findWorkspaces from '@nkzw/find-workspaces';
 import nkzw from '@nkzw/oxlint-config';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
-import { configDefaults } from 'vitest/config';
+import { configDefaults } from 'vite-plus';
 
 const root = process.cwd();
 

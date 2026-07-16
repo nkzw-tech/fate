@@ -46,7 +46,7 @@
     "@nkzw/fate": "workspace:^"
   },
   "devDependencies": {
-    "vue": "^3.5.35"
+    "vue": "^3.5.39"
   },
   "peerDependencies": {
     "vue": "^3.5.0"

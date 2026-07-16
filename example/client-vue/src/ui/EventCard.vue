@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, CalendarDays, MapPin, Users } from 'lucide-vue-next';
+import { ArrowUpRight, CalendarDays, MapPin, Users } from '@lucide/vue';
 import { defineComponent, h, type PropType } from 'vue';
 import type { ViewRef } from 'vue-fate';
 import { useView } from 'vue-fate';

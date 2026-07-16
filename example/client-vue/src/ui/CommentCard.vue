@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue';
 import type { Comment } from '@nkzw/fate-server/src/trpc/views.ts';
-import { X } from 'lucide-vue-next';
 import type { ViewRef } from 'vue-fate';
 import { useFateClient, useView, view } from 'vue-fate';
 import { CommentView } from '../fateViews.ts';

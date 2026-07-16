@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, LogIn, LogOut, Search } from 'lucide-vue-next';
+import { ChevronLeft, LogIn, LogOut, Search } from '@lucide/vue';
 import { path, goHomeOrBack, visit } from '../router.ts';
 import AuthClient from '../user/AuthClient.ts';
 import Button from './Button.vue';

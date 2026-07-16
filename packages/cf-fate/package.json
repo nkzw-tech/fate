@@ -40,7 +40,7 @@
     "build": "vp pack -d lib --target=node24 src/index.ts src/client.ts src/server.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "^1.0.3"
+    "@nkzw/fate": "^1.3.1"
   },
   "devDependencies": {
     "vite": "catalog:"

@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "dependencies": {
-    "@clack/prompts": "^1.5.0"
+    "@clack/prompts": "^1.7.0"
   },
   "engines": {
     "node": ">=24.0.0"
