@@ -600,9 +600,13 @@ export function createHTTPTransport<
       return record;
     };
 
-    const resolveConnectionNode = async (subscription: LiveSubscription, id: string | number) => {
+    const resolveConnectionNode = async (
+      subscription: LiveSubscription,
+      id: string | number,
+      nodeType: string,
+    ) => {
       const [record] = await transport.fetchById(
-        subscription.type,
+        nodeType,
         [id],
         subscription.select,
         subscription.selectionArgs,
@@ -758,7 +762,7 @@ export function createHTTPTransport<
           return;
         }
 
-        void resolveConnectionNode(subscription, id)
+        void resolveConnectionNode(subscription, id, nodeType)
           .then(sendNode)
           .catch((error) => reportSubscriptionError(subscription, error));
       };

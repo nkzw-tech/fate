@@ -544,6 +544,75 @@ test('subscribes to live connector connection topics', async () => {
   dispose?.();
 });
 
+test('uses the live event node type to fetch connection records without data', async () => {
+  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (String(input) === 'http://local/fate/live') {
+      return jsonResponse({
+        accepted: true,
+        connectionId: body.connectionId,
+        results: body.operations.map((operation: { id: string; kind: 'subscribe' }) => ({
+          id: operation.id,
+          kind: operation.kind,
+          ok: true,
+        })),
+      });
+    }
+
+    return jsonResponse({
+      results: [
+        {
+          data: [{ id: 'comment-1', title: 'Fetched' }],
+          id: body.operations[0].id,
+          ok: true,
+        },
+      ],
+      version: 1,
+    });
+  });
+  const onEvent = vi.fn();
+  const args = { id: 'post-1' };
+  const topic = liveConnectionTopic('Post.comments', args);
+  const transport = createHTTPTransport<{ mutations: Record<never, never> }>({
+    eventSource: resetMockEventSource(),
+    fetch,
+    live: liveConnector(),
+    url: 'http://local/fate',
+  });
+
+  const dispose = transport.subscribeConnection?.(
+    'Post.comments',
+    '',
+    args,
+    new Set(['id', 'title']),
+    undefined,
+    { onEvent },
+  );
+
+  const source = await openLiveStream();
+  source.message({
+    data: { id: 'comment-1', nodeType: 'Comment' },
+    subscriptionId: '1',
+    topic,
+    type: 'appendNode',
+  });
+
+  await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
+  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  const byIdCall = calls.find(([input]) => input === 'http://local/fate');
+  const operation = JSON.parse(String(byIdCall?.[1].body ?? '{}')).operations[0];
+
+  expect(operation.type).toBe('Comment');
+  expect(onEvent).toHaveBeenCalledWith({
+    edge: {
+      node: { id: 'comment-1', title: 'Fetched' },
+    },
+    nodeType: 'Comment',
+    type: 'appendNode',
+  });
+  dispose?.();
+});
+
 test('reports live connector connection errors once per subscription', async () => {
   const fetch = liveControlFetch();
   const onError = vi.fn();

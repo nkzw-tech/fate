@@ -823,6 +823,70 @@ test('live nested list changes keep the owner field in sync', () => {
   expect(getNodeRefIds(client.store.read(postId)?.comments)).toEqual([commentTwoId]);
 });
 
+test('derives empty nested connection types from the schema', () => {
+  const subscribeConnection = vi.fn(() => vi.fn());
+  const client = createClient({
+    roots: {},
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      subscribeConnection,
+    },
+    types: [{ fields: { comments: { listOf: 'Comment' } }, type: 'Post' }, { type: 'Comment' }],
+  });
+
+  const CommentView = view<Comment>()({
+    content: true,
+    id: true,
+  });
+  const PostView = view<Post>()({
+    comments: {
+      items: {
+        node: CommentView,
+      },
+    },
+    id: true,
+  });
+  const plan = getSelectionPlan(PostView, null);
+
+  client.write(
+    'Post',
+    {
+      __typename: 'Post',
+      comments: [],
+      id: 'post-1',
+    },
+    plan.paths,
+    undefined,
+    plan,
+  );
+
+  const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const post = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
+  const metadata = (post.comments as unknown as AnyRecord)[
+    ConnectionTag as any
+  ] as ConnectionMetadata;
+
+  expect(metadata.type).toBe('Comment');
+
+  client.subscribeLiveListView(CommentView, metadata);
+
+  expect(subscribeConnection).toHaveBeenCalledWith(
+    'Post.comments',
+    'Comment',
+    { id: 'post-1' },
+    expect.any(Set),
+    undefined,
+    expect.objectContaining({
+      onError: expect.any(Function),
+      onEvent: expect.any(Function),
+    }),
+  );
+});
+
 test('hidden live nested list appends do not leak into the owner field', () => {
   let handlers: any;
   const client = createClient({

@@ -742,6 +742,14 @@ export class FateClient<
     return config;
   }
 
+  private getListNodeType(type: string, field: string): string {
+    const descriptor = this.getTypeConfig(type).fields?.[field];
+    if (!descriptor || descriptor === 'scalar' || !('listOf' in descriptor)) {
+      throw new Error(`fate: Could not find node type for '${type}.${field}'.`);
+    }
+    return descriptor.listOf;
+  }
+
   async executeMutation(
     key: string,
     input: unknown,
@@ -1952,15 +1960,7 @@ export class FateClient<
     const incomingIds: Array<EntityId> = [];
     const incomingCursors: Array<string | undefined> = [];
 
-    const fieldConfig = this.getTypeConfig(owner.type).fields?.[connection.field];
-    const nodeType =
-      (fieldConfig &&
-        (fieldConfig === 'scalar' ? null : 'listOf' in fieldConfig ? fieldConfig.listOf : null)) ||
-      null;
-
-    if (!nodeType) {
-      throw new Error(`fate: Could not find node type for '${owner.type}.${connection.field}'.`);
-    }
+    const nodeType = this.getListNodeType(owner.type, connection.field);
 
     for (const entry of connectionPayload.items) {
       const { node } = entry;
@@ -3130,15 +3130,8 @@ export class FateClient<
                 }
               }
               const { id: ownerRawId, type: parentType } = parseEntityId(parentId);
-              const childType = (() => {
-                for (const item of value) {
-                  if (isNodeRef(item)) {
-                    return parseEntityId(getNodeRefId(item)).type;
-                  }
-                }
-                return '';
-              })();
               if (parentType) {
+                const childType = this.getListNodeType(parentType, key);
                 const metadataArgs = (() => {
                   if (!fieldArgs?.value && ownerRawId === undefined) {
                     return undefined;
