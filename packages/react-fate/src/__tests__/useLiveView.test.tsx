@@ -2,12 +2,14 @@
  * @vitest-environment happy-dom
  */
 
-import { createClient, view, type ViewRef } from '@nkzw/fate';
-import { act, Suspense } from 'react';
+import { clientRoot, createClient, view, type ViewRef } from '@nkzw/fate';
+import { act, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
+import { useLiveListView } from '../useLiveListView.tsx';
 import { useLiveView } from '../useLiveView.tsx';
+import { useRequest } from '../useRequest.tsx';
 
 // @ts-expect-error React 🤷‍♂️
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -207,4 +209,108 @@ test('keeps the same live subscription when ref identity changes for the same en
   await Promise.resolve();
 
   expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+test('deleting the final live item does not loop', async () => {
+  let deletePost: ((id?: string | number) => void) | undefined;
+  const client = createClient({
+    roots: {
+      posts: clientRoot<
+        {
+          items: ReadonlyArray<{
+            node: Post;
+          }>;
+        },
+        'Post'
+      >('Post'),
+    },
+    transport: {
+      async fetchById() {
+        return [];
+      },
+      async fetchList() {
+        return {
+          items: [
+            {
+              cursor: 'post-1',
+              node: {
+                __typename: 'Post' as const,
+                content: 'Apple',
+                id: 'post-1',
+              },
+            },
+          ],
+          pagination: {
+            hasNext: false,
+            hasPrevious: false,
+          },
+        };
+      },
+      subscribeById: (_type, _id, _select, _args, handlers) => {
+        deletePost = handlers.onDelete;
+        return () => {};
+      },
+      subscribeConnection: () => () => {},
+    },
+    types: [{ type: 'Post' }],
+  });
+
+  const PostView = view<Post>()({
+    content: true,
+    id: true,
+  });
+  const PostConnectionView = {
+    items: { node: PostView },
+    live: { append: 'visible' as const },
+  };
+
+  await client.request({
+    posts: { list: PostConnectionView },
+  });
+
+  const PostContent = ({ postRef }: { postRef: ViewRef<'Post'> }) => {
+    const post = useLiveView(PostView, postRef);
+    return <span>{post.content}</span>;
+  };
+
+  const PostList = () => {
+    const request = useRequest({
+      posts: { list: PostConnectionView },
+    });
+    const [posts] = useLiveListView(PostConnectionView, request.posts);
+
+    return posts.length ? (
+      posts.map(({ node }) => <PostContent key={node.id} postRef={node} />)
+    ) : (
+      <span>No posts</span>
+    );
+  };
+
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(
+      <StrictMode>
+        <FateClient client={client}>
+          <Suspense fallback={null}>
+            <PostList />
+          </Suspense>
+        </FateClient>
+      </StrictMode>,
+    );
+  });
+
+  expect(container.textContent).toBe('Apple');
+  expect(deletePost).toBeTypeOf('function');
+
+  await act(async () => {
+    deletePost?.('post-1');
+  });
+
+  expect(container.textContent).toBe('No posts');
+
+  await act(async () => {
+    root.unmount();
+  });
 });

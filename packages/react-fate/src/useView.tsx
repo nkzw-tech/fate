@@ -115,6 +115,10 @@ export function useView<V extends View<any, any>>(
 
       mergedSnapshotRef.current = null;
       snapshotRef.current = null;
+      if (!coverage.length) {
+        return snapshot;
+      }
+
       return Promise.resolve(snapshot).then((value) => {
         const resolved = mergeCoverage(value);
         snapshotRef.current = resolved;
