@@ -1,20 +1,42 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defineConfig } from 'vitepress';
+import { defineConfig, type HeadConfig } from 'vitepress';
 import apiItems from '../docs/api/typedoc-sidebar.json';
 import pkg from '../packages/fate/package.json' with { type: 'json' };
 import dunkel from './theme/dunkel.json';
 import licht from './theme/licht.json';
 
 const origin = 'https://fate.technology';
+const description = 'A Modern React and Vue Data Framework';
+const ogImage = `${origin}/og-image.png`;
 const nkzwLogo = readFileSync(join(import.meta.dirname, './nkzw-logo.svg'), 'utf8');
+
+const meta = (attribute: 'name' | 'property', value: string, content: string): HeadConfig => {
+  const attributes: Record<string, string> = {};
+  attributes[attribute] = value;
+  attributes.content = content;
+  return ['meta', attributes];
+};
 
 export default defineConfig({
   cleanUrls: true,
-  description: 'A Modern React and Vue Data Framework',
+  description,
   head: [
     ['link', { href: '/icon.svg', rel: 'icon' }],
-    ['meta', { content: `${origin}/og-image.png`, name: 'og:image' }],
+    meta('property', 'og:type', 'website'),
+    meta('property', 'og:title', 'fate'),
+    meta('property', 'og:description', description),
+    meta('property', 'og:url', origin),
+    meta('property', 'og:image', ogImage),
+    meta('property', 'og:image:width', '2400'),
+    meta('property', 'og:image:height', '1260'),
+    meta('property', 'og:image:type', 'image/png'),
+    meta('property', 'og:image:alt', 'fate — A modern data framework for React and Vue'),
+    meta('name', 'twitter:card', 'summary_large_image'),
+    meta('name', 'twitter:title', 'fate'),
+    meta('name', 'twitter:description', description),
+    meta('name', 'twitter:image', ogImage),
+    meta('name', 'twitter:image:alt', 'fate — A modern data framework for React and Vue'),
   ],
   markdown: {
     theme: {
