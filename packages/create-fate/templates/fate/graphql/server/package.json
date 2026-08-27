@@ -10,9 +10,9 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
-    "dev": "NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env src/index.tsx",
+    "dev": "NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/index.tsx",
     "dev:setup": "pnpm prisma generate && pnpm generate-graphql",
-    "generate-graphql": "node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm ./scripts/generate-graphql.tsx",
+    "generate-graphql": "node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register ./scripts/generate-graphql.tsx",
     "prisma": "prisma"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/oxlint-config": "^1.2.1",
+    "@oxc-node/core": "^0.1.0",
     "@swc/core": "^1.15.33",
     "@types/node": "^25.6.0",
     "@typescript/native-preview": "7.0.0-dev.20260505.1",
@@ -50,7 +51,6 @@
     "oxfmt": "^0.48.0",
     "prisma": "^7.8.0",
     "prisma-json-types-generator": "^5.0.0",
-    "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

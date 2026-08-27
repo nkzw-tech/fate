@@ -20,14 +20,5 @@
     "types": ["vite/client"]
   },
   "exclude": ["**/.void/**/*.ts", "node_modules"],
-  "include": ["**/.fate/*.ts", "**/*.ts", "**/*.tsx"],
-  "ts-node": {
-    "transpileOnly": true,
-    "transpiler": "ts-node/transpilers/swc",
-    "files": true,
-    "compilerOptions": {
-      "module": "esnext",
-      "isolatedModules": false
-    }
-  }
+  "include": ["**/.fate/*.ts", "**/*.ts", "**/*.tsx"]
 }

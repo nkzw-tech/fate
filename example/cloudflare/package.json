@@ -14,7 +14,7 @@
     "deploy": "pnpm --filter cf-fate build && wrangler deploy",
     "dev": "pnpm --filter cf-fate build && pnpm run db:migrate && wrangler dev",
     "dev:worker": "wrangler dev",
-    "fate:generate": "TS_NODE_PROJECT=../../tsconfig.json node --conditions=development --no-warnings --loader ts-node/esm ../../packages/fate/src/cli.ts generate",
+    "fate:generate": "node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

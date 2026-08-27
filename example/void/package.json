@@ -15,7 +15,7 @@
     "db:seed": "void db seed --file db/seed.ts",
     "dev": "vp dev",
     "dev:setup": "vp run prepare:void && vp run db:seed && vp run fate:generate",
-    "fate:generate": "TS_NODE_PROJECT=../../tsconfig.json node --conditions=development --no-warnings --loader ts-node/esm ../../packages/fate/src/cli.ts generate",
+    "fate:generate": "node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate",
     "prepare:void": "void prepare"
   },
   "dependencies": {
@@ -39,13 +39,13 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@oxc-node/core": "^0.1.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "tailwindcss": "^4.3.2",
-    "ts-node": "^10.9.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },

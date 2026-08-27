@@ -43,6 +43,7 @@
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/oxlint-config": "^1.2.1",
+    "@oxc-node/core": "^0.1.0",
     "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
@@ -55,7 +56,6 @@
     "eslint-plugin-perfectionist": "^5.9.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "tailwindcss": "^4.2.4",
-    "ts-node": "^10.9.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

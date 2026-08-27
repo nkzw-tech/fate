@@ -21,14 +21,5 @@
     "types": ["vite/client", "vitepress/client"]
   },
   "exclude": ["node_modules", "packages/create-fate/templates"],
-  "include": ["**/.fate/*.ts", "**/*.d.ts", "**/*.ts", "**/*.tsx"],
-  "ts-node": {
-    "transpileOnly": true,
-    "transpiler": "ts-node/transpilers/swc",
-    "files": true,
-    "compilerOptions": {
-      "module": "esnext",
-      "isolatedModules": false
-    }
-  }
+  "include": ["**/.fate/*.ts", "**/*.d.ts", "**/*.ts", "**/*.tsx"]
 }

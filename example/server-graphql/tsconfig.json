@@ -19,15 +19,5 @@
     "target": "es2022"
   },
   "exclude": ["node_modules", "src/prisma/pothos-types.ts", "src/prisma/prisma-client"],
-  "include": ["**/*.ts", "**/*.tsx"],
-  "ts-node": {
-    "transpileOnly": true,
-    "transpiler": "ts-node/transpilers/swc",
-    "files": true,
-    "compilerOptions": {
-      "module": "esnext",
-      "isolatedModules": false,
-      "target": "es2022"
-    }
-  }
+  "include": ["**/*.ts", "**/*.tsx"]
 }

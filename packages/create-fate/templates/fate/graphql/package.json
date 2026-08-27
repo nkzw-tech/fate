@@ -23,6 +23,7 @@
     "@app/server": "workspace:*",
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/oxlint-config": "^1.2.1",
+    "@oxc-node/core": "^0.1.0",
     "@swc/core": "^1.15.33",
     "@types/node": "^25.6.0",
     "@typescript/native-preview": "7.0.0-dev.20260505.1",
@@ -34,7 +35,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "npm-run-all2": "^8.0.4",
     "prisma": "^7.8.0",
-    "ts-node": "^10.9.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

@@ -11,7 +11,7 @@ dotenv.config({
 
 export default defineConfig({
   migrations: {
-    seed: `node --no-warnings --experimental-specifier-resolution=node --loader ts-node/esm --env-file .env src/prisma/seed.tsx`,
+    seed: `node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/prisma/seed.tsx`,
   },
   schema: './src/prisma/schema.prisma',
 });
