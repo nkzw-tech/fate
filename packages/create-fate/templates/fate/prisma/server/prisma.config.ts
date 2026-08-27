@@ -15,7 +15,7 @@ export default defineConfig({
     url: env('DATABASE_URL'),
   },
   migrations: {
-    seed: `node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/prisma/seed.tsx`,
+    seed: `OXC_TSCONFIG_PATH=../tsconfig.json node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/prisma/seed.tsx`,
   },
   schema: './src/prisma/schema.prisma',
 });

@@ -31,7 +31,7 @@
     "dev:void": "cd example/void && vp dev",
     "dev:vue": "vp run --filter '@nkzw/fate' build && vp run --filter vue-fate build && npm-run-all --parallel dev:vue-client dev:server",
     "dev:vue-client": "cd example/client-vue && vp dev",
-    "fate:generate": "(cd example/client && node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate)",
+    "fate:generate": "(cd example/client && OXC_TSCONFIG_PATH=../../tsconfig.json node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate)",
     "generate-readme": "node --conditions=development --no-warnings --import @oxc-node/core/register scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",

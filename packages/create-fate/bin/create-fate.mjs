@@ -959,6 +959,12 @@ const main = async () => {
   const templateRoot = resolveTemplateRoot(variants[selectedVariant].template);
   fs.mkdirSync(targetPath, { recursive: true });
   fs.cpSync(templateRoot, targetPath, { recursive: true });
+  if (selectedVariant === 'graphql') {
+    fs.copyFileSync(
+      path.resolve(packageRoot, 'templates', 'fate', 'void', 'seedData.ts'),
+      path.join(targetPath, 'seedData.ts'),
+    );
+  }
   if (selectedFramework === 'vue') {
     configureVueTemplate(targetPath, selectedVariant);
   }

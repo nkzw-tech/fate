@@ -23,7 +23,7 @@
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.2.4",
     "@void/react": "^0.7.13",
-    "better-auth": "^1.6.9",
+    "better-auth": "~1.6.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fbtee": "^1.7.4",

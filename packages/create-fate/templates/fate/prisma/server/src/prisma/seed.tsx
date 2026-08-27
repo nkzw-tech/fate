@@ -1,4 +1,4 @@
-#!/usr/bin/env NODE_ENV=development node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env
+#!/usr/bin/env NODE_ENV=development OXC_TSCONFIG_PATH=../tsconfig.json node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env
 import { styleText } from 'node:util';
 import randomEntry from '@nkzw/core/randomEntry.js';
 import { auth } from '../lib/auth.ts';

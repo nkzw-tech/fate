@@ -96,7 +96,7 @@ const CommentInput = ({
               id: user.id,
               name: user.name ?? 'Anonymous',
             }
-          : null,
+          : undefined,
         content,
         id: `optimistic:${Date.now().toString(36)}`,
         post: { commentCount: post.commentCount + 1, id: post.id },

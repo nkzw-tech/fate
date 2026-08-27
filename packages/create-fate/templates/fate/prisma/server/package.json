@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
-    "dev": "NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/index.tsx",
+    "dev": "NODE_ENV=development OXC_TSCONFIG_PATH=../tsconfig.json node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/index.tsx",
     "dev:setup": "vp exec prisma generate",
     "prisma": "prisma"
   },
@@ -23,7 +23,7 @@
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@trpc/server": "^11.17.0",
-    "better-auth": "^1.6.9",
+    "better-auth": "~1.6.9",
     "hono": "^4.12.17",
     "zod": "^4.4.3"
   },

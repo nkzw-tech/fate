@@ -19,5 +19,5 @@
     "target": "es2022"
   },
   "exclude": ["node_modules", "src/prisma/pothos-types.ts", "src/prisma/prisma-client"],
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["../seedData.ts", "**/*.ts", "**/*.tsx"]
 }

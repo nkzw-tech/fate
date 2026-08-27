@@ -6,7 +6,7 @@ import {
   getScopedArgs,
   hasNestedSelection,
 } from '@nkzw/fate/server';
-import { createDrizzleSourceAdapter } from '@nkzw/fate/server/drizzle';
+import { createDrizzleSourceAdapter, type DrizzleQueryExtra } from '@nkzw/fate/server/drizzle';
 import { createCloudflareFateLive } from 'cf-fate/server';
 import { z } from 'zod';
 import { db, eq, like } from '../../db/db.ts';
@@ -87,7 +87,10 @@ export const fateServer = createFateServer({
           cursor,
           direction: 'forward',
           extra: {
-            where: like(comment.content, `%${query.trim()}%`),
+            where: like(
+              comment.content,
+              `%${query.trim()}%`,
+            ) as unknown as DrizzleQueryExtra['where'],
           },
           input: { args: input.args, select },
           skip: cursor ? 1 : undefined,

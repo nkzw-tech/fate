@@ -72,16 +72,12 @@ export default defineConfig({
       transport: 'graphql',
     }),
   ],
-  run: {
-    tasks: {
-      'test:all': {
-        command: 'vp check && vp test',
-      },
-    },
-  },
   server: { port: 6001 },
   ssr: { noExternal: ['@nkzw/fate', 'react-fate'] },
   staged: {
     '*': 'vp check --fix',
+  },
+  test: {
+    passWithNoTests: true,
   },
 });

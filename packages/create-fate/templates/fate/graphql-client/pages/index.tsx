@@ -1,14 +1,57 @@
-import { ConnectionRef, useListView, useRequest } from 'react-fate';
-import { postDataView, userDataView } from '../src/fate/graphql.ts';
+import { ConnectionRef, useListView, useRequest, useView, view, ViewRef } from 'react-fate';
+import type { Post, User } from '../src/fate/graphql.ts';
+
+const UserView = view<User>()({
+  id: true,
+  name: true,
+  username: true,
+});
+
+const PostView = view<Post>()({
+  author: UserView,
+  title: true,
+});
 
 const PostConnectionView = {
   args: { first: 10 },
   items: {
-    node: postDataView,
+    node: PostView,
   },
   pagination: {
     hasNext: true,
   },
+};
+
+const UserName = ({ user: userRef }: { user: ViewRef<'User'> }) => {
+  const user = useView(UserView, userRef);
+
+  return user.name ?? user.username ?? user.id;
+};
+
+const PostItem = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
+  const post = useView(PostView, postRef);
+
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <h3 className="text-lg font-semibold">{post.title}</h3>
+      {post.author ? (
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          <UserName user={post.author} />
+        </p>
+      ) : null}
+    </article>
+  );
+};
+
+const Viewer = ({ viewer: viewerRef }: { viewer: ViewRef<'User'> }) => {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">Viewer</h2>
+      <p className="mt-2 text-lg font-semibold">
+        <UserName user={viewerRef} />
+      </p>
+    </section>
+  );
 };
 
 const PostList = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
@@ -18,17 +61,7 @@ const PostList = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
     <section className="space-y-4">
       <h2 className="text-2xl font-semibold">Posts</h2>
       {posts.map(({ node }) => (
-        <article
-          className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-          key={node.id}
-        >
-          <h3 className="text-lg font-semibold">{node.title}</h3>
-          {node.author ? (
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              {node.author.name ?? node.author.username ?? node.author.id}
-            </p>
-          ) : null}
-        </article>
+        <PostItem key={node.id} post={node} />
       ))}
     </section>
   );
@@ -37,7 +70,7 @@ const PostList = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
 export default function HomePage() {
   const { posts, viewer } = useRequest({
     posts: { list: PostConnectionView },
-    viewer: { view: userDataView },
+    viewer: { view: UserView },
   });
 
   return (
@@ -55,14 +88,7 @@ export default function HomePage() {
         </p>
       </header>
 
-      {viewer ? (
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">Viewer</h2>
-          <p className="mt-2 text-lg font-semibold">
-            {viewer.name ?? viewer.username ?? viewer.id}
-          </p>
-        </section>
-      ) : null}
+      {viewer ? <Viewer viewer={viewer} /> : null}
       <PostList posts={posts} />
     </main>
   );

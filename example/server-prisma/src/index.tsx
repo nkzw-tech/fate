@@ -1,4 +1,4 @@
-#!/usr/bin/env NODE_ENV=development node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env
+#!/usr/bin/env NODE_ENV=development OXC_TSCONFIG_PATH=../../tsconfig.json node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env
 import { parseArgs, styleText } from 'node:util';
 import { serve } from '@hono/node-server';
 import { trpcServer } from '@hono/trpc-server';
