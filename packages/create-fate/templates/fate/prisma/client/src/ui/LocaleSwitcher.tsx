@@ -12,7 +12,7 @@ export default function LocaleSwitcher() {
   return (
     <>
       <Button asChild size="sm" variant="ghost">
-        <button popoverTarget="locale-switcher" popoverTargetAction="show">
+        <button popoverTarget="locale-switcher" popoverTargetAction="show" type="button">
           <Languages className="h-4 w-4" />
           <span className="hidden sm:inline">
             <fbt desc="Locale switcher button">Change Language</fbt>

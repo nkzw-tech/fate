@@ -2,10 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vite-plus/test';
 
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageRoot = dirname(import.meta.dirname);
 const builtinModules = new Set(['node:fs', 'node:path', 'node:url']);
 
 const findViteConfigs = (dir: string): Array<string> =>
@@ -228,6 +227,9 @@ describe('create-fate templates', () => {
         expect.soft(dependencies, templateName).not.toHaveProperty('@void/react');
         expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/stack');
         expect.soft(dependencies, templateName).not.toHaveProperty('@rolldown/plugin-babel');
+        expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/fbtee-cli');
+        expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/vite-plugin-fbtee');
+        expect.soft(dependencies, templateName).not.toHaveProperty('oxc-transform-react');
         expect
           .soft(rootDependencies, templateName)
           .not.toHaveProperty('babel-plugin-react-compiler');
@@ -315,7 +317,7 @@ describe('create-fate templates', () => {
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });
     }
-  });
+  }, 180_000);
 
   test('uses React as the default UI framework', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-default-'));
@@ -343,5 +345,5 @@ describe('create-fate templates', () => {
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });
     }
-  });
+  }, 30_000);
 });

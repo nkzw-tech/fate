@@ -309,7 +309,7 @@ export function wrapMutation<
 
           return { error, result: undefined };
         } else {
-          throw new Error(`fate: Mutation '${identifier.key}' failed.`);
+          throw new Error(`fate: Mutation '${identifier.key}' failed.`, { cause: error });
         }
       } finally {
         client.clearOptimisticUpdate(optimisticToken);

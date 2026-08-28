@@ -65,7 +65,7 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/graphqlTransport.ts src/vite.ts"
+    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/graphqlTransport.ts src/vite.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",
@@ -80,7 +80,7 @@
   "peerDependencies": {
     "@trpc/client": "^11.6.0",
     "drizzle-orm": "^0.45.0",
-    "graphql": "^16.0.0",
+    "graphql": "^16.0.0 || ^17.0.0",
     "graphql-sse": "^2.6.0",
     "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
   },

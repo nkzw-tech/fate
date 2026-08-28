@@ -1,7 +1,6 @@
 import nkzw from '@nkzw/oxlint-config';
-import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
 import { defineConfig, lazyPlugins } from 'vite-plus';
@@ -64,11 +63,9 @@ export default defineConfig({
   },
   plugins: [
     ...(lazyPlugins(() => [
-      babel({
-        presets: [reactCompilerPreset()],
-      }),
       tailwindcss(),
       ...(isTest ? [] : [voidPlugin(), voidReact()]),
+      react({ compiler: true }),
     ]) ?? []),
     fate({
       module: './src/fate/server.ts',

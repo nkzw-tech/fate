@@ -9,7 +9,15 @@ dotenv.config({
   quiet: true,
 });
 
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('Missing DATABASE_URL.');
+}
+
 export default defineConfig({
+  datasource: {
+    url: databaseUrl,
+  },
   migrations: {
     seed: `node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/prisma/seed.tsx`,
   },

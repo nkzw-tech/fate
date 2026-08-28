@@ -194,7 +194,7 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
   };
 
   return {
-    buildStart: async function () {
+    async buildStart() {
       await ensureGenerated();
 
       const resolvedServerModule = await this.resolve(options.module);

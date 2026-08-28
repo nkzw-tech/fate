@@ -147,6 +147,7 @@ test('loads additional items when loadNext is invoked', async () => {
         onClick={async () => {
           await loadNext?.();
         }}
+        type="button"
       >
         load
       </button>
@@ -300,6 +301,7 @@ test('loadNext forwards the limit when the initial request used last/before', as
         onClick={async () => {
           await loadNext?.();
         }}
+        type="button"
       >
         load
       </button>

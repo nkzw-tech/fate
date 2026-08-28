@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, URL } from 'node:url';
+import { URL } from 'node:url';
 import { cancel, intro, isCancel, outro, select, text } from '@clack/prompts';
 
 const variants = {
@@ -352,8 +352,10 @@ const removePackageEntries = (record, names) => {
 
 const reactPackageEntries = [
   '@nkzw/babel-preset-fbtee',
+  '@nkzw/fbtee-cli',
   '@radix-ui/react-slot',
   '@nkzw/stack',
+  '@nkzw/vite-plugin-fbtee',
   '@rolldown/plugin-babel',
   '@types/react',
   '@types/react-dom',
@@ -363,6 +365,7 @@ const reactPackageEntries = [
   'eslint-plugin-react-hooks',
   'fbtee',
   'lucide-react',
+  'oxc-transform-react',
   'react',
   'react-dom',
   'react-error-boundary',
@@ -911,7 +914,7 @@ const printReadme = (targetPath) => {
   process.stdout.write('\n');
 };
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageRoot = path.resolve(import.meta.dirname, '..');
 
 const resolveTemplateRoot = (template) => {
   const templateRoot = path.resolve(packageRoot, 'templates', 'fate', template);

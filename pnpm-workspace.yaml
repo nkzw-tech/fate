@@ -7,16 +7,17 @@ allowBuilds:
   '@swc/core': true
   better-sqlite3: true
   esbuild: true
+  msgpackr-extract: true
   prisma: true
   sharp: true
   unrs-resolver: true
   workerd: true
 
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
-  vite-plus: 0.2.4
-  vitest: 4.1.10
-  '@vitest/coverage-v8': 4.1.10
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vite-plus: 0.3.0
+  vitest: 4.1.11
+  '@vitest/coverage-v8': 4.1.11
 
 onlyBuiltDependencies:
   - '@prisma/client'
@@ -32,6 +33,7 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  better-auth: 1.7.2
   kysely: 0.28.17
   vite: 'catalog:'
   vitest: 'catalog:'

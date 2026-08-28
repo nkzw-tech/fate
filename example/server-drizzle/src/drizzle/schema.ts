@@ -77,6 +77,7 @@ export const account = pgTable(
     createdAt: timestamp({ mode: 'date' }).notNull().defaultNow(),
     id: idColumn().primaryKey(),
     idToken: text(),
+    issuer: text().notNull(),
     password: text(),
     providerId: text().notNull(),
     refreshToken: text(),
@@ -87,9 +88,7 @@ export const account = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
   },
-  (table) => [
-    uniqueIndex('account_providerId_accountId_key').on(table.providerId, table.accountId),
-  ],
+  (table) => [uniqueIndex('account_issuer_accountId_key').on(table.issuer, table.accountId)],
 );
 
 export const category = pgTable(

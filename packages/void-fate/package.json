@@ -37,17 +37,17 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.ts src/react.tsx src/server.ts"
+    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/react.tsx src/server.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "^1.3.1",
-    "react-fate": "^1.3.1"
+    "@nkzw/fate": "workspace:^",
+    "react-fate": "workspace:^"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "react": "^19.2.7",
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
     "vite": "catalog:",
-    "void": "^0.10.10"
+    "void": "^0.10.12"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",

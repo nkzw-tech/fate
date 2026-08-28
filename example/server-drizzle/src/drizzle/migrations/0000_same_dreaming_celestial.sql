@@ -7,6 +7,7 @@ CREATE TABLE "account" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"id" text PRIMARY KEY NOT NULL,
 	"idToken" text,
+	"issuer" text NOT NULL,
 	"password" text,
 	"providerId" text NOT NULL,
 	"refreshToken" text,
@@ -119,7 +120,7 @@ ALTER TABLE "Post" ADD CONSTRAINT "Post_categoryId_Category_id_fk" FOREIGN KEY (
 ALTER TABLE "_PostTags" ADD CONSTRAINT "_PostTags_A_Post_id_fk" FOREIGN KEY ("A") REFERENCES "public"."Post"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "_PostTags" ADD CONSTRAINT "_PostTags_B_Tag_id_fk" FOREIGN KEY ("B") REFERENCES "public"."Tag"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_userId_user_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "account_providerId_accountId_key" ON "account" USING btree ("providerId","accountId");--> statement-breakpoint
+CREATE UNIQUE INDEX "account_issuer_accountId_key" ON "account" USING btree ("issuer","accountId");--> statement-breakpoint
 CREATE UNIQUE INDEX "Category_name_key" ON "Category" USING btree ("name");--> statement-breakpoint
 CREATE INDEX "Comment_authorId_idx" ON "Comment" USING btree ("authorId");--> statement-breakpoint
 CREATE INDEX "Comment_postId_idx" ON "Comment" USING btree ("postId");--> statement-breakpoint

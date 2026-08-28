@@ -27,6 +27,7 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  better-auth: 1.7.2
   vite: 'catalog:'
   vitest: 'catalog:'
 

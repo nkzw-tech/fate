@@ -1,7 +1,6 @@
 import { join } from 'node:path';
-import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
@@ -24,12 +23,10 @@ if (!process.env.VITE_SERVER_URL) {
 process.env.VITE_FATE_TRANSPORT = 'graphql';
 
 const lazyClientPlugins = (): Array<PluginOption> => [
-  babel({
-    presets: [reactCompilerPreset()],
-  }) as PluginOption,
   tailwindcss() as PluginOption,
   voidPlugin() as PluginOption,
   voidReact() as PluginOption,
+  react({ compiler: true }) as PluginOption,
 ];
 
 export default defineConfig({

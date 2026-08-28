@@ -40,16 +40,16 @@
     }
   },
   "scripts": {
-    "build": "vp pack -d lib --target=node24 src/index.tsx src/client.ts src/cli.ts src/vite.ts"
+    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.tsx src/client.ts src/cli.ts src/vite.ts"
   },
   "dependencies": {
     "@nkzw/fate": "workspace:^"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "peerDependencies": {
     "react": "^19.2.0",

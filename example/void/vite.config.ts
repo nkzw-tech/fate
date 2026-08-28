@@ -1,6 +1,5 @@
-import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
 import type { PluginOption } from 'vite-plus';
@@ -8,12 +7,10 @@ import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 
 const lazyVoidPlugins = (): Array<PluginOption> => [
-  babel({
-    presets: [reactCompilerPreset()],
-  }) as PluginOption,
   tailwindcss() as PluginOption,
   voidPlugin() as PluginOption,
   voidReact() as PluginOption,
+  react({ compiler: true }) as PluginOption,
 ];
 
 export default defineConfig({

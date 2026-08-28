@@ -1,8 +1,7 @@
 import { join } from 'node:path';
-import fbteePreset from '@nkzw/babel-preset-fbtee';
-import babel from '@rolldown/plugin-babel';
+import fbtee from '@nkzw/vite-plugin-fbtee';
 import tailwindcss from '@tailwindcss/vite';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
@@ -25,12 +24,11 @@ export default defineConfig({
   build: { outDir: join(root, '../dist/client') },
   plugins: [
     ...(lazyPlugins(() => [
-      babel({
-        presets: [fbteePreset, reactCompilerPreset()],
-      }),
+      fbtee(),
       tailwindcss(),
       voidPlugin(),
       voidReact(),
+      react({ compiler: true }),
     ]) ?? []),
     fate({
       module: '@app/server/src/graphql/fate.ts',

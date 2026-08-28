@@ -46,6 +46,7 @@ const PostFeed = ({
               user ? 'active:translate-y-0.5 active:opacity-50' : 'pointer-events-none opacity-0',
             )}
             onClick={() => setShowPostEditor((showPostEditor) => !showPostEditor)}
+            type="button"
           >
             {showPostEditor ? (
               <CircleMinus className="h-6 w-6" />

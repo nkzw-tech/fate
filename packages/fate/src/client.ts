@@ -2691,7 +2691,7 @@ export class FateClient<
         const fieldArgs = plan?.args.get(fieldPath);
         const isFieldBlocked = blockedMask ? isCovered(blockedMask, fieldPath) : false;
         if (relationDescriptor === 'scalar') {
-          if (isFieldBlocked || !Object.prototype.hasOwnProperty.call(record, key)) {
+          if (isFieldBlocked || !Object.hasOwn(record, key)) {
             continue;
           }
           result[key] = value;

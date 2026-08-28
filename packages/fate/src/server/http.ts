@@ -169,18 +169,22 @@ type RootOutput<Root> =
     : never;
 
 type RootLists<Roots extends RootMap> = {
-  [K in keyof Roots as RootView<Roots[K]>['kind'] extends 'list'
-    ? RootProcedure<Roots[K], K & string>
-    : never]: {
+  [
+    K in keyof Roots as RootView<Roots[K]>['kind'] extends 'list'
+      ? RootProcedure<Roots[K], K & string>
+      : never
+  ]: {
     input: OperationInput;
     output: RootOutput<Roots[K]>;
   };
 };
 
 type RootQueries<Roots extends RootMap> = {
-  [K in keyof Roots as RootView<Roots[K]>['kind'] extends 'list'
-    ? never
-    : RootProcedure<Roots[K], K & string>]: {
+  [
+    K in keyof Roots as RootView<Roots[K]>['kind'] extends 'list'
+      ? never
+      : RootProcedure<Roots[K], K & string>
+  ]: {
     input: OperationInput;
     output: RootOutput<Roots[K]>;
   };
@@ -249,8 +253,9 @@ const sseHeaders = {
   'content-type': 'text/event-stream; charset=utf-8',
 } as const;
 
-const normalizeRootConfig = (root: RootConfig): { procedure?: string; view: DataView<AnyRecord> } =>
-  isDataView(root) ? { view: root } : root;
+const normalizeRootConfig = (
+  root: RootConfig,
+): { procedure?: string; view: DataView<AnyRecord> } => (isDataView(root) ? { view: root } : root);
 
 const rootProcedureName = (name: string, _root: RootConfig): string => {
   return name;
@@ -489,8 +494,7 @@ const sse = (message: FateLiveMessage, eventId?: string): string => {
   if (eventId) {
     lines.push(`id: ${eventId}`);
   }
-  lines.push(`event: ${message.kind}`);
-  lines.push(`data: ${JSON.stringify(message)}`);
+  lines.push(`event: ${message.kind}`, `data: ${JSON.stringify(message)}`);
   return `${lines.join('\n')}\n\n`;
 };
 

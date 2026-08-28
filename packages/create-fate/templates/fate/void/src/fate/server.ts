@@ -7,8 +7,9 @@ import {
   hasNestedSelection,
 } from '@nkzw/fate/server';
 import { createDrizzleSourceAdapter, type DrizzleQueryExtra } from '@nkzw/fate/server/drizzle';
+import { like } from 'drizzle-orm';
 import { createVoidFateLive } from 'void-fate/server';
-import { db, eq, like } from 'void/db';
+import { db, eq } from 'void/db';
 import { z } from 'zod';
 import {
   type CommentItem,

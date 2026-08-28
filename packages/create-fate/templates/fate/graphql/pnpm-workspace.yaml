@@ -31,6 +31,7 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  better-auth: 1.7.2
   kysely: 0.28.17
   vite: 'catalog:'
   vitest: 'catalog:'

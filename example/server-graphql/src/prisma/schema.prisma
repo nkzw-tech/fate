@@ -69,6 +69,7 @@ model Account {
   id                    String    @unique @default(uuid(7))
   accountId             String
   providerId            String
+  issuer                String
   userId                String
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
@@ -81,7 +82,7 @@ model Account {
   createdAt             DateTime
   updatedAt             DateTime
 
-  @@unique([providerId, accountId])
+  @@unique([issuer, accountId])
   @@map("account")
 }
 

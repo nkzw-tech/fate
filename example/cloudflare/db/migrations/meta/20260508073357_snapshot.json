@@ -50,6 +50,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "issuer": {
+          "name": "issuer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "password": {
           "name": "password",
           "type": "text",
@@ -102,9 +109,9 @@
         }
       },
       "indexes": {
-        "account_providerId_accountId_key": {
-          "name": "account_providerId_accountId_key",
-          "columns": ["providerId", "accountId"],
+        "account_issuer_accountId_key": {
+          "name": "account_issuer_accountId_key",
+          "columns": ["issuer", "accountId"],
           "isUnique": true
         }
       },

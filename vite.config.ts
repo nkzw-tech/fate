@@ -80,16 +80,16 @@ export default defineConfig({
         ],
         rules: {
           'no-console': 'off',
-          'react-hooks-js/globals': 'off',
+          'react/globals': 'off',
         },
       },
       {
         files: ['packages/vue-fate/**', 'example/client-vue/**'],
         rules: {
           'no-undef': 'off',
-          'react-hooks-js/globals': 'off',
-          'react-hooks-js/immutability': 'off',
           'react-hooks/rules-of-hooks': 'off',
+          'react/globals': 'off',
+          'react/immutability': 'off',
         },
       },
     ],

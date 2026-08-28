@@ -260,16 +260,14 @@ export function connectCloudflareFateStream(
         operations = [
           ...[...subscriptions.values()]
             .filter((subscription) => !pendingIds.has(subscription.id))
-            .map(
-              (subscription): LiveControlOperation => ({
-                id: subscription.id,
-                kind: 'subscribe',
-                topic: subscription.topic,
-                ...(subscription.lastEventId !== undefined && {
-                  lastEventId: subscription.lastEventId,
-                }),
+            .map((subscription): LiveControlOperation => ({
+              id: subscription.id,
+              kind: 'subscribe',
+              topic: subscription.topic,
+              ...(subscription.lastEventId !== undefined && {
+                lastEventId: subscription.lastEventId,
               }),
-            ),
+            })),
           ...operations,
         ];
       }

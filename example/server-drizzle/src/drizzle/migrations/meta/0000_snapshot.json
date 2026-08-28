@@ -45,6 +45,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "issuer": {
+          "name": "issuer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "password": {
           "name": "password",
           "type": "text",
@@ -90,11 +96,11 @@
         }
       },
       "indexes": {
-        "account_providerId_accountId_key": {
-          "name": "account_providerId_accountId_key",
+        "account_issuer_accountId_key": {
+          "name": "account_issuer_accountId_key",
           "columns": [
             {
-              "expression": "providerId",
+              "expression": "issuer",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

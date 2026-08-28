@@ -579,6 +579,7 @@ function assertJsonSerializable(value: unknown): void {
   } catch (error) {
     throw new Error(
       `cf-fate: payload must be JSON-serializable. ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }

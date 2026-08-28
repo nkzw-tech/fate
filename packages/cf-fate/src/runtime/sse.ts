@@ -290,6 +290,7 @@ function serializeData(data: unknown): string {
   } catch (error) {
     throw new Error(
       `sse: data must be JSON-serializable. ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }

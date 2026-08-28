@@ -5,6 +5,7 @@ CREATE TABLE `account` (
 	`createdAt` integer DEFAULT (unixepoch()) NOT NULL,
 	`id` text PRIMARY KEY NOT NULL,
 	`idToken` text,
+	`issuer` text NOT NULL,
 	`password` text,
 	`providerId` text NOT NULL,
 	`refreshToken` text,
@@ -15,7 +16,7 @@ CREATE TABLE `account` (
 	FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `account_providerId_accountId_key` ON `account` (`providerId`,`accountId`);--> statement-breakpoint
+CREATE UNIQUE INDEX `account_issuer_accountId_key` ON `account` (`issuer`,`accountId`);--> statement-breakpoint
 CREATE TABLE `Category` (
 	`createdAt` integer DEFAULT (unixepoch()) NOT NULL,
 	`description` text,
