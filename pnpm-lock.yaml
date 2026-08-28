@@ -86,15 +86,6 @@ importers:
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
-      typedoc:
-        specifier: ^0.28.20
-        version: 0.28.20(typescript@7.0.2)
-      typedoc-plugin-markdown:
-        specifier: ^4.13.0
-        version: 4.13.0(typedoc@0.28.20(typescript@7.0.2))
-      typedoc-vitepress-theme:
-        specifier: ^1.1.3
-        version: 1.1.3(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@7.0.2)))
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -625,6 +616,21 @@ importers:
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
+
+  packages/docs-toolchain:
+    dependencies:
+      typedoc:
+        specifier: ^0.28.20
+        version: 0.28.20(typescript@6.0.3)
+      typedoc-plugin-markdown:
+        specifier: ^4.13.0
+        version: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
+      typedoc-vitepress-theme:
+        specifier: ^1.1.3
+        version: 1.1.3(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/fate:
     dependencies:
@@ -10873,21 +10879,21 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
 
-  typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@7.0.2)):
+  typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)):
     dependencies:
-      typedoc: 0.28.20(typescript@7.0.2)
+      typedoc: 0.28.20(typescript@6.0.3)
 
-  typedoc-vitepress-theme@1.1.3(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@7.0.2))):
+  typedoc-vitepress-theme@1.1.3(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3))):
     dependencies:
-      typedoc-plugin-markdown: 4.13.0(typedoc@0.28.20(typescript@7.0.2))
+      typedoc-plugin-markdown: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
 
-  typedoc@0.28.20(typescript@7.0.2):
+  typedoc@0.28.20(typescript@6.0.3):
     dependencies:
       '@gerrit0/mini-shiki': 3.23.0
       lunr: 2.3.9
       markdown-it: 14.3.0
       minimatch: 10.2.6
-      typescript: 7.0.2
+      typescript: 6.0.3
       yaml: 2.9.0
 
   typescript@6.0.3: {}
