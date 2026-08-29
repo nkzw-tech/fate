@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
-    "@nkzw/oxlint-config": "^2.0.0",
+    "@nkzw/oxlint-config": "^2.0.1",
     "@oxc-node/core": "^0.1.0",
     "@swc/core": "^1.16.1",
     "@tailwindcss/vite": "^4.3.3",
@@ -38,9 +38,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
-    "eslint-plugin-no-only-tests": "^3.4.0",
-    "eslint-plugin-perfectionist": "^5.10.1",
-    "eslint-plugin-react-hooks": "^7.1.1",
     "oxc-transform-react": "^0.147.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
