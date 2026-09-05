@@ -8,11 +8,13 @@ import {
   clientRoot,
   createClient,
   defer,
+  mutation,
   toEntityId,
   view,
   type ConnectionMetadata,
   type Deferred,
   type FateMutations,
+  type FateRoots,
   type ViewRef,
 } from '@nkzw/fate';
 import { expect, test, vi } from 'vite-plus/test';
@@ -72,6 +74,53 @@ const mount = (
   app.mount(container);
   return { app, container };
 };
+
+test('pending edits update only Vue views whose selected values change', async () => {
+  const response = Promise.withResolvers<Partial<Post>>();
+  const mutations = { edit: mutation<Post, { id: string }, Partial<Post>>('Post') };
+  const client = createClient<[FateRoots, typeof mutations]>({
+    mutations,
+    roots: {},
+    transport: { fetchById: async () => [], mutate: vi.fn().mockReturnValue(response.promise) },
+    types: [{ type: 'Post' }],
+  });
+  client.write('Post', { content: 'Initial', id: '1' }, new Set(['id', 'content']));
+  const ContentView = view<Post>()({ content: true });
+  const postRef = client.ref('Post', '1', ContentView);
+  const rendered = vi.fn();
+  const Component = defineComponent({
+    setup() {
+      const post = useView(ContentView, postRef);
+      return () => {
+        rendered();
+        return h('span', post.value?.content);
+      };
+    },
+  });
+  const pending = client.mutations
+    .edit({ input: { id: '1' }, optimistic: { content: 'Pending' } })
+    .catch(() => undefined);
+  const { app, container } = mount(Component, client);
+  try {
+    await flushAsync();
+    expect(container.textContent).toBe('Pending');
+    rendered.mockClear();
+    for (let index = 0; index < 20; index++) {
+      client.write('Post', { content: String(index), id: 'other' }, new Set(['id', 'content']));
+    }
+    await flushAsync();
+    expect(rendered).not.toHaveBeenCalled();
+    response.reject(new Error('failed'));
+    await pending;
+    await flushAsync();
+    expect(rendered).toHaveBeenCalled();
+    expect(container.textContent).toBe('Initial');
+  } finally {
+    response.reject(new Error('cleanup'));
+    await pending;
+    app.unmount();
+  }
+});
 
 test('provides the fate client through Vue injection', () => {
   const client = createClient({

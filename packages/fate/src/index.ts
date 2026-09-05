@@ -30,7 +30,6 @@ export type {
   Request,
   RequestResult,
   Selection,
-  Snapshot,
   TypeConfig,
   View,
   ViewData,

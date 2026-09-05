@@ -1,4 +1,3 @@
-import { FieldMask } from './mask.ts';
 import { FateMutations } from './mutation.ts';
 
 /** Canonical runtime name for an entity type as returned by the server. */
@@ -508,9 +507,6 @@ type OptimisticUpdateValue<T> =
 export type OptimisticUpdate<T> = {
   [K in keyof T]?: OptimisticUpdateValue<T[K]>;
 };
-
-/** Snapshot captured before mutating the cache, used to roll back on errors. */
-export type Snapshot = Readonly<{ mask?: FieldMask; record?: AnyRecord }>;
 
 /** Promise-like value returned by cache reads that already have a resolved payload for React `use`. */
 export interface FateThenable<T> extends PromiseLike<T> {

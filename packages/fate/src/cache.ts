@@ -9,6 +9,8 @@ import {
 } from './types.ts';
 
 export default class ViewDataCache {
+  constructor(private readonly isEnabled: () => boolean = () => true) {}
+
   private cache = new Map<
     string,
     WeakMap<View<any, any>, WeakMap<ViewRef<string>, FateThenable<ViewSnapshot<any, any>>>>
@@ -28,6 +30,9 @@ export default class ViewDataCache {
     view: V,
     ref: ViewRef<T['__typename']>,
   ): FateThenable<ViewSnapshot<T, S>> | null {
+    if (!this.isEnabled()) {
+      return null;
+    }
     return this.cache.get(entityId)?.get(view)?.get(ref) ?? null;
   }
 
@@ -38,6 +43,9 @@ export default class ViewDataCache {
     thenable: FateThenable<ViewSnapshot<T, S>>,
     dependencies: ReadonlySet<EntityId>,
   ) {
+    if (!this.isEnabled()) {
+      return;
+    }
     let entityMap = this.cache.get(entityId);
     if (!entityMap) {
       entityMap = new WeakMap();
@@ -72,6 +80,9 @@ export default class ViewDataCache {
   }
 
   invalidate(entityId: EntityId) {
+    if (!this.isEnabled()) {
+      return;
+    }
     this.invalidateDependents(entityId, new Set());
   }
 

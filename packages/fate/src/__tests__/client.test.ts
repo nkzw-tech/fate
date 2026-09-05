@@ -16,7 +16,6 @@ import {
   FateRoots,
   FateThenable,
   SelectionOf,
-  Snapshot,
   View,
   ViewSnapshot,
   ViewsTag,
@@ -203,7 +202,6 @@ test('live view subscriptions preserve cached scalars outside narrowed updates',
       title: 'Original title',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -858,7 +856,6 @@ test('derives empty nested connection types from the schema', () => {
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -1662,13 +1659,7 @@ test(`'readView' returns null for nullable view selections`, () => {
 
   const plan = getSelectionPlan(PostView, null);
 
-  client.write(
-    'Post',
-    { __typename: 'Post', category: null, id: 'post-1' },
-    plan.paths,
-    undefined,
-    plan,
-  );
+  client.write('Post', { __typename: 'Post', category: null, id: 'post-1' }, plan.paths, plan);
 
   const postRef = client.ref<PostWithCategory>('Post', 'post-1', PostView);
   const result = unwrap(
@@ -1720,7 +1711,6 @@ test(`'readView' returns selected fields from plain nested objects`, () => {
       },
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -2082,10 +2072,7 @@ test(`'delete' removes an entity and cleans references`, () => {
     },
   });
 
-  const snapshots = new Map<string, Snapshot>();
-  const listSnapshots = new Map<string, List>();
-
-  client.deleteRecord('Comment', 'comment-1', snapshots, listSnapshots);
+  const rollback = client.store.optimisticUpdate(() => client.deleteRecord('Comment', 'comment-1'));
 
   expect(client.store.read(commentId)).toBeUndefined();
 
@@ -2093,24 +2080,7 @@ test(`'delete' removes an entity and cleans references`, () => {
   expect(updatedPost?.comments).toEqual([]);
   expect(client.store.getList('comments')).toEqual([]);
 
-  const storedSnapshot = listSnapshots.get('comments');
-  expect(storedSnapshot).toEqual({
-    cursors: ['cursor-1'],
-    ids: [commentId],
-    pagination: {
-      hasNext: true,
-      hasPrevious: false,
-      nextCursor: 'cursor-2',
-    },
-  });
-
-  for (const [id, snapshot] of snapshots) {
-    client.restore(id, snapshot);
-  }
-
-  for (const [name, list] of listSnapshots) {
-    client.restoreList(name, list);
-  }
+  rollback();
 
   const restoredComment = client.store.read(commentId);
   expect(restoredComment).toMatchObject({ id: 'comment-1' });
@@ -3437,7 +3407,6 @@ test(`'readDeferred' fetches arg-scoped connection lists independently`, async (
       id: 'post-1',
     },
     fruitPlan.paths,
-    undefined,
     fruitPlan,
   );
 
@@ -3719,7 +3688,6 @@ test(`'readDeferred' fetches no-arg connection lists independently from scoped l
       id: 'post-1',
     },
     scopedPlan.paths,
-    undefined,
     scopedPlan,
   );
 
@@ -3797,7 +3765,6 @@ test(`'readDeferred' fetches deferred connection pages without enough cached cov
       id: 'post-1',
     },
     shortPlan.paths,
-    undefined,
     shortPlan,
   );
 
@@ -4985,7 +4952,6 @@ test('stores connection lists using argument hashes', () => {
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -5180,7 +5146,6 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -5340,7 +5305,6 @@ test('pending optimistic nested prepends stay visible in plain list views', asyn
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -5754,7 +5718,6 @@ test('notifies parent subscribers when nested connection metadata changes', () =
         id: 'post-1',
       },
       plan.paths,
-      undefined,
       plan,
     );
 

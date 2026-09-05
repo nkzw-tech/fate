@@ -150,6 +150,24 @@ test('updates coverage when merging identical values', () => {
   expect(store.missingForSelection(entityId, new Set(['title', 'subtitle']))).toEqual(new Set());
 });
 
+test('rebasing reports coverage changes only to the affected selection', () => {
+  const store = new Store();
+  store.merge('Post:1', { id: '1', subtitle: 'Sub', title: 'Initial' }, ['id', 'title']);
+  const settle = store.optimisticUpdate(() =>
+    store.merge('Post:1', { title: 'Pending' }, ['title']),
+  );
+  const titleChanged = vi.fn();
+  const subtitleChanged = vi.fn();
+  store.subscribe('Post:1', new Set(['title']), titleChanged);
+  store.subscribe('Post:1', new Set(['subtitle']), subtitleChanged);
+  store.merge('Post:1', { subtitle: 'Sub' }, ['subtitle']);
+  expect(subtitleChanged).toHaveBeenCalledTimes(1);
+  expect(titleChanged).not.toHaveBeenCalled();
+  settle();
+  expect(titleChanged).toHaveBeenCalledTimes(1);
+  expect(subtitleChanged).toHaveBeenCalledTimes(1);
+});
+
 test('keeps indexed list lookup in sync with list writes and deletes', () => {
   const store = new Store();
   const defaultKey = getListKey('Post:1', 'comments');

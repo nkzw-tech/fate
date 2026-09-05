@@ -21,7 +21,6 @@ import {
   type HydrateOptions,
 } from './hydration.ts';
 import { getListEntries } from './list.ts';
-import { cloneMask, fromPaths, isCovered, union, type FieldMask } from './mask.ts';
 import {
   FateMutations,
   InsertPosition,
@@ -71,7 +70,6 @@ import {
   type Request,
   type RequestResult,
   type Selection,
-  type Snapshot,
   type TypeConfig,
   type View,
   type ViewData,
@@ -425,10 +423,7 @@ export class FateClient<
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
   private readonly pendingDeferred = new Map<string, PromiseLike<DeferredSnapshot<any>>>();
   private readonly pendingOptimisticMutations = new Map<EntityId, Set<Promise<unknown>>>();
-  private readonly optimisticMasks = new Map<number, { entityId: EntityId; mask: FieldMask }>();
-  private readonly optimisticByEntity = new Map<EntityId, Set<number>>();
   private readonly optimisticEntityResolutions = new Map<EntityId, EntityId>();
-  private optimisticTokenCounter = 0;
   private readonly onLiveError: ((error: unknown) => void) | undefined;
   private readonly liveSubscriptions = new Map<
     string,
@@ -445,13 +440,19 @@ export class FateClient<
   private gcPending = false;
   private gcScheduled = false;
   private pendingNetworkRequests = 0;
-  readonly store = new Store();
+  readonly store = new Store((ids) => {
+    for (const id of ids) {
+      this.viewDataCache.invalidate(id);
+    }
+    this.runPendingGarbageCollection();
+  });
   private readonly operationLifetime: OperationLifetime;
   private readonly hydrationLimits: HydrationLimits;
   private readonly hydrationScope: HydrationScope;
   private readonly types: ReadonlyMap<string, TypeConfig>;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
-  private readonly viewDataCache = new ViewDataCache();
+  // Intermediate rollback/replay states must not evict or populate view snapshots.
+  private readonly viewDataCache = new ViewDataCache(() => !this.store.isRebasing);
   private liveConnectionInvalidationToken = 0;
 
   readonly actions: MutationActionsFor<Mutations>;
@@ -638,17 +639,6 @@ export class FateClient<
     lists.add(key);
   }
 
-  private snapshotList(key: string, listSnapshots: Map<string, List> | undefined) {
-    if (!listSnapshots || listSnapshots.has(key)) {
-      return;
-    }
-
-    const listState = this.store.getListState(key);
-    if (listState) {
-      listSnapshots.set(key, listState);
-    }
-  }
-
   private applyListInsert(
     listState: List,
     entityId: EntityId,
@@ -703,12 +693,7 @@ export class FateClient<
     };
   }
 
-  private insertIntoRootLists(
-    type: string,
-    entityId: EntityId,
-    insert: InsertPosition,
-    listSnapshots?: Map<string, List>,
-  ) {
+  private insertIntoRootLists(type: string, entityId: EntityId, insert: InsertPosition) {
     if (insert === 'none') {
       return;
     }
@@ -729,7 +714,6 @@ export class FateClient<
         continue;
       }
 
-      this.snapshotList(key, listSnapshots);
       this.store.setList(key, next);
     }
   }
@@ -788,51 +772,21 @@ export class FateClient<
     type: string,
     data: AnyRecord,
     select: ReadonlySet<string>,
-    snapshots?: Map<EntityId, Snapshot>,
     plan?: SelectionPlan,
-    pathPrefix: string | null = null,
-    blockedMask?: FieldMask | null,
     insert?: InsertPosition,
-    listSnapshots?: Map<string, List>,
   ) {
-    return this.writeEntity(
-      type,
-      data,
-      select,
-      snapshots,
-      plan,
-      pathPrefix,
-      blockedMask,
-      insert,
-      listSnapshots,
-    );
+    return this.writeEntity(type, data, select, plan, null, insert);
   }
 
-  deleteRecord(
-    type: string,
-    id: string | number,
-    snapshots?: Map<EntityId, Snapshot>,
-    listSnapshots?: Map<string, List>,
-  ) {
-    const entityId = toEntityId(type, id);
+  deleteRecord(type: string, id: string | number) {
+    return this.store.update(() => {
+      const entityId = toEntityId(type, id);
 
-    if (snapshots && !snapshots.has(entityId)) {
-      snapshots.set(entityId, this.store.snapshot(entityId));
-    }
-
-    this.viewDataCache.invalidate(entityId);
-    this.stableRefs.delete(entityId);
-    this.store.deleteRecord(entityId);
-    this.store.removeReferencesTo(entityId, this.viewDataCache, snapshots, listSnapshots);
-  }
-
-  restore(id: EntityId, snapshot: Snapshot) {
-    this.viewDataCache.invalidate(id);
-    this.store.restore(id, snapshot);
-  }
-
-  restoreList(name: string, list?: List) {
-    this.store.restoreList(name, list);
+      this.viewDataCache.invalidate(entityId);
+      this.stableRefs.delete(entityId);
+      this.store.deleteRecord(entityId);
+      this.store.removeReferencesTo(entityId, this.viewDataCache);
+    });
   }
 
   private stableRefWithViewNames<TName extends string>(
@@ -1163,20 +1117,9 @@ export class FateClient<
             return;
           }
 
-          const pendingMask = this.getPendingOptimisticMask(entityId);
           const select = new Set(liveSelect ?? plan.paths);
-          const selection = this.filterSelectionForPendingOptimistics(entityId, select);
 
-          this.write(
-            type,
-            record as AnyRecord,
-            selection,
-            undefined,
-            plan,
-            null,
-            pendingMask,
-            'none',
-          );
+          this.write(type, record as AnyRecord, select, plan, 'none');
         },
         onDelete: (deletedId) => {
           this.deleteRecord(type, deletedId ?? id);
@@ -1247,51 +1190,44 @@ export class FateClient<
     plan: SelectionPlan,
     event: FateLiveConnectionEvent,
   ) {
-    if (event.type === 'invalidate') {
-      this.invalidateLiveConnection(view, connection);
-      return;
-    }
+    return this.store.update(() => {
+      if (event.type === 'invalidate') {
+        this.invalidateLiveConnection(view, connection);
+        return;
+      }
 
-    if (event.type === 'deleteEdge') {
-      this.deleteConnectionEdge(connection, toEntityId(event.nodeType, event.id));
-      return;
-    }
+      if (event.type === 'deleteEdge') {
+        this.deleteConnectionEdge(connection, toEntityId(event.nodeType, event.id));
+        return;
+      }
 
-    const node = event.edge.node;
-    if (!node || typeof node !== 'object') {
-      return;
-    }
+      const node = event.edge.node;
+      if (!node || typeof node !== 'object') {
+        return;
+      }
 
-    const nodeRecord = node as AnyRecord;
-    const nodeType = event.nodeType;
-    if (!nodeType) {
-      this.reportLiveError(
-        new Error(
-          `fate: Live connection event for '${connection.procedure}' did not include a node type.`,
-        ),
+      const nodeRecord = node as AnyRecord;
+      const nodeType = event.nodeType;
+      if (!nodeType) {
+        this.reportLiveError(
+          new Error(
+            `fate: Live connection event for '${connection.procedure}' did not include a node type.`,
+          ),
+        );
+        return;
+      }
+
+      const entityId = this.write(nodeType, nodeRecord, plan.paths, plan, 'none');
+      this.insertConnectionEdge(
+        connection.key,
+        entityId,
+        event.edge.cursor,
+        event.type,
+        event.targetCursor,
+        view,
+        connection,
       );
-      return;
-    }
-
-    const entityId = this.write(
-      nodeType,
-      nodeRecord,
-      plan.paths,
-      undefined,
-      plan,
-      null,
-      null,
-      'none',
-    );
-    this.insertConnectionEdge(
-      connection.key,
-      entityId,
-      event.edge.cursor,
-      event.type,
-      event.targetCursor,
-      view,
-      connection,
-    );
+    });
   }
 
   private invalidateLiveConnection<V extends View<any, any>>(
@@ -1735,110 +1671,11 @@ export class FateClient<
     this.store.replaceListEntityId(optimisticEntityId, resolvedEntityId);
   }
 
-  registerOptimisticUpdate(entityId: EntityId | null, select: ReadonlySet<string>): number | null {
-    if (!entityId || select.size === 0) {
-      return null;
-    }
-
-    const mask = fromPaths(select);
-    const token = ++this.optimisticTokenCounter;
-    this.optimisticMasks.set(token, { entityId, mask });
-
-    let entries = this.optimisticByEntity.get(entityId);
-    if (!entries) {
-      entries = new Set();
-      this.optimisticByEntity.set(entityId, entries);
-    }
-    entries.add(token);
-
-    return token;
-  }
-
-  clearOptimisticUpdate(token: number | null) {
-    if (token == null) {
-      return;
-    }
-
-    const entry = this.optimisticMasks.get(token);
-    if (!entry) {
-      return;
-    }
-
-    this.optimisticMasks.delete(token);
-    const entityTokens = this.optimisticByEntity.get(entry.entityId);
-    if (entityTokens) {
-      entityTokens.delete(token);
-      if (entityTokens.size === 0) {
-        this.optimisticByEntity.delete(entry.entityId);
-      }
-    }
-
-    this.runPendingGarbageCollection();
-  }
-
-  getPendingOptimisticMask(
-    entityId: EntityId | null,
-    options: { excludeToken?: number | null } = {},
-  ): FieldMask | null {
-    if (!entityId) {
-      return null;
-    }
-    const tokens = this.optimisticByEntity.get(entityId);
-    if (!tokens || tokens.size === 0) {
-      return null;
-    }
-
-    let mask: FieldMask | null = null;
-
-    for (const token of tokens) {
-      if (options.excludeToken != null && token === options.excludeToken) {
-        continue;
-      }
-
-      const entry = this.optimisticMasks.get(token);
-      if (!entry) {
-        continue;
-      }
-
-      if (!mask) {
-        mask = cloneMask(entry.mask);
-      } else {
-        union(mask, entry.mask);
-      }
-    }
-
-    return mask;
-  }
-
   private getPendingOptimisticMutations(
     entityId: EntityId,
   ): ReadonlyArray<Promise<unknown>> | null {
     const pending = this.pendingOptimisticMutations.get(entityId);
     return pending && pending.size > 0 ? [...pending] : null;
-  }
-
-  filterSelectionForPendingOptimistics(
-    entityId: EntityId | null,
-    select: Set<string>,
-    options: { excludeToken?: number | null } = {},
-  ): Set<string> {
-    if (!entityId || select.size === 0) {
-      return select;
-    }
-
-    const pendingMask = this.getPendingOptimisticMask(entityId, options);
-    if (!pendingMask) {
-      return select;
-    }
-
-    const filtered = new Set<string>();
-    for (const path of select) {
-      if (!isCovered(pendingMask, path)) {
-        filtered.add(path);
-      }
-    }
-
-    return filtered;
   }
 
   async loadConnection<V extends View<any, any>>(
@@ -1878,40 +1715,32 @@ export class FateClient<
         return this.store.getListState(connection.key);
       }
 
-      const incomingIds: Array<EntityId> = [];
-      const incomingCursors: Array<string | undefined> = [];
+      this.store.update(() => {
+        const incomingIds: Array<EntityId> = [];
+        const incomingCursors: Array<string | undefined> = [];
 
-      for (const entry of items) {
-        const id = this.write(
-          connection.type,
-          entry.node as AnyRecord,
-          plan.paths,
-          undefined,
-          plan,
-          null,
-          null,
-          'none',
+        for (const entry of items) {
+          const id = this.write(connection.type, entry.node as AnyRecord, plan.paths, plan, 'none');
+          incomingIds.push(id);
+          incomingCursors.push(entry.cursor);
+        }
+
+        const previous = this.store.getListState(connection.key);
+
+        const nextListState = this.mergeListState(
+          previous,
+          incomingIds,
+          incomingCursors,
+          pagination,
+          { ...getPaginationMergeInfo(requestArgs), replace: true },
         );
-        incomingIds.push(id);
-        incomingCursors.push(entry.cursor);
-      }
 
-      const previous = this.store.getListState(connection.key);
-
-      const nextListState = this.mergeListState(
-        previous,
-        incomingIds,
-        incomingCursors,
-        pagination,
-        { ...getPaginationMergeInfo(requestArgs), replace: true },
-      );
-
-      if (!filterConnectionArgs(connection.args)) {
-        this.registerRootList(connection.type, connection.key);
-      }
-      this.store.setList(connection.key, nextListState);
-
-      return nextListState;
+        if (!filterConnectionArgs(connection.args)) {
+          this.registerRootList(connection.type, connection.key);
+        }
+        this.store.setList(connection.key, nextListState);
+      });
+      return this.store.getListState(connection.key);
     }
 
     const owner = parseEntityId(connection.owner);
@@ -1957,43 +1786,44 @@ export class FateClient<
       return this.store.getListState(connection.key);
     }
 
-    const incomingIds: Array<EntityId> = [];
-    const incomingCursors: Array<string | undefined> = [];
+    this.store.update(() => {
+      const incomingIds: Array<EntityId> = [];
+      const incomingCursors: Array<string | undefined> = [];
 
-    const nodeType = this.getListNodeType(owner.type, connection.field);
+      const nodeType = this.getListNodeType(owner.type, connection.field);
 
-    for (const entry of connectionPayload.items) {
-      const { node } = entry;
-      const id = this.write(nodeType, node, nodeSelection, undefined, plan);
-      incomingIds.push(id);
-      incomingCursors.push(entry.cursor);
-    }
+      for (const entry of connectionPayload.items) {
+        const { node } = entry;
+        const id = this.write(nodeType, node, nodeSelection, plan);
+        incomingIds.push(id);
+        incomingCursors.push(entry.cursor);
+      }
 
-    const previous = this.store.getListState(connection.key);
-    const previousIds = previous?.ids ?? [];
-    const previousSet = new Set(previousIds);
-    const newIds = incomingIds.filter((id) => !previousSet.has(id));
-    const nextListState = this.mergeListState(
-      previous,
-      incomingIds,
-      incomingCursors,
-      connectionPayload.pagination,
-      { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
-    );
+      const previous = this.store.getListState(connection.key);
+      const previousIds = previous?.ids ?? [];
+      const previousSet = new Set(previousIds);
+      const newIds = incomingIds.filter((id) => !previousSet.has(id));
+      const nextListState = this.mergeListState(
+        previous,
+        incomingIds,
+        incomingCursors,
+        connectionPayload.pagination,
+        { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
+      );
 
-    this.store.setList(connection.key, nextListState);
+      this.store.setList(connection.key, nextListState);
 
-    const current = this.store.read(connection.owner);
-    const existingField = Array.isArray(current?.[connection.field])
-      ? (current?.[connection.field] as Array<unknown>) || []
-      : [];
-    const nodeRefs = createNodeRefsForIds(newIds, undefined);
-    const nextField =
-      direction === 'forward' ? [...existingField, ...nodeRefs] : [...nodeRefs, ...existingField];
+      const current = this.store.read(connection.owner);
+      const existingField = Array.isArray(current?.[connection.field])
+        ? (current?.[connection.field] as Array<unknown>) || []
+        : [];
+      const nodeRefs = createNodeRefsForIds(newIds, undefined);
+      const nextField =
+        direction === 'forward' ? [...existingField, ...nodeRefs] : [...nodeRefs, ...existingField];
 
-    this.viewDataCache.invalidate(connection.owner);
-    this.store.merge(connection.owner, { [connection.field]: nextField }, [connection.field]);
-
+      this.viewDataCache.invalidate(connection.owner);
+      this.store.merge(connection.owner, { [connection.field]: nextField }, [connection.field]);
+    });
     return this.store.getListState(connection.key);
   }
 
@@ -2309,11 +2139,7 @@ export class FateClient<
   }
 
   private hasActiveOptimisticUpdates(): boolean {
-    return (
-      this.optimisticMasks.size > 0 ||
-      this.optimisticByEntity.size > 0 ||
-      this.pendingOptimisticMutations.size > 0
-    );
+    return this.store.hasOptimisticUpdates || this.pendingOptimisticMutations.size > 0;
   }
 
   private hasPendingRequests(): boolean {
@@ -2592,7 +2418,7 @@ export class FateClient<
     await this.trackPendingRequest(async () => {
       const records = await this.transport.fetchById(type, ids, select, resolvedArgs);
       for (const record of records) {
-        this.writeEntity(type, record as AnyRecord, select, undefined, plan, prefix);
+        this.writeEntity(type, record as AnyRecord, select, plan, prefix);
       }
     });
   }
@@ -2611,13 +2437,7 @@ export class FateClient<
         return;
       }
 
-      const entityId = this.writeEntity(
-        item.type,
-        record as AnyRecord,
-        item.plan.paths,
-        undefined,
-        item.plan,
-      );
+      const entityId = this.writeEntity(item.type, record as AnyRecord, item.plan.paths, item.plan);
       this.rootRequests.set(item.queryKey, entityId);
     });
   }
@@ -2635,31 +2455,32 @@ export class FateClient<
         item.plan.paths,
         item.argsPayload,
       );
-      const ids: Array<EntityId> = [];
-      const cursors: Array<string | undefined> = [];
-      for (const entry of items) {
-        const id = this.writeEntity(
-          item.type,
-          entry.node as AnyRecord,
-          item.plan.paths,
-          undefined,
-          item.plan,
-        );
-        ids.push(id);
-        cursors.push(entry.cursor);
-      }
-      if (!filterConnectionArgs(item.argsPayload)) {
-        this.registerRootList(item.type, item.listKey);
-      }
+      this.store.update(() => {
+        const ids: Array<EntityId> = [];
+        const cursors: Array<string | undefined> = [];
+        for (const entry of items) {
+          const id = this.writeEntity(
+            item.type,
+            entry.node as AnyRecord,
+            item.plan.paths,
+            item.plan,
+          );
+          ids.push(id);
+          cursors.push(entry.cursor);
+        }
+        if (!filterConnectionArgs(item.argsPayload)) {
+          this.registerRootList(item.type, item.listKey);
+        }
 
-      const previous = this.store.getListState(item.listKey);
-      this.store.setList(
-        item.listKey,
-        this.mergeListState(previous, ids, cursors, pagination, {
-          ...getPaginationMergeInfo(item.argsPayload),
-          replace: true,
-        }),
-      );
+        const previous = this.store.getListState(item.listKey);
+        this.store.setList(
+          item.listKey,
+          this.mergeListState(previous, ids, cursors, pagination, {
+            ...getPaginationMergeInfo(item.argsPayload),
+            replace: true,
+          }),
+        );
+      });
     });
   }
 
@@ -2667,234 +2488,198 @@ export class FateClient<
     type: string,
     record: AnyRecord,
     select: ReadonlySet<string>,
-    snapshots?: Map<EntityId, Snapshot>,
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
-    blockedMask?: FieldMask | null,
     insert?: InsertPosition,
-    listSnapshots?: Map<string, List>,
   ): EntityId {
-    const config = this.types.get(type);
-    if (!config) {
-      throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
-    }
+    return this.store.update(() => {
+      const config = this.types.get(type);
+      if (!config) {
+        throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
+      }
 
-    const id = config.getId(record);
-    const entityId = toEntityId(type, id);
-    const result: AnyRecord = {};
-    const selectionTree = groupSelectionByPrefix(select);
+      const id = config.getId(record);
+      const entityId = toEntityId(type, id);
+      const result: AnyRecord = {};
+      const selectionTree = groupSelectionByPrefix(select);
 
-    if (config.fields) {
-      for (const [key, relationDescriptor] of Object.entries(config.fields)) {
-        const value = record[key];
-        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-        const fieldArgs = plan?.args.get(fieldPath);
-        const isFieldBlocked = blockedMask ? isCovered(blockedMask, fieldPath) : false;
-        if (relationDescriptor === 'scalar') {
-          if (isFieldBlocked || !Object.hasOwn(record, key)) {
-            continue;
-          }
-          result[key] = value;
-        } else if (
-          relationDescriptor &&
-          typeof relationDescriptor === 'object' &&
-          'type' in relationDescriptor
-        ) {
-          if (isFieldBlocked) {
-            continue;
-          }
-          const childPaths = selectionTree.get(key) ?? emptySet;
-          if (value === null) {
-            result[key] = null;
-            continue;
-          }
-          if (value && typeof value === 'object' && !isNodeRef(value)) {
-            const childType = relationDescriptor.type;
+      if (config.fields) {
+        for (const [key, relationDescriptor] of Object.entries(config.fields)) {
+          const value = record[key];
+          const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+          const fieldArgs = plan?.args.get(fieldPath);
+          if (relationDescriptor === 'scalar') {
+            if (!Object.hasOwn(record, key)) {
+              continue;
+            }
+            result[key] = value;
+          } else if (
+            relationDescriptor &&
+            typeof relationDescriptor === 'object' &&
+            'type' in relationDescriptor
+          ) {
+            const childPaths = selectionTree.get(key) ?? emptySet;
+            if (value === null) {
+              result[key] = null;
+              continue;
+            }
+            if (value && typeof value === 'object' && !isNodeRef(value)) {
+              const childType = relationDescriptor.type;
+              const childConfig = this.types.get(childType);
+              if (!childConfig) {
+                throw new Error(
+                  `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
+                );
+              }
+              const childId = toEntityId(childType, childConfig.getId(value));
+              result[key] = createNodeRef(childId);
+
+              this.writeEntity(childType, value as AnyRecord, childPaths, plan, fieldPath);
+            }
+          } else if (
+            relationDescriptor &&
+            typeof relationDescriptor === 'object' &&
+            'listOf' in relationDescriptor
+          ) {
+            const childPaths = selectionTree.get(key) ?? emptySet;
+            if (value === null) {
+              result[key] = null;
+              continue;
+            }
+            const childType = relationDescriptor.listOf;
             const childConfig = this.types.get(childType);
             if (!childConfig) {
               throw new Error(
                 `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
               );
             }
-            const childId = toEntityId(childType, childConfig.getId(value));
-            result[key] = createNodeRef(childId);
 
-            this.writeEntity(
-              childType,
-              value as AnyRecord,
-              childPaths,
-              snapshots,
-              plan,
-              fieldPath,
-              blockedMask,
-              undefined,
-              listSnapshots,
-            );
-          }
-        } else if (
-          relationDescriptor &&
-          typeof relationDescriptor === 'object' &&
-          'listOf' in relationDescriptor
-        ) {
-          if (isFieldBlocked) {
-            continue;
-          }
-          const childPaths = selectionTree.get(key) ?? emptySet;
-          if (value === null) {
-            result[key] = null;
-            continue;
-          }
-          const childType = relationDescriptor.listOf;
-          const childConfig = this.types.get(childType);
-          if (!childConfig) {
-            throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
-          }
-
-          const connection = (() => {
-            if (Array.isArray(value)) {
-              return {
-                items: value.map((item) => ({ node: item })),
-              };
-            }
-
-            if (value && typeof value === 'object') {
-              const record = value as AnyRecord;
-              if (Array.isArray(record.items)) {
+            const connection = (() => {
+              if (Array.isArray(value)) {
                 return {
-                  items: record.items.map((node) => {
-                    if (node && typeof node === 'object' && 'node' in node) {
-                      const itemRecord = node as AnyRecord;
-                      return {
-                        cursor: itemRecord.cursor,
-                        node: itemRecord.node,
-                      };
-                    }
-
-                    return { node };
-                  }),
-                  pagination: record.pagination,
+                  items: value.map((item) => ({ node: item })),
                 };
               }
-            }
 
-            return null;
-          })();
+              if (value && typeof value === 'object') {
+                const record = value as AnyRecord;
+                if (Array.isArray(record.items)) {
+                  return {
+                    items: record.items.map((node) => {
+                      if (node && typeof node === 'object' && 'node' in node) {
+                        const itemRecord = node as AnyRecord;
+                        return {
+                          cursor: itemRecord.cursor,
+                          node: itemRecord.node,
+                        };
+                      }
 
-          if (connection) {
-            const ids: Array<EntityId> = [];
-            const cursors: Array<string | undefined> = [];
-
-            const nodeSelection = childPaths.size > 0 ? new Set<string>() : childPaths;
-
-            if (childPaths.size > 0) {
-              for (const path of childPaths) {
-                if (path.startsWith('items.node.')) {
-                  nodeSelection.add(path.slice('items.node.'.length));
-                  continue;
+                      return { node };
+                    }),
+                    pagination: record.pagination,
+                  };
                 }
-
-                if (path.startsWith('node.')) {
-                  nodeSelection.add(path.slice('node.'.length));
-                  continue;
-                }
-
-                if (path === 'items.node' || path.startsWith('items.')) {
-                  continue;
-                }
-
-                nodeSelection.add(path);
               }
-            }
 
-            for (const entry of connection.items) {
-              const node = entry.node;
-              const cursor = 'cursor' in entry ? (entry.cursor as string) : undefined;
-              cursors.push(cursor);
-              if (isNodeRef(node)) {
-                ids.push(getNodeRefId(node));
+              return null;
+            })();
+
+            if (connection) {
+              const ids: Array<EntityId> = [];
+              const cursors: Array<string | undefined> = [];
+
+              const nodeSelection = childPaths.size > 0 ? new Set<string>() : childPaths;
+
+              if (childPaths.size > 0) {
+                for (const path of childPaths) {
+                  if (path.startsWith('items.node.')) {
+                    nodeSelection.add(path.slice('items.node.'.length));
+                    continue;
+                  }
+
+                  if (path.startsWith('node.')) {
+                    nodeSelection.add(path.slice('node.'.length));
+                    continue;
+                  }
+
+                  if (path === 'items.node' || path.startsWith('items.')) {
+                    continue;
+                  }
+
+                  nodeSelection.add(path);
+                }
+              }
+
+              for (const entry of connection.items) {
+                const node = entry.node;
+                const cursor = 'cursor' in entry ? (entry.cursor as string) : undefined;
+                cursors.push(cursor);
+                if (isNodeRef(node)) {
+                  ids.push(getNodeRefId(node));
+                  continue;
+                }
+
+                if (node && typeof node === 'object') {
+                  const childId = toEntityId(childType, childConfig.getId(node as AnyRecord));
+
+                  this.writeEntity(childType, node as AnyRecord, nodeSelection, plan, fieldPath);
+
+                  ids.push(childId);
+                  continue;
+                }
+
                 continue;
               }
 
-              if (node && typeof node === 'object') {
-                const childId = toEntityId(childType, childConfig.getId(node as AnyRecord));
+              const listKey = getListKey(entityId, key, fieldArgs?.hash);
+              const previousList = this.store.getListState(listKey);
+              const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
-                this.writeEntity(
-                  childType,
-                  node as AnyRecord,
-                  nodeSelection,
-                  snapshots,
-                  plan,
-                  fieldPath,
-                  blockedMask,
-                  undefined,
-                  listSnapshots,
-                );
+              const nextListState = this.mergeListState(
+                previousList,
+                ids,
+                cursors,
+                connection.pagination as List['pagination'],
+                getPaginationMergeInfo(argsValue),
+              );
 
-                ids.push(childId);
-                continue;
-              }
+              const listChanged = !areListStatesEqual(previousList, nextListState);
+              result[key] = createNodeRefsForIds(
+                nextListState.ids,
+                this.store.read(entityId)?.[key],
+                {
+                  reuseCurrentArray: !listChanged,
+                },
+              );
 
-              continue;
+              this.store.setList(listKey, nextListState);
             }
-
-            const listKey = getListKey(entityId, key, fieldArgs?.hash);
-            const previousList = this.store.getListState(listKey);
-            const argsValue = fieldArgs?.value as AnyRecord | undefined;
-
-            const nextListState = this.mergeListState(
-              previousList,
-              ids,
-              cursors,
-              connection.pagination as List['pagination'],
-              getPaginationMergeInfo(argsValue),
-            );
-
-            const listChanged = !areListStatesEqual(previousList, nextListState);
-            result[key] = createNodeRefsForIds(
-              nextListState.ids,
-              this.store.read(entityId)?.[key],
-              {
-                reuseCurrentArray: !listChanged,
-              },
-            );
-
-            this.store.setList(listKey, nextListState);
+          } else {
+            result[key] = value;
           }
-        } else {
+        }
+      }
+
+      for (const [key, value] of Object.entries(record)) {
+        if (!(key in (config.fields ?? {}))) {
           result[key] = value;
         }
       }
-    }
 
-    for (const [key, value] of Object.entries(record)) {
-      if (!(key in (config.fields ?? {}))) {
-        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-        if (blockedMask && isCovered(blockedMask, fieldPath)) {
-          continue;
-        }
-        result[key] = value;
+      this.viewDataCache.invalidate(entityId);
+      this.store.merge(entityId, result, select);
+      this.linkParentLists(type, entityId, result, insert ?? 'after');
+      if (!pathPrefix && insert) {
+        this.insertIntoRootLists(type, entityId, insert);
       }
-    }
-
-    if (snapshots && !snapshots.has(entityId)) {
-      snapshots.set(entityId, this.store.snapshot(entityId));
-    }
-
-    this.viewDataCache.invalidate(entityId);
-    this.store.merge(entityId, result, select);
-    this.linkParentLists(type, entityId, result, snapshots, listSnapshots, insert ?? 'after');
-    if (!pathPrefix && insert) {
-      this.insertIntoRootLists(type, entityId, insert, listSnapshots);
-    }
-    return entityId;
+      return entityId;
+    });
   }
 
   private linkParentLists(
     type: string,
     entityId: EntityId,
     record: AnyRecord,
-    snapshots: Map<EntityId, Snapshot> | undefined,
-    listSnapshots: Map<string, List> | undefined,
     insert: InsertPosition,
   ) {
     if (insert === 'none') {
@@ -2929,10 +2714,6 @@ export class FateClient<
         continue;
       }
 
-      if (snapshots && !snapshots.has(parentId)) {
-        snapshots.set(parentId, this.store.snapshot(parentId));
-      }
-
       this.viewDataCache.invalidate(parentId);
 
       const defaultListKey = getListKey(parentId, parent.field);
@@ -2945,7 +2726,6 @@ export class FateClient<
           insert,
         );
         if (nextDefaultListState !== defaultListState) {
-          this.snapshotList(defaultListKey, listSnapshots);
           this.store.setList(defaultListKey, nextDefaultListState);
         }
 
@@ -2959,7 +2739,7 @@ export class FateClient<
           .filter((id): id is EntityId => id != null);
         const ids = insert === 'before' ? [entityId, ...currentIds] : [...currentIds, entityId];
         const nextDefaultListState = { ids } satisfies List;
-        this.snapshotList(defaultListKey, listSnapshots);
+
         this.store.setList(defaultListKey, nextDefaultListState);
         nextField = createNodeRefsForIds(nextDefaultListState.ids, current);
       }
@@ -2974,7 +2754,6 @@ export class FateClient<
           continue;
         }
 
-        this.snapshotList(listKey, listSnapshots);
         this.store.setList(listKey, nextListState);
       }
 

@@ -6,11 +6,12 @@ import {
   FieldMask,
   fromPaths,
   intersects,
+  isCovered,
   toPaths,
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
-import type { AnyRecord, EntityId, Pagination, Snapshot } from './types.ts';
+import type { AnyRecord, EntityId, Pagination } from './types.ts';
 
 export type List = Readonly<{
   backwardPageLimit?: number;
@@ -23,6 +24,20 @@ export type List = Readonly<{
   pendingAfterIds?: ReadonlyArray<EntityId>;
   pendingBeforeIds?: ReadonlyArray<EntityId>;
 }>;
+
+type Snapshot = { mask?: FieldMask; record?: AnyRecord };
+type OptimisticWrite = { partial: AnyRecord; paths: Set<string> };
+
+type OptimisticLayer = {
+  apply: () => void;
+  settled?: boolean;
+  writes: Map<EntityId, OptimisticWrite>;
+};
+
+type Snapshots = {
+  lists: Map<string, List | undefined>;
+  records: Map<EntityId, Snapshot>;
+};
 
 type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
 
@@ -66,26 +81,6 @@ const parseListKey = (key: string): ListKeyParts | null => {
     field: decodeListKeyPart(field),
     ownerId: decodeListKeyPart(ownerId),
   };
-};
-
-const cloneValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(cloneValue);
-  }
-
-  if (isNodeRef(value)) {
-    return value;
-  }
-
-  if (value != null && typeof value === 'object') {
-    const result: AnyRecord = {};
-    for (const [key, record] of Object.entries(value)) {
-      result[key] = cloneValue(record);
-    }
-    return result;
-  }
-
-  return value;
 };
 
 const isPlainRecord = (value: unknown): value is AnyRecord => {
@@ -165,19 +160,33 @@ const areHydrationValuesEqual = (left: unknown, right: unknown): boolean => {
 };
 
 const areMasksEqual = (left: FieldMask | undefined, right: FieldMask | undefined): boolean => {
-  if (!left || !right) {
-    return left === right;
+  if (left === right || (left?.all && right?.all)) {
+    return true;
   }
-
-  const leftPaths = toPaths(left).sort();
-  const rightPaths = toPaths(right).sort();
-  return (
-    leftPaths.length === rightPaths.length &&
-    leftPaths.every((path, index) => path === rightPaths[index])
-  );
+  if (!left || !right || left.all !== right.all || left.children.size !== right.children.size) {
+    return false;
+  }
+  for (const [key, child] of left.children) {
+    if (!areMasksEqual(child, right.children.get(key))) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const emptyFunction = () => {};
+
+const hasReferences = (value: unknown): boolean =>
+  isNodeRef(value) || (Array.isArray(value) && value.some(isNodeRef));
+
+// Normalization recreates relation references and arrays when a layer is replayed.
+const areNormalizedValuesEqual = (left: unknown, right: unknown): boolean =>
+  Object.is(left, right) ||
+  (isNodeRef(left) && isNodeRef(right) && getNodeRefId(left) === getNodeRefId(right)) ||
+  (Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((value, index) => areNormalizedValuesEqual(value, right[index])));
 
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
@@ -189,6 +198,233 @@ export class Store {
   private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
   private listSubscriptions = new Map<string, Set<() => void>>();
+
+  private readonly optimisticLayers = new Set<OptimisticLayer>();
+  private readonly optimisticBase: Snapshots = { lists: new Map(), records: new Map() };
+  private recordingLayer: OptimisticLayer | undefined;
+  private rebase: Snapshots | undefined;
+
+  constructor(private readonly onRebase?: (ids: ReadonlySet<EntityId>) => void) {}
+
+  get hasOptimisticUpdates(): boolean {
+    return this.optimisticLayers.size > 0;
+  }
+
+  get isRebasing(): boolean {
+    return this.rebase !== undefined;
+  }
+
+  /** Apply a synchronous cache update beneath the pending optimistic layers. */
+  update<T>(apply: () => T): T {
+    if (this.rebase || this.optimisticLayers.size === 0) {
+      return apply();
+    }
+
+    const rebase: Snapshots = { lists: new Map(), records: new Map() };
+    this.rebase = rebase;
+    try {
+      // Undo the pending writes once to expose the authoritative state.
+      for (const [id, snapshot] of this.optimisticBase.records) {
+        this.restore(id, snapshot);
+      }
+      for (const [key, list] of this.optimisticBase.lists) {
+        this.restoreList(key, list);
+      }
+      this.optimisticBase.records.clear();
+      this.optimisticBase.lists.clear();
+      return apply();
+    } finally {
+      try {
+        for (const layer of this.optimisticLayers) {
+          layer.writes.clear();
+          this.recordingLayer = layer;
+          layer.apply();
+        }
+      } finally {
+        this.recordingLayer = undefined;
+        const records = this.getRebaseChanges(rebase);
+        const lists = new Set<string>();
+        for (const [key, before] of rebase.lists) {
+          if (!areHydrationValuesEqual(before, this.lists.get(key))) {
+            lists.add(key);
+            // Connection metadata belongs to its owner's view even when IDs match.
+            const owner = parseListKey(key);
+            if (owner) {
+              if (!records.has(owner.ownerId)) {
+                records.set(owner.ownerId, new Set([owner.field]));
+              } else {
+                records.get(owner.ownerId)?.add(owner.field);
+              }
+            }
+          } else if (before) {
+            this.lists.set(key, before);
+          }
+        }
+        this.rebase = undefined;
+        this.onRebase?.(new Set(records.keys()));
+        for (const [id, paths] of records) {
+          this.notify(id, paths);
+        }
+        for (const key of lists) {
+          this.notifyListSubscribers(key);
+        }
+      }
+    }
+  }
+
+  private getRebaseChanges(rebase: Snapshots): Map<EntityId, Set<string> | undefined> {
+    const changes = new Map<EntityId, Set<string> | undefined>();
+    for (const [id, before] of rebase.records) {
+      const after = this.records.get(id);
+      const mask = this.coverage.get(id);
+      if (Boolean(before.record) !== Boolean(after) || before.mask?.all !== mask?.all) {
+        changes.set(id, undefined);
+        continue;
+      }
+      const paths = new Set<string>();
+      for (const key of new Set([
+        ...Object.keys(before.record ?? {}),
+        ...Object.keys(after ?? {}),
+      ])) {
+        if (
+          Object.hasOwn(before.record ?? {}, key) !== Object.hasOwn(after ?? {}, key) ||
+          !areNormalizedValuesEqual(before.record?.[key], after?.[key])
+        ) {
+          paths.add(key);
+        }
+      }
+      if (!areMasksEqual(before.mask, mask)) {
+        for (const path of before.mask ? toPaths(before.mask) : []) {
+          if (!mask || !isCovered(mask, path)) {
+            paths.add(path);
+          }
+        }
+        for (const path of mask ? toPaths(mask) : []) {
+          if (!before.mask || !isCovered(before.mask, path)) {
+            paths.add(path);
+          }
+        }
+      }
+      if (paths.size > 0) {
+        changes.set(id, paths);
+      } else if (before.record) {
+        // Keep referential equality as well as suppressing redundant notifications.
+        // Relation indexes already describe the same normalized IDs.
+        this.records.set(id, before.record);
+      }
+    }
+    return changes;
+  }
+
+  /** Returns an idempotent settlement function; omit its update to roll back. */
+  optimisticUpdate(apply: () => void): (commit?: () => void) => void {
+    const layer: OptimisticLayer = {
+      apply,
+      writes: new Map(),
+    };
+    const settle = (commit?: () => void) => {
+      if (!this.optimisticLayers.has(layer) || layer.settled) {
+        return;
+      }
+      this.update(() => {
+        // A newer completed mutation must not reveal an older pending value.
+        // Keep only its overlapping optimistic fields visible until those older
+        // operations finish; its complete server response still enters the base.
+        const overlays = commit
+          ? this.getPendingOverlap(layer, layer.writes)
+          : new Map<EntityId, OptimisticWrite>();
+        if (overlays.size > 0) {
+          layer.settled = true;
+          layer.apply = () => {
+            for (const [id, { partial, paths }] of this.getPendingOverlap(layer, overlays)) {
+              this.merge(id, partial, paths);
+            }
+          };
+        } else {
+          this.optimisticLayers.delete(layer);
+        }
+        for (const pending of this.optimisticLayers) {
+          if (!pending.settled) {
+            break;
+          }
+          this.optimisticLayers.delete(pending);
+        }
+        commit?.();
+      });
+    };
+    this.optimisticLayers.add(layer);
+    try {
+      this.update(() => {});
+    } catch (error) {
+      settle();
+      throw error;
+    }
+    return settle;
+  }
+
+  private getPendingOverlap(
+    layer: OptimisticLayer,
+    writes: ReadonlyMap<EntityId, OptimisticWrite>,
+  ) {
+    const earlier: Array<OptimisticLayer> = [];
+    for (const pending of this.optimisticLayers) {
+      if (pending === layer) {
+        break;
+      }
+      if (!pending.settled) {
+        earlier.push(pending);
+      }
+    }
+    const overlaps = new Map<EntityId, OptimisticWrite>();
+    for (const [id, write] of writes) {
+      // Replaying relation references would resurrect resolved temporary IDs.
+      const partial = Object.fromEntries(
+        Object.entries(write.partial).filter(
+          ([key, value]) =>
+            !hasReferences(value) &&
+            earlier.some(({ writes }) => {
+              const previous = writes.get(id)?.partial;
+              return previous && Object.hasOwn(previous, key) && !hasReferences(previous[key]);
+            }),
+        ),
+      );
+      if (Object.keys(partial).length) {
+        overlaps.set(id, {
+          partial,
+          paths: new Set(
+            [...write.paths].filter((path) => Object.hasOwn(partial, path.split('.')[0])),
+          ),
+        });
+      }
+    }
+    return overlaps;
+  }
+
+  private captureRecord(id: EntityId) {
+    if (!this.rebase) {
+      return;
+    }
+    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase]) {
+      if (target && !target.records.has(id)) {
+        const mask = this.coverage.get(id);
+        target.records.set(id, {
+          mask: mask ? cloneMask(mask) : undefined,
+          record: this.records.get(id),
+        });
+      }
+    }
+  }
+
+  private captureList(key: string) {
+    if (!this.rebase) {
+      return;
+    }
+    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase]) {
+      if (target && !target.lists.has(key)) {
+        target.lists.set(key, this.lists.get(key));
+      }
+    }
+  }
 
   dehydrate(): StoreHydrationState {
     return {
@@ -294,10 +530,12 @@ export class Store {
   }
 
   merge(id: EntityId, partial: AnyRecord, paths: Iterable<string>) {
-    const changedPaths = this.mergeInternal(id, partial, paths);
-    if (changedPaths) {
-      this.notify(id, changedPaths);
-    }
+    return this.update(() => {
+      const changedPaths = this.mergeInternal(id, partial, paths);
+      if (changedPaths) {
+        this.notify(id, changedPaths);
+      }
+    });
   }
 
   private mergeInternal(
@@ -305,6 +543,16 @@ export class Store {
     partial: AnyRecord,
     paths: Iterable<string>,
   ): ReadonlySet<string> | null {
+    this.captureRecord(id);
+    const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
+    if (this.recordingLayer) {
+      const write = this.recordingLayer.writes.get(id) ?? { partial: {}, paths: new Set<string>() };
+      Object.assign(write.partial, partial);
+      for (const path of selectedPaths) {
+        write.paths.add(path);
+      }
+      this.recordingLayer.writes.set(id, write);
+    }
     const previous = this.records.get(id);
     const changedPaths = new Set<string>();
 
@@ -314,7 +562,7 @@ export class Store {
       this.coverage.set(id, mask);
     }
 
-    union(mask, fromPaths(paths));
+    union(mask, fromPaths(selectedPaths));
 
     if (previous) {
       let hasChanges = false;
@@ -342,12 +590,15 @@ export class Store {
   }
 
   deleteRecord(id: EntityId) {
-    const record = this.records.get(id);
-    if (record) {
-      this.removeRecordReferenceIndexes(id, record);
-    }
-    this.records.delete(id);
-    this.coverage.delete(id);
+    return this.update(() => {
+      this.captureRecord(id);
+      const record = this.records.get(id);
+      if (record) {
+        this.removeRecordReferenceIndexes(id, record);
+      }
+      this.records.delete(id);
+      this.coverage.delete(id);
+    });
   }
 
   missingForSelection(id: EntityId, paths: Iterable<string>): Set<string> {
@@ -404,6 +655,9 @@ export class Store {
   }
 
   private notify(id: EntityId, paths?: Iterable<string>) {
+    if (this.rebase) {
+      return;
+    }
     const set = this.subscriptions.get(id);
     if (!set) {
       return;
@@ -426,6 +680,9 @@ export class Store {
   }
 
   private notifyListSubscribers(key: string) {
+    if (this.rebase) {
+      return;
+    }
     const set = this.listSubscriptions.get(key);
     if (!set) {
       return;
@@ -465,97 +722,104 @@ export class Store {
   }
 
   setList(key: string, state: List) {
-    const previous = this.lists.get(key);
-    if (previous) {
-      this.removeListIndexes(key, previous);
-    }
-    this.lists.set(key, state);
-    this.addListIndexes(key, state);
-    this.notifyListSubscribers(key);
+    return this.update(() => {
+      this.captureList(key);
+      const previous = this.lists.get(key);
+      if (previous) {
+        this.removeListIndexes(key, previous);
+      }
+      this.lists.set(key, state);
+      this.addListIndexes(key, state);
+      this.notifyListSubscribers(key);
+    });
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
-    const keys = [...(this.listKeysByReferencedEntity.get(previousId) ?? [])];
-    for (const key of keys) {
-      const list = this.lists.get(key);
-      if (!list) {
-        continue;
-      }
+    return this.update(() => {
+      const keys = [...(this.listKeysByReferencedEntity.get(previousId) ?? [])];
+      for (const key of keys) {
+        const list = this.lists.get(key);
+        if (!list) {
+          continue;
+        }
 
-      let changed = false;
+        let changed = false;
 
-      let ids = list.ids;
-      let cursors = list.cursors;
-      if (list.ids.includes(previousId)) {
-        const nextIds: Array<EntityId> = [];
-        const nextCursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
-        const seenIds = new Set<EntityId>();
-        list.ids.forEach((id, index) => {
-          const resolved = id === previousId ? nextId : id;
-          if (seenIds.has(resolved)) {
-            return;
+        let ids = list.ids;
+        let cursors = list.cursors;
+        if (list.ids.includes(previousId)) {
+          const nextIds: Array<EntityId> = [];
+          const nextCursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
+          const seenIds = new Set<EntityId>();
+          list.ids.forEach((id, index) => {
+            const resolved = id === previousId ? nextId : id;
+            if (seenIds.has(resolved)) {
+              return;
+            }
+            seenIds.add(resolved);
+            nextIds.push(resolved);
+            if (nextCursors) {
+              nextCursors.push(list.cursors?.[index]);
+            }
+          });
+          changed = true;
+          ids = nextIds;
+          cursors = nextCursors;
+        }
+
+        const dedupe = (values: ReadonlyArray<EntityId> | undefined) => {
+          if (!values || !values.includes(previousId)) {
+            return undefined;
           }
-          seenIds.add(resolved);
-          nextIds.push(resolved);
-          if (nextCursors) {
-            nextCursors.push(list.cursors?.[index]);
+
+          const seen = new Set<EntityId>();
+          const next: Array<EntityId> = [];
+          for (const value of values) {
+            const resolved = value === previousId ? nextId : value;
+            if (seen.has(resolved)) {
+              continue;
+            }
+            seen.add(resolved);
+            next.push(resolved);
           }
+
+          changed = true;
+          return next;
+        };
+
+        const pendingBeforeIds = dedupe(list.pendingBeforeIds) ?? list.pendingBeforeIds;
+        const pendingAfterIds = dedupe(list.pendingAfterIds) ?? list.pendingAfterIds;
+        const liveBeforeIds = dedupe(list.liveBeforeIds) ?? list.liveBeforeIds;
+        const liveAfterIds = dedupe(list.liveAfterIds) ?? list.liveAfterIds;
+
+        if (!changed) {
+          continue;
+        }
+
+        const canonicalIds = new Set(ids);
+        this.setList(key, {
+          backwardPageLimit: list.backwardPageLimit,
+          cursors,
+          forwardPageLimit: list.forwardPageLimit,
+          ids,
+          liveAfterIds: liveAfterIds?.filter((id) => !canonicalIds.has(id)),
+          liveBeforeIds: liveBeforeIds?.filter((id) => !canonicalIds.has(id)),
+          pagination: list.pagination,
+          pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
+          pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
         });
-        changed = true;
-        ids = nextIds;
-        cursors = nextCursors;
       }
-
-      const dedupe = (values: ReadonlyArray<EntityId> | undefined) => {
-        if (!values || !values.includes(previousId)) {
-          return undefined;
-        }
-
-        const seen = new Set<EntityId>();
-        const next: Array<EntityId> = [];
-        for (const value of values) {
-          const resolved = value === previousId ? nextId : value;
-          if (seen.has(resolved)) {
-            continue;
-          }
-          seen.add(resolved);
-          next.push(resolved);
-        }
-
-        changed = true;
-        return next;
-      };
-
-      const pendingBeforeIds = dedupe(list.pendingBeforeIds) ?? list.pendingBeforeIds;
-      const pendingAfterIds = dedupe(list.pendingAfterIds) ?? list.pendingAfterIds;
-      const liveBeforeIds = dedupe(list.liveBeforeIds) ?? list.liveBeforeIds;
-      const liveAfterIds = dedupe(list.liveAfterIds) ?? list.liveAfterIds;
-
-      if (!changed) {
-        continue;
-      }
-
-      const canonicalIds = new Set(ids);
-      this.setList(key, {
-        backwardPageLimit: list.backwardPageLimit,
-        cursors,
-        forwardPageLimit: list.forwardPageLimit,
-        ids,
-        liveAfterIds: liveAfterIds?.filter((id) => !canonicalIds.has(id)),
-        liveBeforeIds: liveBeforeIds?.filter((id) => !canonicalIds.has(id)),
-        pagination: list.pagination,
-        pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
-        pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
-      });
-    }
+    });
   }
 
   restoreList(key: string, list?: List) {
-    if (list == null) {
-      this.deleteList(key);
-    } else {
-      this.setList(key, list);
-    }
+    return this.update(() => {
+      if (list == null) {
+        this.deleteList(key);
+      } else {
+        this.setList(key, list);
+      }
+    });
   }
 
   collectGarbage(
@@ -600,12 +864,15 @@ export class Store {
   }
 
   private deleteList(key: string) {
-    const previous = this.lists.get(key);
-    if (previous) {
-      this.removeListIndexes(key, previous);
-    }
-    this.lists.delete(key);
-    this.notifyListSubscribers(key);
+    return this.update(() => {
+      this.captureList(key);
+      const previous = this.lists.get(key);
+      if (previous) {
+        this.removeListIndexes(key, previous);
+      }
+      this.lists.delete(key);
+      this.notifyListSubscribers(key);
+    });
   }
 
   subscribeList(key: string, fn: () => void): () => void {
@@ -630,146 +897,129 @@ export class Store {
     };
   }
 
-  removeReferencesTo(
-    targetId: EntityId,
-    viewDataCache: ViewDataCache,
-    snapshots?: Map<EntityId, Snapshot>,
-    listSnapshots?: Map<string, List>,
-  ) {
-    const listKeys = [...(this.listKeysByReferencedEntity.get(targetId) ?? [])];
-    for (const key of listKeys) {
-      const list = this.lists.get(key);
-      if (!list) {
-        continue;
-      }
-
-      const { ids } = list;
-      const hasLiveAfter = Boolean(list.liveAfterIds?.includes(targetId));
-      const hasLiveBefore = Boolean(list.liveBeforeIds?.includes(targetId));
-      const hasPendingAfter = Boolean(list.pendingAfterIds?.includes(targetId));
-      const hasPendingBefore = Boolean(list.pendingBeforeIds?.includes(targetId));
-      if (
-        !ids.includes(targetId) &&
-        !hasLiveAfter &&
-        !hasLiveBefore &&
-        !hasPendingAfter &&
-        !hasPendingBefore
-      ) {
-        continue;
-      }
-
-      if (listSnapshots && !listSnapshots.has(key)) {
-        listSnapshots.set(key, list);
-      }
-
-      const entityIds: Array<EntityId> = [];
-      const cursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
-
-      for (let index = 0; index < ids.length; index++) {
-        const id = ids[index];
-        if (id === targetId) {
+  removeReferencesTo(targetId: EntityId, viewDataCache: ViewDataCache) {
+    return this.update(() => {
+      const listKeys = [...(this.listKeysByReferencedEntity.get(targetId) ?? [])];
+      for (const key of listKeys) {
+        const list = this.lists.get(key);
+        if (!list) {
           continue;
         }
 
-        entityIds.push(id);
-        if (cursors) {
-          cursors.push(list.cursors?.[index]);
+        const { ids } = list;
+        const hasLiveAfter = Boolean(list.liveAfterIds?.includes(targetId));
+        const hasLiveBefore = Boolean(list.liveBeforeIds?.includes(targetId));
+        const hasPendingAfter = Boolean(list.pendingAfterIds?.includes(targetId));
+        const hasPendingBefore = Boolean(list.pendingBeforeIds?.includes(targetId));
+        if (
+          !ids.includes(targetId) &&
+          !hasLiveAfter &&
+          !hasLiveBefore &&
+          !hasPendingAfter &&
+          !hasPendingBefore
+        ) {
+          continue;
         }
+
+        const entityIds: Array<EntityId> = [];
+        const cursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
+
+        for (let index = 0; index < ids.length; index++) {
+          const id = ids[index];
+          if (id === targetId) {
+            continue;
+          }
+
+          entityIds.push(id);
+          if (cursors) {
+            cursors.push(list.cursors?.[index]);
+          }
+        }
+
+        this.setList(key, {
+          backwardPageLimit: list.backwardPageLimit,
+          cursors,
+          forwardPageLimit: list.forwardPageLimit,
+          ids: entityIds,
+          liveAfterIds: list.liveAfterIds?.filter((id) => id !== targetId),
+          liveBeforeIds: list.liveBeforeIds?.filter((id) => id !== targetId),
+          pagination: list.pagination,
+          pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
+          pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
+        });
       }
 
-      this.setList(key, {
-        backwardPageLimit: list.backwardPageLimit,
-        cursors,
-        forwardPageLimit: list.forwardPageLimit,
-        ids: entityIds,
-        liveAfterIds: list.liveAfterIds?.filter((id) => id !== targetId),
-        liveBeforeIds: list.liveBeforeIds?.filter((id) => id !== targetId),
-        pagination: list.pagination,
-        pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
-        pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
-      });
-    }
+      const ids = new Map<EntityId, Set<string>>();
 
-    const ids = new Map<EntityId, Set<string>>();
+      const recordEntries = [...(this.recordReferencesByTarget.get(targetId)?.entries() ?? [])];
 
-    const recordEntries = [...(this.recordReferencesByTarget.get(targetId)?.entries() ?? [])];
+      for (const [id, fields] of recordEntries) {
+        const record = this.records.get(id);
+        if (!record) {
+          continue;
+        }
 
-    for (const [id, fields] of recordEntries) {
-      const record = this.records.get(id);
-      if (!record) {
-        continue;
-      }
+        let updated = false;
+        const next: AnyRecord = {};
+        const paths = new Set<string>();
 
-      let updated = false;
-      const next: AnyRecord = {};
-      const paths = new Set<string>();
+        for (const key of fields) {
+          const value = record[key];
+          if (Array.isArray(value)) {
+            const filtered = value.filter(
+              (item) => !(isNodeRef(item) && getNodeRefId(item) === targetId),
+            );
 
-      for (const key of fields) {
-        const value = record[key];
-        if (Array.isArray(value)) {
-          const filtered = value.filter(
-            (item) => !(isNodeRef(item) && getNodeRefId(item) === targetId),
-          );
-
-          if (filtered.length !== value.length) {
+            if (filtered.length !== value.length) {
+              updated = true;
+              paths.add(key);
+              next[key] = filtered;
+            }
+          } else if (isNodeRef(value) && getNodeRefId(value) === targetId) {
             updated = true;
             paths.add(key);
-            next[key] = filtered;
+            next[key] = null;
           }
-        } else if (isNodeRef(value) && getNodeRefId(value) === targetId) {
-          updated = true;
-          paths.add(key);
-          next[key] = null;
         }
+
+        if (!updated) {
+          continue;
+        }
+
+        viewDataCache.invalidate(id);
+        this.mergeInternal(id, next, paths);
+        ids.set(id, paths);
       }
 
-      if (!updated) {
-        continue;
+      for (const [id, paths] of ids) {
+        this.notify(id, paths);
       }
-
-      if (snapshots && !snapshots.has(id)) {
-        snapshots.set(id, this.snapshot(id));
-      }
-
-      viewDataCache.invalidate(id);
-      this.mergeInternal(id, next, paths);
-      ids.set(id, paths);
-    }
-
-    for (const [id, paths] of ids) {
-      this.notify(id, paths);
-    }
+    });
   }
 
-  snapshot(id: EntityId): Snapshot {
-    const record = this.records.get(id);
-    const mask = this.coverage.get(id);
-    return {
-      mask: mask ? cloneMask(mask) : undefined,
-      record: record ? (cloneValue(record) as AnyRecord) : undefined,
-    };
-  }
+  private restore(id: EntityId, snapshot: Snapshot) {
+    return this.update(() => {
+      this.captureRecord(id);
+      const previous = this.records.get(id);
+      if (previous) {
+        this.removeRecordReferenceIndexes(id, previous);
+      }
 
-  restore(id: EntityId, snapshot: Snapshot) {
-    const previous = this.records.get(id);
-    if (previous) {
-      this.removeRecordReferenceIndexes(id, previous);
-    }
+      if (snapshot.record === undefined) {
+        this.records.delete(id);
+      } else {
+        this.records.set(id, snapshot.record);
+        this.addRecordReferenceIndexes(id, snapshot.record);
+      }
 
-    if (snapshot.record === undefined) {
-      this.records.delete(id);
-    } else {
-      this.records.set(id, snapshot.record);
-      this.addRecordReferenceIndexes(id, snapshot.record);
-    }
+      if (snapshot.mask === undefined) {
+        this.coverage.delete(id);
+      } else {
+        this.coverage.set(id, snapshot.mask);
+      }
 
-    if (snapshot.mask === undefined) {
-      this.coverage.delete(id);
-    } else {
-      this.coverage.set(id, snapshot.mask);
-    }
-
-    this.notify(id);
+      this.notify(id);
+    });
   }
 
   private addListIndexes(key: string, list: List) {

@@ -4,7 +4,6 @@ import type { FateClient } from './client.js';
 import { FateRequestError } from './protocol.ts';
 import { toEntityId } from './ref.ts';
 import { getSelectionPlan } from './selection.ts';
-import { List } from './store.ts';
 import type {
   AnyRecord,
   Entity,
@@ -15,7 +14,6 @@ import type {
   MutationResult,
   OptimisticUpdate,
   Selection,
-  Snapshot,
   TypeConfig,
   View,
 } from './types.ts';
@@ -196,8 +194,6 @@ export function wrapMutation<
           ? toEntityId(identifier.entity, optimisticRecordId)
           : null;
 
-    const snapshots = new Map<string, Snapshot>();
-    const listSnapshots = deleteRecord || optimisticRecord ? new Map<string, List>() : undefined;
     const optimisticSelection = optimisticRecord
       ? collectImplicitSelectedPaths(optimisticRecord)
       : undefined;
@@ -214,27 +210,21 @@ export function wrapMutation<
       throw new Error(`fate: Mutation '${identifier.key}' requires an 'id' to delete.`);
     }
 
-    const optimisticToken = optimisticEntityId
-      ? client.registerOptimisticUpdate(optimisticEntityId, optimisticSelection ?? emptySet)
-      : null;
-
-    if (optimisticRecord && optimisticEntityId) {
-      client.write(
-        identifier.entity,
-        optimisticRecord,
-        optimisticSelection ?? emptySet,
-        snapshots,
-        plan,
-        null,
-        null,
-        insert,
-        listSnapshots,
-      );
-    }
-
-    if (deleteRecord && id != null) {
-      client.deleteRecord(identifier.entity, id, snapshots, listSnapshots);
-    }
+    const applyOptimistic = () => {
+      if (optimisticRecord && optimisticEntityId) {
+        client.write(
+          identifier.entity,
+          optimisticRecord,
+          optimisticSelection ?? emptySet,
+          plan,
+          insert,
+        );
+      }
+      if (deleteRecord && id != null) {
+        client.deleteRecord(identifier.entity, id);
+      }
+    };
+    const settle = client.store.optimisticUpdate(applyOptimistic);
 
     const performMutation = async () => {
       try {
@@ -246,58 +236,30 @@ export function wrapMutation<
         const shouldWriteResult =
           result && typeof result === 'object' && (!deleteRecord || Boolean(view));
 
-        if (shouldWriteResult) {
-          const select = collectImplicitSelectedPaths(result);
-          const pendingMask = optimisticEntityId
-            ? client.getPendingOptimisticMask(optimisticEntityId, { excludeToken: optimisticToken })
-            : null;
-          const filteredSelection = optimisticEntityId
-            ? client.filterSelectionForPendingOptimistics(optimisticEntityId, select, {
-                excludeToken: optimisticToken,
-              })
-            : select;
+        settle(() => {
+          if (shouldWriteResult) {
+            const select = collectImplicitSelectedPaths(result);
+            client.write(identifier.entity, result, select, plan, insert);
 
-          client.write(
-            identifier.entity,
-            result,
-            filteredSelection,
-            undefined,
-            plan,
-            null,
-            pendingMask,
-            insert,
-          );
-
+            const resultId = maybeGetId(config.getId, result as AnyRecord);
+            if (optimisticEntityId && resultId != null) {
+              client.resolveOptimisticEntity(
+                optimisticEntityId,
+                toEntityId(identifier.entity, resultId),
+              );
+            }
+            if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
+              client.deleteRecord(identifier.entity, optimisticRecordId);
+            }
+          }
           if (deleteRecord && id != null) {
             client.deleteRecord(identifier.entity, id);
           }
-
-          const resultId = maybeGetId(config.getId, result as AnyRecord);
-          if (optimisticEntityId && resultId != null) {
-            client.resolveOptimisticEntity(
-              optimisticEntityId,
-              toEntityId(identifier.entity, resultId),
-            );
-          }
-          if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
-            client.deleteRecord(identifier.entity, optimisticRecordId);
-          }
-        }
+        });
 
         return { error: undefined, result };
       } catch (error) {
-        client.clearOptimisticUpdate(optimisticToken);
-        if (snapshots.size > 0) {
-          for (const [id, snapshot] of snapshots) {
-            client.restore(id, snapshot);
-          }
-        }
-
-        if (listSnapshots && listSnapshots.size > 0) {
-          for (const [name, list] of listSnapshots) {
-            client.restoreList(name, list);
-          }
-        }
+        settle();
 
         if (error instanceof Error) {
           const statusCode = getErrorStatusCode(error);
@@ -311,8 +273,6 @@ export function wrapMutation<
         } else {
           throw new Error(`fate: Mutation '${identifier.key}' failed.`, { cause: error });
         }
-      } finally {
-        client.clearOptimisticUpdate(optimisticToken);
       }
     };
 

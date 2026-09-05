@@ -333,9 +333,6 @@ test('hydrates list windows and root-list registrations used by mutation inserti
     { __typename: 'Post', id: 'post-2', title: 'Two' },
     new Set(['id', 'title']),
     undefined,
-    undefined,
-    null,
-    undefined,
     'after',
   );
   expect(browser.store.getListState(listKey)?.pendingAfterIds).toContain(
@@ -521,9 +518,6 @@ test('notifies list subscribers after replacement root-list registrations are fu
       { __typename: 'Post', id: 'post-2', title: 'Two' },
       new Set(['id', 'title']),
       undefined,
-      undefined,
-      null,
-      undefined,
       'after',
     );
   });
@@ -633,11 +627,12 @@ test('rejects unsafe hydration values, unknown versions, and optimistic state', 
     } as never),
   ).toThrow(/Unsupported hydration merge mode/);
 
-  client.registerOptimisticUpdate('Post:post-1', new Set(['title']));
+  const settle = client.store.optimisticUpdate(() => {});
   expect(() => client.dehydrate()).toThrow(/optimistic updates are active/);
   expect(() => client.hydrate(hydrationState(emptyHydrationState()))).toThrow(
     /optimistic updates are active/,
   );
+  settle();
 
   expect(() => decodeHydrationValue(['null', 'unexpected'])).toThrow(/Invalid hydration payload/);
   expect(() => decodeHydrationValue(['unknown'])).toThrow(/Invalid hydration payload/);

@@ -124,7 +124,6 @@ test('loads additional items when loadNext is invoked', async () => {
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -278,7 +277,6 @@ test('loadNext forwards the limit when the initial request used last/before', as
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -425,7 +423,6 @@ test('uses pagination from list state when not selected', async () => {
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -758,7 +755,6 @@ test('nested list optimistic pending edges roll back after failed mutations', as
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
@@ -911,7 +907,6 @@ test('loads previous items when loadPrevious is invoked', async () => {
       id: 'post-1',
     },
     plan.paths,
-    undefined,
     plan,
   );
 
