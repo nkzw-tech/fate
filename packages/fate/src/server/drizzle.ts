@@ -1544,7 +1544,10 @@ export function createDrizzleSourceAdapter<Context>({
       ctx,
       extraFields: extra?.extraFields,
       node: plan.root,
-      where: inArray(getColumn(config.columns, plan.source.id), [...new Set(ids)]),
+      where: and(
+        inArray(getColumn(config.columns, plan.source.id), [...new Set(ids)]),
+        extra?.where,
+      ),
     });
     return reorderByIds(
       ids,

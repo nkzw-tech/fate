@@ -561,7 +561,7 @@ export function createPrismaSourceAdapter<Context>({
       items: await delegate.findMany({
         ...extra,
         select: toPrismaSelect(plan),
-        where: { id: { in: ids } },
+        where: { ...(extra?.where ? { AND: [extra.where] } : {}), id: { in: ids } },
       }),
       plan,
     }) as Promise<Array<Item>>;
@@ -590,7 +590,7 @@ export function createPrismaSourceAdapter<Context>({
                 delegate.findUnique({
                   ...extra,
                   select: toPrismaSelect(plan),
-                  where: { id },
+                  where: { ...(extra?.where ? { AND: [extra.where] } : {}), id },
                 }),
               ])
             ).flatMap((item) => (item ? [item] : [])),
