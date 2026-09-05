@@ -18,7 +18,7 @@ import { isDataView, type DataView, type DataViewResult } from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
-import { createSourcePlan, type SourceDefinition } from './source.ts';
+import type { SourceDefinition } from './source.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -553,47 +553,14 @@ const filterLiveSelection = (
   return [...result];
 };
 
-const hasSelectedDataPath = (value: unknown, segments: Array<string>): boolean => {
-  if (segments.length === 0) {
-    return true;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every((entry) => hasSelectedDataPath(entry, segments));
-  }
-
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const [field, ...rest] = segments;
-  return field in value && hasSelectedDataPath(value[field], rest);
-};
-
-const canUseLiveEventData = (data: unknown, selectedPaths: ReadonlySet<string>): boolean => {
-  if (!isRecord(data)) {
-    return false;
-  }
-
-  for (const path of selectedPaths) {
-    if (!hasSelectedDataPath(data, path.split('.'))) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
 const resolveLiveSourceData = async <Context>({
   ctx,
-  data,
   id,
   input,
   registry,
   source,
 }: {
   ctx: Context;
-  data?: unknown;
   id?: string | number;
   input: {
     args?: Record<string, unknown>;
@@ -602,17 +569,7 @@ const resolveLiveSourceData = async <Context>({
   registry: SourceRegistry<Context>;
   source: SourceDefinition<AnyRecord>;
 }): Promise<unknown> => {
-  if (data !== undefined) {
-    if (data == null) {
-      return data;
-    }
-
-    const plan = createSourcePlan({ ...input, ctx, source });
-    if (canUseLiveEventData(data, plan.selectedPaths)) {
-      return await plan.resolve(data as AnyRecord);
-    }
-  }
-
+  // Load in the subscriber context so access checks and field redaction always apply.
   return id == null
     ? null
     : await resolveSourceById({
@@ -988,7 +945,6 @@ export function createFateServer<
               ? null
               : await resolveLiveSourceData({
                   ctx: connection.ctx,
-                  data: event.data,
                   id: event.id,
                   input,
                   registry: sources.registry,
@@ -1016,7 +972,6 @@ export function createFateServer<
             : source
               ? await resolveLiveSourceData({
                   ctx: connection.ctx,
-                  data: event.node,
                   id: event.id,
                   input: {
                     args: operation.selectionArgs,
@@ -1113,7 +1068,6 @@ export function createFateServer<
             ? null
             : await resolveLiveSourceData({
                 ctx: connection.ctx,
-                data: event.data,
                 id: event.id,
                 input,
                 registry: sources.registry,
@@ -1222,7 +1176,6 @@ export function createFateServer<
             : source
               ? await resolveLiveSourceData({
                   ctx: connection.ctx,
-                  data: event.node,
                   id: event.id,
                   input: {
                     args: operation.selectionArgs,

@@ -521,7 +521,7 @@ test('streams live updates over SSE', async () => {
   await reader.cancel();
 });
 
-test('shapes supplied live update data for the subscription selection', async () => {
+test('refetches supplied live update data for the subscription selection', async () => {
   const { fate, live } = createServer();
   const response = await fate.handleLiveRequest(
     new Request('http://local/fate/live?connectionId=c1'),
@@ -550,7 +550,7 @@ test('shapes supplied live update data for the subscription selection', async ()
   await reader.read();
   const first = new TextDecoder().decode((await reader.read()).value);
 
-  expect(first).toContain('"event":{"data":{"id":"1","title":"One from event"}}');
+  expect(first).toContain('"event":{"data":{"id":"1","title":"One"}}');
   expect(first).not.toContain('likes');
   expect(first).not.toContain('__typename');
 
@@ -919,7 +919,7 @@ test('controls live subscriptions when adapter execution context is unavailable'
   await reader.cancel();
 });
 
-test('shapes supplied live connection nodes for the subscription selection', async () => {
+test('refetches supplied live connection nodes for the subscription selection', async () => {
   const { fate, live } = createServer();
   const response = await fate.handleLiveRequest(
     new Request('http://local/fate/live?connectionId=c1'),
@@ -951,7 +951,7 @@ test('shapes supplied live connection nodes for the subscription selection', asy
   await reader.read();
   const first = new TextDecoder().decode((await reader.read()).value);
 
-  expect(first).toContain('"node":{"id":"1","title":"One from event"}');
+  expect(first).toContain('"node":{"id":"1","title":"One"}');
   expect(first).not.toContain('likes');
   expect(first).not.toContain('__typename');
 
