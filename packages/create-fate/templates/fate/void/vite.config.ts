@@ -64,8 +64,9 @@ export default defineConfig({
   plugins: [
     ...(lazyPlugins(() => [
       tailwindcss(),
-      ...(isTest ? [] : [voidPlugin(), voidReact()]),
-      react({ compiler: true }),
+      ...(isTest
+        ? [react({ compiler: true })]
+        : [voidPlugin(), voidReact({ react: { compiler: true } })]),
     ]) ?? []),
     fate({
       module: './src/fate/server.ts',

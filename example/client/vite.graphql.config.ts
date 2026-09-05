@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
@@ -25,8 +24,7 @@ process.env.VITE_FATE_TRANSPORT = 'graphql';
 const lazyClientPlugins = (): Array<PluginOption> => [
   tailwindcss() as PluginOption,
   voidPlugin() as PluginOption,
-  voidReact() as PluginOption,
-  react({ compiler: true }) as PluginOption,
+  voidReact({ react: { compiler: true } }) as PluginOption,
 ];
 
 export default defineConfig({

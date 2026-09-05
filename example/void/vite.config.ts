@@ -1,5 +1,4 @@
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
 import type { PluginOption } from 'vite-plus';
@@ -9,8 +8,7 @@ import { voidPlugin } from 'void';
 const lazyVoidPlugins = (): Array<PluginOption> => [
   tailwindcss() as PluginOption,
   voidPlugin() as PluginOption,
-  voidReact() as PluginOption,
-  react({ compiler: true }) as PluginOption,
+  voidReact({ react: { compiler: true } }) as PluginOption,
 ];
 
 export default defineConfig({

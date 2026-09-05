@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import fbtee from '@nkzw/vite-plugin-fbtee';
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
 import { fate } from 'react-fate/vite';
@@ -27,8 +26,7 @@ export default defineConfig({
       fbtee(),
       tailwindcss(),
       voidPlugin(),
-      voidReact(),
-      react({ compiler: true }),
+      voidReact({ react: { compiler: true } }),
     ]) ?? []),
     fate({
       module: '@app/server/src/graphql/fate.ts',
