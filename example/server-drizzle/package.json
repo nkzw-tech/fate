@@ -29,10 +29,10 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.5",
     "pg": "^8.23.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",
     "nodemon": "^3.1.14"

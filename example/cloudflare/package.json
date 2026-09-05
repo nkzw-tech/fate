@@ -23,12 +23,12 @@
     "better-auth": "1.7.2",
     "cf-fate": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "wrangler": "^4.126.0"
+    "wrangler": "^4.129.0"
   }
 }

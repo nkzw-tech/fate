@@ -40,14 +40,14 @@
     "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/react.tsx src/server.ts"
   },
   "dependencies": {
-    "@nkzw/fate": "workspace:^",
-    "react-fate": "workspace:^"
+    "@nkzw/fate": "^1.3.3",
+    "react-fate": "^1.3.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
     "react": "^19.2.8",
     "vite": "catalog:",
-    "void": "^0.10.12"
+    "void": "^0.10.13"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",
