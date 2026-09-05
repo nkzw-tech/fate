@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 work_root="${tmp_root%/}/fate-template-tests"
 target_dir="${work_root}/${template}"
+package_dir="${work_root}/${template}-packages"
 templates_root="${repo_root}/packages/create-fate/templates/fate"
 
 if [[ ! -d "${templates_root}/${template}" ]]; then
@@ -23,6 +24,14 @@ fi
 rm -rf "${target_dir}"
 mkdir -p "${work_root}"
 node "${repo_root}/packages/create-fate/bin/create-fate.mjs" "${target_dir}" --template "${template}" --no-setup
+
+# Install release artifacts so the template resolves its own peer dependencies.
+mkdir -p "${package_dir}"
+vp pm pack --filter '@nkzw/fate' --out "${package_dir}/fate.tgz"
+vp pm pack --filter react-fate --out "${package_dir}/react-fate.tgz"
+if [[ "${template}" == "void" ]]; then
+  vp pm pack --filter void-fate --out "${package_dir}/void-fate.tgz"
+fi
 
 if [[ -d "${target_dir}/server" ]]; then
   test -f "${target_dir}/server/.env"
@@ -44,9 +53,9 @@ EOF
 fi
 
 TEMPLATE_DIR="${target_dir}" \
-FATE_PACKAGE="link:${repo_root}/packages/fate" \
-REACT_FATE_PACKAGE="link:${repo_root}/packages/react-fate" \
-VOID_FATE_PACKAGE="link:${repo_root}/packages/void-fate" \
+FATE_PACKAGE="file:${package_dir}/fate.tgz" \
+REACT_FATE_PACKAGE="file:${package_dir}/react-fate.tgz" \
+VOID_FATE_PACKAGE="file:${package_dir}/void-fate.tgz" \
 node --input-type=module <<'EOF'
 import { readFileSync, writeFileSync } from 'node:fs';
 
