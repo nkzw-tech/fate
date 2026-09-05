@@ -1,4 +1,4 @@
-import { bench, describe } from 'vite-plus/test';
+import { describe, test } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
 import { createNodeRef } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
@@ -49,11 +49,15 @@ const createReferenceStore = () => {
 describe('Store indexed large-collection operations', () => {
   const { ownerId, store } = createIndexedListStore();
 
-  bench('getListsForField with many lists on one owner field', () => {
-    store.getListsForField(ownerId, 'comments');
+  test('getListsForField with many lists on one owner field', async ({ bench }) => {
+    await bench('getListsForField with many lists on one owner field', () => {
+      store.getListsForField(ownerId, 'comments');
+    }).run();
   });
 
-  bench('removeReferencesTo with many records and lists', () => {
-    createReferenceStore().removeReferencesTo(targetId, new ViewDataCache());
+  test('removeReferencesTo with many records and lists', async ({ bench }) => {
+    await bench('removeReferencesTo with many records and lists', () => {
+      createReferenceStore().removeReferencesTo(targetId, new ViewDataCache());
+    }).run();
   });
 });

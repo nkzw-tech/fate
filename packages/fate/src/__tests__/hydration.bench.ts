@@ -1,4 +1,4 @@
-import { bench, describe } from 'vite-plus/test';
+import { describe, test } from 'vite-plus/test';
 import { decodeHydrationValue, encodeHydrationValue } from '../hydration.ts';
 import { createNodeRef } from '../node-ref.ts';
 import { getListKey, Store, type StoreHydrationState } from '../store.ts';
@@ -34,11 +34,15 @@ const state: StoreHydrationState = {
 const encoded = encodeHydrationValue({ rootLists: [], rootRequests: [], store: state });
 
 describe('Hydration large-cache operations', () => {
-  bench('decode hydration payload', () => {
-    decodeHydrationValue(encoded);
+  test('decode hydration payload', async ({ bench }) => {
+    await bench('decode hydration payload', () => {
+      decodeHydrationValue(encoded);
+    }).run();
   });
 
-  bench('replace hydrated store state and rebuild indexes', () => {
-    new Store().hydrate(state, 'replace');
+  test('replace hydrated store state and rebuild indexes', async ({ bench }) => {
+    await bench('replace hydrated store state and rebuild indexes', () => {
+      new Store().hydrate(state, 'replace');
+    }).run();
   });
 });
