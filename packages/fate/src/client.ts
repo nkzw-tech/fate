@@ -1611,14 +1611,21 @@ export class FateClient<
 
     const previousPagination = previous?.pagination;
     const newPagination = incomingPagination;
+    // Cursor pages extend one edge of the accumulated list. Keep the other
+    // edge's flag and cursor instead of replacing them with the new page's.
+    const extendsExistingList = options.hasCursorArg && existingIds.length > 0;
+    const leadingPagination =
+      extendsExistingList && !isBackward ? (previousPagination ?? newPagination) : newPagination;
+    const trailingPagination =
+      extendsExistingList && isBackward ? (previousPagination ?? newPagination) : newPagination;
 
     const pagination =
       previousPagination || newPagination
         ? {
-            hasNext: !!(newPagination?.hasNext ?? previousPagination?.hasNext),
-            hasPrevious: !!(newPagination?.hasPrevious ?? previousPagination?.hasPrevious),
-            nextCursor: newPagination?.nextCursor ?? previousPagination?.nextCursor,
-            previousCursor: newPagination?.previousCursor ?? previousPagination?.previousCursor,
+            hasNext: !!(trailingPagination?.hasNext ?? previousPagination?.hasNext),
+            hasPrevious: !!(leadingPagination?.hasPrevious ?? previousPagination?.hasPrevious),
+            nextCursor: trailingPagination?.nextCursor ?? previousPagination?.nextCursor,
+            previousCursor: leadingPagination?.previousCursor ?? previousPagination?.previousCursor,
           }
         : undefined;
 

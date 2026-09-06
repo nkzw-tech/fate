@@ -8,6 +8,7 @@ import { toEntityId } from '../ref.ts';
 import { createRequestDescriptor } from '../request-descriptor.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
+import { arrayToConnection } from '../server/connection.ts';
 import { getListKey, List } from '../store.ts';
 import {
   AnyRecord,
@@ -4464,6 +4465,90 @@ test(`'request' keeps cursor args in root list request cache keys`, async () => 
       .posts.items.map(({ node }) => node.id),
   ).toEqual(['post-1', 'post-2']);
 });
+
+test.each(['forward', 'backward'] as const)(
+  '%s cache-first requests preserve an expanded root list and its unchanged boundary',
+  async (direction) => {
+    const isBackward = direction === 'backward';
+    type Post = { __typename: 'Post'; id: string; title: string };
+    const nodes: Array<Post> = Array.from({ length: 6 }, (_, index) => ({
+      __typename: 'Post',
+      id: String(index + 1),
+      title: `Post ${index + 1}`,
+    }));
+    const fetchList = vi.fn(async (_name, _select, args) => arrayToConnection(nodes, { args })!);
+    const roots = { posts: clientRoot('Post') };
+    const mutations = {};
+    const client = createClient<[typeof roots, typeof mutations]>({
+      roots,
+      transport: {
+        async fetchById() {
+          return [];
+        },
+        fetchList,
+      },
+      types: [{ fields: { title: 'scalar' }, type: 'Post' }],
+    });
+    const PostView = view<Post>()({ id: true, title: true });
+    const request = {
+      posts: {
+        list: {
+          args: isBackward ? { last: 2 } : { first: 2 },
+          items: { node: PostView },
+          pagination: { hasNext: true, hasPrevious: true, nextCursor: true, previousCursor: true },
+        },
+      },
+    };
+
+    const { posts } = await client.request(request);
+    expect(posts.items.map(({ node }) => node.id)).toEqual(isBackward ? ['5', '6'] : ['1', '2']);
+    expect(isBackward ? posts.pagination?.hasNext : posts.pagination?.hasPrevious).toBe(false);
+    const metadata = (posts as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+
+    await client.loadConnection(
+      PostView,
+      metadata,
+      isBackward
+        ? { before: posts.pagination?.previousCursor, last: 2 }
+        : { after: posts.pagination?.nextCursor, first: 2 },
+      { direction },
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
+    const expanded = client.getRequestResult(request).posts;
+    const expectedIds = isBackward ? ['3', '4', '5', '6'] : ['1', '2', '3', '4'];
+    expect(expanded.items.map(({ node }) => node.id)).toEqual(expectedIds);
+    // Loading another page must only update the boundary in that direction.
+    expect.soft(expanded.pagination).toEqual(
+      isBackward
+        ? {
+            hasNext: false,
+            hasPrevious: true,
+            nextCursor: '6',
+            previousCursor: '3',
+          }
+        : {
+            hasNext: true,
+            hasPrevious: false,
+            nextCursor: '4',
+            previousCursor: undefined,
+          },
+    );
+
+    // Returning to a screen repeats its cache-first request on the same client.
+    // No router, component lifecycle, or garbage collection is needed to reproduce this.
+    const revisited = await client.request(request, { mode: 'cache-first' });
+    expect.soft(fetchList).toHaveBeenCalledTimes(2);
+    expect.soft(revisited.posts.items.map(({ node }) => node.id)).toEqual(expectedIds);
+
+    // An explicit refresh still replaces the list and both of its boundaries.
+    const refreshed = await client.request(request, { mode: 'network-only' });
+    expect(fetchList).toHaveBeenCalledTimes(3);
+    expect(refreshed.posts.items.map(({ node }) => node.id)).toEqual(
+      isBackward ? ['5', '6'] : ['1', '2'],
+    );
+    expect(refreshed.posts.pagination).toEqual(posts.pagination);
+  },
+);
 
 test(`root pagination does not update other arg-scoped root lists`, async () => {
   type Post = { __typename: 'Post'; id: string; title: string };
