@@ -13,6 +13,9 @@ hero:
       text: Get Started
       link: /guide/getting-started
     - theme: alt
+      text: Explore the fate stack ↗
+      link: https://stack.fate.technology
+    - theme: alt
       text: API Documentation
       link: /api
     - theme: alt

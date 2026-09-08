@@ -20,9 +20,7 @@ example/server-graphql/src/prisma/prisma-client/
 example/server-prisma/src/prisma/prisma-client/
 packages/fate/docs/
 packages/react-fate/docs/
-packages/**/lib/
-!packages/create-fate/templates/**/src/lib/
-!packages/create-fate/templates/**/src/lib/**
+packages/*/lib/
 packages/**/LICENSE
 packages/**/README.md
 !packages/create-fate/LICENSE

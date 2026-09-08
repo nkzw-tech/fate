@@ -69,6 +69,12 @@ jobs:
           node-version: '24'
           cache: true
 
+      - name: Set up pnpm for Wrangler
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.0.6'
+          run_install: false
+
       - name: Install dependencies
         run: vp install --frozen-lockfile
 

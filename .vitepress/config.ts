@@ -54,7 +54,7 @@ export default defineConfig({
   sitemap: {
     hostname: 'https://fate.technology',
   },
-  srcExclude: ['docs/parts/**.', 'packages/**/README.md', '/README.md'],
+  srcExclude: ['docs/parts/**.', 'packages/**/README.md', 'sites/**', '/README.md'],
   themeConfig: {
     footer: {
       copyright: `Copyright © 2025-present Nakazawa Tech`,
@@ -69,6 +69,7 @@ export default defineConfig({
       { link: '/guide/getting-started', text: 'Guide' },
       { link: '/api', text: 'API' },
       { link: '/posts/fate-1.0', text: 'Blog' },
+      { link: 'https://stack.fate.technology', text: 'fate stack' },
       {
         items: [
           {
