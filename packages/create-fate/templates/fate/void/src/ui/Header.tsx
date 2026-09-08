@@ -5,6 +5,7 @@ import type { SharedData } from '../lib/shared.ts';
 import AuthClient from '../user/AuthClient.tsx';
 import { Button } from './Button.tsx';
 import Link from './Link.tsx';
+import LocaleSwitcher from './LocaleSwitcher.tsx';
 
 export default function Header() {
   const router = useRouter();
@@ -51,16 +52,19 @@ export default function Header() {
                 <span className="italic">fate</span>
               </span>
               <p className="hidden text-xs text-muted-foreground sm:block">
-                A modern data client for React.
+                <fbt desc="fate library tagline">A modern data client for React.</fbt>{' '}
               </p>
             </div>
           </Stack>
         </Link>
         <Stack alignCenter>
+          <LocaleSwitcher />
           <Button asChild size="sm" variant="ghost">
             <Link href="/search">
               <Search className="h-4 w-4" />
-              <span className="hidden sm:inline">Search</span>
+              <span className="hidden sm:inline">
+                <fbt desc="Search button">Search</fbt>
+              </span>
             </Link>
           </Button>
           <div className="flex w-9 justify-end sm:w-24">
@@ -78,13 +82,15 @@ export default function Header() {
                   }}
                 >
                   <LogOut className="h-4 w-4" />
-                  <span className="hidden sm:inline">Logout</span>
+                  <span className="hidden sm:inline">
+                    <fbt desc="Logout button">Logout</fbt>
+                  </span>
                 </Stack>
               </Button>
             ) : (
               <Button asChild className="w-full" size="sm" variant="ghost">
                 <Link href="/login">
-                  <LogIn className="h-4 w-4" /> Login
+                  <LogIn className="h-4 w-4" /> <fbt desc="Login button">Login</fbt>{' '}
                 </Link>
               </Button>
             )}

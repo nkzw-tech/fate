@@ -46,7 +46,9 @@ const PostItem = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 const Viewer = ({ viewer: viewerRef }: { viewer: ViewRef<'User'> }) => {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">Viewer</h2>
+      <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
+        <fbt desc="index: Viewer">Viewer</fbt>
+      </h2>
       <p className="mt-2 text-lg font-semibold">
         <UserName user={viewerRef} />
       </p>
@@ -59,7 +61,9 @@ const PostList = ({ posts: postsRef }: { posts: ConnectionRef<'Post'> }) => {
 
   return (
     <section className="space-y-4">
-      <h2 className="text-2xl font-semibold">Posts</h2>
+      <h2 className="text-2xl font-semibold">
+        <fbt desc="index: Posts">Posts</fbt>
+      </h2>
       {posts.map(({ node }) => (
         <PostItem key={node.id} post={node} />
       ))}
@@ -80,11 +84,15 @@ export default function HomePage() {
           fate + GraphQL
         </p>
         <h1 className="text-4xl font-semibold tracking-tight text-slate-950 dark:text-white">
-          Use fate with an existing GraphQL server
+          <fbt desc="index: Use fate with an existing GraphQL server">
+            Use fate with an existing GraphQL server
+          </fbt>{' '}
         </h1>
         <p className="max-w-2xl text-slate-600 dark:text-slate-300">
-          Replace the sample views in <code>src/fate/graphql.ts</code> with your schema types and
-          point <code>VITE_GRAPHQL_URL</code> at your API.
+          <fbt desc="GraphQL client setup instructions">
+            Replace the sample views in <code>src/fate/graphql.ts</code> with your schema types and
+            point <code>VITE_GRAPHQL_URL</code> at your API.
+          </fbt>
         </p>
       </header>
 

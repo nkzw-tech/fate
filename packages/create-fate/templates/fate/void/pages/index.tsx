@@ -38,7 +38,9 @@ const PostFeed = ({
   return posts.length ? (
     <VStack gap={16}>
       <Stack alignCenter between gap={16}>
-        <H2 className="pl-5">Latest posts</H2>
+        <H2 className="pl-5">
+          <fbt desc="Latest posts header">Latest posts</fbt>
+        </H2>
         <div>
           <button
             className={cx(
@@ -66,7 +68,7 @@ const PostFeed = ({
         {loadNext ? (
           <Stack center>
             <Button onClick={loadNext} variant="ghost">
-              Load more posts
+              <fbt desc="Load more posts button">Load more posts</fbt>{' '}
             </Button>
           </Stack>
         ) : null}
@@ -78,7 +80,9 @@ const PostFeed = ({
 const CategoryFeed = ({ categories }: { categories: Array<ViewRef<'Category'>> }) =>
   categories.length ? (
     <VStack gap={16}>
-      <H2 className="pl-5">Explore by theme</H2>
+      <H2 className="pl-5">
+        <fbt desc="index: Explore by theme">Explore by theme</fbt>
+      </H2>
       <VStack gap={24}>
         {categories.map((category) => (
           <CategoryCard category={category} key={category.id} />
@@ -90,7 +94,9 @@ const CategoryFeed = ({ categories }: { categories: Array<ViewRef<'Category'>> }
 const EventFeed = ({ events }: { events: Array<ViewRef<'Event'>> }) =>
   events.length ? (
     <VStack gap={16}>
-      <H2 className="pl-5">Events</H2>
+      <H2 className="pl-5">
+        <fbt desc="index: Events">Events</fbt>
+      </H2>
       <VStack gap={24}>
         {events.map((event) => (
           <EventCard event={event} key={event.id} />
@@ -115,16 +121,20 @@ export default function HomePage() {
         <Card className="border border-white/20 bg-linear-to-r from-blue-500 to-sky-500 text-white dark:from-blue-600 dark:to-sky-600">
           <Stack alignCenter gap={12} wrap>
             <span className="squircle bg-white/20 px-2 py-1 text-xs font-semibold tracking-widest uppercase">
-              <span className="lowercase italic">fate</span> demo
+              <span className="lowercase italic">fate</span> <fbt desc="index: demo">demo</fbt>{' '}
             </span>
           </Stack>
           <div className="space-y-3">
             <h1 className="text-3xl leading-tight font-semibold text-balance lg:text-4xl">
-              fate is a modern data client for React inspired by Relay and GraphQL.
+              <fbt desc="Description of fate">
+                fate is a modern data client for React inspired by Relay and GraphQL.
+              </fbt>{' '}
             </h1>
             <p className="text-sm text-white/80 lg:text-base">
-              fate combines view composition, normalized caching, data masking, Async React
-              features, and type-safe data fetching.
+              <fbt desc="index: fate combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.">
+                fate combines view composition, normalized caching, data masking, Async React
+                features, and type-safe data fetching.
+              </fbt>{' '}
             </p>
           </div>
           <Stack alignCenter gap={12} wrap>
@@ -132,10 +142,12 @@ export default function HomePage() {
               <>
                 <Button asChild size="sm" variant="secondary">
                   <Link className="squircle px-4 py-2 text-sm font-semibold" href="/login">
-                    Login
+                    <fbt desc="Login button">Login</fbt>{' '}
                   </Link>
                 </Button>
-                <span className="text-sm text-white/80">Sign in to post comments.</span>
+                <span className="text-sm text-white/80">
+                  <fbt desc="Login button label">Sign in to post comments.</fbt>
+                </span>
               </>
             )}
           </Stack>

@@ -62,5 +62,3 @@ export const createAuth = (baseURL = 'http://localhost:8787', secret?: string) =
   authByBaseURL.set(cacheKey, auth);
   return auth;
 };
-
-export const auth = createAuth();

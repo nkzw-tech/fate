@@ -26,4 +26,7 @@ export default defineMiddleware(async (context, next) => {
   });
 
   await next();
+
+  // Void auth appends headers after this middleware; asset responses can be immutable.
+  context.res = new Response(context.res.body, context.res);
 });

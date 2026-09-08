@@ -591,7 +591,13 @@ const removeIfExists = (entryPath) => {
 
 const removeReactFrontend = (frontendRoot, selectedVariant) => {
   if (selectedVariant === 'void' || selectedVariant === 'graphql-client') {
-    for (const entry of ['pages', 'src/ui']) {
+    for (const entry of [
+      'pages',
+      'src/ui',
+      'translations',
+      'src/lib/LocaleContext.tsx',
+      'src/lib/AvailableLanguages.tsx',
+    ]) {
       removeIfExists(path.join(frontendRoot, entry));
     }
     removeIfExists(path.join(frontendRoot, 'src', 'App.css'));
@@ -617,8 +623,21 @@ const configureVuePackageJson = (frontendRoot, selectedVariant, originalPackageJ
           ...originalPackageJson.devDependencies,
           ...vuePackageJson.devDependencies,
         },
+        scripts: {
+          ...originalPackageJson.scripts,
+          build: vuePackageJson.scripts.build,
+          'dev:setup': originalPackageJson.scripts['dev:setup'].replace('vp run fbtee:all && ', ''),
+        },
       }
     : vuePackageJson;
+
+  if (packageJson.scripts) {
+    for (const name of Object.keys(packageJson.scripts)) {
+      if (name.startsWith('fbtee:')) {
+        delete packageJson.scripts[name];
+      }
+    }
+  }
 
   removePackageEntries(packageJson.dependencies, reactPackageEntries);
   removePackageEntries(packageJson.devDependencies, reactPackageEntries);
@@ -709,6 +728,11 @@ const configureVueReadme = (targetPath, selectedVariant) => {
   fs.writeFileSync(
     readmePath,
     readme
+      .replace(/\n## Translations\n[\s\S]*$/, '')
+      .replaceAll(/^- \[fbtee\].*\n/gm, '')
+      .replaceAll('runs fbtee setup, and ', '')
+      .replaceAll('fbtee setup, and ', '')
+      .replaceAll(', fbtee setup,', ',')
       .replaceAll(
         `vp create fate my-app --template ${selectedVariant}`,
         `vp create fate my-app --template ${selectedVariant} --framework vue`,
@@ -878,6 +902,11 @@ const runCommand = (command, args, cwd) => {
 
 const setupProject = (targetPath, selectedVariant) => {
   runCommand('vp', ['install'], targetPath);
+
+  const frontendRoot = frontendRootForVariant(targetPath, selectedVariant);
+  if (readPackageJson(path.join(frontendRoot, 'package.json')).scripts?.['fbtee:all']) {
+    runCommand('vp', ['run', 'fbtee:all'], frontendRoot);
+  }
 
   switch (selectedVariant) {
     case 'cloudflare':

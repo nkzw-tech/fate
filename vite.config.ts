@@ -111,6 +111,7 @@ export default defineConfig({
             './example/server-graphql/vite.config.ts',
             './prisma.config.ts',
             './scripts/**/*.tsx',
+            './scripts/**/*.mjs',
             './src/index.test.tsx',
             './example/server-drizzle/drizzle.config.ts',
             './example/server-prisma/prisma.config.ts',
@@ -140,6 +141,7 @@ export default defineConfig({
   test: {
     exclude: [
       ...configDefaults.exclude,
+      '.template-tests/**',
       'packages/create-fate/templates/fate/{drizzle,graphql,graphql-client,http,prisma,void}/**',
     ],
   },

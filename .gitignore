@@ -33,3 +33,5 @@ packages/**/README.md
 !packages/void-fate/README.md
 tsconfig.tsbuildinfo
 vite.config.ts.timestamp-*
+
+.template-tests/

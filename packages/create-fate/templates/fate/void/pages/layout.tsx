@@ -1,9 +1,10 @@
-import '../src/App.css';
 import Stack from '@nkzw/stack';
+import '../src/App.css';
 import { useShared } from '@void/react';
 import { ReactNode, Suspense } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { VoidFateClient } from 'void-fate/react';
+import LocaleContext from '../src/lib/LocaleContext.tsx';
 import type { SharedData } from '../src/lib/shared.ts';
 import Card from '../src/ui/Card.tsx';
 import Error from '../src/ui/Error.tsx';
@@ -13,7 +14,7 @@ import Section from '../src/ui/Section.tsx';
 const Thinking = () => (
   <Section>
     <Stack center className="animate-pulse text-gray-500 italic" verticalPadding={48}>
-      Thinking...
+      <fbt desc="Text for thinking/loading screen">Thinking...</fbt>
     </Stack>
   </Section>
 );
@@ -24,23 +25,25 @@ export default function Layout({ children }: { children: ReactNode }) {
   const origin = typeof window === 'undefined' ? shared.origin : window.location.origin;
 
   return (
-    <VoidFateClient origin={origin} userId={userId}>
-      <div className="min-h-screen bg-background text-foreground">
-        <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
-          <Header />
-          <ErrorBoundary
-            fallbackRender={({ error }) => (
-              <Section>
-                <Card>
-                  <Error error={error} />
-                </Card>
-              </Section>
-            )}
-          >
-            <Suspense fallback={<Thinking />}>{children}</Suspense>
-          </ErrorBoundary>
+    <LocaleContext>
+      <VoidFateClient origin={origin} userId={userId}>
+        <div className="min-h-screen bg-background text-foreground">
+          <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0,rgba(99,102,241,0.08),transparent_28%)]">
+            <Header />
+            <ErrorBoundary
+              fallbackRender={({ error }) => (
+                <Section>
+                  <Card>
+                    <Error error={error} />
+                  </Card>
+                </Section>
+              )}
+            >
+              <Suspense fallback={<Thinking />}>{children}</Suspense>
+            </ErrorBoundary>
+          </div>
         </div>
-      </div>
-    </VoidFateClient>
+      </VoidFateClient>
+    </LocaleContext>
   );
 }

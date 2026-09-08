@@ -1,13 +1,12 @@
 {
-  "fb-locale": "de_DE",
+  "fb-locale": "ja-JP",
   "translations": {
     "UbcovqOVkoR40Cj8ythMNg==": {
       "description": "Text for thinking/loading screen",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Denke nach…",
+          "translation": "考え中…",
           "variations": {}
         }
       ],
@@ -15,11 +14,10 @@
     },
     "hgJmGY0Nk8kIfZm4QB34Zg==": {
       "description": "Sign In headline",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Anmelden",
+          "translation": "サインイン",
           "variations": {}
         }
       ],
@@ -27,11 +25,10 @@
     },
     "fjAChxxl9YYALSgXtLJkew==": {
       "description": "Email placeholder",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "E-Mail",
+          "translation": "メールアドレス",
           "variations": {}
         }
       ],
@@ -39,11 +36,10 @@
     },
     "cpewlSg5zFW0qSMLNtcxFw==": {
       "description": "Password placeholder",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Passwort",
+          "translation": "パスワード",
           "variations": {}
         }
       ],
@@ -51,47 +47,10 @@
     },
     "G7H+7X7c7UTEnQYdTDQxFQ==": {
       "description": "Sign in button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Anmelden",
-          "variations": {}
-        }
-      ],
-      "types": []
-    },
-    "ivCtO+jqs13xzsYK23hzeg==": {
-      "description": "Login details",
-      "status": "new",
-      "tokens": [],
-      "translations": [
-        {
-          "translation": "Probieren Sie eines der {=Example Accounts} in den Seed-Daten aus.",
-          "variations": {}
-        }
-      ],
-      "types": []
-    },
-    "0RrDsXsqYgvqv+XzJc155A==": {
-      "description": "In the phrase: \"Try one of the {=Example Accounts} in the seed data.\"",
-      "status": "new",
-      "tokens": [],
-      "translations": [
-        {
-          "translation": "Beispielkonten {=}",
-          "variations": {}
-        }
-      ],
-      "types": []
-    },
-    "/H4NwTM4npOLUYbNr2IDBg==": {
-      "description": "In the phrase: \"Try one of the Example Accounts {=} in the seed data.\"",
-      "status": "new",
-      "tokens": [],
-      "translations": [
-        {
-          "translation": "",
+          "translation": "サインイン",
           "variations": {}
         }
       ],
@@ -99,11 +58,10 @@
     },
     "GjQuNGdVoQW88RkFt7fMBw==": {
       "description": "Try again button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Erneut versuchen",
+          "translation": "もう一度試す",
           "variations": {}
         }
       ],
@@ -111,11 +69,10 @@
     },
     "pxlvTZmpYNhXWc31iqf+uQ==": {
       "description": "fate library tagline",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Ein moderner Daten-Client für React.",
+          "translation": "React のためのモダンなデータクライアント。",
           "variations": {}
         }
       ],
@@ -123,11 +80,10 @@
     },
     "kJ5ukjdPI5cdsGVesqmrcg==": {
       "description": "Search button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Suchen",
+          "translation": "検索",
           "variations": {}
         }
       ],
@@ -135,11 +91,10 @@
     },
     "PkKwcnNiHG2aiPl+1FyNPw==": {
       "description": "Logout button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Abmelden",
+          "translation": "ログアウト",
           "variations": {}
         }
       ],
@@ -147,11 +102,10 @@
     },
     "F3p8DbdliugG4CTKslAYqA==": {
       "description": "Login button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Einloggen",
+          "translation": "ログイン",
           "variations": {}
         }
       ],
@@ -159,11 +113,10 @@
     },
     "FUJIhsu5G4IY6P5TPRp3Vg==": {
       "description": "Comment add label",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Kommentar hinzufügen",
+          "translation": "コメントを追加",
           "variations": {}
         }
       ],
@@ -171,11 +124,10 @@
     },
     "T1ALGhyc+Kaa2DPzPPNtTA==": {
       "description": "Placeholder text for comment input",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Teilen Sie Ihre Gedanken…",
+          "translation": "感想を共有してください…",
           "variations": {}
         }
       ],
@@ -183,11 +135,10 @@
     },
     "BckTW/qty+fgQ5iKKN0y1g==": {
       "description": "Error text",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+          "translation": "問題が発生しました。もう一度お試しください。",
           "variations": {}
         }
       ],
@@ -195,11 +146,10 @@
     },
     "bEtExk1zQe1Iah6xAjqtKQ==": {
       "description": "Post comment button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Kommentar posten",
+          "translation": "コメントを投稿",
           "variations": {}
         }
       ],
@@ -207,11 +157,10 @@
     },
     "lUG++psd2OuZ5idF7EFY4w==": {
       "description": "Like count",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{number} Likes",
+          "translation": "{number} 件のいいね",
           "variations": {}
         }
       ],
@@ -219,11 +168,10 @@
     },
     "dMWQOcPqkDZj3MCZcy7/pA==": {
       "description": "Like count",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "1 Like",
+          "translation": "いいね 1 件",
           "variations": {}
         }
       ],
@@ -231,11 +179,10 @@
     },
     "MUnkaSorTo5i+Fx/WIQ+hw==": {
       "description": "Like button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir",
+          "translation": "いいね",
           "variations": {}
         }
       ],
@@ -243,11 +190,10 @@
     },
     "UOSt+no1zSlM9CTWOGmKBw==": {
       "description": "Like button with a slow request",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir (langsam)",
+          "translation": "いいね（低速）",
           "variations": {}
         }
       ],
@@ -255,11 +201,10 @@
     },
     "oNdagxfUl7t6w9JkaNR0sw==": {
       "description": "Very short error messages",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Ups, nochmal!",
+          "translation": "おっと、もう一度！",
           "variations": {}
         }
       ],
@@ -267,11 +212,10 @@
     },
     "miSs0inqjvdLcC/XGl0N9Q==": {
       "description": "Like button that triggers an error",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir (Fehler)",
+          "translation": "いいね（エラー）",
           "variations": {}
         }
       ],
@@ -279,11 +223,10 @@
     },
     "DMbqoljTAyZr91I1ieUePw==": {
       "description": "Like button that triggers a network error",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir (Netzwerkfehler)",
+          "translation": "いいね（ネットワークエラー）",
           "variations": {}
         }
       ],
@@ -291,11 +234,10 @@
     },
     "2pHWO8Jme4T+4V3ujzB65Q==": {
       "description": "Like button that can be pressed many times",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir (mehrfach)",
+          "translation": "いいね（連打）",
           "variations": {}
         }
       ],
@@ -303,11 +245,10 @@
     },
     "6zDP+czhNkRqY+5ZMGrOfQ==": {
       "description": "Unlike button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Gefällt mir nicht mehr",
+          "translation": "いいねを取り消す",
           "variations": {}
         }
       ],
@@ -315,11 +256,10 @@
     },
     "nbg2VP5XZv6NUc/92aYS5g==": {
       "description": "Comment headline",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{number} Kommentare",
+          "translation": "コメント {number} 件",
           "variations": {}
         }
       ],
@@ -327,11 +267,10 @@
     },
     "pD2BZoLk7TPDeYaAKeZSXw==": {
       "description": "Comment headline",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Ein Kommentar",
+          "translation": "コメント 1 件",
           "variations": {}
         }
       ],
@@ -339,11 +278,10 @@
     },
     "b3poi39jZnMvKCWuAKoPkw==": {
       "description": "Load more comments button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Weitere Kommentare laden",
+          "translation": "コメントをさらに読み込む",
           "variations": {}
         }
       ],
@@ -351,11 +289,10 @@
     },
     "V+dphRjMQgYEAYIwaZ86eA==": {
       "description": "No matches text",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Keine Treffer für {=\"[query]\"}",
+          "translation": "{=\"[query]\"} に一致するものはありません",
           "variations": {}
         }
       ],
@@ -363,11 +300,10 @@
     },
     "jOVKSVdYTyYUaZKttBdCvg==": {
       "description": "In the phrase: \"No matches for {=\"[query]\"}\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "„{query}“",
+          "translation": "「{query}」",
           "variations": {}
         }
       ],
@@ -375,11 +311,10 @@
     },
     "JmKWBejr/NwXzEjhSgw6NA==": {
       "description": "Search input placeholder",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Kommentare suchen…",
+          "translation": "コメントを検索…",
           "variations": {}
         }
       ],
@@ -387,11 +322,10 @@
     },
     "0DJP0yKjBJSU20Mmtm3gXA==": {
       "description": "Slowdown label explanation",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "500 ms künstliche Verzögerung",
+          "translation": "500ms の人工的な遅延",
           "variations": {}
         }
       ],
@@ -399,11 +333,10 @@
     },
     "mz6EqB/vFEIHqLpLtXPvAQ==": {
       "description": "Headline for update name section",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Update-Name",
+          "translation": "更新名",
           "variations": {}
         }
       ],
@@ -411,11 +344,10 @@
     },
     "Dak4b7/tonGn0/lBSJtAsQ==": {
       "description": "Username label",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Benutzername",
+          "translation": "ユーザー名",
           "variations": {}
         }
       ],
@@ -423,11 +355,10 @@
     },
     "oIBMQemmmzQYvVo4ilURGw==": {
       "description": "name input field placeholder",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Name",
+          "translation": "名前",
           "variations": {}
         }
       ],
@@ -435,11 +366,10 @@
     },
     "2OzJ2sKoxSsqwHnnbVvq3A==": {
       "description": "Button for saving",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Speichern",
+          "translation": "保存",
           "variations": {}
         }
       ],
@@ -447,11 +377,10 @@
     },
     "tWb7A0wVb3UoE4+aOszc9g==": {
       "description": "Your account headline",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Ihr Konto",
+          "translation": "あなたのアカウント",
           "variations": {}
         }
       ],
@@ -459,11 +388,10 @@
     },
     "QJQdLesxH2DDZ/QixDw2Ag==": {
       "description": "Signed in text",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Angemeldet als {username}.",
+          "translation": "{username} としてサインインしています。",
           "variations": {}
         }
       ],
@@ -471,11 +399,10 @@
     },
     "wGBBoraj5XODDH6aMivFig==": {
       "description": "Latest posts header",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Neueste Beiträge",
+          "translation": "最新の投稿",
           "variations": {}
         }
       ],
@@ -483,35 +410,10 @@
     },
     "lxhFAcau1SpZz7pY2MF3aA==": {
       "description": "Load more posts button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Weitere Beiträge laden",
-          "variations": {}
-        }
-      ],
-      "types": []
-    },
-    "a1m6R6xCfulWvyS7MBRNOQ==": {
-      "description": "Description of fate",
-      "status": "new",
-      "tokens": [],
-      "translations": [
-        {
-          "translation": "fate ist ein moderner Daten-Client für React und GraphQL, inspiriert von Relay und GraphQL.",
-          "variations": {}
-        }
-      ],
-      "types": []
-    },
-    "zC+02LzfoPvi9WJXYM0Opw==": {
-      "description": "Tagline for fate",
-      "status": "new",
-      "tokens": [],
-      "translations": [
-        {
-          "translation": "fate kombiniert View-Komposition, normalisiertes Caching, Datenmaskierung, Async-React-Features und die GraphQL-Integration.",
+          "translation": "投稿をさらに読み込む",
           "variations": {}
         }
       ],
@@ -519,11 +421,10 @@
     },
     "N6sA4e6dEXz2DfLMt0w9Jg==": {
       "description": "Login button label",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Melden Sie sich an, um Kommentare zu posten.",
+          "translation": "コメントを投稿するにはサインインしてください。",
           "variations": {}
         }
       ],
@@ -531,7 +432,6 @@
     },
     "IYUmtYxQtGdt1MucjXrsVA==": {
       "description": "Label with meaning 'at least number'",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -543,7 +443,6 @@
     },
     "ZIF1WhVQwt7WZJvFTEbMWw==": {
       "description": "Label with meaning 'less than number'",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -555,7 +454,6 @@
     },
     "Oc/9PrbjfyLHS60BXceD1A==": {
       "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -567,7 +465,6 @@
     },
     "AXXbKEUZuc0ji1IClRrOOw==": {
       "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -579,7 +476,6 @@
     },
     "89ACgPMtnwlLDSeqhLBx2Q==": {
       "description": "A list of items of various types separated by commas, for example: \"San Francisco, London, Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -591,11 +487,10 @@
     },
     "5hL7VXOBVnetm46YAjpX0g==": {
       "description": "A list of items of various types with a serial comma, for example: \"item1, item2, and item3\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{list of items} und {last item}",
+          "translation": "{list of items}、そして {last item}",
           "variations": {}
         }
       ],
@@ -603,11 +498,10 @@
     },
     "icNetEL/crQv/PS6yhySVQ==": {
       "description": "A list of items of various types, for example: \"item1, item2, item3 and item4\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{list of items} und {last item}",
+          "translation": "{list of items} と {last item}",
           "variations": {}
         }
       ],
@@ -615,11 +509,10 @@
     },
     "8kLAQ3ffiiFnQ/bWPqXfuQ==": {
       "description": "A list of items of various types with a serial comma, for example: \"item1, item2, or item3\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{list of items} oder {last item}",
+          "translation": "{list of items}、または {last item}",
           "variations": {}
         }
       ],
@@ -627,11 +520,10 @@
     },
     "8eSaAzrWtAqn9ktNKfkaEg==": {
       "description": "A list of items of various types, for example: \"item1, item2, item3 or item4\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{list of items} oder {last item}",
+          "translation": "{list of items} または {last item}",
           "variations": {}
         }
       ],
@@ -639,7 +531,6 @@
     },
     "+IBI7kr/mMKdzp+3stDvkw==": {
       "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} itself contains one or more items.",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -651,7 +542,6 @@
     },
     "55IeE8c0qqtjTU0lo7q9AA==": {
       "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} contains one or more items.",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
@@ -663,11 +553,10 @@
     },
     "6PRJS0QalZfvaN8CkKCUCw==": {
       "description": "A list of items of various types, for example: \"item1, item2, item3, item4\"",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "{list of items}, {last item}",
+          "translation": "{list of items}、{last item}",
           "variations": {}
         }
       ],
@@ -675,11 +564,65 @@
     },
     "6/ZbJcEx19aXKls64qknkg==": {
       "description": "Locale switcher button",
-      "status": "new",
       "tokens": [],
       "translations": [
         {
-          "translation": "Sprache ändern",
+          "translation": "言語を変更",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8lvoq8uf2l2Q/kHMPHHuGg==": {
+      "description": "Description of fate",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "fate は Relay と GraphQL に着想を得た、React 向けのモダンなデータクライアントです。",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "oNAybv4r6KfJmXOwwzWEKg==": {
+      "description": "Tagline for fate",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "fate はビューの合成、正規化キャッシュ、データマスキング、React の非同期機能、型安全なデータ取得を組み合わせています。",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "QQezjWtwy5sIytWefNDhfw==": {
+      "description": "Text for thinking/loading screen",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "考え中…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "D+Sj8NnepF6xtGZ8B9F43Q==": {
+      "description": "Login details",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "初期データの {=Example Accounts [=m1]} をお試しください。",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "SIc154vl363J+amQWwn5zw==": {
+      "description": "In the phrase: \"Try one of the {=Example Accounts [=m1]} in the seed data.\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "サンプルアカウント {=}",
           "variations": {}
         }
       ],

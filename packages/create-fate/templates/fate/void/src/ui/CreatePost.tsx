@@ -1,4 +1,5 @@
 import Stack, { VStack } from '@nkzw/stack';
+import { fbs } from 'fbtee';
 import { KeyboardEvent, startTransition, useActionState, useState } from 'react';
 import { useFateClient, useView, ViewRef } from 'react-fate';
 import { Button } from '../ui/Button.tsx';
@@ -64,13 +65,15 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
   return (
     <Card>
       <VStack action={createPost} as="form" gap={16}>
-        <H3>Create a Post</H3>
+        <H3>
+          <fbt desc="CreatePost: Create a Post">Create a Post</fbt>
+        </H3>
         <Input
           className="w-full"
           disabled={isPending}
           onChange={(event) => setTitleValue(event.target.value)}
           onKeyDown={maybeSubmitPost}
-          placeholder="Post Title"
+          placeholder={fbs('Post Title', 'CreatePost: placeholder')}
           value={titleValue}
         />
         <textarea
@@ -78,18 +81,20 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
           disabled={isPending}
           onChange={(event) => setContentValue(event.target.value)}
           onKeyDown={maybeSubmitPost}
-          placeholder={'Share your thoughts about fate...'}
+          placeholder={fbs('Share your thoughts about fate...', 'CreatePost: placeholder')}
           value={contentValue}
         />
         <Stack alignCenter between className="text-sm" gap={16}>
-          <span className="font-bold">Mutation Debug Options</span>
+          <span className="font-bold">
+            <fbt desc="CreatePost: Mutation Debug Options">Mutation Debug Options</fbt>
+          </span>
           <Stack alignCenter as="label" gap>
             <CheckBox
               checked={missingMutationSelection}
               disabled={isPending}
               onChange={(event) => setMissingMutationSelection(event.target.checked)}
             />
-            Missing mutation selection
+            <fbt desc="CreatePost: Missing mutation selection">Missing mutation selection</fbt>{' '}
           </Stack>
           <Stack alignCenter as="label" gap>
             <CheckBox
@@ -97,12 +102,12 @@ export default function CreatePost({ user: userRef }: { user: ViewRef<'User'> | 
               disabled={isPending}
               onChange={(event) => setMissingOptimisticContent(event.target.checked)}
             />
-            Missing optimistic content
+            <fbt desc="CreatePost: Missing optimistic content">Missing optimistic content</fbt>{' '}
           </Stack>
         </Stack>
         <Stack alignCenter end gap={16}>
           <Button disabled={postingIsDisabled} size="sm" type="submit" variant="secondary">
-            Post comment
+            <fbt desc="Post comment button">Post comment</fbt>{' '}
           </Button>
         </Stack>
       </VStack>

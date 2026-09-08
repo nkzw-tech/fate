@@ -1,0 +1,225 @@
+{
+  "fb-locale": "ja-JP",
+  "translations": {
+    "IYUmtYxQtGdt1MucjXrsVA==": {
+      "description": "Label with meaning 'at least number'",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{number}+",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "ZIF1WhVQwt7WZJvFTEbMWw==": {
+      "description": "Label with meaning 'less than number'",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "<{number}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "Oc/9PrbjfyLHS60BXceD1A==": {
+      "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}; {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "AXXbKEUZuc0ji1IClRrOOw==": {
+      "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items} • {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "89ACgPMtnwlLDSeqhLBx2Q==": {
+      "description": "A list of items of various types separated by commas, for example: \"San Francisco, London, Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}, {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "5hL7VXOBVnetm46YAjpX0g==": {
+      "description": "A list of items of various types with a serial comma, for example: \"item1, item2, and item3\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items}、そして {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "icNetEL/crQv/PS6yhySVQ==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3 and item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} と {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8kLAQ3ffiiFnQ/bWPqXfuQ==": {
+      "description": "A list of items of various types with a serial comma, for example: \"item1, item2, or item3\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items}、または {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8eSaAzrWtAqn9ktNKfkaEg==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3 or item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} または {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "+IBI7kr/mMKdzp+3stDvkw==": {
+      "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} itself contains one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}; {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "55IeE8c0qqtjTU0lo7q9AA==": {
+      "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} contains one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} • {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "6PRJS0QalZfvaN8CkKCUCw==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3, item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items}、{last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "6/ZbJcEx19aXKls64qknkg==": {
+      "description": "Locale switcher button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "言語を変更",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "wfNswo3mwqgq+8bQUCJAPA==": {
+      "description": "index: Viewer",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "ログインユーザー",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "mMgxQsJPII8/aJtwXOPsNw==": {
+      "description": "index: Posts",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "投稿",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "LyADov8X2C8AsE0BOJ73Mg==": {
+      "description": "index: Use fate with an existing GraphQL server",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "既存の GraphQL サーバーで fate を使う",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "wlLz2xe9I3pIUzeg46KuVw==": {
+      "description": "layout: Loading...",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "読み込み中…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "4QjroIHQHerlYYiN65OAqQ==": {
+      "description": "GraphQL client setup instructions",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{=src/fate/graphql.ts} のサンプルビューを自分のスキーマ型に置き換え、{=VITE_GRAPHQL_URL} を自分の API に設定してください。",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "wDeH760jWvob7b0UD/ldjw==": {
+      "description": "In the phrase: \"Replace the sample views in {=src/fate/graphql.ts} with your schema types and point {=VITE_GRAPHQL_URL} at your API.\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "src/fate/graphql.ts",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "T4saJreAWC68v2UUSToqoA==": {
+      "description": "In the phrase: \"Replace the sample views in {=src/fate/graphql.ts} with your schema types and point {=VITE_GRAPHQL_URL} at your API.\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "VITE_GRAPHQL_URL",
+          "variations": {}
+        }
+      ],
+      "types": []
+    }
+  }
+}

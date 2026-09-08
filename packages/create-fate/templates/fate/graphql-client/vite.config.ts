@@ -1,4 +1,5 @@
 import nkzw from '@nkzw/oxlint-config';
+import fbtee from '@nkzw/vite-plugin-fbtee';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
@@ -60,6 +61,7 @@ export default defineConfig({
   },
   plugins: [
     ...(lazyPlugins(() => [
+      fbtee(),
       tailwindcss(),
       ...(isTest
         ? [react({ compiler: true })]

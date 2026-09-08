@@ -7,3 +7,6 @@ coverage/
 dist/
 tsconfig.tsbuildinfo
 vite.config.ts.timestamp-*
+.enum_manifest.json
+source_strings.json
+src/translations/

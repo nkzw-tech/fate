@@ -33,11 +33,23 @@ const CategoryPost = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
             {post.title}
           </span>
         </Link>
-        <span className="text-xs text-muted-foreground">{post.likes} likes</span>
+        <span className="text-xs text-muted-foreground">
+          <fbt desc="Post like count">
+            <fbt:plural count={post.likes} many="likes" showCount="yes">
+              like
+            </fbt:plural>
+          </fbt>
+        </span>
       </Stack>
       <Stack alignCenter gap wrap>
         <span className="text-xs text-muted-foreground">
-          {author?.name ? `by ${author.name}` : 'By an anonymous collaborator'}
+          {author?.name ? (
+            <fbt desc="Post author">
+              by <fbt:param name="author">{author.name}</fbt:param>
+            </fbt>
+          ) : (
+            <fbt desc="Anonymous post author">By an anonymous collaborator</fbt>
+          )}
         </span>
         {tags.length ? (
           <Stack gap wrap>
@@ -82,7 +94,11 @@ export default function CategoryCard({ category: categoryRef }: { category: View
             <p className="text-sm text-muted-foreground">{category.description}</p>
           </div>
           <Badge className="text-nowrap" variant="outline">
-            {category.postCount} posts
+            <fbt desc="Category post count">
+              <fbt:plural count={category.postCount} many="posts" showCount="yes">
+                post
+              </fbt:plural>
+            </fbt>{' '}
           </Badge>
         </Stack>
         <VStack gap={12}>
@@ -92,7 +108,9 @@ export default function CategoryCard({ category: categoryRef }: { category: View
         </VStack>
         {category.posts?.pagination?.hasNext ? (
           <span className="text-sm text-muted-foreground">
-            More posts available in this category...
+            <fbt desc="CategoryCard: More posts available in this category...">
+              More posts available in this category...
+            </fbt>{' '}
           </span>
         ) : null}
       </VStack>

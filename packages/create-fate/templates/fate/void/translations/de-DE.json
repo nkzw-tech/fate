@@ -1,0 +1,863 @@
+{
+  "fb-locale": "de-DE",
+  "translations": {
+    "UbcovqOVkoR40Cj8ythMNg==": {
+      "description": "Text for thinking/loading screen",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Denke nach…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "G7H+7X7c7UTEnQYdTDQxFQ==": {
+      "description": "Sign in button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Anmelden",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "GjQuNGdVoQW88RkFt7fMBw==": {
+      "description": "Try again button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Erneut versuchen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "pxlvTZmpYNhXWc31iqf+uQ==": {
+      "description": "fate library tagline",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Ein moderner Daten-Client für React.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "kJ5ukjdPI5cdsGVesqmrcg==": {
+      "description": "Search button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Suchen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "PkKwcnNiHG2aiPl+1FyNPw==": {
+      "description": "Logout button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Abmelden",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "F3p8DbdliugG4CTKslAYqA==": {
+      "description": "Login button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Einloggen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "FUJIhsu5G4IY6P5TPRp3Vg==": {
+      "description": "Comment add label",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Kommentar hinzufügen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "bEtExk1zQe1Iah6xAjqtKQ==": {
+      "description": "Post comment button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Kommentar posten",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "MUnkaSorTo5i+Fx/WIQ+hw==": {
+      "description": "Like button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "UOSt+no1zSlM9CTWOGmKBw==": {
+      "description": "Like button with a slow request",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir (langsam)",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "DMbqoljTAyZr91I1ieUePw==": {
+      "description": "Like button that triggers a network error",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir (Netzwerkfehler)",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "2pHWO8Jme4T+4V3ujzB65Q==": {
+      "description": "Like button that can be pressed many times",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir (mehrfach)",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "6zDP+czhNkRqY+5ZMGrOfQ==": {
+      "description": "Unlike button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir nicht mehr",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "b3poi39jZnMvKCWuAKoPkw==": {
+      "description": "Load more comments button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Weitere Kommentare laden",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "0DJP0yKjBJSU20Mmtm3gXA==": {
+      "description": "Slowdown label explanation",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "500 ms künstliche Verzögerung",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "mz6EqB/vFEIHqLpLtXPvAQ==": {
+      "description": "Headline for update name section",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Update-Name",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "Dak4b7/tonGn0/lBSJtAsQ==": {
+      "description": "Username label",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Benutzername",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "2OzJ2sKoxSsqwHnnbVvq3A==": {
+      "description": "Button for saving",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Speichern",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "tWb7A0wVb3UoE4+aOszc9g==": {
+      "description": "Your account headline",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Ihr Konto",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "wGBBoraj5XODDH6aMivFig==": {
+      "description": "Latest posts header",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Neueste Beiträge",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "lxhFAcau1SpZz7pY2MF3aA==": {
+      "description": "Load more posts button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Weitere Beiträge laden",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "N6sA4e6dEXz2DfLMt0w9Jg==": {
+      "description": "Login button label",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Melden Sie sich an, um Kommentare zu posten.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "IYUmtYxQtGdt1MucjXrsVA==": {
+      "description": "Label with meaning 'at least number'",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{number}+",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "ZIF1WhVQwt7WZJvFTEbMWw==": {
+      "description": "Label with meaning 'less than number'",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "<{number}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "Oc/9PrbjfyLHS60BXceD1A==": {
+      "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}; {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "AXXbKEUZuc0ji1IClRrOOw==": {
+      "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items} • {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "89ACgPMtnwlLDSeqhLBx2Q==": {
+      "description": "A list of items of various types separated by commas, for example: \"San Francisco, London, Tokyo\". {previous items} and {following items} are themselves lists that contain one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}, {following items}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "5hL7VXOBVnetm46YAjpX0g==": {
+      "description": "A list of items of various types with a serial comma, for example: \"item1, item2, and item3\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} und {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "icNetEL/crQv/PS6yhySVQ==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3 and item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} und {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8kLAQ3ffiiFnQ/bWPqXfuQ==": {
+      "description": "A list of items of various types with a serial comma, for example: \"item1, item2, or item3\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} oder {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8eSaAzrWtAqn9ktNKfkaEg==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3 or item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} oder {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "+IBI7kr/mMKdzp+3stDvkw==": {
+      "description": "A list of items of various types, for example: \"San Francisco; London; Tokyo\". {previous items} itself contains one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{previous items}; {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "55IeE8c0qqtjTU0lo7q9AA==": {
+      "description": "A list of items of various types separated by bullets, for example: \"San Francisco \\u2022 London \\u2022 Tokyo\". {previous items} contains one or more items.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items} • {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "6PRJS0QalZfvaN8CkKCUCw==": {
+      "description": "A list of items of various types, for example: \"item1, item2, item3, item4\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{list of items}, {last item}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "6/ZbJcEx19aXKls64qknkg==": {
+      "description": "Locale switcher button",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Sprache ändern",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "PsLKDtsbiVQM1Y5jOlJ+nw==": {
+      "description": "index: Explore by theme",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Nach Thema entdecken",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "+uzF9dxbWEpFt+43A2vsIQ==": {
+      "description": "index: Events",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Veranstaltungen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "YJ5z32ORMuHkyGJcUJVbyg==": {
+      "description": "index: demo",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Demo",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "8lvoq8uf2l2Q/kHMPHHuGg==": {
+      "description": "Description of fate",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "fate ist ein moderner Datenclient für React, inspiriert von Relay und GraphQL.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "9FjR7/2xdl6DTCpPzSMaMA==": {
+      "description": "index: fate combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "fate kombiniert View-Komposition, normalisiertes Caching, Datenmaskierung, asynchrone React-Funktionen und typsicheres Laden von Daten.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "QQezjWtwy5sIytWefNDhfw==": {
+      "description": "Text for thinking/loading screen",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Denke nach…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "FpzXpQ9lOXBNTSORlyDd7Q==": {
+      "description": "login: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "E-Mail",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "pNEY4q6tA85KvbAJyvw//Q==": {
+      "description": "login: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Passwort",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "nqjGLXjsvDlj6iLZLnF3fA==": {
+      "description": "search: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Kommentare durchsuchen…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "1wZr+nxLrq6rpXbZLcu1PQ==": {
+      "description": "CategoryCard: More posts available in this category...",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Weitere Beiträge in dieser Kategorie verfügbar…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "NSt+vt0wt7Xi+Hq5+soloA==": {
+      "description": "CreatePost: Create a Post",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Beitrag erstellen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "7dwyWSgK8W4pBbkeh4Nmzg==": {
+      "description": "CreatePost: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Beitragstitel",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "XAJHDYfbScLftPuAQwwBTg==": {
+      "description": "CreatePost: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Teile deine Gedanken zu fate…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "Zf7otVI4cmxT6u3pVxVsNw==": {
+      "description": "CreatePost: Mutation Debug Options",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Debug-Optionen für Mutationen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "qF7GOrFX1R1F02w8/Sbmcg==": {
+      "description": "CreatePost: Missing mutation selection",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Fehlende Mutationsauswahl",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "H38opCaYO5bRgjRKOFxhdw==": {
+      "description": "CreatePost: Missing optimistic content",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Fehlender optimistischer Inhalt",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "Lbv9kj09WcgxxYxmRC1l7A==": {
+      "description": "Error: Error",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Fehler",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "3+tDh9yTOJZmOgxDl4YClw==": {
+      "description": "EventCard: Community RSVPs",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Zusagen aus der Community",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "4C+Ez8V7queAuotjy5AsBw==": {
+      "description": "EventCard: Join livestream",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Livestream öffnen",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "obGhQxpKl6hKGgPDroZedA==": {
+      "description": "UserCard: placeholder",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Name",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "AaRoazDc5eF6QwmdWIqgVg==": {
+      "description": "Example account instructions",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Probiere eines der {=Example Accounts [=m1]} aus den Beispieldaten aus.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "SIc154vl363J+amQWwn5zw==": {
+      "description": "In the phrase: \"Try one of the {=Example Accounts [=m1]} in the seed data.\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Beispielkonten {=}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "BhvE/Ig3BDJf+bUdZ1vbAA==": {
+      "description": "Empty comment search results",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Keine Treffer für {=\"[query]\"}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "jOVKSVdYTyYUaZKttBdCvg==": {
+      "description": "In the phrase: \"No matches for {=\"[query]\"}\"",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "„{query}“",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "+tFij6yciK9h7QRqYFAJDQ==": {
+      "description": "Post like count",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{number} Likes",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "xn+uXtuLrk7oF23hr31ZPA==": {
+      "description": "Post like count",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "1 Like",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "vdyqba6k6d9zLeD12z28fg==": {
+      "description": "Post author",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "von {author}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "UTA6ZISsZ0GMcQ3d8E2XOQ==": {
+      "description": "Anonymous post author",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Von einer anonymen Person",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "lzd1HhFypBGCUm6feQBTOg==": {
+      "description": "Category post count",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{number} Beiträge",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "ps9dKA9+hmQtqL0esQ8Unw==": {
+      "description": "Category post count",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "1 Beitrag",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "U2oygw0/pCSZJ+4qLg68nA==": {
+      "description": "Unnamed event attendee",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gast",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "wgiZJ5TA1Cc5faMQY5IhOQ==": {
+      "description": "Event attendance and capacity",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{attending} Teilnehmende · Kapazität {capacity}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "UOJD/A5bBzid9WzHRytmew==": {
+      "description": "Event host",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Veranstaltet von {host}",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "3WcGis4XZNnLyRk3H+OYRg==": {
+      "description": "Unknown event host",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Unbekannt",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "+SQnedbEKcMjuiWA7cXo1w==": {
+      "description": "User name update error",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Der Benutzername konnte nicht aktualisiert werden.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "n/19olRiMKHSp8PeeUl+kQ==": {
+      "description": "Signed in user",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Angemeldet als {name}{email}.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "T1ALGhyc+Kaa2DPzPPNtTA==": {
+      "description": "Placeholder text for comment input",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Teilen Sie Ihre Gedanken…",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "BckTW/qty+fgQ5iKKN0y1g==": {
+      "description": "Error text",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "oNdagxfUl7t6w9JkaNR0sw==": {
+      "description": "Very short error messages",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Ups, nochmal!",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "miSs0inqjvdLcC/XGl0N9Q==": {
+      "description": "Like button that triggers an error",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Gefällt mir (Fehler)",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "nbg2VP5XZv6NUc/92aYS5g==": {
+      "description": "Comment headline",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "{number} Kommentare",
+          "variations": {}
+        }
+      ],
+      "types": []
+    },
+    "pD2BZoLk7TPDeYaAKeZSXw==": {
+      "description": "Comment headline",
+      "tokens": [],
+      "translations": [
+        {
+          "translation": "Ein Kommentar",
+          "variations": {}
+        }
+      ],
+      "types": []
+    }
+  }
+}

@@ -34,6 +34,9 @@ jobs:
       fail-fast: false
       matrix:
         template:
+          - cloudflare
+          - graphql
+          - graphql-client
           - void
           - drizzle
           - http
@@ -49,6 +52,9 @@ jobs:
 
       - name: Install dependencies
         run: vp install
+
+      - name: Install browser
+        run: vp exec playwright install --with-deps chromium
 
       - name: Test ${{ matrix.template }} template
         run: scripts/test-fate-template.sh ${{ matrix.template }}

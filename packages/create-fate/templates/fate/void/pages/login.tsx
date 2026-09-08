@@ -1,5 +1,6 @@
 import Stack, { VStack } from '@nkzw/stack';
 import { useRouter, useShared } from '@void/react';
+import { fbs } from 'fbtee';
 import { ExternalLinkIcon } from 'lucide-react';
 import { useActionState, useEffect, useState } from 'react';
 import type { SharedData } from '../src/lib/shared.ts';
@@ -49,7 +50,9 @@ export default function LoginPage() {
   return (
     <Section>
       <VStack center gap={16}>
-        <H2 className="pl-5">Sign In</H2>
+        <H2 className="pl-5">
+          <fbt desc="Sign in button">Sign In</fbt>
+        </H2>
         <Stack gap={32} wrap>
           <Card className="w-84">
             <Stack gap vertical>
@@ -58,7 +61,7 @@ export default function LoginPage() {
                   className="w-48"
                   name="email"
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="email"
+                  placeholder={fbs('email', 'login: placeholder')}
                   type="email"
                   value={email}
                 />
@@ -66,13 +69,13 @@ export default function LoginPage() {
                   className="w-48"
                   name="password"
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="password"
+                  placeholder={fbs('password', 'login: placeholder')}
                   type="password"
                   value={password}
                 />
                 <div>
                   <AsyncButton type="submit" variant="outline">
-                    Sign In
+                    <fbt desc="Sign in button">Sign In</fbt>{' '}
                   </AsyncButton>
                 </div>
               </VStack>
@@ -80,20 +83,21 @@ export default function LoginPage() {
           </Card>
           <Card className="w-84">
             <p>
-              Try one of the
-              <Stack
-                alignCenter
-                as="a"
-                className="inline-flex! px-1 underline hover:no-underline"
-                gap={4}
-                href="https://github.com/nkzw-tech/fate/blob/main/packages/create-fate/templates/fate/void/seedData.ts#L1"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Example Accounts
-                <ExternalLinkIcon className="h-4 w-4" />
-              </Stack>{' '}
-              in the seed data.
+              <fbt desc="Example account instructions">
+                Try one of the{' '}
+                <Stack
+                  alignCenter
+                  as="a"
+                  className="inline-flex! px-1 underline hover:no-underline"
+                  gap={4}
+                  href="https://github.com/nkzw-tech/fate/blob/main/packages/create-fate/templates/fate/void/seedData.ts#L1"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Example Accounts <ExternalLinkIcon className="h-4 w-4" />
+                </Stack>{' '}
+                in the seed data.
+              </fbt>{' '}
             </p>
           </Card>
         </Stack>

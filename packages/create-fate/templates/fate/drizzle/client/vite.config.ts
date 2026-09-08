@@ -20,7 +20,7 @@ if (!process.env.VITE_SERVER_URL) {
 }
 
 export default defineConfig({
-  build: { outDir: join(root, '../dist/client') },
+  build: { outDir: 'dist/client' },
   plugins: [
     ...(lazyPlugins(() => [
       fbtee(),

@@ -134,7 +134,7 @@ describe('create-fate templates', () => {
     );
 
     expect(clientPackageJson.dependencies).toHaveProperty('cf-fate');
-    expect(clientPackageJson.dependencies).not.toHaveProperty('@hono/node-server');
+    expect(clientPackageJson.dependencies).toHaveProperty('@hono/node-server');
     expect(clientViteConfig).toContain("transport: 'cloudflare'");
     expect(clientViteConfig).toContain('server: { port: 6001 }');
     expect(layout).toContain("liveUrl: `${env('SERVER_URL')}/fate-live`");
@@ -227,6 +227,14 @@ describe('create-fate templates', () => {
         expect.soft(dependencies, templateName).not.toHaveProperty('@void/react');
         expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/stack');
         expect.soft(dependencies, templateName).not.toHaveProperty('@rolldown/plugin-babel');
+        expect.soft(dependencies, templateName).not.toHaveProperty('fbtee');
+        expect.soft(JSON.stringify(packageJson.scripts), templateName).not.toContain('fbtee');
+        expect
+          .soft(existsSync(join(appRoot, 'src/lib/LocaleContext.tsx')), templateName)
+          .toBe(false);
+        if (templateName === 'void') {
+          expect.soft(packageJson.scripts?.['dev:setup'], templateName).toContain('db:seed');
+        }
         expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/fbtee-cli');
         expect.soft(dependencies, templateName).not.toHaveProperty('@nkzw/vite-plugin-fbtee');
         expect.soft(dependencies, templateName).not.toHaveProperty('oxc-transform-react');

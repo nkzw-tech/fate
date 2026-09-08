@@ -1,5 +1,6 @@
 import safeParse from '@nkzw/core/safeParse.js';
 import Stack, { VStack } from '@nkzw/stack';
+import { fbs } from 'fbtee';
 import { ChangeEvent, useActionState, useState } from 'react';
 import { useFateClient, useView, view, ViewRef } from 'react-fate';
 import { User } from '../fate/server.ts';
@@ -68,7 +69,7 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
         (error instanceof Error &&
           error.message &&
           safeParse<Array<{ message: string }>>(error.message)?.[0]?.message) ||
-          'Failed to update user name.',
+          fbs('Failed to update user name.', 'User name update error'),
       );
     }
   }, null);
@@ -80,9 +81,11 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
   return (
     <div>
       <VStack action={submitAction} as="form" gap={12}>
-        <h3 className="font-semibold">Update Name</h3>
+        <h3 className="font-semibold">
+          <fbt desc="Headline for update name section">Update Name</fbt>
+        </h3>
         <label className="sr-only" htmlFor="header-username">
-          Username
+          <fbt desc="Username label">Username</fbt>{' '}
         </label>
         <Input
           aria-describedby={error ? 'header-username-error' : undefined}
@@ -92,13 +95,13 @@ const UserNameForm = ({ user }: { user: SessionUser }) => {
           id="header-username"
           name="name"
           onChange={handleChange}
-          placeholder="Name"
+          placeholder={fbs('Name', 'UserCard: placeholder')}
           title={error ?? undefined}
           value={name}
         />
         <div>
           <Button disabled={isSaveDisabled} size="sm" type="submit" variant="secondary">
-            Save
+            <fbt desc="Button for saving">Save</fbt>{' '}
           </Button>
         </div>
       </VStack>
@@ -114,11 +117,15 @@ export default function UserCard({ viewer: viewerRef }: { viewer: ViewRef<'User'
     <Card>
       <VStack between className="h-full" gap={16}>
         <VStack gap={16}>
-          <H2>Your account</H2>
+          <H2>
+            <fbt desc="Your account headline">Your account</fbt>
+          </H2>
           <Stack alignCenter between gap={16}>
             <p className="text-sm text-muted-foreground">
-              Signed in as {viewer.name}
-              {viewer.email ? ` <${viewer.email}>` : null}.
+              <fbt desc="Signed in user">
+                Signed in as <fbt:param name="name">{viewer.name}</fbt:param>
+                <fbt:param name="email">{viewer.email ? ` <${viewer.email}>` : ''}</fbt:param>.
+              </fbt>
             </p>
           </Stack>
         </VStack>

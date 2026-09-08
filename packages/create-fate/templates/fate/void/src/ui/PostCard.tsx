@@ -1,6 +1,7 @@
 import Stack, { VStack } from '@nkzw/stack';
 import { useShared } from '@void/react';
 import { cx } from 'class-variance-authority';
+import { fbs } from 'fbtee';
 import {
   KeyboardEvent,
   Suspense,
@@ -79,7 +80,7 @@ const PostComments = ({
       ))}
       {loadNext ? (
         <Button onClick={loadNext} variant="ghost">
-          Load more comments
+          <fbt desc="Load more comments button">Load more comments</fbt>{' '}
         </Button>
       ) : null}
     </VStack>
@@ -136,25 +137,29 @@ const CommentInput = ({
 
   return (
     <VStack action={addComment} as="form" gap>
-      <span className="text-sm font-medium text-foreground">Add a comment</span>
+      <span className="text-sm font-medium text-foreground">
+        <fbt desc="Comment add label">Add a comment</fbt>
+      </span>
       <textarea
         className="squircle min-h-20 w-full border border-gray-200/80 bg-gray-100/50 p-3 text-sm placeholder-gray-500 transition outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 disabled:opacity-50 dark:border-neutral-800 dark:bg-neutral-900/40 dark:placeholder-gray-400"
         disabled={isPending}
         onChange={(event) => setCommentText(event.target.value)}
         onKeyDown={maybeSubmitComment}
-        placeholder={user?.name ? `Share your thoughts, ${user.name}!` : 'Share your thoughts...'}
+        placeholder={fbs('Share your thoughts...', 'Placeholder text for comment input')}
         value={commentText}
       />
       {anyServerError ? (
         <p className="text-sm text-destructive">
-          {anyServerError instanceof Error
-            ? anyServerError.message
-            : 'Something went wrong. Please try again.'}
+          {anyServerError instanceof Error ? (
+            anyServerError.message
+          ) : (
+            <fbt desc="Error text">Something went wrong. Please try again.</fbt>
+          )}
         </p>
       ) : null}
       <Stack end gap>
         <Button disabled={commentingIsDisabled} size="sm" type="submit" variant="secondary">
-          Post comment
+          <fbt desc="Post comment button">Post comment</fbt>{' '}
         </Button>
       </Stack>
     </VStack>
@@ -237,7 +242,7 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
               </span>
             </Stack>
             <Button action={handleLike} disabled={likeIsPending} size="sm" variant="outline">
-              Like
+              <fbt desc="Like button">Like</fbt>{' '}
             </Button>
             {detail && (
               <Button
@@ -246,7 +251,7 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
                 size="sm"
                 variant="outline"
               >
-                Like (Slow)
+                <fbt desc="Like button with a slow request">Like (Slow)</fbt>{' '}
               </Button>
             )}
             {detail && (
@@ -260,7 +265,11 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
                 size="sm"
                 variant="outline"
               >
-                {likeResult?.error ? 'Oops, try again!' : `Like (Error)`}
+                {likeResult?.error ? (
+                  <fbt desc="Very short error messages">Oops, try again!</fbt>
+                ) : (
+                  <fbt desc="Like button that triggers an error">Like (Error)</fbt>
+                )}
               </Button>
             )}
             {detail && (
@@ -270,7 +279,9 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
                 size="sm"
                 variant="outline"
               >
-                Like (Network Error)
+                <fbt desc="Like button that triggers a network error">
+                  Like (Network Error)
+                </fbt>{' '}
               </Button>
             )}
             {detail && (
@@ -285,7 +296,7 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
                 size="sm"
                 variant="outline"
               >
-                Like (Many)
+                <fbt desc="Like button that can be pressed many times">Like (Many)</fbt>{' '}
               </Button>
             )}
             <Button
@@ -294,7 +305,7 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
               size="sm"
               variant="outline"
             >
-              Unlike
+              <fbt desc="Unlike button">Unlike</fbt>{' '}
             </Button>
           </Stack>
         </Stack>
@@ -302,7 +313,11 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
         <p className="text-sm text-muted-foreground">- {author?.name ?? 'Unknown author'}</p>
         <VStack gap={16}>
           <h4 className="text-base font-semibold text-foreground">
-            {post.commentCount} {post.commentCount === 1 ? 'Comment' : 'Comments'}
+            <fbt desc="Comment headline">
+              <fbt:plural count={post.commentCount} many="Comments" showCount="ifMany">
+                One Comment
+              </fbt:plural>
+            </fbt>
           </h4>
           <Suspense fallback={null}>
             <PostComments comments={post.comments} post={post} />

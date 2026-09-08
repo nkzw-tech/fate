@@ -1,15 +1,13 @@
-/// <reference types="fbtee/ReactTypes.d.ts" />
-
-import '../src/App.css';
 import Stack from '@nkzw/stack';
+/// <reference types="fbtee/ReactTypes.d.ts" />
+import '../src/App.css';
 import { httpBatchLink } from '@trpc/client';
-import { createLocaleContext } from 'fbtee';
 import { ReactNode, Suspense, useMemo } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { FateClient } from 'react-fate';
 import { createFateClient } from 'react-fate/client';
-import AvailableLanguages from '../src/lib/AvailableLanguages.tsx';
 import env from '../src/lib/env.tsx';
+import LocaleContext from '../src/lib/LocaleContext.tsx';
 import Card from '../src/ui/Card.tsx';
 import Error from '../src/ui/Error.tsx';
 import Header from '../src/ui/Header.tsx';
@@ -23,18 +21,6 @@ const Thinking = () => (
     </Stack>
   </Section>
 );
-
-const LocaleContext = createLocaleContext({
-  availableLanguages: AvailableLanguages,
-  clientLocales: [navigator.language, ...navigator.languages],
-  loadLocale: async (locale: string) => {
-    if (locale !== 'en_US' && AvailableLanguages.has(locale)) {
-      return (await import(`../src/translations/${locale}.json`)).default[locale];
-    }
-
-    return {};
-  },
-});
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { data: session } = AuthClient.useSession();

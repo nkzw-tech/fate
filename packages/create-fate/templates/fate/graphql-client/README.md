@@ -67,3 +67,12 @@ Common commands:
 - `vp run fate:generate` refreshes _fate_ client support after changing `src/fate/graphql.ts`.
 - `vp check --fix` formats, lints, and type-checks the project.
 - `vp run test:all` verifies the project.
+
+## Translations
+
+The React app uses fbtee 4 with its native Oxc Vite plugin and CLI. Setup and builds generate the runtime translation files automatically.
+
+- Wrap UI text in `<fbt desc="Translator context">Text</fbt>`; use `fbs('Text', 'Translator context')` from `fbtee` for string attributes such as placeholders.
+- Run `vp run fbtee:collect` in the app root to extract strings, then `vp run fbtee:prepare` to update the editable German and Japanese files in `translations/`.
+- Translate entries marked `"status": "new"`, remove that status when finished, and run `vp run fbtee:translate` (or `vp run fbtee:all`). Commit `translations/`; runtime files in `src/translations/` are generated and ignored.
+- Add locales to `src/lib/AvailableLanguages.tsx` and the `fbtee:prepare` script. The language selector remembers the choice. Server rendering starts in English and restores the browser preference after hydration.

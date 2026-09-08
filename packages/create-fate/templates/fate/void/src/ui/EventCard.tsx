@@ -1,4 +1,5 @@
 import Stack, { VStack } from '@nkzw/stack';
+import { fbs } from 'fbtee';
 import { ArrowUpRight, CalendarDays, MapPin, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useView, view, ViewRef } from 'react-fate';
@@ -41,7 +42,7 @@ const EventAttendeeChip = ({ attendee: attendeeRef }: { attendee: ViewRef<'Event
 
   return (
     <Badge className="text-nowrap" key={attendee.id} variant="outline">
-      {user?.name ?? 'Guest'} · {formatLabel(attendee.status)}
+      {user?.name ?? fbs('Guest', 'Unnamed event attendee')} · {formatLabel(attendee.status)}
     </Badge>
   );
 };
@@ -110,12 +111,22 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
         <Stack alignCenter gap>
           <Users className="text-muted-foreground" size={14} />
           <span className="text-sm text-foreground/80">
-            {event.attendingCount ?? attendees.length} attending · capacity {event.capacity}
+            <fbt desc="Event attendance and capacity">
+              <fbt:param name="attending">{event.attendingCount ?? attendees.length}</fbt:param>{' '}
+              attending · capacity <fbt:param name="capacity">{event.capacity}</fbt:param>
+            </fbt>
           </span>
         </Stack>
         <Stack alignCenter gap>
           <ArrowUpRight className="text-muted-foreground" size={14} />
-          <span className="text-sm text-foreground/80">Hosted by {host?.name ?? 'Unknown'}</span>
+          <span className="text-sm text-foreground/80">
+            <fbt desc="Event host">
+              Hosted by{' '}
+              <fbt:param name="host">
+                {host?.name ?? fbs('Unknown', 'Unknown event host')}
+              </fbt:param>
+            </fbt>
+          </span>
         </Stack>
         {topics.length ? (
           <Stack gap wrap>
@@ -128,7 +139,9 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
         ) : null}
         {attendees.length ? (
           <VStack gap>
-            <span className="text-xs text-muted-foreground">Community RSVPs</span>
+            <span className="text-xs text-muted-foreground">
+              <fbt desc="EventCard: Community RSVPs">Community RSVPs</fbt>
+            </span>
             <Stack gap wrap>
               {attendees.slice(0, 4).map(({ node }) => (
                 <EventAttendeeChip attendee={node} key={node.id} />
@@ -143,7 +156,7 @@ export default function EventCard({ event: eventRef }: { event: ViewRef<'Event'>
             rel="noreferrer"
             target="_blank"
           >
-            Join livestream
+            <fbt desc="EventCard: Join livestream">Join livestream</fbt>{' '}
           </a>
         ) : null}
       </VStack>

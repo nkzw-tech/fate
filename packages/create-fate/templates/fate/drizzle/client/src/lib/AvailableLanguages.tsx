@@ -1,5 +1,5 @@
 export default new Map([
-  ['en_US', 'English'],
-  ['de_DE', 'Deutsch (German)'],
-  ['ja_JP', '日本語 (Japanese)'],
+  ['en-US', 'English'],
+  ['de-DE', 'Deutsch (German)'],
+  ['ja-JP', '日本語 (Japanese)'],
 ]);
