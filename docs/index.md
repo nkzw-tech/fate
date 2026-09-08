@@ -15,15 +15,6 @@ hero:
     - theme: alt
       text: Explore the fate stack ↗
       link: https://stack.fate.technology
-    - theme: alt
-      text: API Documentation
-      link: /api
-    - theme: alt
-      text: Read the Announcement
-      link: /posts/fate-1.0
-    - theme: alt
-      text: View on GitHub
-      link: https://github.com/nkzw-tech/fate
 features:
   - title: View Composition
     icon: 🎑
