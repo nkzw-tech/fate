@@ -770,6 +770,9 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.0(@types/node@26.4.1)(@vitest/coverage-v8@5.0.0(vitest@5.0.0))(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0))(esbuild@0.28.2)(happy-dom@20.14.0)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0)
+      wrangler:
+        specifier: 4.129.0
+        version: 4.129.0(@cloudflare/workers-types@5.20260904.1)
 
 packages:
 

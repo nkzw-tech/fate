@@ -88,4 +88,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4.129.0'
-          command: pages deploy sites/stack/dist/client --project-name=fatestack --branch=main
+          workingDirectory: sites/stack
+          command: pages deploy dist/client --project-name=fatestack --branch=main
