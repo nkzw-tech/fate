@@ -1,0 +1,62 @@
+{
+  "$schema": "./node_modules/void/schema.json",
+  "head": {
+    "title": "fatestack \u2014 A modern stack for the web",
+    "htmlAttrs": {
+      "lang": "en"
+    },
+    "meta": [
+      {
+        "charset": "utf-8"
+      },
+      {
+        "name": "viewport",
+        "content": "width=device-width, initial-scale=1"
+      },
+      {
+        "name": "description",
+        "content": "From type-safe data and translations to fast builds and sensible defaults. Explore fate, fbtee, Void, Hono, Vite+, and Oxc, and create your next project."
+      },
+      {
+        "property": "og:title",
+        "content": "fatestack \u2014 A modern stack for the web"
+      },
+      {
+        "property": "og:description",
+        "content": "Great tools, all the way down. Explore the stack and create a project with fate."
+      },
+      {
+        "name": "theme-color",
+        "content": "#ffffff",
+        "media": "(prefers-color-scheme: light)"
+      },
+      {
+        "name": "theme-color",
+        "content": "#141414",
+        "media": "(prefers-color-scheme: dark)"
+      }
+    ],
+    "link": [
+      {
+        "rel": "icon",
+        "href": "/favicon.svg"
+      },
+      {
+        "rel": "preload",
+        "href": "/fonts/salesforce/SalesforceSans-Book.woff2",
+        "as": "font",
+        "type": "font/woff2",
+        "crossorigin": ""
+      },
+      {
+        "rel": "preload",
+        "href": "/fonts/salesforce/SalesforceSans-Semibold.woff2",
+        "as": "font",
+        "type": "font/woff2",
+        "crossorigin": ""
+      }
+    ]
+  },
+  "output": "static",
+  "target": "node"
+}

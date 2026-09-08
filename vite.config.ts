@@ -117,6 +117,7 @@ export default defineConfig({
             './example/server-prisma/prisma.config.ts',
             './example/server-prisma/scripts/**/*.tsx',
             './example/void/vite.config.ts',
+            './sites/stack/vite.config.ts',
             '**/__tests__/**',
             '**/tsdown.config.js',
             'vite.config.ts',

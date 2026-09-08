@@ -1,6 +1,7 @@
 packages:
   - example/*
   - packages/*
+  - sites/*
 
 allowBuilds:
   '@prisma/engines': true
