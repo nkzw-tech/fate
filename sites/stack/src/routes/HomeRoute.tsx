@@ -171,56 +171,51 @@ const layers: ReadonlyArray<
 
 export default function HomeRoute() {
   return (
-    <>
-      <a className="skip-link" href="#stack">
-        Skip to the stack
-      </a>
-      <div className="site-container">
-        <main>
-          <section aria-labelledby="hero-title" className="hero">
-            <h1 id="hero-title">
-              <i>fate</i>stack<span>.</span>
-            </h1>
-            <p className="hero-tagline">Great tools, all the way down.</p>
-            <CreateProject />
-          </section>
-          <section aria-labelledby="stack-title" className="stack" id="stack">
-            <h1 className="stack-title" id="stack-title">
-              Explore the stack
-            </h1>
-            {layers.map(({ name, note, projects }, index) => (
-              <section aria-labelledby={`layer-${index}`} className="stack-layer" key={name}>
-                <div className="layer-heading">
-                  <h2 id={`layer-${index}`}>{name}</h2>
-                  {note ? <span className="layer-note">{note}</span> : null}
-                </div>
-                <div className={`project-grid shader-grid columns-${Math.min(projects.length, 3)}`}>
-                  {projects.map((project) => (
-                    <ProjectCard {...project} key={project.name} />
-                  ))}
-                  <StackShaders
-                    count={projects.length}
-                    seedOffset={
-                      1 +
-                      layers
-                        .slice(0, index)
-                        .reduce((count, layer) => count + layer.projects.length, 0)
-                    }
-                  />
-                </div>
-              </section>
-            ))}
-          </section>
-        </main>
-        <footer className="site-footer">
-          <p>
-            Curated by{' '}
-            <a href="https://nakazawa.tech">
-              Nakazawa Tech <span aria-hidden="true">↗</span>
-            </a>
-          </p>
-        </footer>
-      </div>
-    </>
+    <div className="site-container">
+      <main>
+        <section aria-labelledby="hero-title" className="hero">
+          <h1 id="hero-title">
+            <i>fate</i>stack<span>.</span>
+          </h1>
+          <p className="hero-tagline">Great tools, all the way down.</p>
+          <CreateProject />
+        </section>
+        <section aria-labelledby="stack-title" className="stack" id="stack">
+          <h1 className="stack-title" id="stack-title">
+            Explore the stack
+          </h1>
+          {layers.map(({ name, note, projects }, index) => (
+            <section aria-labelledby={`layer-${index}`} className="stack-layer" key={name}>
+              <div className="layer-heading">
+                <h2 id={`layer-${index}`}>{name}</h2>
+                {note ? <span className="layer-note">{note}</span> : null}
+              </div>
+              <div className={`project-grid shader-grid columns-${Math.min(projects.length, 3)}`}>
+                {projects.map((project) => (
+                  <ProjectCard {...project} key={project.name} />
+                ))}
+                <StackShaders
+                  count={projects.length}
+                  seedOffset={
+                    1 +
+                    layers
+                      .slice(0, index)
+                      .reduce((count, layer) => count + layer.projects.length, 0)
+                  }
+                />
+              </div>
+            </section>
+          ))}
+        </section>
+      </main>
+      <footer className="site-footer">
+        <p>
+          Curated by{' '}
+          <a href="https://nakazawa.tech">
+            Nakazawa Tech <span aria-hidden="true">↗</span>
+          </a>
+        </p>
+      </footer>
+    </div>
   );
 }

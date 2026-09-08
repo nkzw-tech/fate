@@ -1,3 +1,4 @@
+import { sortObjectKeys } from '../sortObjectKeys.ts';
 import type { FateViteTransport } from '../viteTypes.ts';
 import { createSchema, isDataView } from './schema.ts';
 
@@ -36,27 +37,13 @@ const indentBlock = (value: string, spaces: number) =>
 
 const compareStrings = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
-const canonicalizeHydrationScopeValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeHydrationScopeValue);
-  }
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => compareStrings(left, right))
-      .map(([key, entry]) => [key, canonicalizeHydrationScopeValue(entry)]),
-  );
-};
-
 const getHydrationScope = (
   moduleName: string,
   roots: Record<string, unknown>,
   types: ReadonlyArray<{ type: string }>,
 ) =>
   JSON.stringify(
-    canonicalizeHydrationScopeValue({
+    sortObjectKeys({
       moduleName,
       roots,
       types: [...types].sort((left, right) => compareStrings(left.type, right.type)),
@@ -347,17 +334,19 @@ export type GeneratedClientMutations = typeof mutations;
 export type GeneratedClientRoots = typeof roots;
 const hydrationScope = ${JSON.stringify(getHydrationScope(moduleName, roots, types))} as const;
 
+const trpcMutations = {
+${mutationResolverBlock}
+} as const;
+
 export const createFateClient = (options: {
   links: Parameters<typeof createTRPCProxyClient>[0]['links'];
 ${indentBlock(liveOptions.trim(), 2)}
+  mutateDurably?: Parameters<typeof createTRPCTransport<AppRouter, typeof trpcMutations>>[0]['mutateDurably'];
   onLiveError?: (error: unknown) => void;
+  persistence?: import("@nkzw/fate").Persistence;
 }) => {
   const trpcClient = createTRPCProxyClient<AppRouter>(options);
 ${liveTransportSetup}
-
-  const trpcMutations = {
-${mutationResolverBlock}
-  } as const;
 
   const transport = createTRPCTransport<AppRouter, typeof trpcMutations>({
     byId: {
@@ -365,6 +354,7 @@ ${byIdBlock}
     },
     client: trpcClient,
 ${queriesBlock}${listsBlock}    mutations: trpcMutations,
+    mutateDurably: options.mutateDurably,
   });
 ${liveTransportAssignment}
 
@@ -372,6 +362,7 @@ ${liveTransportAssignment}
     hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
+    persistence: options.persistence,
     roots,
     transport,
     types: ${typesBlock.trimStart()},
@@ -560,13 +551,16 @@ export const createFateClient = (options: {
   fetch?: typeof fetch;
   headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
   live?: Parameters<typeof createGraphQLTransport>[0]['live'];
+  mutateDurably?: Parameters<typeof createGraphQLTransport<GraphQLTransportMutations>>[0]['mutateDurably'];
   onLiveError?: (error: unknown) => void;
+  persistence?: import("@nkzw/fate").Persistence;
   url: string | URL;
 }) =>
   createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
     hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
+    persistence: options.persistence,
     roots,
     transport: createGraphQLTransport<GraphQLTransportMutations>({
       decodeNodeId: options.decodeNodeId,
@@ -576,6 +570,7 @@ export const createFateClient = (options: {
       headers: options.headers,
       live: options.live,
       mutations: graphQL.mutations,
+      mutateDurably: options.mutateDurably,
       roots: graphQL.roots,
       types: ${typesBlock.trimStart()},
       url: options.url,
@@ -761,6 +756,7 @@ const toEndpointUrl = (url: string | URL | undefined, path: string, origin: stri
   liveRetryMs?: number;
   liveUrl?: string | URL;
   onLiveError?: (error: unknown) => void;
+  persistence?: import("@nkzw/fate").Persistence;
   origin?: string | URL;
   rpcPath?: string;
   url?: string | URL;
@@ -772,6 +768,7 @@ const toEndpointUrl = (url: string | URL | undefined, path: string, origin: stri
   liveRetryMs?: number;
   liveUrl?: string | URL;
   onLiveError?: (error: unknown) => void;
+  persistence?: import("@nkzw/fate").Persistence;
   url: string | URL;
 }`;
   const clientSetup =
@@ -783,6 +780,7 @@ const toEndpointUrl = (url: string | URL | undefined, path: string, origin: stri
     hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
+    persistence: options.persistence,
     roots,
     transport: createHTTPTransport<FateAPI>({
       fetch: ${voidTransport ? 'createVoidFetch(options)' : 'options.fetch'},
@@ -804,6 +802,7 @@ const toEndpointUrl = (url: string | URL | undefined, path: string, origin: stri
     hydrationScope,
     mutations,
     onLiveError: options.onLiveError,
+    persistence: options.persistence,
     roots,
     transport: createHTTPTransport<FateAPI>({
       fetch: options.fetch,

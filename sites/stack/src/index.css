@@ -407,17 +407,6 @@ button:focus-visible {
 .site-footer a {
   color: var(--text-muted);
 }
-.skip-link {
-  position: fixed;
-  top: -100px;
-  left: 16px;
-  z-index: 10;
-  padding: 12px 20px;
-  background: var(--background-color);
-}
-.skip-link:focus {
-  top: 12px;
-}
 
 @media (max-width: 640px) {
   .site-container {

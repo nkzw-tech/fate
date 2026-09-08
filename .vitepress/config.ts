@@ -100,6 +100,7 @@ export default defineConfig({
           { link: '/guide/list-views', text: 'List Views' },
           { link: '/guide/live-views', text: 'Live Views' },
           { link: '/guide/actions', text: 'Actions' },
+          { link: '/guide/persistence', text: 'Persistence' },
           { link: '/guide/requests', text: 'Requests' },
           { link: '/guide/deferred-views', text: 'Deferred Views' },
           { link: '/guide/vue', text: 'Vue' },

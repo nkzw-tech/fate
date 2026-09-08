@@ -1,0 +1,33 @@
+{
+  "name": "@nkzw/fate-indexeddb",
+  "version": "1.4.0",
+  "description": "Optional IndexedDB persistence adapter for fate.",
+  "license": "MIT",
+  "files": [
+    "lib"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@nkzw/source": "./src/index.ts",
+      "types": "./lib/index.d.mts",
+      "default": "./lib/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vp pack --tsconfig tsconfig.json -d lib src/index.ts"
+  },
+  "dependencies": {
+    "idb": "^8.0.3"
+  },
+  "devDependencies": {
+    "@nkzw/fate": "workspace:*",
+    "fake-indexeddb": "^6.2.4",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "@nkzw/fate": "^1.4.0"
+  }
+}

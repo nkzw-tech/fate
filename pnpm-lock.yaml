@@ -302,6 +302,49 @@ importers:
         specifier: ^4.129.0
         version: 4.129.0(@cloudflare/workers-types@5.20260904.1)
 
+  example/persistence:
+    dependencies:
+      '@nkzw/fate':
+        specifier: workspace:*
+        version: link:../../packages/fate
+      '@nkzw/fate-client':
+        specifier: workspace:*
+        version: link:../client
+      '@nkzw/fate-indexeddb':
+        specifier: workspace:*
+        version: link:../../packages/fate-indexeddb
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      react-fate:
+        specifier: workspace:*
+        version: link:../../packages/react-fate
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.3(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0))
+      '@types/node':
+        specifier: ^26.4.1
+        version: 26.4.1
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.7
+        version: 19.2.7(@types/react@19.2.18)
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.3.0
+        version: '@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.3.0(@types/node@26.4.1)(@vitest/coverage-v8@5.0.0(vitest@5.0.0))(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0))(esbuild@0.28.2)(happy-dom@20.14.0)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0)
+
   example/server-drizzle:
     dependencies:
       '@hono/node-server':
@@ -649,6 +692,25 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@5.20260904.1)(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(better-sqlite3@12.11.1)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.23.0)(postgres@3.4.7)(prisma@7.10.0(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(better-sqlite3@12.11.1)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))
+
+  packages/fate-indexeddb:
+    dependencies:
+      idb:
+        specifier: ^8.0.3
+        version: 8.0.3
+    devDependencies:
+      '@nkzw/fate':
+        specifier: workspace:*
+        version: link:../fate
+      fake-indexeddb:
+        specifier: ^6.2.4
+        version: 6.2.5
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.3.0
+        version: '@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.3.0(@types/node@26.4.1)(@vitest/coverage-v8@5.0.0(vitest@5.0.0))(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0))(esbuild@0.28.2)(happy-dom@20.14.0)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.0)
 
   packages/react-fate:
     dependencies:
@@ -5001,6 +5063,10 @@ packages:
   exsolve@1.1.1:
     resolution: {integrity: sha512-9U/jZUgjnSGyntRr6y5Muu1MJcwFl6kPu7k8qLF0IMNfLqvw0NZ4nnVDq0RVoZ0RvCyumib4Ez3KYrVfilrw+g==}
 
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
+    engines: {node: '>=18'}
+
   fast-check@3.23.2:
     resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
     engines: {node: '>=8.0.0'}
@@ -5184,6 +5250,9 @@ packages:
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
+
+  idb@8.0.3:
+    resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -9713,6 +9782,8 @@ snapshots:
 
   exsolve@1.1.1: {}
 
+  fake-indexeddb@6.2.5: {}
+
   fast-check@3.23.2:
     dependencies:
       pure-rand: 6.1.0
@@ -9909,6 +9980,8 @@ snapshots:
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
+
+  idb@8.0.3: {}
 
   ieee754@1.2.1: {}
 

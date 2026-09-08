@@ -1,0 +1,4 @@
+@import '@nkzw/fate-client/style.css';
+
+@source './';
+@source '../client/src/ui';

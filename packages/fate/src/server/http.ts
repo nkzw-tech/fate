@@ -17,6 +17,7 @@ import { resolveConnection, type ConnectionResult } from './connection.ts';
 import { isDataView, type DataView, type DataViewResult } from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
+import type { MutationIdempotency } from './idempotency-types.ts';
 import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
 import type { SourceDefinition } from './source.ts';
 
@@ -144,6 +145,7 @@ type FateServerOptions<
   AdapterContext,
 > = {
   context?: (options: ContextOptions<AdapterContext>) => MaybePromise<Context>;
+  idempotency?: MutationIdempotency<Context>;
   lists?: Lists;
   live?: false | LiveConfig;
   mutations?: Mutations;
@@ -390,7 +392,11 @@ const isProtocolId = (value: unknown): value is string | number =>
 const operationKinds = new Set(['byId', 'list', 'mutation', 'query']);
 
 const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
-  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.operations)) {
+  if (
+    !isRecord(value) ||
+    (value.version !== 1 && value.version !== 2) ||
+    !Array.isArray(value.operations)
+  ) {
     throw new FateRequestError('BAD_REQUEST', 'Invalid Fate protocol request.');
   }
 
@@ -404,6 +410,21 @@ const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
       ('args' in operation && operation.args !== undefined && !isRecord(operation.args))
     ) {
       throw new FateRequestError('BAD_REQUEST', 'Invalid Fate protocol operation.');
+    }
+
+    if (
+      operation.mutation !== undefined &&
+      (value.version !== 2 ||
+        operation.kind !== 'mutation' ||
+        !isRecord(operation.mutation) ||
+        (operation.mutation.replayOnly !== undefined && operation.mutation.replayOnly !== true) ||
+        typeof operation.mutation.id !== 'string' ||
+        !operation.mutation.id ||
+        operation.mutation.id.length > 256 ||
+        typeof operation.mutation.scope !== 'string' ||
+        operation.mutation.scope.length > 1024)
+    ) {
+      throw new FateRequestError('BAD_REQUEST', 'Invalid durable mutation metadata.');
     }
 
     if (
@@ -615,6 +636,7 @@ export function createFateServer<
   AdapterContext = unknown,
 >({
   context,
+  idempotency,
   lists,
   live,
   mutations,
@@ -777,12 +799,29 @@ export function createFateServer<
         throw new FateRequestError('NOT_FOUND', `No mutation registered for '${operation.name}'.`);
       }
 
-      return {
-        data: await mutation.resolve({
-          ctx,
+      const resolve = async (context: Context) =>
+        mutation.resolve({
+          ctx: context,
           input: await parseInput(mutation.input, operation.input),
           select: operation.select,
-        }),
+        });
+      if (operation.mutation && !idempotency) {
+        throw new FateRequestError(
+          'BAD_REQUEST',
+          'fate: Configure createFateServer({ idempotency: createMutationIdempotency({ scope, store }) }) to accept persisted mutations. The store must commit mutation effects and receipts in the same database transaction.',
+        );
+      }
+      return {
+        data: operation.mutation
+          ? await idempotency!.execute({
+              ctx,
+              identity: operation.mutation,
+              input: operation.input,
+              name: operation.name,
+              resolve,
+              select: operation.select,
+            })
+          : await resolve(ctx),
         id: operation.id,
         ok: true,
       };

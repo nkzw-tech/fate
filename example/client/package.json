@@ -8,6 +8,10 @@
     "url": "git://github.com/nkzw-tech/fate.git"
   },
   "type": "module",
+  "exports": {
+    "./style.css": "./src/App.css",
+    "./ui/*": "./src/ui/*.tsx"
+  },
   "scripts": {
     "dev": "vp dev"
   },

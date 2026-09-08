@@ -62,10 +62,20 @@
       "types": "./lib/vite.d.mts",
       "@nkzw/source": "./src/vite.ts",
       "default": "./lib/vite.mjs"
+    },
+    "./persistence": {
+      "types": "./lib/persistence.d.mts",
+      "@nkzw/source": "./src/persistence.ts",
+      "default": "./lib/persistence.mjs"
+    },
+    "./persistence/server": {
+      "types": "./lib/idempotency.d.mts",
+      "@nkzw/source": "./src/idempotency.ts",
+      "default": "./lib/idempotency.mjs"
     }
   },
   "scripts": {
-    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/graphqlTransport.ts src/vite.ts"
+    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/graphqlTransport.ts src/vite.ts src/persistence.ts src/idempotency.ts"
   },
   "dependencies": {
     "superjson": "^2.2.6",

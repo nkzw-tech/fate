@@ -3,6 +3,9 @@
   "docsRoot": "./docs",
   "entryPoints": [
     "packages/fate/src/index.ts",
+    "packages/fate/src/persistence.ts",
+    "packages/fate/src/idempotency.ts",
+    "packages/fate-indexeddb/src/index.ts",
     "packages/fate/src/server.ts",
     "packages/fate/src/server/drizzle.ts",
     "packages/fate/src/server/prisma.ts",

@@ -1,0 +1,26 @@
+{
+  "name": "@nkzw/fate-persistence-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev"
+  },
+  "dependencies": {
+    "@nkzw/fate": "workspace:*",
+    "@nkzw/fate-client": "workspace:*",
+    "@nkzw/fate-indexeddb": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-fate": "workspace:*",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

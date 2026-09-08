@@ -29,6 +29,9 @@ export {
   type HydrateOptions,
   type InferFateAPI,
   type Pagination,
+  type Persistence,
+  type PersistenceSession,
+  type PersistenceSnapshot,
   type ViewRef,
   view,
 } from '@nkzw/fate';

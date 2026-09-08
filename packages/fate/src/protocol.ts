@@ -1,6 +1,8 @@
+import type { MutationIdentity } from './persistence-types.ts';
 import type { Pagination } from './types.ts';
 
-export type FateProtocolVersion = 1;
+/** Version 2 requires support for durable mutation identities and receipt-only recovery. */
+export type FateProtocolVersion = 1 | 2;
 
 export type FateOperationKind = 'byId' | 'list' | 'mutation' | 'query';
 
@@ -10,6 +12,7 @@ export type FateOperation = Readonly<{
   ids?: Array<string | number>;
   input?: unknown;
   kind: FateOperationKind;
+  mutation?: MutationIdentity;
   name?: string;
   select: Array<string>;
   type?: string;

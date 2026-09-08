@@ -76,3 +76,10 @@ export { mutation } from './mutation.ts';
 export { clientRoot } from './root.ts';
 export { toEntityId } from './ref.ts';
 export { view } from './view.ts';
+
+export type {
+  Persistence,
+  PersistenceSession,
+  PersistenceSnapshot,
+  MutationIdentity,
+} from './persistence-types.ts';

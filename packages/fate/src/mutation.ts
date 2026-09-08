@@ -1,9 +1,10 @@
 import type { TRPCError } from '@trpc/server';
 import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
+import type { MutationIdentity } from './persistence-types.ts';
 import { FateRequestError } from './protocol.ts';
 import { toEntityId } from './ref.ts';
-import { getSelectionPlan } from './selection.ts';
+import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import type {
   AnyRecord,
   Entity,
@@ -48,6 +49,8 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   insert?: InsertPosition;
   /** Optional optimistic update to apply immediately. */
   optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
+  /** Skip durable delivery for this call, even when persistence is configured. */
+  persist?: boolean;
   /** Optional view specifying which fields to select from the server. */
   view?: View<MutationEntity<Identifier>, Selection<MutationEntity<Identifier>>>;
 };
@@ -159,10 +162,85 @@ const maybeGetId = (getId: TypeConfig['getId'], input: AnyRecord) => {
 
 const emptySet: ReadonlySet<string> = new Set();
 
-/**
- * Binds a mutation definition to a `FateClient`, wiring up optimistic updates,
- * cache writes, and error handling.
- */
+/** @internal Serializable input to a live or restored mutation. */
+export type MutationCommand = {
+  args?: AnyRecord;
+  delete?: boolean;
+  entity: string;
+  input: AnyRecord;
+  insert: InsertPosition;
+  key: string;
+  optimistic?: AnyRecord;
+  plan?: SelectionPlan;
+};
+
+/** @internal Creates the same optimistic/confirmation machinery for live and restored calls. */
+export function prepareMutation(
+  client: FateClient<any, any>,
+  command: MutationCommand,
+  config: TypeConfig,
+  durable = false,
+) {
+  const { args, delete: deleteRecord, entity, input, insert, key, optimistic, plan } = command;
+  const id = maybeGetId(config.getId, input);
+  const optimisticRecord = optimistic
+    ? id != null
+      ? { id, ...optimistic }
+      : optimistic
+    : undefined;
+  const optimisticRecordId = optimisticRecord ? maybeGetId(config.getId, optimisticRecord) : null;
+  const optimisticEntityId =
+    id != null
+      ? toEntityId(entity, id)
+      : optimisticRecordId != null
+        ? toEntityId(entity, optimisticRecordId)
+        : null;
+  const optimisticSelection = optimisticRecord
+    ? collectImplicitSelectedPaths(optimisticRecord)
+    : undefined;
+  const selection = new Set([...(plan?.paths ?? []), ...(optimisticSelection ?? [])]);
+  if (deleteRecord && id == null) {
+    throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
+  }
+  const settle = client.store.optimisticUpdate(() => {
+    if (optimisticRecord && optimisticEntityId) {
+      client.write(entity, optimisticRecord, optimisticSelection ?? emptySet, plan, insert);
+    }
+    if (deleteRecord && id != null) {
+      client.deleteRecord(entity, id);
+    }
+  }, durable);
+  return {
+    commit: (result: unknown) =>
+      settle(() => {
+        if (result && typeof result === 'object' && (!deleteRecord || plan)) {
+          client.write(
+            entity,
+            result as AnyRecord,
+            collectImplicitSelectedPaths(result as AnyRecord),
+            plan,
+            insert,
+          );
+          const resultId = maybeGetId(config.getId, result as AnyRecord);
+          if (optimisticEntityId && resultId != null) {
+            client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+          }
+          if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
+            client.deleteRecord(entity, optimisticRecordId);
+          }
+        }
+        if (deleteRecord && id != null) {
+          client.deleteRecord(entity, id);
+        }
+      }),
+    entityId: optimisticEntityId,
+    execute: (identity?: MutationIdentity) =>
+      client.executeMutation(key, input, selection, { args, identity, plan }),
+    rollback: () => settle(),
+  };
+}
+
+/** Binds a mutation's optimistic updates, cache writes, and error handling. */
 export function wrapMutation<
   I extends MutationIdentifier<any, any, any>,
   M extends Record<string, MutationDefinition<any, any, any>>,
@@ -175,120 +253,72 @@ export function wrapMutation<
     input,
     insert = 'after',
     optimistic,
+    persist,
     view,
   }: MutationOptions<I>) => {
-    const id = maybeGetId(config.getId, input);
-    const plan = view ? getSelectionPlan(view, null) : undefined;
-    const viewSelection = plan?.paths;
-
-    const optimisticRecord: AnyRecord | undefined = optimistic
-      ? ((id != null ? { id, ...optimistic } : optimistic) as AnyRecord)
-      : undefined;
-    const optimisticRecordId =
-      optimisticRecord !== undefined ? maybeGetId(config.getId, optimisticRecord) : null;
-
-    const optimisticEntityId =
-      id != null
-        ? toEntityId(identifier.entity, id)
-        : optimisticRecordId != null
-          ? toEntityId(identifier.entity, optimisticRecordId)
-          : null;
-
-    const optimisticSelection = optimisticRecord
-      ? collectImplicitSelectedPaths(optimisticRecord)
-      : undefined;
-
-    const selection =
-      viewSelection || optimisticSelection
-        ? new Set<string>([
-            ...(viewSelection ? [...viewSelection] : []),
-            ...(optimisticSelection ? [...optimisticSelection] : []),
-          ])
-        : new Set<string>();
-
-    if (deleteRecord && id == null) {
-      throw new Error(`fate: Mutation '${identifier.key}' requires an 'id' to delete.`);
-    }
-
-    const applyOptimistic = () => {
-      if (optimisticRecord && optimisticEntityId) {
-        client.write(
-          identifier.entity,
-          optimisticRecord,
-          optimisticSelection ?? emptySet,
-          plan,
-          insert,
-        );
-      }
-      if (deleteRecord && id != null) {
-        client.deleteRecord(identifier.entity, id);
-      }
+    const command: MutationCommand = {
+      args,
+      delete: deleteRecord,
+      entity: identifier.entity,
+      input,
+      insert,
+      key: identifier.key,
+      optimistic: optimistic as AnyRecord | undefined,
+      plan: view ? getSelectionPlan(view, null) : undefined,
     };
-    const settle = client.store.optimisticUpdate(applyOptimistic);
-
-    const performMutation = async () => {
+    if (client.persistence && persist !== false) {
       try {
-        const result = (await client.executeMutation(identifier.key, input, selection, {
-          args,
-          plan,
-        })) as MutationResult<I>;
-
-        const shouldWriteResult =
-          result && typeof result === 'object' && (!deleteRecord || Boolean(view));
-
-        settle(() => {
-          if (shouldWriteResult) {
-            const select = collectImplicitSelectedPaths(result);
-            client.write(identifier.entity, result, select, plan, insert);
-
-            const resultId = maybeGetId(config.getId, result as AnyRecord);
-            if (optimisticEntityId && resultId != null) {
-              client.resolveOptimisticEntity(
-                optimisticEntityId,
-                toEntityId(identifier.entity, resultId),
-              );
-            }
-            if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
-              client.deleteRecord(identifier.entity, optimisticRecordId);
-            }
-          }
-          if (deleteRecord && id != null) {
-            client.deleteRecord(identifier.entity, id);
-          }
-        });
-
+        const result = (await client.withPersistenceLifecycle(() =>
+          client.persistence!.mutate(command),
+        )) as MutationResult<I>;
         return { error: undefined, result };
       } catch (error) {
-        settle();
+        return handleMutationError(identifier.key, error);
+      }
+    }
 
-        if (error instanceof Error) {
-          const statusCode = getErrorStatusCode(error);
-          const errorCategory = statusCode ? categorizeHTTPErrorStatus(statusCode) : 'boundary';
-
-          if (errorCategory === 'boundary') {
-            throw error;
-          }
-
-          return { error, result: undefined };
-        } else {
-          throw new Error(`fate: Mutation '${identifier.key}' failed.`, { cause: error });
-        }
+    if (client.persistence) {
+      await client.withPersistenceLifecycle(() => client.persistence!.ready);
+    }
+    client.assertPersistenceActive();
+    // Preparation failures reject directly, as they did before persistence.
+    const operation = prepareMutation(client, command, config);
+    const performMutation = async () => {
+      try {
+        const result = (await operation.execute()) as MutationResult<I>;
+        client.assertPersistenceActive();
+        operation.commit(result);
+        return { error: undefined, result };
+      } catch (error) {
+        operation.rollback();
+        return handleMutationError(identifier.key, error);
       }
     };
-
     const mutationPromise = client.trackPendingRequest(performMutation);
 
-    if (optimisticEntityId) {
-      client.registerPendingOptimisticMutation(optimisticEntityId, mutationPromise);
+    if (operation.entityId) {
+      client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
     }
 
     return mutationPromise;
   };
 }
 
+const handleMutationError = (key: string, error: unknown): { error: Error; result: undefined } => {
+  if (error instanceof Error) {
+    const statusCode = getErrorStatusCode(error);
+    const errorCategory = statusCode ? categorizeHTTPErrorStatus(statusCode) : 'boundary';
+    if (errorCategory === 'boundary') {
+      throw error;
+    }
+    return { error, result: undefined };
+  }
+  throw new Error(`fate: Mutation '${key}' failed.`, { cause: error });
+};
+
 export type ErrorHandlingScope = 'callSite' | 'boundary';
 
-const getErrorStatusCode = (error: Error): number | undefined => {
+export const getErrorStatusCode = (error: Error): number | undefined => {
   if (error instanceof FateRequestError) {
     return error.status;
   }

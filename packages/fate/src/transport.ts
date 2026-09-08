@@ -1,5 +1,6 @@
 import type { TRPCClient } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
+import type { MutationIdentity } from './persistence-types.ts';
 import { AnyRecord, Pagination, type MutationShape } from './types.ts';
 
 /**
@@ -69,6 +70,16 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     proc: K,
     input: Mutations[K]['input'],
     select: Set<string>,
+  ): Promise<Mutations[K]['output']>;
+  /**
+   * Deliver through an endpoint that durably deduplicates this identity. Required
+   * for persisted mutations; never falls back to ordinary mutate.
+   */
+  mutateDurably?<K extends Extract<keyof Mutations, string>>(
+    proc: K,
+    input: Mutations[K]['input'],
+    select: Set<string>,
+    identity: MutationIdentity,
   ): Promise<Mutations[K]['output']>;
   subscribeById?(
     type: string,
@@ -153,12 +164,14 @@ export function createTRPCTransport<
   byId,
   client,
   lists,
+  mutateDurably,
   mutations,
   queries,
 }: {
   byId: TRPCByIdResolvers<AppRouter>;
   client: TRPCClient<AppRouter>;
   lists?: TRPCListResolvers<AppRouter>;
+  mutateDurably?: Transport<MutationMapFromResolvers<Mutations>>['mutateDurably'];
   mutations?: Mutations;
   queries?: TRPCQueryResolvers<AppRouter>;
 }): Transport<MutationMapFromResolvers<Mutations>> {
@@ -205,6 +218,7 @@ export function createTRPCTransport<
         select: [...select],
       });
     },
+    mutateDurably,
   };
 
   transport.mutate = async <K extends Extract<keyof Mutations, string>>(

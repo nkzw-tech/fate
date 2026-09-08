@@ -1,5 +1,6 @@
 import type { ViewPlan, ViewPlanNode } from './dataView.ts';
 import { getScopedArgs, toPrismaArgs } from './queryArgs.ts';
+import { stableStringify } from './stableStringify.ts';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -73,24 +74,6 @@ const mergeObject = (target: AnyRecord, source: AnyRecord) => {
     }
     target[key] = value;
   }
-};
-
-const stableStringify = (value: unknown): string => {
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
-  }
-
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value as AnyRecord).sort(([left], [right]) =>
-      left.localeCompare(right),
-    );
-
-    return `{${entries
-      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-      .join(',')}}`;
-  }
-
-  return JSON.stringify(value);
 };
 
 const getConflictingCountRelations = <Context>(node: ViewPlanNode<Context>): Set<string> => {

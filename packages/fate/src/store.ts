@@ -30,6 +30,7 @@ type OptimisticWrite = { partial: AnyRecord; paths: Set<string> };
 
 type OptimisticLayer = {
   apply: () => void;
+  durable?: boolean;
   settled?: boolean;
   writes: Map<EntityId, OptimisticWrite>;
 };
@@ -98,7 +99,7 @@ const isDate = (value: unknown): value is Date =>
   Object.prototype.toString.call(value) === '[object Date]' &&
   typeof (value as Date).getTime === 'function';
 
-const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
+export const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
   if (!isPlainRecord(incoming) || !isPlainRecord(existing)) {
     return existing;
   }
@@ -204,7 +205,15 @@ export class Store {
   private recordingLayer: OptimisticLayer | undefined;
   private rebase: Snapshots | undefined;
 
-  constructor(private readonly onRebase?: (ids: ReadonlySet<EntityId>) => void) {}
+  constructor(
+    private readonly onRebase?: (ids: ReadonlySet<EntityId>) => void,
+    private readonly onChange?: (
+      kind: 'record' | 'list',
+      key: string,
+      paths?: Iterable<string>,
+      previousList?: List,
+    ) => void,
+  ) {}
 
   get hasOptimisticUpdates(): boolean {
     return this.optimisticLayers.size > 0;
@@ -263,10 +272,10 @@ export class Store {
         this.rebase = undefined;
         this.onRebase?.(new Set(records.keys()));
         for (const [id, paths] of records) {
-          this.notify(id, paths);
+          this.notify(id, paths, false);
         }
         for (const key of lists) {
-          this.notifyListSubscribers(key);
+          this.notifyListSubscribers(key, false);
         }
       }
     }
@@ -317,11 +326,8 @@ export class Store {
   }
 
   /** Returns an idempotent settlement function; omit its update to roll back. */
-  optimisticUpdate(apply: () => void): (commit?: () => void) => void {
-    const layer: OptimisticLayer = {
-      apply,
-      writes: new Map(),
-    };
+  optimisticUpdate(apply: () => void, durable = false): (commit?: () => void) => void {
+    const layer: OptimisticLayer = { apply, durable, writes: new Map() };
     const settle = (commit?: () => void) => {
       if (!this.optimisticLayers.has(layer) || layer.settled) {
         return;
@@ -424,6 +430,86 @@ export class Store {
         target.lists.set(key, this.lists.get(key));
       }
     }
+  }
+
+  get hasTransientOptimisticUpdates(): boolean {
+    return [...this.optimisticLayers].some((layer) => !layer.durable);
+  }
+
+  getOptimisticRoots() {
+    return {
+      baseRecords: [...this.optimisticBase.records.values()].flatMap(({ record }) =>
+        record ? [record] : [],
+      ),
+      lists: [...this.optimisticBase.lists.keys()],
+      records: [
+        ...this.optimisticBase.records.keys(),
+        ...[...this.optimisticBase.lists.values()].flatMap((list) =>
+          list
+            ? [
+                ...list.ids,
+                ...(list.pendingBeforeIds ?? []),
+                ...(list.pendingAfterIds ?? []),
+                ...(list.liveBeforeIds ?? []),
+                ...(list.liveAfterIds ?? []),
+              ]
+            : [],
+        ),
+      ],
+    };
+  }
+
+  /** @internal Indexed owners needed for mutation rollback. */
+  getPersistenceOwners(id: EntityId) {
+    return {
+      lists: [...(this.listKeysByReferencedEntity.get(id) ?? [])],
+      records: [...(this.recordReferencesByTarget.get(id)?.keys() ?? [])],
+    };
+  }
+
+  /** @internal Read one confirmed record without copying the cache. */
+  readConfirmed(id: EntityId) {
+    const snapshot = this.optimisticBase.records.get(id);
+    const record = snapshot ? snapshot.record : this.records.get(id);
+    const mask = snapshot ? snapshot.mask : this.coverage.get(id);
+    return record ? { paths: mask ? toPaths(mask) : [], record } : undefined;
+  }
+
+  /** @internal */
+  readConfirmedList(key: string) {
+    return this.optimisticBase.lists.has(key)
+      ? this.optimisticBase.lists.get(key)
+      : this.lists.get(key);
+  }
+
+  dehydrateConfirmed(): StoreHydrationState {
+    const records = new Map(this.records);
+    const coverage = new Map(this.coverage);
+    const lists = new Map(this.lists);
+    for (const [id, snapshot] of this.optimisticBase.records) {
+      if (snapshot.record === undefined) {
+        records.delete(id);
+      } else {
+        records.set(id, snapshot.record);
+      }
+      if (snapshot.mask === undefined) {
+        coverage.delete(id);
+      } else {
+        coverage.set(id, snapshot.mask);
+      }
+    }
+    for (const [key, list] of this.optimisticBase.lists) {
+      if (list === undefined) {
+        lists.delete(key);
+      } else {
+        lists.set(key, list);
+      }
+    }
+    return {
+      coverage: [...coverage].map(([id, mask]) => [id, toPaths(mask)]),
+      lists: [...lists],
+      records: [...records],
+    };
   }
 
   dehydrate(): StoreHydrationState {
@@ -598,6 +684,9 @@ export class Store {
       }
       this.records.delete(id);
       this.coverage.delete(id);
+      if (!this.recordingLayer) {
+        this.onChange?.('record', id);
+      }
     });
   }
 
@@ -654,7 +743,10 @@ export class Store {
     };
   }
 
-  private notify(id: EntityId, paths?: Iterable<string>) {
+  private notify(id: EntityId, paths?: Iterable<string>, confirmed = true) {
+    if (confirmed && !this.recordingLayer) {
+      this.onChange?.('record', id, paths);
+    }
     if (this.rebase) {
       return;
     }
@@ -679,7 +771,10 @@ export class Store {
     }
   }
 
-  private notifyListSubscribers(key: string) {
+  private notifyListSubscribers(key: string, confirmed = true, previousList?: List) {
+    if (confirmed && !this.recordingLayer) {
+      this.onChange?.('list', key, undefined, previousList);
+    }
     if (this.rebase) {
       return;
     }
@@ -730,7 +825,7 @@ export class Store {
       }
       this.lists.set(key, state);
       this.addListIndexes(key, state);
-      this.notifyListSubscribers(key);
+      this.notifyListSubscribers(key, true, previous);
     });
   }
 
@@ -857,13 +952,13 @@ export class Store {
     }
 
     for (const key of lists) {
-      this.deleteList(key);
+      this.deleteList(key, true);
     }
 
     return { lists, records };
   }
 
-  private deleteList(key: string) {
+  private deleteList(key: string, collected = false) {
     return this.update(() => {
       this.captureList(key);
       const previous = this.lists.get(key);
@@ -871,7 +966,7 @@ export class Store {
         this.removeListIndexes(key, previous);
       }
       this.lists.delete(key);
-      this.notifyListSubscribers(key);
+      this.notifyListSubscribers(key, !collected, previous);
     });
   }
 

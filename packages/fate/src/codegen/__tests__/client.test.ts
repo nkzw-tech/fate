@@ -43,7 +43,13 @@ test('generates the same client source for the Prisma and Drizzle examples', asy
       'createHTTPTransport',
     );
     expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
+      'persistence: options.persistence',
+    );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
       'transport.subscribeConnection = liveTransport.subscribeConnection;',
+    );
+    expect(createClientSource({ moduleExports: prismaModule, moduleName })).toContain(
+      'mutateDurably: options.mutateDurably',
     );
     expect(createClientSource({ moduleExports: prismaModule, moduleName })).not.toContain(
       'live.subscribe',
@@ -300,6 +306,10 @@ test('generates a GraphQL client source with Relay roots and configured mutation
   expect(sourceText).toContain("'post.like': mutation<");
   expect(sourceText).toContain("GraphQLMutationInput<typeof fateGraphQL.mutations['post.like']>");
   expect(sourceText).toContain('mutations: graphQL.mutations');
+  expect(sourceText).toContain('mutateDurably: options.mutateDurably');
+  expect(sourceText).toContain(
+    "mutateDurably?: Parameters<typeof createGraphQLTransport<GraphQLTransportMutations>>[0]['mutateDurably'];",
+  );
   expect(sourceText).toContain(
     "eventSource?: Parameters<typeof createGraphQLTransport>[0]['eventSource'];",
   );

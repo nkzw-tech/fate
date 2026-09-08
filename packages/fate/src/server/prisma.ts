@@ -33,6 +33,7 @@ import {
   type SourceRelationConfig,
 } from './source.ts';
 import { bindSourceProcedures } from './sourceRouter.ts';
+import { stableStringify } from './stableStringify.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 
@@ -258,21 +259,6 @@ type CountRequest = {
   needName: string;
   relation: string;
   where?: unknown;
-};
-
-const stableStringify = (value: unknown): string => {
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
-  }
-
-  if (isRecord(value)) {
-    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
-    return `{${entries
-      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-      .join(',')}}`;
-  }
-
-  return JSON.stringify(value);
 };
 
 const resolveSourceReference = (source: Source | (() => Source)) =>

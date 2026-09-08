@@ -242,7 +242,7 @@ const responseError = async (response: Response): Promise<Error> => {
 const assertProtocolResponse = (value: unknown): FateProtocolResponse => {
   if (
     !isRecord(value) ||
-    value.version !== 1 ||
+    (value.version !== 1 && value.version !== 2) ||
     !Array.isArray(value.results) ||
     value.results.some((entry) => !isRecord(entry) || typeof entry.id !== 'string')
   ) {
@@ -320,7 +320,7 @@ export function createHTTPTransport<
       const response = await fetchImpl(endpoint, {
         body: JSON.stringify({
           operations: batch.map((entry) => entry.operation),
-          version: 1,
+          version: batch.some((entry) => entry.operation.mutation) ? 2 : 1,
         } satisfies FateProtocolRequest),
         headers: await requestHeaders({ 'content-type': 'application/json' }, headers),
         method: 'POST',
@@ -386,6 +386,15 @@ export function createHTTPTransport<
       return enqueue({
         input,
         kind: 'mutation',
+        name,
+        select: [...select],
+      }) as Promise<Mutations[Extract<keyof Mutations, string>]['output']>;
+    },
+    mutateDurably(name, input, select, identity) {
+      return enqueue({
+        input,
+        kind: 'mutation',
+        mutation: identity,
         name,
         select: [...select],
       }) as Promise<Mutations[Extract<keyof Mutations, string>]['output']>;

@@ -16,6 +16,7 @@ const files = [
   'docs/guide/list-views.md',
   'docs/guide/live-views.md',
   'docs/guide/actions.md',
+  'docs/guide/persistence.md',
   'docs/guide/vue.md',
   'docs/integrations/graphql.md',
   'docs/integrations/server.md',

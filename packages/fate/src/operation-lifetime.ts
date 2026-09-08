@@ -44,6 +44,15 @@ export default class OperationLifetime {
     return [...this.operations.values()].map((operation) => operation.descriptor);
   }
 
+  restore(descriptors: ReadonlyArray<RequestDescriptor>) {
+    for (const descriptor of descriptors.slice(-Math.max(1, this.releaseBufferSize))) {
+      if (!this.operations.has(descriptor.key)) {
+        this.operations.set(descriptor.key, { descriptor, refCount: 0 });
+        this.releaseBuffer.push(descriptor.key);
+      }
+    }
+  }
+
   private release(key: string): boolean {
     const operation = this.operations.get(key);
     if (!operation) {

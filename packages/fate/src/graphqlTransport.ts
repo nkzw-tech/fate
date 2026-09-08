@@ -75,6 +75,7 @@ export type GraphQLTransportOptions<
   fetch?: FetchLike;
   headers?: HeadersFactory;
   live?: boolean | GraphQLLiveOptions;
+  mutateDurably?: Transport<Mutations>['mutateDurably'];
   mutations?: Record<Extract<keyof Mutations, string>, GraphQLMutationRuntimeConfig>;
   roots?: Record<string, GraphQLRootConfig>;
   types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<Pick<TypeConfig, 'getId'>>>;
@@ -583,6 +584,7 @@ export function createGraphQLTransport<
   fetch: fetchImpl = defaultFetch,
   headers,
   live = true,
+  mutateDurably,
   mutations,
   roots,
   types: typeConfigs,
@@ -765,6 +767,7 @@ export function createGraphQLTransport<
           }),
       }) as Promise<Mutations[Extract<keyof Mutations, string>]['output']>;
     },
+    mutateDurably,
   };
 
   if (live !== false) {
