@@ -28,12 +28,6 @@ export function memoryStorage() {
         set.delete(listener);
       };
     },
-    async write(key, value) {
-      values.set(key, structuredClone(value));
-      for (const listener of listeners.get(key) ?? []) {
-        listener();
-      }
-    },
     async writeBatch(entries) {
       const copied = structuredClone(entries);
       for (const [key, value] of copied) {

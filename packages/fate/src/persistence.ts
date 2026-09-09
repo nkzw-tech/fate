@@ -7,34 +7,81 @@ import {
 import { getErrorStatusCode, prepareMutation, type MutationCommand } from './mutation.ts';
 import { PersistenceCache } from './persistence-cache.ts';
 import { deserializePlan, serializePlan } from './persistence-codec.ts';
-import { PersistenceJournal, type JournalData as Data } from './persistence-journal.ts';
-import type { Persistence, PersistenceSession, PersistenceSnapshot } from './persistence-types.ts';
+import {
+  PersistenceJournal,
+  type ConfirmedJournalEntry,
+  type JournalData as Data,
+  type JournalEntry,
+  type PendingJournalEntry,
+} from './persistence-journal.ts';
+import type { Persistence, PersistenceRuntime, PersistenceSnapshot } from './persistence-types.ts';
+import { persistencePageSize, yieldPersistenceTask } from './persistence-utils.ts';
 import { FateRequestError } from './protocol.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
-import type { List } from './store.ts';
+import type { StoreChange } from './store.ts';
 
-export type { Persistence, PersistenceSession, PersistenceSnapshot } from './persistence-types.ts';
+export type {
+  PersistedMutationStatus,
+  Persistence,
+  PersistenceSession,
+  PersistenceSnapshot,
+  RequestPersistenceOptions,
+} from './persistence-types.ts';
 type Encoded = ReturnType<typeof encodeHydrationValue>;
+type PreparedOperation = Omit<ReturnType<typeof prepareMutation>, 'commit' | 'rollback'> & {
+  commit(result: unknown, persist?: boolean): void;
+  getCacheUpdates(): Encoded | undefined;
+  rollback(persist?: boolean): void;
+};
+
+const isPendingMutation = (entry: JournalEntry): entry is PendingJournalEntry =>
+  entry.status === 'queued' || entry.status === 'sending';
+
+const replaceMutation = (
+  data: Data,
+  id: string,
+  replace: (entry: JournalEntry) => JournalEntry,
+) => {
+  const index = data.mutations.findIndex((entry) => entry.id === id);
+  if (index >= 0) {
+    data.mutations[index] = replace(data.mutations[index]);
+  }
+};
+
+const isTerminalDeliveryError = (status?: number) =>
+  status !== undefined && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status);
+
+const mutationDiscardedError = () => new Error('fate: Mutation was discarded.');
 
 /**
- * Backend-neutral durable storage. Writes replace one value atomically and resolve
- * only after commit. Exclusive sections must coordinate ALL instances using this
- * key (including other tabs/processes). Use distinct lock names independently.
+ * Backend-neutral durable storage. Batches apply atomically and resolve only after
+ * commit. Exclusive sections must coordinate ALL instances using this key
+ * (including other tabs/processes). Use distinct lock names independently.
  */
+export type PersistenceStorageEntry = Readonly<{ key: string; value: unknown }>;
+export type PersistenceStorageWrite = readonly [key: string, value: unknown];
+
 export interface PersistenceStorage {
   exclusive<T>(key: string, run: () => Promise<T>): Promise<T>;
   read(key: string): Promise<unknown>;
   /** Ordered, bounded scan. Return keys strictly after `after`, under `prefix`. */
-  scan(
-    prefix: string,
-    after?: string,
-    limit?: number,
-  ): Promise<Array<{ key: string; value: unknown }>>;
+  scan(prefix: string, after?: string, limit?: number): Promise<Array<PersistenceStorageEntry>>;
   subscribe?(key: string, listener: () => void): () => void;
-  write(key: string, value: unknown): Promise<void>;
   /** Atomically apply a batch. Undefined deletes the key. */
-  writeBatch(entries: ReadonlyArray<readonly [string, unknown]>): Promise<void>;
+  writeBatch(entries: ReadonlyArray<PersistenceStorageWrite>): Promise<void>;
 }
+
+export type PersistenceOptions = Readonly<{
+  key: string;
+  /** Maximum disk retention since a successful fetch, in milliseconds. Defaults to one day. */
+  maxAge?: number;
+  /** Encoded storage budget, including the mutation journal. Defaults to 25 MiB. */
+  maxBytes?: number;
+  /** Override connectivity for native runtimes or controlled offline testing. */
+  online?: () => boolean;
+  retryDelay?: number;
+  storage: PersistenceStorage;
+}>;
 
 const encodeCommand = (command: MutationCommand) =>
   encodeHydrationValue({
@@ -69,17 +116,7 @@ export function createPersistence({
   online = () => typeof navigator === 'undefined' || navigator.onLine,
   retryDelay = 1000,
   storage,
-}: {
-  key: string;
-  /** Maximum disk retention since a successful fetch, in milliseconds. Defaults to one day. */
-  maxAge?: number;
-  /** Encoded storage budget, including the mutation journal. Defaults to 25 MiB. */
-  maxBytes?: number;
-  /** Override connectivity for native runtimes or controlled offline testing. */
-  online?: () => boolean;
-  retryDelay?: number;
-  storage: PersistenceStorage;
-}): Persistence {
+}: PersistenceOptions): Persistence {
   if (!key || key.length > 1024) {
     throw new Error('fate: Persistence requires an account-scoped key of 1–1024 characters.');
   }
@@ -101,7 +138,7 @@ export function createPersistence({
   };
 }
 
-class Session implements PersistenceSession {
+class Session implements PersistenceRuntime {
   readonly ready: Promise<void>;
   private snapshot: PersistenceSnapshot = { mutations: [], status: 'restoring' };
   private listeners = new Set<() => void>();
@@ -109,8 +146,11 @@ class Session implements PersistenceSession {
     string,
     { command: MutationCommand; input: unknown; value: Encoded }
   >();
-  private operations = new Map<string, ReturnType<Session['prepareOperation']>>();
+  private operations = new Map<string, PreparedOperation>();
   private mutationAdmission: Promise<unknown> = Promise.resolve();
+  private cacheChangeRevision = 0;
+  private baseCheckpointRevision = 0;
+  private checkpointedCacheUpdates = new Set<string>();
   private needsCacheRecovery = false;
   private needsCheckpoint = false;
   private waiters = new Map<
@@ -122,7 +162,10 @@ class Session implements PersistenceSession {
   private draining = false;
   private timer?: ReturnType<typeof setTimeout>;
   private saveTimer?: ReturnType<typeof setTimeout>;
+  private flushRequested = false;
+  private flushing?: Promise<void>;
   private unsubscribe?: () => void;
+  private refreshRequested = false;
   private refreshing?: Promise<void>;
   private readonly cache: PersistenceCache;
   private readonly journal: PersistenceJournal;
@@ -135,7 +178,7 @@ class Session implements PersistenceSession {
     private readonly online: () => boolean,
     private readonly retryDelay: number,
     maxAge: number,
-    private readonly maxBytes: number,
+    maxBytes: number,
   ) {
     this.journal = new PersistenceJournal(storage, key, (entry) => {
       decodeCommand(entry.command);
@@ -215,17 +258,30 @@ class Session implements PersistenceSession {
     this.publish();
   }
 
-  private load = () => this.storage.exclusive(`${this.key}:write`, () => this.journal.load());
+  private clearError() {
+    if (!this.mutationError && this.snapshot.error) {
+      this.snapshot = { ...this.snapshot, error: undefined };
+      this.publish();
+    }
+  }
 
-  private update = <T>(apply: (data: Data) => T | Promise<T>, admit = false): Promise<T> =>
+  private assertActive() {
+    if (this.disposed) {
+      throw new Error('fate: Persistence was disposed.');
+    }
+  }
+
+  private loadJournal = () =>
+    this.storage.exclusive(`${this.key}:write`, () => this.journal.load());
+
+  private updateJournal = <T>(apply: (data: Data) => T | Promise<T>, admit = false): Promise<T> =>
     this.storage.exclusive(`${this.key}:write`, async () => {
-      if (this.disposed) {
-        throw new Error('fate: Persistence was disposed.');
-      }
+      this.assertActive();
       const data = await this.journal.load();
       const result = await apply(data);
-      const bytes = await this.journal.measure(data);
-      if (admit && bytes > this.maxBytes) {
+      const plan = await this.journal.prepare(data);
+      const { bytes } = plan;
+      if (admit && !(await this.cache.fitsWithoutEviction(bytes))) {
         throw new Error(
           'fate: Persistence size limit exceeded; unconfirmed mutations have been preserved.',
         );
@@ -243,21 +299,19 @@ class Session implements PersistenceSession {
           'fate: Persistence size limit exceeded; unconfirmed mutations have been preserved.',
         );
       }
-      if (this.disposed) {
-        throw new Error('fate: Persistence was disposed.');
-      }
-      await this.journal.save(data);
+      this.assertActive();
+      await this.journal.commit(plan);
       return result;
     });
 
   private async restore() {
-    const data = await this.load();
+    const data = await this.loadJournal();
     await this.cache.initialize();
     if (this.disposed) {
       return;
     }
     for (const entry of data.mutations) {
-      if (entry.status === 'queued' || entry.status === 'sending') {
+      if (isPendingMutation(entry)) {
         if (entry.base && entry.base.scope === this.client.getPersistenceScope()) {
           this.cache.restoreBase(decodeClientHydrationState(entry.base.data));
         }
@@ -292,8 +346,8 @@ class Session implements PersistenceSession {
     }
     let processed = 0;
     for (const entry of data.mutations) {
-      if (++processed % 64 === 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (++processed % persistencePageSize === 0) {
+        await yieldPersistenceTask();
       }
       if (this.disposed) {
         return;
@@ -305,7 +359,7 @@ class Session implements PersistenceSession {
           this.needsCheckpoint = true;
           const result =
             operation || this.waiters.has(entry.id)
-              ? decodeHydrationValue(entry.result!)
+              ? decodeHydrationValue(entry.result)
               : undefined;
           operation?.commit(result);
           if (entry.cacheUpdates && entry.scope === this.client.getPersistenceScope()) {
@@ -353,6 +407,8 @@ class Session implements PersistenceSession {
     );
     const { promise, resolve } = Promise.withResolvers<void>();
     let cacheUpdates: Encoded | undefined;
+    let commitError: unknown;
+    let commitFailed = false;
     if (operation.entityId) {
       // Restored operations have no caller promise, but reads must still wait for
       // their optimistic record to be confirmed or rolled back before fetching.
@@ -361,10 +417,21 @@ class Session implements PersistenceSession {
     return {
       ...operation,
       commit: (result: unknown, persist = true) => {
-        if (persist) {
-          cacheUpdates ??= this.cache.captureChanges(() => operation.commit(result));
-        } else {
-          this.cache.withoutChanges(() => operation.commit(result));
+        if (commitFailed) {
+          throw commitError;
+        }
+        try {
+          if (persist) {
+            cacheUpdates ??= this.cache.captureChanges(() => operation.commit(result));
+          } else {
+            this.cache.withoutChanges(() => operation.commit(result));
+          }
+        } catch (error) {
+          // Settlement is idempotent, so a second invocation could otherwise
+          // appear to succeed after the first local normalization failed.
+          commitFailed = true;
+          commitError = error;
+          throw error;
         }
         resolve();
       },
@@ -384,14 +451,23 @@ class Session implements PersistenceSession {
   }
 
   private refresh(): Promise<void> {
-    return (this.refreshing ??= this.load()
-      .then(async (data) => {
-        await this.reconcile(data);
-        this.retry();
-      })
-      .finally(() => {
-        this.refreshing = undefined;
-      }));
+    this.refreshRequested = true;
+    return (this.refreshing ??= this.drainRefreshes());
+  }
+
+  private async drainRefreshes() {
+    try {
+      while (this.refreshRequested && !this.disposed) {
+        this.refreshRequested = false;
+        await this.reconcile(await this.loadJournal());
+      }
+      this.retry();
+    } finally {
+      this.refreshing = undefined;
+      if (this.refreshRequested && !this.disposed) {
+        void this.refresh().catch((error: unknown) => this.report(error));
+      }
+    }
   }
 
   async mutate(command: MutationCommand): Promise<unknown> {
@@ -401,15 +477,13 @@ class Session implements PersistenceSession {
     // Capture values at invocation, before any asynchronous restoration.
     const encoded = encodeCommand(command);
     await this.ready;
-    if (this.disposed) {
-      throw new Error('fate: Persistence was disposed.');
-    }
+    this.assertActive();
     const id = crypto.randomUUID();
     const admission = this.mutationAdmission.then(async () => {
       if (this.needsCheckpoint) {
         await this.flushCache().catch((error: unknown) => this.report(error));
       }
-      return this.update(async (data) => {
+      return this.updateJournal(async (data) => {
         // Restore earlier commands under the journal lock before preparing this
         // invocation, including work queued by tabs without storage notifications.
         await this.reconcile(data);
@@ -428,9 +502,7 @@ class Session implements PersistenceSession {
     // Failed admission must not prevent the next invocation from being saved.
     this.mutationAdmission = admission.catch(() => {});
     const base = await admission;
-    if (this.disposed) {
-      throw new Error('fate: Persistence was disposed.');
-    }
+    this.assertActive();
     this.cache.restoreBase(decodeClientHydrationState(base.data));
     const result = new Promise((resolve, reject) => this.waiters.set(id, { reject, resolve }));
     try {
@@ -447,9 +519,7 @@ class Session implements PersistenceSession {
 
   async restoreRequest(request: RequestDescriptor) {
     await this.ready;
-    if (this.disposed) {
-      throw new Error('fate: Persistence was disposed.');
-    }
+    this.assertActive();
     try {
       if (this.needsCacheRecovery) {
         await this.flush();
@@ -480,17 +550,34 @@ class Session implements PersistenceSession {
     this.changed();
   }
 
-  changed(kind?: 'record' | 'list', key?: string, paths?: Iterable<string>, previousList?: List) {
+  changed(change?: StoreChange) {
     if (this.disposed) {
       return;
     }
-    if (this.cache.changedNode(kind, key, paths, previousList)) {
+    if (this.cache.changedNode(change)) {
       this.needsCacheRecovery = true;
+      this.cacheChangeRevision++;
     }
     if (this.disposed || this.snapshot.status !== 'ready') {
       return;
     }
-    if (!this.saveTimer) {
+    if (this.flushing || this.draining) {
+      this.flushRequested = true;
+    } else {
+      this.scheduleSave();
+    }
+  }
+
+  async flush() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    await this.ready;
+    await this.flushCache();
+    this.clearError();
+  }
+
+  private scheduleSave() {
+    if (!this.saveTimer && !this.disposed) {
       this.saveTimer = setTimeout(() => {
         this.saveTimer = undefined;
         void this.flush().catch((error: unknown) => this.report(error));
@@ -498,59 +585,111 @@ class Session implements PersistenceSession {
     }
   }
 
-  async flush() {
-    await this.ready;
-    await this.flushCache();
+  private confirmedCacheEntries(data: Data): Array<readonly [id: string, updates: Encoded]> {
+    const scope = this.client.getPersistenceScope();
+    return data.mutations.flatMap((entry) =>
+      entry.status === 'confirmed' && entry.scope === scope
+        ? [[entry.id, entry.cacheUpdates] as const]
+        : [],
+    );
   }
 
-  private async flushCache() {
-    if (this.disposed) {
-      throw new Error('fate: Persistence was disposed.');
+  private confirmedCacheUpdates(data: Data): Array<Encoded> {
+    return this.confirmedCacheEntries(data).map(([, updates]) => updates);
+  }
+
+  private async checkpointPendingBases(data: Data) {
+    const revision = this.cacheChangeRevision;
+    const cacheUpdateIds = this.confirmedCacheEntries(data).map(([id]) => id);
+    if (
+      revision === this.baseCheckpointRevision &&
+      cacheUpdateIds.every((id) => this.checkpointedCacheUpdates.has(id))
+    ) {
+      return;
     }
-    await this.storage.exclusive(`${this.key}:write`, async () => {
-      if (this.disposed) {
-        throw new Error('fate: Persistence was disposed.');
+    const scope = this.client.getPersistenceScope();
+    if (!data.mutations.some((entry) => isPendingMutation(entry) && entry.scope === scope)) {
+      this.baseCheckpointRevision = revision;
+      for (const id of cacheUpdateIds) {
+        this.checkpointedCacheUpdates.add(id);
       }
+      return;
+    }
+    for (const entry of data.mutations) {
+      if (isPendingMutation(entry) && entry.scope === scope) {
+        entry.base = await this.cache.mutationBase(this.command(entry), entry.base);
+      }
+    }
+    const plan = await this.journal.prepare(data);
+    await this.cache.prune(plan.bytes);
+    this.assertActive();
+    await this.journal.commit(plan);
+    this.baseCheckpointRevision = revision;
+    for (const id of cacheUpdateIds) {
+      this.checkpointedCacheUpdates.add(id);
+    }
+  }
+
+  private async removeConfirmedEntries(data: Data) {
+    const confirmedIds = new Set(
+      data.mutations.filter((entry) => entry.status === 'confirmed').map(({ id }) => id),
+    );
+    if (!confirmedIds.size) {
+      return;
+    }
+    data.mutations = data.mutations.filter(({ id }) => !confirmedIds.has(id));
+    await this.journal.commit(await this.journal.prepare(data));
+    for (const id of confirmedIds) {
+      this.checkpointedCacheUpdates.delete(id);
+    }
+  }
+
+  private flushCache(): Promise<void> {
+    this.assertActive();
+    this.flushRequested = true;
+    if (!this.flushing) {
+      const flushing = this.drainCacheFlushes();
+      this.flushing = flushing;
+      void flushing.then(
+        () => this.finishCacheFlush(flushing),
+        () => this.finishCacheFlush(flushing),
+      );
+    }
+    return this.flushing;
+  }
+
+  private finishCacheFlush(flushing: Promise<void>) {
+    if (this.flushing !== flushing) {
+      return;
+    }
+    this.flushing = undefined;
+    if (this.flushRequested && !this.disposed) {
+      this.scheduleSave();
+    }
+  }
+
+  private async drainCacheFlushes() {
+    while (this.flushRequested && !this.disposed) {
+      this.flushRequested = false;
+      await this.flushCacheOnce();
+    }
+  }
+
+  private async flushCacheOnce() {
+    await this.storage.exclusive(`${this.key}:write`, async () => {
+      this.assertActive();
       const data = await this.journal.load();
       await this.reconcile(data);
       // Re-read recovery work under the write lock: another tab may have
       // checkpointed it and saved newer data since our last notification.
-      this.cache.replayChanges(
-        data.mutations.flatMap((entry) =>
-          entry.cacheUpdates && entry.scope === this.client.getPersistenceScope()
-            ? [entry.cacheUpdates]
-            : [],
-        ),
-      );
+      this.cache.replayChanges(this.confirmedCacheUpdates(data));
       // Preserve live confirmed changes beneath pending optimism on restart.
-      if (data.mutations.some((entry) => entry.status === 'queued' || entry.status === 'sending')) {
-        for (const entry of data.mutations) {
-          if (
-            (entry.status === 'queued' || entry.status === 'sending') &&
-            entry.scope === this.client.getPersistenceScope()
-          ) {
-            entry.base = await this.cache.mutationBase(this.command(entry), entry.base);
-          }
-        }
-        await this.cache.prune(await this.journal.measure(data));
-        if (this.disposed) {
-          throw new Error('fate: Persistence was disposed.');
-        }
-        await this.journal.save(data);
-      }
-      await this.cache.flush(await this.journal.measure(data));
-      if (this.disposed) {
-        throw new Error('fate: Persistence was disposed.');
-      }
+      await this.checkpointPendingBases(data);
+      await this.cache.flush((await this.journal.prepare(data)).bytes);
+      this.assertActive();
       // Incompatible cache scopes were cleared during initialization; their
       // confirmed patches no longer have a saved cache to repair.
-      const confirmed = data.mutations.filter((entry) => entry.status === 'confirmed');
-      if (confirmed.length) {
-        const ids = new Set(confirmed.map(({ id }) => id));
-        data.mutations = data.mutations.filter(({ id }) => !ids.has(id));
-        await this.journal.measure(data);
-        await this.journal.save(data);
-      }
+      await this.removeConfirmedEntries(data);
       this.needsCacheRecovery = this.cache.hasChanges;
       this.needsCheckpoint = false;
     });
@@ -581,17 +720,151 @@ class Session implements PersistenceSession {
     }
   }
 
-  private async fail(id: string, error: unknown) {
+  private async fail(id: string, error: unknown, status?: number) {
     const failure = error instanceof Error ? error : new Error(String(error));
-    await this.update((data) => {
-      const entry = data.mutations.find((item) => item.id === id);
-      if (entry) {
-        entry.status = 'failed';
-        delete entry.base;
-        entry.error = { message: failure.message, status: getErrorStatusCode(failure) };
-      }
+    status ??= getErrorStatusCode(failure);
+    await this.updateJournal((data) => {
+      replaceMutation(data, id, (entry) => ({
+        attempts: entry.attempts,
+        command: entry.command,
+        error: { message: failure.message, status },
+        id: entry.id,
+        scope: entry.scope,
+        status: 'failed',
+      }));
     });
-    await this.reconcile(await this.load());
+    await this.reconcile(await this.loadJournal());
+  }
+
+  private forgetOperation(id: string) {
+    this.operations.delete(id);
+    this.waiters.delete(id);
+  }
+
+  /** Resolve an operation whose journal entry another client already removed. */
+  private async recoverOperation(id: string, operation: PreparedOperation) {
+    try {
+      const result = await operation.execute({ id, replayOnly: true, scope: this.key });
+      if (this.disposed) {
+        return;
+      }
+      operation.commit(result, false);
+      this.waiters.get(id)?.resolve(result);
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+      if (!(error instanceof Error) || getErrorStatusCode(error) !== 404) {
+        throw error;
+      }
+      operation.rollback(false);
+      this.waiters.get(id)?.reject(mutationDiscardedError());
+    }
+    this.forgetOperation(id);
+  }
+
+  private async recoverRemovedOperations(data: Data): Promise<boolean> {
+    const retained = new Set(data.mutations.map(({ id }) => id));
+    for (const [id, operation] of this.operations) {
+      if (retained.has(id)) {
+        continue;
+      }
+      try {
+        await this.recoverOperation(id, operation);
+      } catch (error) {
+        this.report(error);
+        this.scheduleRetry();
+        return false;
+      }
+      if (this.disposed) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async claim(entry: JournalEntry): Promise<boolean> {
+    const data = await this.updateJournal((data) => {
+      const current = data.mutations.find((item) => item.id === entry.id);
+      if (!current || !isPendingMutation(current)) {
+        return;
+      }
+      replaceMutation(data, entry.id, () => ({
+        ...current,
+        attempts: current.attempts + 1,
+        status: 'sending',
+      }));
+      return data;
+    });
+    if (!data) {
+      return false;
+    }
+    await this.reconcile(data);
+    return true;
+  }
+
+  private async confirm(entry: JournalEntry, operation: PreparedOperation, encodedResult: Encoded) {
+    const cacheUpdates = operation.getCacheUpdates();
+    if (!cacheUpdates) {
+      throw new Error('fate: Mutation confirmation did not capture its cache updates.');
+    }
+    await this.updateJournal((data) => {
+      replaceMutation(data, entry.id, (current): ConfirmedJournalEntry => ({
+        attempts: current.attempts,
+        cacheUpdates,
+        command: current.command,
+        id: current.id,
+        result: encodedResult,
+        scope: current.scope,
+        status: 'confirmed',
+      }));
+    });
+    await this.reconcile(await this.loadJournal());
+  }
+
+  /** Deliver one claimed entry. False means the queue must pause for a retry. */
+  private async deliver(entry: JournalEntry, operation: PreparedOperation): Promise<boolean> {
+    let result: unknown;
+    try {
+      result = await operation.execute({ id: entry.id, scope: this.key });
+    } catch (error) {
+      if (this.disposed) {
+        return false;
+      }
+      const status = error instanceof Error ? getErrorStatusCode(error) : undefined;
+      if (isTerminalDeliveryError(status)) {
+        await this.fail(entry.id, error);
+        return true;
+      }
+      await this.queueRetry(entry.id, error, status);
+      return false;
+    }
+    if (this.disposed) {
+      return false;
+    }
+
+    let encodedResult: Encoded;
+    try {
+      encodedResult = encodeHydrationValue(result);
+      operation.commit(result);
+    } catch (error) {
+      // A receipt exists, so repeating delivery cannot fix a local codec or
+      // normalization failure. Keep the failed entry available for inspection.
+      await this.fail(entry.id, error, 500);
+      return true;
+    }
+
+    try {
+      await this.confirm(entry, operation, encodedResult);
+      return true;
+    } catch (error) {
+      if (this.disposed) {
+        return false;
+      }
+      const status = error instanceof Error ? getErrorStatusCode(error) : undefined;
+      await this.queueRetry(entry.id, error, status);
+      return false;
+    }
   }
 
   private async drain() {
@@ -602,36 +875,12 @@ class Session implements PersistenceSession {
     try {
       await this.storage.exclusive(`${this.key}:delivery`, async () => {
         while (!this.disposed && this.online()) {
-          const data = await this.load();
+          const data = await this.loadJournal();
           await this.reconcile(data);
           // Missing local entries may have been checkpointed while this tab was
           // suspended. A receipt-only lookup also distinguishes discarded work.
-          const retained = new Set(data.mutations.map(({ id }) => id));
-          for (const [id, operation] of this.operations) {
-            if (retained.has(id)) {
-              continue;
-            }
-            try {
-              const result = await operation.execute({ id, replayOnly: true, scope: this.key });
-              if (this.disposed) {
-                return;
-              }
-              operation.commit(result, false);
-              this.waiters.get(id)?.resolve(result);
-            } catch (error) {
-              if (this.disposed) {
-                return;
-              }
-              if (!(error instanceof Error) || getErrorStatusCode(error) !== 404) {
-                this.report(error);
-                this.scheduleRetry();
-                return;
-              }
-              operation.rollback(false);
-              this.waiters.get(id)?.reject(new Error('fate: Mutation was discarded.'));
-            }
-            this.operations.delete(id);
-            this.waiters.delete(id);
+          if (!(await this.recoverRemovedOperations(data))) {
+            return;
           }
           const entry = data.mutations.find(
             (item) => item.status !== 'confirmed' && item.status !== 'failed',
@@ -657,91 +906,53 @@ class Session implements PersistenceSession {
             );
             continue;
           }
-          const operation = this.operations.get(entry.id)!;
-          const claimed = await this.update((latest) => {
-            const item = latest.mutations.find((item) => item.id === entry.id);
-            if (!item) {
-              return false;
-            }
-            item.status = 'sending';
-            item.attempts += 1;
-            return true;
-          });
+          const operation = this.operations.get(entry.id);
+          if (!operation) {
+            throw new Error(`fate: Missing restored mutation operation '${entry.id}'.`);
+          }
+          const claimed = await this.claim(entry);
           if (this.disposed) {
             return;
           }
           if (!claimed) {
             continue;
           }
-          try {
-            const result = await operation.execute({ id: entry.id, scope: this.key });
-            if (this.disposed) {
-              return;
-            }
-            const encoded = encodeHydrationValue(result);
-            // Commit the receipt and the remaining commands' rollback bases in
-            // one journal write. Cache admission must never block confirmation.
-            operation.commit(result);
-            await this.update(async (latest) => {
-              this.cache.replayChanges([operation.getCacheUpdates()!]);
-              const item = latest.mutations.find((item) => item.id === entry.id);
-              if (item) {
-                item.status = 'confirmed';
-                delete item.base;
-                item.result = encoded;
-                item.cacheUpdates = operation.getCacheUpdates();
-                item.error = undefined;
-              }
-              for (const pending of latest.mutations) {
-                if (
-                  (pending.status === 'queued' || pending.status === 'sending') &&
-                  pending.scope === this.client.getPersistenceScope()
-                ) {
-                  pending.base = await this.cache.mutationBase(
-                    decodeCommand(pending.command),
-                    pending.base,
-                  );
-                }
-              }
-            });
-            await this.reconcile(await this.load());
-            await this.flush().catch((error: unknown) => this.report(error));
-          } catch (error) {
-            if (this.disposed) {
-              return;
-            }
-            const status = error instanceof Error ? getErrorStatusCode(error) : undefined;
-            if (status && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status)) {
-              await this.fail(entry.id, error);
-              continue;
-            }
-            await this.update((latest) => {
-              const item = latest.mutations.find((item) => item.id === entry.id);
-              if (item && item.status !== 'confirmed') {
-                item.status = 'queued';
-                item.nextAttemptAt =
-                  Date.now() +
-                  Math.min(30_000, this.retryDelay * 2 ** Math.min(item.attempts - 1, 10));
-                item.error = {
-                  message: error instanceof Error ? error.message : String(error),
-                  status,
-                };
-              }
-            });
-            await this.reconcile(await this.load());
-            this.scheduleRetry();
+          if (!(await this.deliver(entry, operation))) {
             return;
           }
         }
       });
+      if ((this.needsCheckpoint || this.flushRequested) && !this.disposed) {
+        await this.flush().catch((error: unknown) => this.report(error));
+      }
     } finally {
       this.draining = false;
     }
   }
 
+  private async queueRetry(id: string, error: unknown, status?: number) {
+    await this.updateJournal((latest) => {
+      const item = latest.mutations.find((item) => item.id === id);
+      if (item && isPendingMutation(item)) {
+        replaceMutation(latest, id, () => ({
+          ...item,
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            status,
+          },
+          nextAttemptAt:
+            Date.now() + Math.min(30_000, this.retryDelay * 2 ** Math.min(item.attempts - 1, 10)),
+          status: 'queued',
+        }));
+      }
+    });
+    await this.reconcile(await this.loadJournal());
+    this.scheduleRetry();
+  }
+
   async discard(id: string) {
     await this.ready;
-    const discarded = await this.update((data) => {
+    const outcome = await this.updateJournal((data) => {
       const entry = data.mutations.find((entry) => entry.id === id);
       if (
         entry &&
@@ -754,24 +965,37 @@ class Session implements PersistenceSession {
         );
       }
       if (entry?.status === 'confirmed') {
-        return;
+        return 'confirmed' as const;
+      }
+      if (!entry) {
+        return 'missing' as const;
       }
       data.mutations = data.mutations.filter((entry) => entry.id !== id);
-      return true;
+      return 'discarded' as const;
     });
-    if (discarded) {
+    if (outcome === 'missing') {
+      const operation = this.operations.get(id);
+      if (operation) {
+        await this.recoverOperation(id, operation);
+      }
+    } else if (outcome === 'discarded') {
       this.operations.get(id)?.rollback();
-      this.operations.delete(id);
-      this.waiters.get(id)?.reject(new Error('fate: Mutation was discarded.'));
-      this.waiters.delete(id);
+      this.waiters.get(id)?.reject(mutationDiscardedError());
+      this.forgetOperation(id);
     }
     await this.refresh();
   }
 
   async clearCache() {
     await this.ready;
-    await this.storage.exclusive(`${this.key}:write`, () => this.cache.clear());
+    this.assertActive();
+    await this.storage.exclusive(`${this.key}:write`, async () => {
+      this.assertActive();
+      await this.cache.clear();
+    });
+    this.assertActive();
     await this.cache.initialize();
+    this.clearError();
   }
 
   dispose() {

@@ -78,8 +78,10 @@ export { toEntityId } from './ref.ts';
 export { view } from './view.ts';
 
 export type {
+  PersistedMutationStatus,
   Persistence,
   PersistenceSession,
   PersistenceSnapshot,
   MutationIdentity,
+  RequestPersistenceOptions,
 } from './persistence-types.ts';

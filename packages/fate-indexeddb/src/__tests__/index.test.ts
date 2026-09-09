@@ -1,36 +1,36 @@
 import 'fake-indexeddb/auto';
 import { afterEach, expect, test, vi } from 'vite-plus/test';
-import { indexedDB } from '../index.ts';
+import { createIndexedDBStorage } from '../index.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 
 test('committed data survives opening another adapter and isolates account keys', async () => {
   const name = crypto.randomUUID();
-  const first = indexedDB({ name });
+  const first = createIndexedDBStorage({ name });
   const value = { entries: [{ input: 'pending' }], version: 1 };
-  await first.write('account:1', value);
+  await first.writeBatch([['account:1', value]]);
   value.entries.length = 0;
-  const next = indexedDB({ name });
+  const next = createIndexedDBStorage({ name });
   expect(await next.read('account:1')).toEqual({ entries: [{ input: 'pending' }], version: 1 });
   expect(await next.read('account:2')).toBeUndefined();
 });
 
 test('failed replacement leaves the previous durable value intact', async () => {
-  const storage = indexedDB({ name: crypto.randomUUID() });
-  await storage.write('key', { saved: true });
-  await expect(storage.write('key', { invalid: () => {} })).rejects.toThrow();
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
+  await storage.writeBatch([['key', { saved: true }]]);
+  await expect(storage.writeBatch([['key', { invalid: () => {} }]])).rejects.toThrow();
   expect(await storage.read('key')).toEqual({ saved: true });
 });
 
 test('notifications propagate across adapter instances and unsubscribe', async () => {
   const name = crypto.randomUUID();
-  const first = indexedDB({ name });
-  const second = indexedDB({ name });
+  const first = createIndexedDBStorage({ name });
+  const second = createIndexedDBStorage({ name });
   const listener = vi.fn();
   const stopFirst = first.subscribe!('key', () => {});
   const stopSecond = second.subscribe!('key', listener);
   try {
-    await first.write('key', { value: 1 });
+    await first.writeBatch([['key', { value: 1 }]]);
     await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
   } finally {
     stopFirst();
@@ -41,7 +41,7 @@ test('notifications propagate across adapter instances and unsubscribe', async (
 test('uses a database-scoped Web Lock and refuses unsafe fallback', async () => {
   const request = vi.fn(async (_key: string, run: () => Promise<unknown>) => run());
   vi.stubGlobal('navigator', { locks: { request } });
-  const storage = indexedDB({ name: 'test-db' });
+  const storage = createIndexedDBStorage({ name: 'test-db' });
   await expect(storage.exclusive('account:write', async () => 42)).resolves.toBe(42);
   expect(request.mock.calls[0][0]).toBe('fate:["test-db","account:write"]');
   vi.stubGlobal('navigator', {});
@@ -49,7 +49,7 @@ test('uses a database-scoped Web Lock and refuses unsafe fallback', async () => 
 });
 
 test('bounded scans are ordered and isolated, and batches support deletion', async () => {
-  const storage = indexedDB({ name: crypto.randomUUID() });
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   await storage.writeBatch([
     ['cache:c', 3],
     ['other:a', 0],
@@ -70,8 +70,8 @@ test('bounded scans are ordered and isolated, and batches support deletion', asy
 });
 
 test('a failed batch rolls back every write', async () => {
-  const storage = indexedDB({ name: crypto.randomUUID() });
-  await storage.write('key', 'Original');
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
+  await storage.writeBatch([['key', 'Original']]);
   await expect(
     storage.writeBatch([
       ['key', 'Changed'],
@@ -83,8 +83,8 @@ test('a failed batch rolls back every write', async () => {
 
 test('batch commits notify subscribers even when the writer has no subscription', async () => {
   const name = crypto.randomUUID();
-  const writer = indexedDB({ name });
-  const reader = indexedDB({ name });
+  const writer = createIndexedDBStorage({ name });
+  const reader = createIndexedDBStorage({ name });
   const listener = vi.fn();
   const stop = reader.subscribe!('key', listener);
   try {
@@ -100,7 +100,7 @@ test('bounded operations share one database connection while holding an exclusiv
   vi.stubGlobal('navigator', {
     locks: { request: async (_key: string, run: () => Promise<unknown>) => run() },
   });
-  const storage = indexedDB({ name: crypto.randomUUID() });
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   const open = vi.spyOn(globalThis.indexedDB, 'open');
   try {
     await storage.exclusive('cache', async () => {
@@ -118,7 +118,7 @@ test('bounded operations share one database connection while holding an exclusiv
 });
 
 test('prefix scans include the entire Unicode suffix range', async () => {
-  const storage = indexedDB({ name: crypto.randomUUID() });
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   await storage.writeBatch([
     ['cache:a', 1],
     ['cache:\uffffsuffix', 2],
@@ -131,12 +131,12 @@ test('prefix scans include the entire Unicode suffix range', async () => {
 });
 
 test('observer exceptions do not reject a successfully committed write', async () => {
-  const storage = indexedDB({ name: crypto.randomUUID() });
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   const stop = storage.subscribe!('key', () => {
     throw new Error('Broken observer');
   });
   try {
-    await expect(storage.write('key', 'Saved')).resolves.toBeUndefined();
+    await expect(storage.writeBatch([['key', 'Saved']])).resolves.toBeUndefined();
     expect(await storage.read('key')).toBe('Saved');
   } finally {
     stop();

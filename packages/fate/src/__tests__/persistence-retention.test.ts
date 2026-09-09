@@ -49,6 +49,13 @@ const setup = ({
   return { client, fetchById, session, storage };
 };
 const request = (id: string) => ({ note: { id, view: Title } });
+const nestedScalar = () => {
+  let value: unknown = 'leaf';
+  for (let depth = 0; depth < 40; depth++) {
+    value = { child: value };
+  }
+  return value;
+};
 const clock = () => {
   let now = 1_800_000_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -305,6 +312,26 @@ test('scalar updates write only their normalized record, not every retained requ
   retain.dispose();
 });
 
+test('deep scalar updates do not inspect references or rewrite request roots', async () => {
+  const first = setup();
+  const detail = { note: { id: '1', view: Detail } };
+  const retain = first.client.retain(detail);
+  await first.client.request(detail);
+  await first.session.flush();
+  const writes = vi.spyOn(first.storage, 'writeBatch');
+  const body = nestedScalar();
+  first.client.write('Note', { body, id: '1' }, new Set(['id', 'body']));
+  await first.session.flush();
+  const keys = writes.mock.calls.flatMap(([entries]) => entries.map(([key]) => key));
+  expect(keys.filter((key) => key.includes(':node:r:'))).toHaveLength(1);
+  expect(keys.some((key) => key.includes(':root:'))).toBe(false);
+  retain.dispose();
+  first.session.dispose();
+  const next = setup({ offline: true, storage: first.storage });
+  await next.client.request(detail);
+  expect(next.client.store.read('Note:1')?.body).toEqual(body);
+});
+
 test('large cache writes yield to the page and use bounded storage batches', async () => {
   const first = setup();
   const writeBatch = vi.spyOn(first.storage, 'writeBatch');
@@ -319,6 +346,59 @@ test('large cache writes yield to the page and use bounded storage batches', asy
   expect(done).toBe(false);
   await flushing;
   expect(writeBatch.mock.calls.every(([entries]) => entries.length <= 65)).toBe(true);
+});
+
+test('updates during a slow flush coalesce into one follow-up flush', async () => {
+  const first = setup();
+  await first.client.request(request('1'));
+  await first.session.flush();
+  const writeBatch = first.storage.writeBatch;
+  const entered = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  let blocked = false;
+  first.storage.writeBatch = async (entries) => {
+    if (!blocked && entries.some(([key]) => key.includes(':node:r:'))) {
+      blocked = true;
+      entered.resolve();
+      await resume.promise;
+    }
+    await writeBatch(entries);
+  };
+  const exclusive = vi.spyOn(first.storage, 'exclusive');
+  first.client.write('Note', { id: '1', title: 'First' }, new Set(['id', 'title']));
+  const initial = first.session.flush();
+  await entered.promise;
+  const concurrent: Array<Promise<void>> = [];
+  for (let index = 0; index < 20; index++) {
+    first.client.write('Note', { id: '1', title: `Update ${index}` }, new Set(['id', 'title']));
+    concurrent.push(first.session.flush());
+  }
+  resume.resolve();
+  await Promise.all([initial, ...concurrent]);
+  expect(exclusive.mock.calls.filter(([key]) => key === 'retention:write')).toHaveLength(2);
+  first.session.dispose();
+  const next = setup({ offline: true, storage: first.storage });
+  const refs = await next.client.request(request('1'));
+  expect((await next.client.readView(Title, refs.note)).data).toMatchObject({
+    title: 'Update 19',
+  });
+});
+
+test('eviction batches node updates and byte accounting', async () => {
+  const first = setup();
+  const many = {
+    note: { ids: Array.from({ length: 80 }, (_, index) => String(index)), view: Title },
+  };
+  await first.client.request(many);
+  await first.session.flush();
+  const writeBatch = vi.spyOn(first.storage, 'writeBatch');
+  await first.client.request(many, { persist: { maxAge: 0 } });
+  await first.session.flush();
+  const nodeBatches = writeBatch.mock.calls.filter(([entries]) =>
+    entries.some(([key]) => key.includes(':node:r:')),
+  );
+  expect(nodeBatches).toHaveLength(2);
+  expect(nodeBatches.every(([entries]) => entries.length <= 65)).toBe(true);
 });
 
 test('a retention override also applies to an already fulfilled request handle', async () => {
@@ -453,7 +533,7 @@ test('a failed disk lookup reports the error and falls back to the network', asy
   await first.session.flush();
   first.session.dispose();
   const read = first.storage.read;
-  vi.spyOn(first.storage, 'read').mockImplementation((key) => {
+  const readCache = vi.spyOn(first.storage, 'read').mockImplementation((key) => {
     if (key.includes(':node:r:')) {
       return Promise.reject(new Error('Unreadable cache'));
     }
@@ -464,6 +544,9 @@ test('a failed disk lookup reports the error and falls back to the network', asy
   expect(next.fetchById).toHaveBeenCalledTimes(1);
   expect(next.client.store.read('Note:1')?.title).toBe('Network');
   expect(next.session.getSnapshot().error?.message).toBe('Unreadable cache');
+  readCache.mockRestore();
+  await next.session.flush();
+  expect(next.session.getSnapshot().error).toBeUndefined();
 });
 
 test('a cached read preserves a newer fetch age despite older overlapping claims', async () => {

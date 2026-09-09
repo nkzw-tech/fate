@@ -269,7 +269,7 @@ export function wrapMutation<
     if (client.persistence && persist !== false) {
       try {
         const result = (await client.withPersistenceLifecycle(() =>
-          client.persistence!.mutate(command),
+          client.persistMutation(command),
         )) as MutationResult<I>;
         return { error: undefined, result };
       } catch (error) {

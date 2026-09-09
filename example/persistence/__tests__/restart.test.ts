@@ -31,9 +31,6 @@ test('SQLite receipts and the client journal survive losing a response and resta
         .slice(0, limit)
         .map((key) => ({ key, value: structuredClone(values.get(key)) }));
     },
-    async write(key, value) {
-      values.set(key, structuredClone(value));
-    },
     async writeBatch(entries) {
       const copied = structuredClone(entries);
       for (const [key, value] of copied) {

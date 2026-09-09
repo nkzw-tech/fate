@@ -50,6 +50,15 @@ export type StoreHydrationState = Readonly<{
   records: ReadonlyArray<readonly [EntityId, AnyRecord]>;
 }>;
 
+export type StoreChange =
+  | Readonly<{ key: string; kind: 'list'; previousList?: List }>
+  | Readonly<{
+      key: EntityId;
+      kind: 'record';
+      paths?: Iterable<string>;
+      referencesChanged: boolean;
+    }>;
+
 const listKeySeparator = ' __fate__ ';
 
 type ListKeyParts = Readonly<{ field: string; ownerId: EntityId }>;
@@ -207,12 +216,7 @@ export class Store {
 
   constructor(
     private readonly onRebase?: (ids: ReadonlySet<EntityId>) => void,
-    private readonly onChange?: (
-      kind: 'record' | 'list',
-      key: string,
-      paths?: Iterable<string>,
-      previousList?: List,
-    ) => void,
+    private readonly onChange?: (change: StoreChange) => void,
   ) {}
 
   get hasOptimisticUpdates(): boolean {
@@ -567,12 +571,16 @@ export class Store {
     this.rebuildIndexes();
 
     const changedRecordIds = new Set<EntityId>();
+    const changedRecordReferences = new Set<EntityId>();
     for (const id of new Set([...previousRecords.keys(), ...records.keys()])) {
       if (
         !areHydrationValuesEqual(previousRecords.get(id), records.get(id)) ||
         !areMasksEqual(previousCoverage.get(id), coverage.get(id))
       ) {
         changedRecordIds.add(id);
+        if (this.recordReferencesChanged(previousRecords.get(id), records.get(id))) {
+          changedRecordReferences.add(id);
+        }
       }
     }
     const changedListKeys = new Set<string>();
@@ -584,7 +592,7 @@ export class Store {
 
     const notify = () => {
       for (const id of changedRecordIds) {
-        this.notify(id);
+        this.notify(id, undefined, true, changedRecordReferences.has(id));
       }
       for (const key of changedListKeys) {
         this.notifyListSubscribers(key);
@@ -617,9 +625,9 @@ export class Store {
 
   merge(id: EntityId, partial: AnyRecord, paths: Iterable<string>) {
     return this.update(() => {
-      const changedPaths = this.mergeInternal(id, partial, paths);
-      if (changedPaths) {
-        this.notify(id, changedPaths);
+      const change = this.mergeInternal(id, partial, paths);
+      if (change) {
+        this.notify(id, change.paths, true, change.referencesChanged);
       }
     });
   }
@@ -628,7 +636,7 @@ export class Store {
     id: EntityId,
     partial: AnyRecord,
     paths: Iterable<string>,
-  ): ReadonlySet<string> | null {
+  ): { paths: ReadonlySet<string>; referencesChanged: boolean } | null {
     this.captureRecord(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
     if (this.recordingLayer) {
@@ -664,15 +672,19 @@ export class Store {
       }
 
       const nextRecord = { ...previous, ...partial };
+      const referencesChanged = this.recordReferencesChanged(previous, nextRecord, changedPaths);
       this.records.set(id, nextRecord);
       this.updateRecordReferenceIndexes(id, previous, nextRecord, changedPaths);
+      return { paths: changedPaths, referencesChanged };
     } else {
       const nextRecord = { ...partial };
       this.records.set(id, nextRecord);
       this.updateRecordReferenceIndexes(id, undefined, nextRecord, Object.keys(nextRecord));
+      return {
+        paths: changedPaths,
+        referencesChanged: this.recordReferencesChanged(undefined, nextRecord),
+      };
     }
-
-    return changedPaths;
   }
 
   deleteRecord(id: EntityId) {
@@ -685,7 +697,7 @@ export class Store {
       this.records.delete(id);
       this.coverage.delete(id);
       if (!this.recordingLayer) {
-        this.onChange?.('record', id);
+        this.onChange?.({ key: id, kind: 'record', referencesChanged: true });
       }
     });
   }
@@ -743,9 +755,14 @@ export class Store {
     };
   }
 
-  private notify(id: EntityId, paths?: Iterable<string>, confirmed = true) {
+  private notify(
+    id: EntityId,
+    paths?: Iterable<string>,
+    confirmed = true,
+    referencesChanged = false,
+  ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.('record', id, paths);
+      this.onChange?.({ key: id, kind: 'record', paths, referencesChanged });
     }
     if (this.rebase) {
       return;
@@ -773,7 +790,7 @@ export class Store {
 
   private notifyListSubscribers(key: string, confirmed = true, previousList?: List) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.('list', key, undefined, previousList);
+      this.onChange?.({ key, kind: 'list', previousList });
     }
     if (this.rebase) {
       return;
@@ -1087,7 +1104,7 @@ export class Store {
       }
 
       for (const [id, paths] of ids) {
-        this.notify(id, paths);
+        this.notify(id, paths, true, true);
       }
     });
   }
@@ -1113,6 +1130,8 @@ export class Store {
         this.coverage.set(id, snapshot.mask);
       }
 
+      // This only exposes the existing confirmed base before optimistic layers
+      // are replayed. The authoritative write, if any, reports reference changes.
       this.notify(id);
     });
   }
@@ -1206,6 +1225,31 @@ export class Store {
     }
 
     return null;
+  }
+
+  private recordReferencesChanged(
+    previous: AnyRecord | undefined,
+    next: AnyRecord | undefined,
+    fields: Iterable<string> = new Set([
+      ...Object.keys(previous ?? {}),
+      ...Object.keys(next ?? {}),
+    ]),
+  ) {
+    for (const field of fields) {
+      const before = this.getRecordFieldReferences(previous?.[field]);
+      const after = this.getRecordFieldReferences(next?.[field]);
+      if (before?.size !== after?.size) {
+        return true;
+      }
+      if (before) {
+        for (const id of before) {
+          if (!after?.has(id)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   private addRecordFieldReferenceIndex(id: EntityId, field: string, value: unknown) {

@@ -1354,13 +1354,13 @@ Then pass `persistence` when creating the client:
 
 ```tsx
 import { createPersistence } from '@nkzw/fate/persistence';
-import { indexedDB } from '@nkzw/fate-indexeddb';
+import { createIndexedDBStorage } from '@nkzw/fate-indexeddb';
 import { createFateClient } from 'react-fate/client';
 
 const fate = createFateClient({
   persistence: createPersistence({
     key: `workspace:${workspaceId}:user:${userId}`,
-    storage: indexedDB(),
+    storage: createIndexedDBStorage(),
   }),
   url: '/api/fate',
 });
@@ -1373,7 +1373,7 @@ persistence: createPersistence({
   key: `workspace:${workspaceId}:user:${userId}`,
   maxAge: 24 * 60 * 60 * 1000,
   maxBytes: 25 * 1024 * 1024,
-  storage: indexedDB(),
+  storage: createIndexedDBStorage(),
 }),
 ```
 
@@ -1545,7 +1545,7 @@ const durableHTTP = createHTTPTransport<MyAPI>({
 
 const fate = createFateClient({
   // ...your generated tRPC or GraphQL client options...
-  persistence: createPersistence({ key: accountKey, storage: indexedDB() }),
+  persistence: createPersistence({ key: accountKey, storage: createIndexedDBStorage() }),
   mutateDurably: durableHTTP.mutateDurably,
 });
 ```
@@ -1635,7 +1635,6 @@ The core persistence layer has no IndexedDB dependency. You can use another back
 ```ts
 interface PersistenceStorage {
   read(key: string): Promise<unknown>;
-  write(key: string, value: unknown): Promise<void>;
   scan(
     prefix: string,
     after?: string,
@@ -1650,9 +1649,8 @@ interface PersistenceStorage {
 Values use fate's hydration codec and can be stored as JSON. The adapter handles storage and coordination:
 
 - `read` returns the saved value for a key.
-- `write` replaces one value atomically and resolves after it has committed.
 - `scan` returns keys under a prefix in ascending order, strictly after the optional cursor, up to the limit (64 by default). Use your backend's ordered index to keep each scan small.
-- `writeBatch` commits all entries atomically. An `undefined` value deletes the key.
+- `writeBatch` commits all entries atomically and resolves after they have committed. An `undefined` value deletes the key. Use a one-entry batch for a single write.
 - `exclusive` coordinates every tab or process sharing the backend. Different lock names are independent: fate holds a delivery lock during network work and acquires a separate write lock when updating storage. Your adapter must allow that nesting.
 - `subscribe` notifies other clients after a change commits, including keys changed by `writeBatch`. Without notifications, clients check saved mutations during delivery attempts and explicit `retry()` calls.
 

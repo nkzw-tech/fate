@@ -1,18 +1,20 @@
 import type { FateClient } from './client.ts';
 import type { MutationCommand } from './mutation.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
-import type { List } from './store.ts';
+import type { StoreChange } from './store.ts';
 
 /** Identity of one logical mutation, reused across every delivery attempt. */
 export type MutationIdentity = Readonly<{
   id: string;
+  /** Return an existing receipt; never execute a new mutation. */
   replayOnly?: true;
-  /** Return an existing receipt; never execute a new mutation. */ scope: string;
+  scope: string;
 }>;
 
 /** A persistence integration. Implementations are imported separately from Fate core. */
 export interface Persistence {
-  attach(client: FateClient<any, any, any>): PersistenceSession;
+  /** @internal */
+  attach(client: FateClient<any, any, any>): PersistenceRuntime;
 }
 
 export type PersistedMutationStatus = Readonly<{
@@ -31,29 +33,24 @@ export type PersistenceSnapshot = Readonly<{
 
 export type RequestPersistenceOptions = Readonly<{ maxAge: number }>;
 
-/** Observability and lifecycle of an attached persistence integration. */
+/** User-facing observability and lifecycle of an attached persistence integration. */
 export interface PersistenceSession {
-  /** @internal */
-  changed(
-    kind?: 'record' | 'list',
-    key?: string,
-    paths?: Iterable<string>,
-    previousList?: List,
-  ): void;
   clearCache(): Promise<void>;
   discard(id: string): Promise<void>;
   dispose(): void;
-  /** @internal */
-  fetched(request: RequestDescriptor, options?: RequestPersistenceOptions): void;
   flush(): Promise<void>;
   getSnapshot(): PersistenceSnapshot;
-  /** @internal */
-  mutate(command: MutationCommand): Promise<unknown>;
   readonly ready: Promise<void>;
-  /** @internal */
-  restoreRequest(request: RequestDescriptor): Promise<void>;
   retry(): void;
   subscribe(listener: () => void): () => void;
+}
+
+/** Contract used internally by Fate to drive an attached persistence session. @internal */
+export interface PersistenceRuntime extends PersistenceSession {
+  changed(change?: StoreChange): void;
+  fetched(request: RequestDescriptor, options?: RequestPersistenceOptions): void;
+  mutate(command: MutationCommand): Promise<unknown>;
+  restoreRequest(request: RequestDescriptor): Promise<void>;
   /** @internal */
   used(request: RequestDescriptor, options?: RequestPersistenceOptions): void;
 }

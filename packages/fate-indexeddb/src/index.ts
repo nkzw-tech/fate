@@ -1,11 +1,15 @@
 import type { PersistenceStorage } from '@nkzw/fate/persistence';
 import { openDB } from 'idb';
 
-export function indexedDB({ name = 'fate' }: { name?: string } = {}): PersistenceStorage {
-  let leases = 0;
+export type IndexedDBStorageOptions = Readonly<{ name?: string }>;
+
+export function createIndexedDBStorage({
+  name = 'fate',
+}: IndexedDBStorageOptions = {}): PersistenceStorage {
+  let connectionLeases = 0;
   let connection: ReturnType<typeof openDB> | undefined;
-  const release = () => {
-    if (--leases === 0) {
+  const releaseDatabase = () => {
+    if (--connectionLeases === 0) {
       const previous = connection;
       connection = undefined;
       void previous?.then(
@@ -14,8 +18,8 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
       );
     }
   };
-  const database = async () => {
-    leases++;
+  const acquireDatabase = async () => {
+    connectionLeases++;
     try {
       return await (connection ??= openDB(name, 1, {
         upgrade(db) {
@@ -23,7 +27,7 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
         },
       }));
     } catch (error) {
-      release();
+      releaseDatabase();
       throw error;
     }
   };
@@ -69,24 +73,24 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
       return navigator.locks.request(`fate:${JSON.stringify([name, key])}`, async () => {
         // A cache traversal performs many small transactions. Reuse its database
         // connection for the lock's lifetime, and close it when all work finishes.
-        leases++;
+        connectionLeases++;
         try {
           return await run();
         } finally {
-          release();
+          releaseDatabase();
         }
       });
     },
     async read(key) {
-      const db = await database();
+      const db = await acquireDatabase();
       try {
         return await db.get('fate', key);
       } finally {
-        release();
+        releaseDatabase();
       }
     },
     async scan(prefix, after, limit = 64) {
-      const db = await database();
+      const db = await acquireDatabase();
       try {
         const range = IDBKeyRange.lowerBound(
           after !== undefined && after >= prefix ? after : prefix,
@@ -102,7 +106,7 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
         await transaction.done;
         return entries;
       } finally {
-        release();
+        releaseDatabase();
       }
     },
     subscribe(key, listener) {
@@ -133,19 +137,8 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
         }
       };
     },
-    async write(key, value) {
-      const db = await database();
-      try {
-        const transaction = db.transaction('fate', 'readwrite');
-        await transaction.store.put(value, key);
-        await transaction.done;
-      } finally {
-        release();
-      }
-      broadcast([key]);
-    },
     async writeBatch(entries) {
-      const db = await database();
+      const db = await acquireDatabase();
       try {
         const transaction = db.transaction('fate', 'readwrite');
         try {
@@ -167,7 +160,7 @@ export function indexedDB({ name = 'fate' }: { name?: string } = {}): Persistenc
           throw error;
         }
       } finally {
-        release();
+        releaseDatabase();
       }
       broadcast([...new Set(entries.map(([key]) => key))]);
     },

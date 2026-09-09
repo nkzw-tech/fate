@@ -10,11 +10,17 @@ import {
 import type { MutationCommand } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import { decodeRequests, encodeRequests } from './persistence-codec.ts';
+import {
+  persistenceEntrySize,
+  persistencePageSize,
+  yieldPersistenceTask,
+} from './persistence-utils.ts';
 import type { PersistenceStorage } from './persistence.ts';
+import { isRecord } from './record.ts';
 import { toEntityId } from './ref.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
 import type { SelectionPlan } from './selection.ts';
-import { getListKey, type List } from './store.ts';
+import { getListKey, type List, type StoreChange } from './store.ts';
 import type { AnyRecord } from './types.ts';
 
 type Encoded = ReturnType<typeof encodeHydrationValue>;
@@ -27,9 +33,42 @@ type Root = {
   request: Encoded;
   usedAt: number;
 };
-type Sized<T> = { bytes: number; value: T };
+type StoredValue<T> = { bytes: number; value: T };
+type PutEntry = readonly [key: string, value: unknown, previousBytes?: number];
 type RecordValue = { paths: Array<string>; record: AnyRecord };
-type CacheUpdate = { fields?: Array<string>; previousList?: List; value: unknown };
+type CacheUpdate = {
+  fields?: Array<string>;
+  previousList?: List;
+  referencesChanged?: boolean;
+  value: unknown;
+};
+type NodeChanges = {
+  listBases: Map<string, List | undefined>;
+  recordFields: Map<string, Set<string> | undefined>;
+  referenceChanges: Set<string>;
+  values: Map<string, unknown>;
+};
+type CollectionSource = 'disk' | 'memory' | 'network';
+const createNodeChanges = (): NodeChanges => ({
+  listBases: new Map(),
+  recordFields: new Map(),
+  referenceChanges: new Set(),
+  values: new Map(),
+});
+const decodeStoredValue = <T>(value: unknown): StoredValue<T> | undefined => {
+  if (value === undefined) {
+    return;
+  }
+  if (
+    !isRecord(value) ||
+    !Number.isSafeInteger(value.bytes) ||
+    (value.bytes as number) <= 0 ||
+    !Object.hasOwn(value, 'value')
+  ) {
+    throw new Error('fate: Unsupported or corrupt persisted cache data.');
+  }
+  return value as StoredValue<T>;
+};
 const mergeCacheUpdate = (
   key: string,
   before: CacheUpdate | undefined,
@@ -40,6 +79,7 @@ const mergeCacheUpdate = (
       ? [...new Set([...(before?.fields ?? []), ...after.fields])]
       : undefined,
   previousList: before ? before.previousList : after.previousList,
+  referencesChanged: before?.referencesChanged || after.referencesChanged,
   value:
     key.startsWith('r:') && before?.value && after.value
       ? applyRecordUpdate(
@@ -49,28 +89,28 @@ const mergeCacheUpdate = (
         )
       : after.value,
 });
-const encoder = new TextEncoder();
-const sized = (key: string, value: unknown): Sized<unknown> => {
+// The stored byte count contributes to its own encoded size, so measure until
+// the value reaches a fixed point (normally one extra pass at a digit boundary).
+const withStoredSize = (key: string, value: unknown): StoredValue<unknown> => {
   const item = { bytes: 0, value };
   for (;;) {
-    const bytes = encoder.encode(JSON.stringify([key, item])).byteLength;
+    const bytes = persistenceEntrySize(key, item);
     if (bytes === item.bytes) {
       return item;
     }
     item.bytes = bytes;
   }
 };
-const yieldTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const stamp = (time: number) => String(time).padStart(16, '0');
 const recordKey = (id: string) => `r:${id}`;
 const listKey = (id: string) => `l:${id}`;
 const queryKey = (id: string) => `q:${id}`;
-const matches = (path: string, selected: string) =>
+const pathsOverlap = (path: string, selected: string) =>
   path === selected || path.startsWith(`${selected}.`) || selected.startsWith(`${path}.`);
-const project = (value: RecordValue, paths: Array<string>): RecordValue => {
+const projectRecord = (value: RecordValue, paths: Array<string>): RecordValue => {
   const fields = new Set(['id', '__typename', ...paths.map((path) => path.split('.')[0])]);
   return {
-    paths: value.paths.filter((path) => paths.some((selected) => matches(path, selected))),
+    paths: value.paths.filter((path) => paths.some((selected) => pathsOverlap(path, selected))),
     record: Object.fromEntries(Object.entries(value.record).filter(([field]) => fields.has(field))),
   };
 };
@@ -189,31 +229,14 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
   return result;
 };
 
-const references = (value: unknown): string => {
-  if (isNodeRef(value)) {
-    return JSON.stringify(['ref', getNodeRefId(value)]);
-  }
-  if (Array.isArray(value)) {
-    return JSON.stringify(value.map(references));
-  }
-  if (value && typeof value === 'object') {
-    return JSON.stringify(Object.entries(value).map(([key, entry]) => [key, references(entry)]));
-  }
-  return '';
-};
-
 /** Independently addressable normalized disk data. No in-memory retention roots. */
 export class PersistenceCache {
   private readonly prefix: string;
-  private changed = new Map<string, unknown>();
-  private updates = new Map<string, unknown>();
-  private listBases = new Map<string, List | undefined>();
-  private updateListBases = new Map<string, List | undefined>();
-  private fields = new Map<string, Set<string> | undefined>();
-  private updateFields = new Map<string, Set<string> | undefined>();
+  private pendingNodes = createNodeChanges();
+  private flushingNodes = createNodeChanges();
   private capturing?: Map<string, CacheUpdate>;
-  private recoveryChanges = new Map<string, CacheUpdate>();
-  private pending = new Map<
+  private recoveryUpdates = new Map<string, CacheUpdate>();
+  private pendingRequests = new Map<
     string,
     { fetchedAt?: number; maxAge: number; release: () => void; request: RequestDescriptor }
   >();
@@ -240,7 +263,8 @@ export class PersistenceCache {
       if (scope !== this.client.getPersistenceScope()) {
         await this.clear();
         if (
-          sized(`${this.prefix}scope`, this.client.getPersistenceScope()).bytes + this.overhead <=
+          withStoredSize(`${this.prefix}scope`, this.client.getPersistenceScope()).bytes +
+            this.overhead <=
           this.maxBytes
         ) {
           await this.put([[`${this.prefix}scope`, this.client.getPersistenceScope()]]);
@@ -331,12 +355,14 @@ export class PersistenceCache {
         : undefined;
       const memory = this.client.store.readConfirmed(id);
       const disk = memory || before ? undefined : await this.node(key);
-      const recovery = this.recoveryChanges.get(key);
-      const changed = this.changed.has(key);
+      const recovery = this.recoveryUpdates.get(key);
+      const changed = this.pendingNodes.values.has(key);
       const update = changed
         ? mergeCacheUpdate(key, recovery, {
-            fields: this.fields.get(key) ? [...this.fields.get(key)!] : undefined,
-            value: this.changed.get(key),
+            fields: this.pendingNodes.recordFields.get(key)
+              ? [...this.pendingNodes.recordFields.get(key)!]
+              : undefined,
+            value: this.pendingNodes.values.get(key),
           })
         : recovery;
       const incoming = update?.value as RecordValue | undefined;
@@ -368,10 +394,10 @@ export class PersistenceCache {
     }
     const listValues: Array<readonly [string, List]> = [];
     for (const key of lists) {
-      const value = this.changed.has(listKey(key))
-        ? (this.changed.get(listKey(key)) as List | undefined)
-        : this.recoveryChanges.has(listKey(key))
-          ? (this.recoveryChanges.get(listKey(key))!.value as List | undefined)
+      const value = this.pendingNodes.values.has(listKey(key))
+        ? (this.pendingNodes.values.get(listKey(key)) as List | undefined)
+        : this.recoveryUpdates.has(listKey(key))
+          ? (this.recoveryUpdates.get(listKey(key))!.value as List | undefined)
           : (previousLists.get(key) ?? this.client.store.readConfirmedList(key));
       if (value) {
         listValues.push([key, value]);
@@ -390,13 +416,13 @@ export class PersistenceCache {
   }
 
   private get overhead() {
-    return encoder.encode(JSON.stringify([`${this.prefix}bytes`, this.maxBytes])).byteLength;
+    return persistenceEntrySize(`${this.prefix}bytes`, this.maxBytes);
   }
 
   private async step() {
     this.assertActive();
-    if (++this.work % 64 === 0) {
-      await yieldTask();
+    if (++this.work % persistencePageSize === 0) {
+      await yieldPersistenceTask();
       this.assertActive();
     }
   }
@@ -407,18 +433,25 @@ export class PersistenceCache {
     return `${this.prefix}root:${key}`;
   }
   private async read<T>(key: string): Promise<T | undefined> {
-    return ((await this.storage.read(key)) as Sized<T> | undefined)?.value;
+    return (await this.readStored<T>(key))?.value;
   }
-  private async put(entries: ReadonlyArray<readonly [string, unknown]>) {
+  private async readStored<T>(key: string): Promise<StoredValue<T> | undefined> {
+    return decodeStoredValue<T>(await this.storage.read(key));
+  }
+  private async put(entries: ReadonlyArray<PutEntry>) {
     let bytes = ((await this.storage.read(`${this.prefix}bytes`)) as number | undefined) ?? 0;
     const writes: Array<readonly [string, unknown]> = [];
-    for (const [key, value] of new Map(entries)) {
-      const previous = (await this.storage.read(key)) as Sized<unknown> | undefined;
-      bytes -= previous?.bytes ?? 0;
+    const unique = new Map<string, readonly [value: unknown, previousBytes?: number]>();
+    for (const [key, value, previousBytes] of entries) {
+      unique.set(key, [value, previousBytes]);
+    }
+    for (const [key, [value, knownPreviousBytes]] of unique) {
+      const previousBytes = knownPreviousBytes ?? (await this.readStored(key))?.bytes ?? 0;
+      bytes -= previousBytes;
       if (value === undefined) {
         writes.push([key, undefined]);
       } else {
-        const item = sized(key, value);
+        const item = withStoredSize(key, value);
         bytes += item.bytes;
         writes.push([key, item]);
       }
@@ -430,36 +463,37 @@ export class PersistenceCache {
   }
 
   get hasChanges() {
-    return this.changed.size > 0 || this.recoveryChanges.size > 0;
+    return this.pendingNodes.values.size > 0 || this.recoveryUpdates.size > 0;
   }
 
-  changedNode(
-    kind?: 'record' | 'list',
-    key?: string,
-    paths?: Iterable<string>,
-    previousList?: List,
-  ) {
-    if (!this.suppressed && key) {
-      const selected = paths ? new Set([...paths].map((path) => path.split('.')[0])) : undefined;
-      if (kind === 'record') {
-        const id = recordKey(key);
-        const previous = this.fields.get(id);
-        this.fields.set(
+  changedNode(change?: StoreChange) {
+    if (!this.suppressed && change) {
+      const selected =
+        change.kind === 'record' && change.paths
+          ? new Set([...change.paths].map((path) => path.split('.')[0]))
+          : undefined;
+      if (change.kind === 'record') {
+        const id = recordKey(change.key);
+        const previous = this.pendingNodes.recordFields.get(id);
+        this.pendingNodes.recordFields.set(
           id,
-          selected?.size && (!this.fields.has(id) || previous)
+          selected?.size && (!this.pendingNodes.recordFields.has(id) || previous)
             ? new Set([...(previous ?? []), ...selected])
             : undefined,
         );
+        if (change.referencesChanged) {
+          this.pendingNodes.referenceChanges.add(id);
+        }
       }
-      const id = kind === 'record' ? recordKey(key) : listKey(key);
+      const id = change.kind === 'record' ? recordKey(change.key) : listKey(change.key);
       const value =
-        kind === 'record'
-          ? this.client.store.readConfirmed(key)
-          : this.client.store.readConfirmedList(key);
-      if (kind === 'list' && !this.changed.has(id)) {
-        this.listBases.set(id, previousList);
+        change.kind === 'record'
+          ? this.client.store.readConfirmed(change.key)
+          : this.client.store.readConfirmedList(change.key);
+      if (change.kind === 'list' && !this.pendingNodes.values.has(id)) {
+        this.pendingNodes.listBases.set(id, change.previousList);
       }
-      this.changed.set(id, value);
+      this.pendingNodes.values.set(id, value);
       if (this.capturing) {
         const previous = this.capturing.get(id);
         this.capturing.set(id, {
@@ -467,7 +501,13 @@ export class PersistenceCache {
             selected?.size && (!previous || previous.fields)
               ? [...new Set([...(previous?.fields ?? []), ...selected])]
               : undefined,
-          previousList: previous ? previous.previousList : previousList,
+          previousList: previous
+            ? previous.previousList
+            : change.kind === 'list'
+              ? change.previousList
+              : undefined,
+          referencesChanged:
+            previous?.referencesChanged || (change.kind === 'record' && change.referencesChanged),
           value,
         });
       }
@@ -499,22 +539,37 @@ export class PersistenceCache {
     // dirty copy here could replay them after another tab checkpoints the receipt.
     for (const [key, update] of changes) {
       changes.set(key, {
-        fields: this.fields.get(key) ? [...this.fields.get(key)!] : undefined,
-        previousList: this.listBases.has(key) ? this.listBases.get(key) : update.previousList,
-        value: this.changed.get(key),
+        fields: this.pendingNodes.recordFields.get(key)
+          ? [...this.pendingNodes.recordFields.get(key)!]
+          : undefined,
+        previousList: this.pendingNodes.listBases.has(key)
+          ? this.pendingNodes.listBases.get(key)
+          : update.previousList,
+        referencesChanged: this.pendingNodes.referenceChanges.has(key),
+        value: this.pendingNodes.values.get(key),
       });
-      this.changed.delete(key);
-      this.fields.delete(key);
-      this.listBases.delete(key);
+      this.pendingNodes.values.delete(key);
+      this.pendingNodes.recordFields.delete(key);
+      this.pendingNodes.referenceChanges.delete(key);
+      this.pendingNodes.listBases.delete(key);
     }
     return encodeHydrationValue([...changes]);
   }
 
   replayChanges(updates: ReadonlyArray<Encoded>) {
-    this.recoveryChanges.clear();
+    this.recoveryUpdates.clear();
     for (const encoded of updates) {
       for (const [key, update] of decodeHydrationValue(encoded) as Array<[string, CacheUpdate]>) {
-        this.recoveryChanges.set(key, mergeCacheUpdate(key, this.recoveryChanges.get(key), update));
+        // Older receipts predate explicit reference metadata. Rebuilding their
+        // record roots is conservative and keeps upgrade recovery correct.
+        const compatible =
+          key.startsWith('r:') && update.referencesChanged === undefined
+            ? { ...update, referencesChanged: true }
+            : update;
+        this.recoveryUpdates.set(
+          key,
+          mergeCacheUpdate(key, this.recoveryUpdates.get(key), compatible),
+        );
       }
     }
   }
@@ -531,11 +586,11 @@ export class PersistenceCache {
       return;
     }
     this.policies.set(request, maxAge);
-    const previous = this.pending.get(request.key);
+    const previous = this.pendingRequests.get(request.key);
     // Keep only the request being copied alive until its incremental write finishes.
     const retain = this.client.retainPersistenceRequest(request);
     previous?.release();
-    this.pending.set(request.key, {
+    this.pendingRequests.set(request.key, {
       fetchedAt: fromNetwork ? Date.now() : previous?.fetchedAt,
       maxAge,
       release: retain.dispose,
@@ -557,27 +612,29 @@ export class PersistenceCache {
     if (key.startsWith('r:')) {
       const paths = Object.values(node.claims).flatMap((claim) => claim.paths);
       node.value = encodeHydrationValue(
-        project(decodeHydrationValue(node.value) as RecordValue, paths),
+        projectRecord(decodeHydrationValue(node.value) as RecordValue, paths),
       );
     }
     return node;
   }
 
   /** Walk only the requested selection, yielding between small pieces of work. */
-  private async collect(request: RequestDescriptor, memory: boolean, fromNetwork = false) {
+  private async collect(request: RequestDescriptor, source: CollectionSource) {
+    const readsMemory = source !== 'disk';
+    const prefersNetworkResult = source === 'network';
     const nodes = new Map<string, { paths: Set<string>; value: unknown }>();
     const visited = new Map<SelectionPlan, Map<string, Set<string>>>();
     let complete = true;
     let fetchedAt = Infinity;
     const queue: Array<{ id: string; paths: Array<string>; plan: SelectionPlan; prefix: string }> =
       [];
-    const read = async (key: string): Promise<unknown> => {
+    const readNode = async (key: string): Promise<unknown> => {
       await this.step();
-      if (memory) {
-        if (this.updates.has(key)) {
-          const incoming = this.updates.get(key);
-          const base = this.updateListBases.get(key);
-          if (!fromNetwork && incoming && base && key.startsWith('l:')) {
+      if (readsMemory) {
+        if (this.flushingNodes.values.has(key)) {
+          const incoming = this.flushingNodes.values.get(key);
+          const base = this.flushingNodes.listBases.get(key);
+          if (!prefersNetworkResult && incoming && base && key.startsWith('l:')) {
             const stored = await this.node(key);
             if (stored) {
               return applyListUpdate(
@@ -587,19 +644,19 @@ export class PersistenceCache {
               );
             }
           }
-          if (incoming && key.startsWith('r:') && this.updateFields.get(key)) {
+          if (incoming && key.startsWith('r:') && this.flushingNodes.recordFields.get(key)) {
             const stored = await this.node(key);
             if (stored) {
               return applyRecordUpdate(
                 decodeHydrationValue(stored.value) as RecordValue,
                 incoming as RecordValue,
-                this.updateFields.get(key),
+                this.flushingNodes.recordFields.get(key),
               );
             }
           }
           return incoming;
         }
-        if (fromNetwork) {
+        if (prefersNetworkResult) {
           const id = key.slice(2);
           const value = key.startsWith('r:')
             ? this.client.store.readConfirmed(id)
@@ -609,7 +666,7 @@ export class PersistenceCache {
           if (value !== undefined) {
             return value;
           }
-          if (this.changed.has(key)) {
+          if (this.pendingNodes.values.has(key)) {
             return undefined;
           }
         }
@@ -623,16 +680,17 @@ export class PersistenceCache {
       if (!stored) {
         // A newly inserted branch can reference an unchanged in-memory record
         // whose last disk claim was evicted. Existing disk values always win.
-        return memory && key.startsWith('r:')
+        return readsMemory && key.startsWith('r:')
           ? this.client.store.readConfirmed(key.slice(2))
           : undefined;
       }
       const value = decodeHydrationValue(stored.value);
-      if (!memory) {
+      if (!readsMemory) {
         return value;
       }
       const deleted = (id: string) =>
-        this.updates.has(recordKey(id)) && this.updates.get(recordKey(id)) === undefined;
+        this.flushingNodes.values.has(recordKey(id)) &&
+        this.flushingNodes.values.get(recordKey(id)) === undefined;
       if (key.startsWith('l:')) {
         const list = value as List;
         return {
@@ -669,7 +727,7 @@ export class PersistenceCache {
       plan: SelectionPlan,
       prefix: string,
     ) => {
-      const list = (await read(listKey(key))) as List | undefined;
+      const list = (await readNode(listKey(key))) as List | undefined;
       if (!list) {
         complete = false;
         return;
@@ -692,7 +750,7 @@ export class PersistenceCache {
           queue.push({ id: toEntityId(item.type, id), paths, plan: item.plan, prefix: '' });
         }
       } else if (item.kind === 'query') {
-        const id = await read(queryKey(item.queryKey));
+        const id = await readNode(queryKey(item.queryKey));
         if (id === undefined) {
           complete = false;
           continue;
@@ -718,21 +776,21 @@ export class PersistenceCache {
         continue;
       }
       contexts.set(context, new Set([...(traversed ?? []), ...paths]));
-      const source = (await read(key)) as RecordValue | undefined;
-      if (!source) {
+      const record = (await readNode(key)) as RecordValue | undefined;
+      if (!record) {
         complete = false;
         continue;
       }
       if (
         paths.some(
           (path) =>
-            !source.paths.some((covered) => path === covered || path.startsWith(`${covered}.`)),
+            !record.paths.some((covered) => path === covered || path.startsWith(`${covered}.`)),
         )
       ) {
         complete = false;
       }
       const all = new Set([...(seen?.paths ?? []), ...paths]);
-      nodes.set(key, { paths: all, value: project(source, [...all]) });
+      nodes.set(key, { paths: all, value: projectRecord(record, [...all]) });
       const groups = new Map<string, Array<string>>();
       for (const path of needed) {
         const [field, ...rest] = path.split('.');
@@ -762,10 +820,10 @@ export class PersistenceCache {
       };
       for (const [field, children] of groups) {
         const childPrefix = prefix ? `${prefix}.${field}` : field;
-        const value = source.record[field];
+        const value = record.record[field];
         if (Array.isArray(value)) {
           const nestedKey = getListKey(id, field, plan.args.get(childPrefix)?.hash);
-          const list = (await read(listKey(nestedKey))) as List | undefined;
+          const list = (await readNode(listKey(nestedKey))) as List | undefined;
           if (list) {
             const node = nodes.get(key)!;
             const projected = node.value as RecordValue;
@@ -787,7 +845,7 @@ export class PersistenceCache {
       if (!(await this.active())) {
         return;
       }
-      const { complete, nodes } = await this.collect(request, false);
+      const { complete, nodes } = await this.collect(request, 'disk');
       if (!complete) {
         return;
       }
@@ -846,22 +904,32 @@ export class PersistenceCache {
       return;
     }
     // Batches can be interrupted safely: losing a cache claim only causes a miss.
+    let writes: Array<PutEntry> = [];
     for (const key of root.nodes) {
-      const node = await this.read<Node>(this.nodeKey(key));
+      const storageKey = this.nodeKey(key);
+      const stored = await this.readStored<Node>(storageKey);
+      const node = stored?.value;
       if (node) {
         delete node.claims[rootId];
         const live = Object.values(node.claims).filter((claim) => claim.expiresAt > Date.now());
         if (key.startsWith('r:') && live.length) {
           node.value = encodeHydrationValue(
-            project(
+            projectRecord(
               decodeHydrationValue(node.value) as RecordValue,
               live.flatMap((claim) => claim.paths),
             ),
           );
         }
-        await this.put([[this.nodeKey(key), live.length ? node : undefined]]);
+        writes.push([storageKey, live.length ? node : undefined, stored.bytes]);
+        if (writes.length === 64) {
+          await this.put(writes);
+          writes = [];
+        }
       }
       await this.step();
+    }
+    if (writes.length) {
+      await this.put(writes);
     }
     await this.put([
       [this.rootKey(rootId), undefined],
@@ -881,7 +949,7 @@ export class PersistenceCache {
       await this.remove(request.key);
       return;
     }
-    const { nodes } = await this.collect(request, true, fromNetwork);
+    const { nodes } = await this.collect(request, fromNetwork ? 'network' : 'memory');
     const root: Root = {
       fetchedAt,
       maxAge,
@@ -892,12 +960,15 @@ export class PersistenceCache {
     // Do not evict useful requests to discover that this graph cannot fit even
     // on its own. The estimate includes one claim per node and root metadata.
     let minimum =
-      sized(this.rootKey(request.key), root).bytes +
-      sized(`${this.prefix}lru:${stamp(usedAt)}:${request.key}`, request.key).bytes +
-      sized(`${this.prefix}expiry:${stamp(fetchedAt + maxAge)}:${request.key}`, request.key).bytes +
-      sized(`${this.prefix}scope`, this.client.getPersistenceScope()).bytes;
+      withStoredSize(this.rootKey(request.key), root).bytes +
+      withStoredSize(`${this.prefix}lru:${stamp(usedAt)}:${request.key}`, request.key).bytes +
+      withStoredSize(
+        `${this.prefix}expiry:${stamp(fetchedAt + maxAge)}:${request.key}`,
+        request.key,
+      ).bytes +
+      withStoredSize(`${this.prefix}scope`, this.client.getPersistenceScope()).bytes;
     for (const [key, node] of nodes) {
-      minimum += sized(this.nodeKey(key), {
+      minimum += withStoredSize(this.nodeKey(key), {
         claims: {
           [request.key]: { expiresAt: fetchedAt + maxAge, fetchedAt, paths: [...node.paths] },
         },
@@ -943,7 +1014,7 @@ export class PersistenceCache {
         if (previous && key.startsWith('r:')) {
           const before = decodeHydrationValue(previous.value) as RecordValue;
           const after = next?.value as RecordValue | undefined;
-          value = project(
+          value = projectRecord(
             {
               paths: [...new Set([...before.paths, ...(after?.paths ?? [])])],
               record: { ...before.record, ...after?.record },
@@ -965,11 +1036,11 @@ export class PersistenceCache {
     for (;;) {
       let added = 0;
       for (const [key, value] of writes) {
-        const before = (await this.storage.read(key)) as Sized<unknown> | undefined;
+        const before = await this.readStored(key);
         // Reserve all growth before writing, including intermediate metadata.
         added += Math.max(
           0,
-          (value === undefined ? 0 : sized(key, value).bytes) - (before?.bytes ?? 0),
+          (value === undefined ? 0 : withStoredSize(key, value).bytes) - (before?.bytes ?? 0),
         );
         await this.step();
       }
@@ -979,13 +1050,13 @@ export class PersistenceCache {
       }
       const candidates = await this.storage.scan(`${this.prefix}lru:`, undefined, 2);
       const candidate = candidates.find(
-        (entry) => (entry.value as Sized<string>).value !== request.key,
+        (entry) => decodeStoredValue<string>(entry.value)?.value !== request.key,
       );
       if (!candidate) {
         await this.remove(request.key);
         return;
       }
-      const id = (candidate.value as Sized<string>).value;
+      const id = decodeStoredValue<string>(candidate.value)!.value;
       if (await this.read(this.rootKey(id))) {
         await this.remove(id);
       } else {
@@ -994,9 +1065,9 @@ export class PersistenceCache {
       writes = await prepare();
     }
     const entries = [...writes];
-    for (let index = 0; index < entries.length; index += 64) {
-      await this.put(entries.slice(index, index + 64));
-      await yieldTask();
+    for (let index = 0; index < entries.length; index += persistencePageSize) {
+      await this.put(entries.slice(index, index + persistencePageSize));
+      await yieldPersistenceTask();
     }
     await this.put([[this.rootKey(request.key), root]]);
   }
@@ -1009,7 +1080,7 @@ export class PersistenceCache {
       if (!entry) {
         break;
       }
-      const id = (entry.value as Sized<string>).value;
+      const id = decodeStoredValue<string>(entry.value)!.value;
       const root = await this.read<Root>(this.rootKey(id));
       if (root && root.fetchedAt + root.maxAge > Date.now()) {
         break;
@@ -1031,7 +1102,7 @@ export class PersistenceCache {
       if (!entry) {
         break;
       }
-      const id = (entry.value as Sized<string>).value;
+      const id = decodeStoredValue<string>(entry.value)!.value;
       if (await this.read(this.rootKey(id))) {
         await this.remove(id);
       } else {
@@ -1050,85 +1121,97 @@ export class PersistenceCache {
     );
   }
 
+  /** Check fixed cache metadata before evicting any saved requests for a new journal entry. */
+  async fitsWithoutEviction(journalBytes: number) {
+    this.assertActive();
+    const scope = (await this.storage.read(`${this.prefix}scope`)) as
+      | StoredValue<string>
+      | undefined;
+    this.assertActive();
+    return (scope?.bytes ?? 0) + journalBytes + this.overhead <= this.maxBytes;
+  }
+
   async flush(journalBytes: number) {
     if (!(await this.active())) {
       this.reset();
       return;
     }
     await this.prune(journalBytes);
-    const pending = this.pending;
-    this.pending = new Map();
-    const changes = this.changed;
-    const fields = this.fields;
-    const listBases = this.listBases;
-    this.listBases = new Map();
-    const recovery = this.recoveryChanges;
-    this.recoveryChanges = new Map();
+    const pending = this.pendingRequests;
+    this.pendingRequests = new Map();
+    const pendingNodes = this.pendingNodes;
+    this.pendingNodes = createNodeChanges();
+    const { listBases, recordFields, referenceChanges, values } = pendingNodes;
+    const recovery = this.recoveryUpdates;
+    this.recoveryUpdates = new Map();
     const updates = new Map(recovery);
-    for (const [key, value] of changes) {
+    for (const [key, value] of values) {
       updates.set(
         key,
         mergeCacheUpdate(key, updates.get(key), {
-          fields: fields.get(key) ? [...fields.get(key)!] : undefined,
+          fields: recordFields.get(key) ? [...recordFields.get(key)!] : undefined,
           previousList: listBases.get(key),
+          referencesChanged: referenceChanges.has(key),
           value,
         }),
       );
     }
-    this.updates = new Map([...updates].map(([key, update]) => [key, update.value]));
-    this.changed = new Map();
-    this.updateListBases = new Map([...updates].map(([key, update]) => [key, update.previousList]));
-    this.updateFields = new Map(
-      [...updates].map(([key, update]) => [
-        key,
-        update.fields ? new Set(update.fields) : undefined,
-      ]),
-    );
-    this.fields = new Map();
+    this.flushingNodes = {
+      listBases: new Map([...updates].map(([key, update]) => [key, update.previousList])),
+      recordFields: new Map(
+        [...updates].map(([key, update]) => [
+          key,
+          update.fields ? new Set(update.fields) : undefined,
+        ]),
+      ),
+      referenceChanges: new Set(
+        [...updates].filter(([, update]) => update.referencesChanged).map(([key]) => key),
+      ),
+      values: new Map([...updates].map(([key, update]) => [key, update.value])),
+    };
     try {
       const affected = new Map<string, Root>();
-      for (const key of this.updates.keys()) {
+      for (const key of this.flushingNodes.values.keys()) {
         const node = await this.node(key);
-        const incoming = this.updates.get(key);
-        if (node && incoming && key.startsWith('r:')) {
+        const incoming = this.flushingNodes.values.get(key);
+        if (
+          node &&
+          incoming &&
+          key.startsWith('r:') &&
+          !this.flushingNodes.referenceChanges.has(key)
+        ) {
           const before = decodeHydrationValue(node.value) as RecordValue;
           const after = applyRecordUpdate(
             before,
             incoming as RecordValue,
-            this.updateFields.get(key),
+            this.flushingNodes.recordFields.get(key),
           );
-          const structural = Object.keys({ ...before.record, ...after.record }).some(
-            (field) => references(before.record[field]) !== references(after.record[field]),
+          const value = encodeHydrationValue(
+            projectRecord(
+              {
+                paths: [...new Set([...before.paths, ...after.paths])],
+                record: { ...before.record, ...after.record },
+              },
+              Object.values(node.claims).flatMap((claim) => claim.paths),
+            ),
           );
-          if (!structural) {
-            const value = encodeHydrationValue(
-              project(
-                {
-                  paths: [...new Set([...before.paths, ...after.paths])],
-                  record: { ...before.record, ...after.record },
-                },
-                Object.values(node.claims).flatMap((claim) => claim.paths),
+          const next = { ...node, value };
+          const beforeSize = (await this.readStored(this.nodeKey(key)))!.bytes;
+          const growth = Math.max(0, withStoredSize(this.nodeKey(key), next).bytes - beforeSize);
+          await this.prune(journalBytes + growth);
+          const retained = await this.node(key);
+          if (retained) {
+            next.claims = retained.claims;
+            next.value = encodeHydrationValue(
+              projectRecord(
+                decodeHydrationValue(value) as RecordValue,
+                Object.values(retained.claims).flatMap((claim) => claim.paths),
               ),
             );
-            const next = { ...node, value };
-            const beforeSize = ((await this.storage.read(this.nodeKey(key))) as Sized<unknown>)
-              .bytes;
-            const growth = Math.max(0, sized(this.nodeKey(key), next).bytes - beforeSize);
-            await this.prune(journalBytes + growth);
-            const retained = await this.node(key);
-            if (retained) {
-              next.claims = retained.claims;
-              next.value = encodeHydrationValue(
-                project(
-                  decodeHydrationValue(value) as RecordValue,
-                  Object.values(retained.claims).flatMap((claim) => claim.paths),
-                ),
-              );
-              await this.put([[this.nodeKey(key), next]]);
-            }
-            this.journalBytes = journalBytes;
-            continue;
+            await this.put([[this.nodeKey(key), next]]);
           }
+          this.journalBytes = journalBytes;
+          continue;
         }
         for (const rootId of Object.keys(node?.claims ?? {})) {
           if (pending.has(rootId) || affected.has(rootId)) {
@@ -1157,7 +1240,7 @@ export class PersistenceCache {
           await this.remove(request.key);
           continue;
         }
-        const cached = await this.collect(request, false);
+        const cached = await this.collect(request, 'disk');
         if (cached.complete && Number.isFinite(cached.fetchedAt)) {
           const root = await this.read<Root>(this.rootKey(request.key));
           // An overlapping selection may have older claims on the same nodes.
@@ -1165,45 +1248,49 @@ export class PersistenceCache {
           await this.save(request, root?.fetchedAt ?? cached.fetchedAt, maxAge);
         }
       }
-      this.updates.clear();
+      this.flushingNodes.values.clear();
       await this.prune(journalBytes);
     } catch (error) {
       if (!this.disposed) {
         // Preserve snapshots and their GC retainers so flush can retry after a
         // temporary storage failure, even if the application released its view.
         for (const [key, update] of recovery) {
-          this.recoveryChanges.set(
+          this.recoveryUpdates.set(
             key,
-            this.recoveryChanges.has(key)
-              ? mergeCacheUpdate(key, update, this.recoveryChanges.get(key)!)
+            this.recoveryUpdates.has(key)
+              ? mergeCacheUpdate(key, update, this.recoveryUpdates.get(key)!)
               : update,
           );
         }
-        for (const [key, value] of changes) {
-          if (key.startsWith('l:')) {
-            this.listBases.set(key, listBases.get(key));
+        for (const [key, value] of values) {
+          if (referenceChanges.has(key)) {
+            this.pendingNodes.referenceChanges.add(key);
           }
-          if (!this.changed.has(key)) {
-            this.changed.set(key, value);
-            this.fields.set(key, fields.get(key));
+          if (key.startsWith('l:')) {
+            this.pendingNodes.listBases.set(key, listBases.get(key));
+          }
+          if (!this.pendingNodes.values.has(key)) {
+            this.pendingNodes.values.set(key, value);
+            this.pendingNodes.recordFields.set(key, recordFields.get(key));
           } else if (key.startsWith('r:')) {
-            const before = fields.get(key);
-            const after = this.fields.get(key);
-            this.fields.set(key, before && after ? new Set([...before, ...after]) : undefined);
+            const before = recordFields.get(key);
+            const after = this.pendingNodes.recordFields.get(key);
+            this.pendingNodes.recordFields.set(
+              key,
+              before && after ? new Set([...before, ...after]) : undefined,
+            );
           }
         }
         for (const [key, entry] of pending) {
-          if (!this.pending.has(key)) {
-            this.pending.set(key, entry);
+          if (!this.pendingRequests.has(key)) {
+            this.pendingRequests.set(key, entry);
             pending.delete(key);
           }
         }
       }
       throw error;
     } finally {
-      this.updates.clear();
-      this.updateFields.clear();
-      this.updateListBases.clear();
+      this.flushingNodes = createNodeChanges();
       for (const entry of pending.values()) {
         entry.release();
       }
@@ -1211,14 +1298,17 @@ export class PersistenceCache {
   }
 
   async clear() {
+    this.assertActive();
     this.reset();
     while (true) {
-      const entries = await this.storage.scan(this.prefix, undefined, 64);
+      const entries = await this.storage.scan(this.prefix, undefined, persistencePageSize);
+      this.assertActive();
       if (!entries.length) {
         return;
       }
       await this.storage.writeBatch(entries.map(({ key }) => [key, undefined]));
-      await yieldTask();
+      await yieldPersistenceTask();
+      this.assertActive();
     }
   }
 
@@ -1228,17 +1318,13 @@ export class PersistenceCache {
   }
 
   private reset() {
-    this.recoveryChanges.clear();
+    this.recoveryUpdates.clear();
     this.policies = new WeakMap();
-    for (const entry of this.pending.values()) {
+    for (const entry of this.pendingRequests.values()) {
       entry.release();
     }
-    this.pending.clear();
-    this.changed.clear();
-    this.updates.clear();
-    this.fields.clear();
-    this.updateFields.clear();
-    this.listBases.clear();
-    this.updateListBases.clear();
+    this.pendingRequests.clear();
+    this.pendingNodes = createNodeChanges();
+    this.flushingNodes = createNodeChanges();
   }
 }

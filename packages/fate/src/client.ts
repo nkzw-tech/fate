@@ -29,11 +29,18 @@ import {
   MutationFunction,
   MutationFunctionsFor,
   MutationOptions,
+  type MutationCommand,
   wrapMutation,
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
-import type { Persistence, PersistenceSession, MutationIdentity } from './persistence-types.ts';
+import type {
+  MutationIdentity,
+  Persistence,
+  PersistenceRuntime,
+  PersistenceSession,
+  RequestPersistenceOptions,
+} from './persistence-types.ts';
 import { FateRequestError, type FateLiveConnectionEvent } from './protocol.ts';
 import { isRecord } from './record.ts';
 import {
@@ -100,7 +107,7 @@ export type RequestMode =
 export type RequestOptions = Readonly<{
   mode?: RequestMode;
   /** Override disk retention in milliseconds; only used with persistence. */
-  persist?: { maxAge: number };
+  persist?: RequestPersistenceOptions;
 }>;
 
 export type DeferredSnapshot<T> = Readonly<{
@@ -453,6 +460,7 @@ export class FateClient<
   private gcScheduled = false;
   private pendingNetworkRequests = 0;
   private readonly persistenceDisposal?: AbortController;
+  private readonly persistenceRuntime?: PersistenceRuntime;
   readonly store = new Store(
     (ids) => {
       for (const id of ids) {
@@ -460,7 +468,7 @@ export class FateClient<
       }
       this.runPendingGarbageCollection();
     },
-    (kind, key, paths, previousList) => this.persistence?.changed(kind, key, paths, previousList),
+    (change) => this.persistenceRuntime?.changed(change),
   );
   private readonly operationLifetime: OperationLifetime;
   private readonly hydrationLimits: HydrationLimits;
@@ -521,7 +529,8 @@ export class FateClient<
     }
 
     this.initializeParentLists();
-    this.persistence = options.persistence?.attach(this);
+    this.persistenceRuntime = options.persistence?.attach(this);
+    this.persistence = this.persistenceRuntime;
   }
 
   private initializeParentLists() {
@@ -851,6 +860,14 @@ export class FateClient<
   }
 
   /** @internal */
+  persistMutation(command: MutationCommand): Promise<unknown> {
+    if (!this.persistenceRuntime) {
+      throw new Error('fate: Persistence is not configured.');
+    }
+    return this.persistenceRuntime.mutate(command);
+  }
+
+  /** @internal */
   assertPersistenceActive(): void {
     if (
       this.persistenceDisposal?.signal.aborted ||
@@ -1097,7 +1114,8 @@ export class FateClient<
       }
 
       const promise = this.trackPendingRequest(async () => {
-        if (this.persistence) {
+        const persistence = this.persistenceRuntime;
+        if (persistence) {
           const persistedRequest: RequestDescriptor = {
             items: [
               {
@@ -1112,11 +1130,11 @@ export class FateClient<
             ],
             key: `view:${key}`,
           };
-          await this.persistence.restoreRequest(persistedRequest);
+          await persistence.restoreRequest(persistedRequest);
           const remaining = this.store.missingForSelection(entityId, selectedPaths);
           if (remaining.size) {
             await this.fetchByIdAndNormalize(type, [id], remaining, plan);
-            this.persistence.fetched({
+            persistence.fetched({
               ...persistedRequest,
               items: persistedRequest.items.map((item) => ({
                 ...item,
@@ -2100,8 +2118,9 @@ export class FateClient<
     options?: RequestOptions,
   ): Promise<RequestResult<Roots, R>> {
     this.assertPersistenceActive();
+    const persistence = this.persistenceRuntime;
     if (
-      this.persistence &&
+      persistence &&
       options?.persist &&
       (!Number.isSafeInteger(options.persist.maxAge) ||
         options.persist.maxAge < 0 ||
@@ -2112,14 +2131,14 @@ export class FateClient<
     const requestKey = descriptor.key;
     const existingRequest = this.requests.get(requestKey)?.get(mode);
     if (existingRequest) {
-      if (this.persistence && options?.persist) {
+      if (persistence && options?.persist) {
         const executionOptions = this.requestExecutionOptions.get(existingRequest.descriptor);
         if (executionOptions) {
           executionOptions.persist = { ...options.persist };
         }
       }
-      if (this.persistence && options?.persist && existingRequest.status === 'fulfilled') {
-        this.persistence.used(existingRequest.descriptor, options.persist);
+      if (persistence && options?.persist && existingRequest.status === 'fulfilled') {
+        persistence.used(existingRequest.descriptor, options.persist);
       }
       const isFulfilledCacheFirstWithMissingData =
         mode === 'cache-first' &&
@@ -2352,11 +2371,12 @@ export class FateClient<
     mode: RequestMode,
     options?: RequestOptions,
   ) {
+    const persistence = this.persistenceRuntime;
     const executionOptions = {
       fetchAll: mode !== 'cache-first',
       persist: options?.persist ? { ...options.persist } : undefined,
     };
-    if (this.persistence) {
+    if (persistence) {
       this.requestExecutionOptions.set(handle.descriptor, executionOptions);
     }
     const execute = (): Promise<RequestResult<Roots, Request>> => {
@@ -2369,13 +2389,13 @@ export class FateClient<
       );
     };
     handle.start(
-      this.persistence
+      persistence
         ? this.withPersistenceLifecycle(() =>
-            this.persistence!.ready.then(() =>
-              mode === 'network-only'
-                ? undefined
-                : this.persistence!.restoreRequest(handle.descriptor),
-            ).then(execute),
+            persistence.ready
+              .then(() =>
+                mode === 'network-only' ? undefined : persistence.restoreRequest(handle.descriptor),
+              )
+              .then(execute),
           )
         : execute(),
     );
@@ -2462,7 +2482,7 @@ export class FateClient<
         return await this.withPersistenceLifecycle(request);
       } finally {
         this.pendingNetworkRequests -= 1;
-        this.persistence?.changed();
+        this.persistenceRuntime?.changed();
       }
     });
   }
@@ -2618,10 +2638,11 @@ export class FateClient<
           : Promise.resolve(),
       ),
     ]);
-    if (this.persistence) {
+    const persistence = this.persistenceRuntime;
+    if (persistence) {
       if (fetchedItems.length) {
         // Only a successful fetch can renew the data it actually requested.
-        this.persistence.fetched(
+        persistence.fetched(
           fetchedAll
             ? request
             : {
@@ -2635,7 +2656,7 @@ export class FateClient<
         );
       }
       if (!fetchedItems.length || !fetchedAll) {
-        this.persistence.used(request, options.persist);
+        persistence.used(request, options.persist);
       }
     }
   }

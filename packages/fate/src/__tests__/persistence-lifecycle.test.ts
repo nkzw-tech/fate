@@ -92,6 +92,38 @@ const setup = (storage = memoryStorage(), online = false) => {
   };
 };
 
+test('relationship metadata rebuilds roots only when referenced IDs change', async () => {
+  const current = setup();
+  const retain = current.client.retain(page);
+  await current.client.request(page);
+  await current.session.flush();
+  const writes = vi.spyOn(current.storage, 'writeBatch');
+  current.client.write(
+    'Post',
+    {
+      author: { __typename: 'Author', id: 'a', name: 'Updated author' },
+      id: '1',
+    },
+    new Set(['id', 'author.id', 'author.name']),
+  );
+  await current.session.flush();
+  let keys = writes.mock.calls.flatMap(([entries]) => entries.map(([key]) => key));
+  expect(keys.some((key) => key.includes(':root:'))).toBe(false);
+  writes.mockClear();
+  current.client.write(
+    'Post',
+    {
+      author: { __typename: 'Author', id: 'b', name: 'New author' },
+      id: '1',
+    },
+    new Set(['id', 'author.id', 'author.name']),
+  );
+  await current.session.flush();
+  keys = writes.mock.calls.flatMap(([entries]) => entries.map(([key]) => key));
+  expect(keys.some((key) => key.includes(':root:'))).toBe(true);
+  retain.dispose();
+});
+
 test.each(['update', 'delete', 'insert', 'remove edge'] as const)(
   'stale-tab list edits preserve another tab’s %s through reload',
   async (change) => {
@@ -148,6 +180,17 @@ test('disposal rejects new requests before starting transport work', async () =>
     client.request({ post: { id: '1', view: PostView } }, { mode: 'network-only' }),
   ).rejects.toThrow('disposed');
   expect(fetchById).not.toHaveBeenCalled();
+});
+
+test('clearing a disposed session does not delete its saved cache', async () => {
+  const { client, session, storage } = setup();
+  await client.request({ post: { id: '1', view: PostView } });
+  await session.flush();
+  const prefix = `${JSON.stringify(['lifecycle', 'cache-v2'])}:`;
+  const before = await storage.scan(prefix, undefined, 100);
+  session.dispose();
+  await expect(session.clearCache()).rejects.toThrow('disposed');
+  expect(await storage.scan(prefix, undefined, 100)).toEqual(before);
 });
 
 test.each(['node', 'list'] as const)(

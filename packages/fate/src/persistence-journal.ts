@@ -1,51 +1,82 @@
 import type { FateDehydratedState, encodeHydrationValue } from './hydration.ts';
+import {
+  persistenceEntrySize,
+  persistencePageSize,
+  yieldPersistenceTask,
+} from './persistence-utils.ts';
 import type { PersistenceStorage } from './persistence.ts';
 
 type Encoded = ReturnType<typeof encodeHydrationValue>;
-export type JournalEntry = {
+type JournalError = { message: string; status?: number };
+type JournalEntryBase = {
   attempts: number;
-  base?: FateDehydratedState;
-  cacheUpdates?: Encoded;
   command: Encoded;
-  error?: { message: string; status?: number };
+  error?: JournalError;
   id: string;
-  nextAttemptAt?: number;
-  result?: Encoded;
   scope: string;
-  status: 'queued' | 'sending' | 'failed' | 'confirmed';
 };
+export type PendingJournalEntry = JournalEntryBase & {
+  base?: FateDehydratedState;
+  nextAttemptAt?: number;
+  status: 'queued' | 'sending';
+};
+export type FailedJournalEntry = JournalEntryBase & {
+  error: JournalError;
+  status: 'failed';
+};
+export type ConfirmedJournalEntry = JournalEntryBase & {
+  cacheUpdates: Encoded;
+  result: Encoded;
+  status: 'confirmed';
+};
+export type JournalEntry = PendingJournalEntry | FailedJournalEntry | ConfirmedJournalEntry;
 export type JournalData = { mutations: Array<JournalEntry> };
 type Header = { nextSequence: number; revision: string; version: 2 };
-type Stored = { bytes: number; entry: JournalEntry; key: string };
+type StoredJournalEntry = { bytes: number; entry: JournalEntry; key: string };
+export type JournalWritePlan = {
+  bytes: number;
+  entries: Map<string, StoredJournalEntry>;
+  header: Header;
+  writes: Array<readonly [string, unknown]>;
+};
 const invalid = () =>
   new Error('fate: Unsupported or corrupt persistence data. It has not been overwritten.');
-const valid = (entry: JournalEntry) =>
-  entry &&
-  typeof entry.id === 'string' &&
-  typeof entry.scope === 'string' &&
-  ['queued', 'sending', 'failed', 'confirmed'].includes(entry.status) &&
-  Number.isInteger(entry.attempts) &&
-  entry.attempts >= 0;
-const same = (left: JournalEntry, right: JournalEntry) => {
+const valid = (value: unknown): value is JournalEntry => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  if (
+    typeof entry.id !== 'string' ||
+    typeof entry.scope !== 'string' ||
+    !Number.isInteger(entry.attempts) ||
+    (entry.attempts as number) < 0
+  ) {
+    return false;
+  }
+  if (entry.status === 'failed') {
+    return (
+      !!entry.error &&
+      typeof entry.error === 'object' &&
+      typeof (entry.error as Record<string, unknown>).message === 'string'
+    );
+  }
+  if (entry.status === 'confirmed') {
+    return 'cacheUpdates' in entry && 'result' in entry;
+  }
+  return entry.status === 'queued' || entry.status === 'sending';
+};
+// load() returns shallow entry copies, so unchanged encoded payloads retain their
+// identity while direct journal-field updates are still detected cheaply.
+const hasSameFields = (left: JournalEntry, right: JournalEntry) => {
   const keys = new Set([...Object.keys(left), ...Object.keys(right)] as Array<keyof JournalEntry>);
   return [...keys].every((key) => left[key] === right[key]);
 };
-const size = (key: string, value: unknown) =>
-  new TextEncoder().encode(JSON.stringify([key, value])).byteLength;
-const yieldTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
 /** All methods run under the account's write lock, including reads across scan pages. */
 export class PersistenceJournal {
   private disposed = false;
   private header?: Header;
-  private entries = new Map<string, Stored>();
-  private prepared?: {
-    bytes: number;
-    data: JournalData;
-    entries: Map<string, Stored>;
-    header: Header;
-    writes: Array<readonly [string, unknown]>;
-  };
+  private entries = new Map<string, StoredJournalEntry>();
   private readonly prefix: string;
 
   constructor(
@@ -59,7 +90,6 @@ export class PersistenceJournal {
   dispose() {
     this.disposed = true;
     this.entries.clear();
-    this.prepared = undefined;
   }
 
   private assertActive() {
@@ -89,8 +119,8 @@ export class PersistenceJournal {
       let checked = 0;
       for (const entry of value.mutations) {
         this.validate?.(entry);
-        if (++checked % 64 === 0) {
-          await yieldTask();
+        if (++checked % persistencePageSize === 0) {
+          await yieldPersistenceTask();
           this.assertActive();
         }
       }
@@ -107,13 +137,13 @@ export class PersistenceJournal {
     ) {
       throw invalid();
     } else if (this.header?.revision !== value.revision) {
-      const entries = new Map<string, Stored>();
+      const entries = new Map<string, StoredJournalEntry>();
       let after: string | undefined;
       while (true) {
-        const page = await this.storage.scan(this.prefix, after, 64);
+        const page = await this.storage.scan(this.prefix, after, persistencePageSize);
         this.assertActive();
         for (const { key, value } of page) {
-          const stored = value as Omit<Stored, 'key'>;
+          const stored = value as Omit<StoredJournalEntry, 'key'>;
           if (
             !stored ||
             !valid(stored.entry) ||
@@ -123,53 +153,53 @@ export class PersistenceJournal {
           ) {
             throw invalid();
           }
+          this.validate?.(stored.entry);
           entries.set(stored.entry.id, { ...stored, key });
         }
-        if (page.length < 64) {
+        if (page.length < persistencePageSize) {
           break;
         }
         after = page.at(-1)!.key;
-        await yieldTask();
+        await yieldPersistenceTask();
       }
       this.assertActive();
       this.header = value;
       this.entries = entries;
     }
-    this.prepared = undefined;
     return { mutations: [...this.entries.values()].map(({ entry }) => ({ ...entry })) };
   }
 
-  async measure(data: JournalData) {
+  async prepare(data: JournalData): Promise<JournalWritePlan> {
     this.assertActive();
     const header: Header = {
       nextSequence: this.header?.nextSequence ?? 0,
       revision: crypto.randomUUID(),
       version: 2,
     };
-    const entries = new Map<string, Stored>();
+    const entries = new Map<string, StoredJournalEntry>();
     const writes: Array<readonly [string, unknown]> = [];
     let bytes = 0;
     let count = 0;
     for (const entry of data.mutations) {
       const previous = this.entries.get(entry.id);
       let stored = previous;
-      if (!previous || !same(previous.entry, entry)) {
+      if (!previous || !hasSameFields(previous.entry, entry)) {
         const key =
           previous?.key ??
           `${this.prefix}${String(header.nextSequence++).padStart(16, '0')}:${entry.id}`;
         const value = { bytes: 0, entry };
-        let measured = size(key, value);
+        let measured = persistenceEntrySize(key, value);
         while (measured !== value.bytes) {
           value.bytes = measured;
-          measured = size(key, value);
+          measured = persistenceEntrySize(key, value);
         }
         stored = { ...value, entry: { ...entry }, key };
         writes.push([key, value]);
       }
       entries.set(entry.id, stored!);
       bytes += stored!.bytes;
-      if (++count % 64 === 0) {
-        await yieldTask();
+      if (++count % persistencePageSize === 0) {
+        await yieldPersistenceTask();
         this.assertActive();
       }
     }
@@ -178,24 +208,21 @@ export class PersistenceJournal {
         writes.push([key, undefined]);
       }
     }
-    bytes += size(this.key, header);
-    this.prepared = { bytes, data, entries, header, writes };
-    return bytes;
+    bytes += persistenceEntrySize(this.key, header);
+    return { bytes, entries, header, writes };
+  }
+
+  async commit(plan: JournalWritePlan) {
+    this.assertActive();
+    if (plan.writes.length || !this.header) {
+      await this.storage.writeBatch([...plan.writes, [this.key, plan.header]]);
+      this.assertActive();
+      this.header = plan.header;
+      this.entries = plan.entries;
+    }
   }
 
   async save(data: JournalData) {
-    this.assertActive();
-    if (this.prepared?.data !== data) {
-      await this.measure(data);
-    }
-    this.assertActive();
-    const prepared = this.prepared!;
-    if (prepared.writes.length || !this.header) {
-      await this.storage.writeBatch([...prepared.writes, [this.key, prepared.header]]);
-      this.assertActive();
-      this.header = prepared.header;
-      this.entries = prepared.entries;
-    }
-    this.prepared = undefined;
+    await this.commit(await this.prepare(data));
   }
 }

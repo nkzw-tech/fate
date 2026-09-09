@@ -5,7 +5,7 @@ import H2 from '@nkzw/fate-client/ui/H2';
 import H3 from '@nkzw/fate-client/ui/H3';
 import Input, { CheckBox } from '@nkzw/fate-client/ui/Input';
 import Section from '@nkzw/fate-client/ui/Section';
-import { indexedDB } from '@nkzw/fate-indexeddb';
+import { createIndexedDBStorage } from '@nkzw/fate-indexeddb';
 import { createPersistence } from '@nkzw/fate/persistence';
 import { Component, type ReactNode, Suspense, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -64,7 +64,7 @@ const client = createClient<[typeof roots, typeof mutations]>({
     maxAge: 24 * 60 * 60 * 1000,
     maxBytes: 25 * 1024 * 1024,
     online: () => !offline && navigator.onLine,
-    storage: indexedDB(),
+    storage: createIndexedDBStorage(),
   }),
   roots,
   transport,

@@ -1,9 +1,15 @@
 import { decodeHydrationValue, encodeHydrationValue } from './hydration.ts';
 import { FateRequestError } from './protocol.ts';
-import type { MutationIdempotency } from './server/idempotency-types.ts';
+import type {
+  MutationIdempotency,
+  MutationIdempotencyOptions,
+} from './server/idempotency-types.ts';
 import { sortObjectKeys } from './sortObjectKeys.ts';
 
-export type { MutationIdempotency } from './server/idempotency-types.ts';
+export type {
+  MutationIdempotency,
+  MutationIdempotencyOptions,
+} from './server/idempotency-types.ts';
 
 export type MutationReceipt = Readonly<{
   fingerprint: string;
@@ -15,13 +21,13 @@ export type MutationReceipt = Readonly<{
  * The adapter must serialize concurrent calls for the same scope and ID,
  * including calls from different processes. Receipts must not expire.
  */
-export interface IdempotencyStore<Context> {
+export interface IdempotencyStore<Context, TransactionContext extends Context = Context> {
   transaction<T>(
     context: Context,
     scope: string,
     id: string,
     run: (transaction: {
-      context: Context;
+      context: TransactionContext;
       read(): Promise<MutationReceipt | undefined>;
       write(receipt: MutationReceipt): Promise<void>;
     }) => Promise<T>,
@@ -29,9 +35,12 @@ export interface IdempotencyStore<Context> {
 }
 
 /** Enforces durable deduplication using the application's own transaction adapter. */
-export function createMutationIdempotency<Context>(options: {
+export function createMutationIdempotency<
+  Context,
+  TransactionContext extends Context = Context,
+>(options: {
   scope(context: Context): string | Promise<string>;
-  store: IdempotencyStore<Context>;
+  store: IdempotencyStore<Context, TransactionContext>;
 }): MutationIdempotency<Context> {
   return {
     async execute<Result>({
@@ -41,14 +50,7 @@ export function createMutationIdempotency<Context>(options: {
       name,
       resolve,
       select,
-    }: {
-      ctx: Context;
-      identity: import('./persistence-types.ts').MutationIdentity;
-      input: unknown;
-      name: string;
-      resolve(ctx: Context): Promise<Result>;
-      select: Array<string>;
-    }): Promise<Result> {
+    }: MutationIdempotencyOptions<Context, Result>): Promise<Result> {
       const scope = await options.scope(ctx);
       if (!scope || scope !== identity.scope) {
         throw new FateRequestError(

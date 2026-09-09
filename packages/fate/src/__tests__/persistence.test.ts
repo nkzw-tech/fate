@@ -59,6 +59,54 @@ const queued = async (session: PersistenceSession, count = 1) => {
   await vi.waitFor(() => expect(session.getSnapshot().mutations).toHaveLength(count));
 };
 
+test('LRU-only flushes do not rewrite pending mutation recovery graphs', async () => {
+  const current = setup();
+  const readRequest = { note: { id: '1', view: NoteView } };
+  await current.client.request(readRequest);
+  await current.session.flush();
+  const submission = current.client.mutations
+    .edit({ input: { id: '1', title: 'Pending' }, optimistic: { title: 'Pending' } })
+    .catch(() => {});
+  await queued(current.session);
+  await current.session.flush();
+  const writeBatch = vi.spyOn(current.storage, 'writeBatch');
+  await current.client.request(readRequest, { persist: { maxAge: 60_000 } });
+  await current.session.flush();
+  const journalWrites = writeBatch.mock.calls.flatMap(([entries]) =>
+    entries.filter(([key]) => key === 'account:1' || key.startsWith('["account:1","journal"]:')),
+  );
+  expect(journalWrites).toHaveLength(0);
+  current.session.dispose();
+  await submission;
+});
+
+test('draining queued confirmations checkpoints the cache once', async () => {
+  let online = false;
+  const current = setup({ online: () => online });
+  const readRequest = { note: { id: '1', view: NoteView } };
+  await current.client.request(readRequest);
+  await current.session.flush();
+  const submissions = Array.from({ length: 8 }, (_, index) =>
+    current.client.mutations.edit({
+      input: { id: '1', title: `Update ${index}` },
+      optimistic: { title: `Update ${index}` },
+    }),
+  );
+  await queued(current.session, submissions.length);
+  await current.session.flush();
+  const writeBatch = vi.spyOn(current.storage, 'writeBatch');
+  online = true;
+  current.session.retry();
+  await Promise.all(submissions);
+  await vi.waitFor(() => {
+    const nodeBatches = writeBatch.mock.calls.filter(([entries]) =>
+      entries.some(([key]) => key.includes(':node:r:')),
+    );
+    expect(nodeBatches).toHaveLength(1);
+  });
+  await queued(current.session, 0);
+});
+
 test.each([false, true])(
   'missing optimistic fields wait for durable confirmation (restored=%s)',
   async (restored) => {
@@ -217,6 +265,64 @@ test('multiple clients share one delivery lock and both observe confirmation', a
   expect(second.client.store.read(noteId)?.title).toBe('B');
 });
 
+test('cross-tab notifications received during refresh are reconciled', async () => {
+  const storage = memoryStorage();
+  const writer = setup({ storage: { ...storage, subscribe: undefined } });
+  const seeded = Array.from({ length: 63 }, (_, index) =>
+    writer.client.mutations
+      .edit({ input: { id: String(index), title: `Seed ${index}` } })
+      .catch(() => {}),
+  );
+  await queued(writer.session, seeded.length);
+  let notify!: () => void;
+  const observer = setup({
+    storage: {
+      ...storage,
+      subscribe: (_key, listener) => {
+        notify = listener;
+        return () => {};
+      },
+    },
+  });
+  await observer.session.ready;
+  expect(observer.session.getSnapshot().mutations).toHaveLength(seeded.length);
+
+  const added = writer.client.mutations
+    .edit({ input: { id: '63', title: 'Added 63' } })
+    .catch(() => {});
+  await queued(writer.session, seeded.length + 1);
+  notify();
+  await storage.exclusive('account:1:write', async () => {
+    const header = (await storage.read('account:1')) as {
+      nextSequence: number;
+      revision: string;
+      version: 2;
+    };
+    const prefix = `${JSON.stringify(['account:1', 'journal'])}:`;
+    const entries = await storage.scan(prefix, undefined, 100);
+    const stored = structuredClone(entries.at(-1)!.value) as {
+      bytes: number;
+      entry: { id: string };
+    };
+    const id = crypto.randomUUID();
+    stored.entry.id = id;
+    const key = `${prefix}${String(header.nextSequence).padStart(16, '0')}:${id}`;
+    await storage.writeBatch([
+      [key, stored],
+      [
+        'account:1',
+        { ...header, nextSequence: header.nextSequence + 1, revision: crypto.randomUUID() },
+      ],
+    ]);
+  });
+  notify();
+  await queued(observer.session, seeded.length + 2);
+
+  writer.session.dispose();
+  observer.session.dispose();
+  await Promise.all([...seeded, added]);
+});
+
 test('terminal rejection rolls back after a restart and preserves its input for inspection', async () => {
   const first = setup();
   await first.session.ready;
@@ -264,6 +370,25 @@ test('storage failure prevents execution and optimistic writes', async () => {
   expect(client.store.read(noteId)).toBeUndefined();
 });
 
+test('a local commit failure is terminal and is not accepted by a receipt retry', async () => {
+  const { client, mutate, session } = setup({
+    mutate: async () => ({ __typename: 'Note', title: 'Missing ID' }),
+    online: () => true,
+  });
+  const submission = client.mutations.edit({
+    input: { id: '1', title: 'Saved' },
+    optimistic: { title: 'Optimistic' },
+  });
+
+  await expect(submission).rejects.toThrow("Missing 'id'");
+  await vi.waitFor(() => expect(session.getSnapshot().mutations[0]?.status).toBe('failed'));
+  session.retry();
+  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+  expect(mutate).toHaveBeenCalledTimes(1);
+  expect(client.store.read(noteId)).toBeUndefined();
+});
+
 test('unsupported transport fails before executing and account keys isolate the journal', async () => {
   const first = setup({ durable: false, online: () => true });
   const response = await first.client.mutations.edit({ input: { id: '1', title: 'A' } });
@@ -279,7 +404,7 @@ test('unsupported transport fails before executing and account keys isolate the 
 
 test('corrupt data blocks restore without overwriting the journal', async () => {
   const storage = memoryStorage();
-  await storage.write('account:1', { mutations: ['corrupt'], version: 999 });
+  await storage.writeBatch([['account:1', { mutations: ['corrupt'], version: 999 }]]);
   const { client, mutate, session } = setup({ online: () => true, storage });
   await expect(session.ready).rejects.toThrow(/corrupt/);
   await expect(client.mutations.edit({ input: { id: '1', title: 'A' } })).rejects.toThrow(
@@ -311,6 +436,21 @@ test('an attempted command cannot be discarded while its remote outcome is unkno
   await expect(session.discard(id)).rejects.toThrow(/may have committed remotely/);
   response.resolve({ id: '1', title: 'A' });
   expect((await pending).result?.title).toBe('A');
+});
+
+test('publishes sending while delivery is in flight without storage subscriptions', async () => {
+  const response = Promise.withResolvers<unknown>();
+  const storage = { ...memoryStorage(), subscribe: undefined };
+  const { client, mutate, session } = setup({
+    mutate: () => response.promise,
+    online: () => true,
+    storage,
+  });
+  const pending = client.mutations.edit({ input: { id: '1', title: 'Pending' } });
+  await vi.waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
+  expect(session.getSnapshot().mutations[0]?.status).toBe('sending');
+  response.resolve({ __typename: 'Note', id: '1', title: 'Saved' });
+  expect((await pending).result?.title).toBe('Saved');
 });
 
 test('acknowledgement write failure keeps the same identity until receipt storage recovers', async () => {
@@ -458,6 +598,46 @@ test('discard racing with the delivery claim cannot send a removed command', asy
   expect(mutate).not.toHaveBeenCalled();
 });
 
+test('discard recovers a receipt when another tab already checkpointed the mutation', async () => {
+  const storage = memoryStorage();
+  const receipts = new Map<string, unknown>();
+  const online = false;
+  const deliver = async (input: { id: string; title: string }, identity?: MutationIdentity) => {
+    const receipt = receipts.get(identity!.id);
+    if (receipt) {
+      return receipt;
+    }
+    if (identity?.replayOnly) {
+      throw new FateRequestError('NOT_FOUND', 'No receipt');
+    }
+    const result = { ...input, __typename: 'Note' };
+    receipts.set(identity!.id, result);
+    return result;
+  };
+  const first = setup({
+    mutate: deliver,
+    online: () => online,
+    storage: { ...storage, subscribe: undefined },
+  });
+  const submission = first.client.mutations.edit({
+    input: { id: '1', title: 'Saved' },
+    optimistic: { title: 'Saved' },
+  });
+  await queued(first.session);
+  const id = first.session.getSnapshot().mutations[0].id;
+
+  const second = setup({ mutate: deliver, online: () => true, storage });
+  await second.session.ready;
+  await queued(second.session, 0);
+  await second.session.flush();
+
+  await first.session.discard(id);
+  expect((await submission).result?.title).toBe('Saved');
+  expect(first.mutate).toHaveBeenCalledTimes(1);
+  expect(first.mutate.mock.calls[0][3]).toMatchObject({ replayOnly: true });
+  expect(first.client.store.read(noteId)?.title).toBe('Saved');
+});
+
 test('missing durable adapter preserves restored commands and still restores the read cache', async () => {
   const first = setup();
   await first.client.request({ note: { id: '1', view: NoteView } });
@@ -497,6 +677,39 @@ test('the size budget rejects new durable work before optimism or delivery', asy
   expect(mutate).not.toHaveBeenCalled();
   expect(client.store.read(noteId)).toBeUndefined();
   expect(session.getSnapshot().mutations).toHaveLength(0);
+});
+
+test('a rejected mutation admission does not evict the saved read cache', async () => {
+  const storage = memoryStorage();
+  const first = setup({ storage });
+  const readRequest = { note: { id: '1', view: NoteView } };
+  await first.client.request(readRequest);
+  await first.session.flush();
+  const probe = first.client.mutations
+    .edit({ input: { id: '1', title: 'Sized mutation' } })
+    .catch(() => {});
+  await queued(first.session);
+  const header = await storage.read('account:1');
+  const journalEntries = await storage.scan(
+    `${JSON.stringify(['account:1', 'journal'])}:`,
+    undefined,
+    100,
+  );
+  const journalBytes =
+    new TextEncoder().encode(JSON.stringify(['account:1', header])).byteLength +
+    journalEntries.reduce((bytes, { value }) => bytes + (value as { bytes: number }).bytes, 0);
+  await first.session.discard(first.session.getSnapshot().mutations[0].id);
+  first.session.dispose();
+  await probe;
+  const cachePrefix = `${JSON.stringify(['account:1', 'cache-v2'])}:`;
+  const before = await storage.scan(cachePrefix, undefined, 100);
+
+  const constrained = setup({ maxBytes: journalBytes, storage });
+  await constrained.session.ready;
+  await expect(
+    constrained.client.mutations.edit({ input: { id: '1', title: 'Sized mutation' } }),
+  ).rejects.toThrow('size limit');
+  expect(await storage.scan(cachePrefix, undefined, 100)).toEqual(before);
 });
 
 test('reducing the size budget preserves already queued mutations', async () => {

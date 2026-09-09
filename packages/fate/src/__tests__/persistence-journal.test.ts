@@ -21,10 +21,10 @@ test('journal updates encode and write only changed entries, preserving order ac
   data.mutations[65].attempts++;
   const stringify = vi.spyOn(JSON, 'stringify');
   const writeBatch = vi.spyOn(storage, 'writeBatch');
-  const bytes = await journal.measure(data);
+  const plan = await journal.prepare(data);
   expect(stringify.mock.calls.length).toBeLessThan(6);
   stringify.mockRestore();
-  await journal.save(data);
+  await journal.commit(plan);
   expect(writeBatch).toHaveBeenCalledTimes(1);
   expect(writeBatch.mock.calls[0][0]).toHaveLength(2);
   const scan = vi.spyOn(storage, 'scan');
@@ -36,7 +36,7 @@ test('journal updates encode and write only changed entries, preserving order ac
     ...(await storage.scan(`${JSON.stringify([key, 'journal'])}:`, undefined, 200)),
     { key, value: await storage.read(key) },
   ];
-  expect(bytes).toBe(
+  expect(plan.bytes).toBe(
     values.reduce(
       (bytes, { key, value }) =>
         bytes + new TextEncoder().encode(JSON.stringify([key, value])).byteLength,
@@ -52,7 +52,7 @@ test('migration is atomic and preserves pending work, failures, and cache recove
   const storage = memoryStorage();
   const entries: Array<JournalEntry> = [
     entry('pending'),
-    { ...entry('failed'), status: 'failed' },
+    { ...entry('failed'), error: { message: 'Failed' }, status: 'failed' },
     {
       ...entry('confirmed'),
       cacheUpdates: encodeHydrationValue([]),
@@ -61,7 +61,7 @@ test('migration is atomic and preserves pending work, failures, and cache recove
     },
   ];
   const legacy = { mutations: entries, version: 1 };
-  await storage.write(key, legacy);
+  await storage.writeBatch([[key, legacy]]);
   const writeBatch = storage.writeBatch;
   storage.writeBatch = async () => {
     throw new Error('Interrupted');
@@ -80,7 +80,12 @@ test('failed journal writes do not change the cached revision or lose pending en
   const journal = new PersistenceJournal(storage, key);
   await journal.save({ mutations: [entry('pending')] });
   const data = await journal.load();
-  data.mutations[0].status = 'confirmed';
+  data.mutations[0] = {
+    ...data.mutations[0],
+    cacheUpdates: encodeHydrationValue([]),
+    result: encodeHydrationValue(undefined),
+    status: 'confirmed',
+  };
   const writeBatch = storage.writeBatch;
   storage.writeBatch = async () => {
     throw new Error('Interrupted');
@@ -107,7 +112,7 @@ test('disposal during a large journal write cancels before storage commits', asy
 test('migration validates commands before replacing legacy data', async () => {
   const storage = memoryStorage();
   const legacy = { mutations: [entry('invalid')], version: 1 };
-  await storage.write(key, legacy);
+  await storage.writeBatch([[key, legacy]]);
   const journal = new PersistenceJournal(storage, key, () => {
     throw new Error('Invalid command');
   });
