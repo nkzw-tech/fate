@@ -5,7 +5,7 @@
 Create a new fate app with Vite+:
 
 ```bash
-vp create fate my-app
+vp create fate
 ```
 
 Explore the [fate stack](https://stack.fate.technology) to see the tools included in your new project.

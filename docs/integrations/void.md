@@ -10,13 +10,13 @@ setup without copying its adapter glue.
 For a new Void app, start from the Void template. It includes the client, Void routes, Drizzle setup, live transport, auth wiring, and generated fate client setup.
 
 ```sh
-vp create fate my-app --template void
+vp create fate -- --template void
 ```
 
 Use Vue instead of React with:
 
 ```sh
-vp create fate my-app --template void --framework vue
+vp create fate -- --template void --framework vue
 ```
 
 ## Existing Project

@@ -183,7 +183,7 @@ Finally, by using modern Async React, the latest React DevTools features for Sus
 Create a new fate app with Vite+:
 
 ```bash
-vp create fate my-app
+vp create fate
 ```
 
 The template selector can create a Void app with Drizzle, a tRPC app with Drizzle, or a tRPC app with Prisma. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.

@@ -5,7 +5,7 @@ Deploy fate directly to your own Cloudflare account with [Void](/integrations/vo
 ## New Project
 
 ```sh
-vp create fate my-app --template void
+vp create fate -- my-app --template void
 cd my-app
 vp run dev:setup
 vp run dev

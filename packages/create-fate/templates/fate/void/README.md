@@ -3,7 +3,7 @@
 Create a new fate app with Vite+:
 
 ```bash
-vp create fate my-app --template void
+vp create fate -- --template void
 ```
 
 This template uses the Void pages router with Drizzle, `void-fate`, `react-fate`, Better Auth, Tailwind, and React Compiler.

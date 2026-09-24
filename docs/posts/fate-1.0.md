@@ -170,15 +170,15 @@ Besides all the features above, there are also many fixes that went into this re
 You can get started using the new [`create-fate`](https://www.npmjs.com/package/create-fate) package. I recommend using it with [Vite+](https://viteplus.dev/):
 
 ```bash
-vp create fate my-app
+vp create fate
 ```
 
 The interactive CLI allows you to choose from one of four templates. You can also use it directly:
 
 ```bash
-vp create fate my-app --template drizzle # drizzle + trpc
-vp create fate my-app --template http # drizzle + http
-vp create fate my-app --template prisma # prisma + trpc
+vp create fate -- --template drizzle # drizzle + trpc
+vp create fate -- --template http # drizzle + http
+vp create fate -- --template prisma # prisma + trpc
 ```
 
 These templates let you start with the stack that best matches your preferences.

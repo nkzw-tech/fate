@@ -65,7 +65,7 @@ _[Learn more](/docs/guide/getting-started.md) about fate's core concepts or crea
 Create a new fate app with Vite+:
 
 ```bash
-vp create fate my-app
+vp create fate
 ```
 
 Explore the [fate stack](https://stack.fate.technology) to see the tools included in your new project.
@@ -1926,13 +1926,13 @@ Use the GraphQL transport when your backend already exposes GraphQL and you want
 Create a client for an existing GraphQL server with:
 
 ```bash
-vp create fate my-app --template graphql-client
+vp create fate -- --template graphql-client
 ```
 
 Create a full GraphQL + Prisma example app with:
 
 ```bash
-vp create fate my-app --template graphql
+vp create fate -- --template graphql
 ```
 
 The client-only template is the smallest reference for the integration. It contains a `src/fate/graphql.ts` file that maps your GraphQL schema to fate views and roots.
@@ -3005,13 +3005,13 @@ setup without copying its adapter glue.
 For a new Void app, start from the Void template. It includes the client, Void routes, Drizzle setup, live transport, auth wiring, and generated fate client setup.
 
 ```sh
-vp create fate my-app --template void
+vp create fate -- --template void
 ```
 
 Use Vue instead of React with:
 
 ```sh
-vp create fate my-app --template void --framework vue
+vp create fate -- --template void --framework vue
 ```
 
 ### Existing Project
@@ -3280,7 +3280,7 @@ Deploy fate directly to your own Cloudflare account with [Void](/docs/integratio
 ### New Project
 
 ```sh
-vp create fate my-app --template void
+vp create fate -- my-app --template void
 cd my-app
 vp run dev:setup
 vp run dev

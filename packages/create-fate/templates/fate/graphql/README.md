@@ -9,7 +9,7 @@ Check out [fate.technology](https://fate.technology) for documentation, examples
 Create a new fate app with Vite+:
 
 ```bash
-vp create fate my-app --template graphql
+vp create fate -- --template graphql
 ```
 
 ## Getting Started with _fate_
