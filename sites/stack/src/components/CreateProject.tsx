@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import StackShaders from './StackShaders.tsx';
 
-const commands = 'vp create fate my-app\ncd my-app\nvp run dev:setup\nvp run dev';
+const commands = 'vp create fate\ncd my-app\nvp run dev:setup\nvp run dev';
 
 const agentPrompt = `Set up a new project using the fate stack: React, TypeScript, fate, Void, fbtee, and Vite+.
 
@@ -11,7 +11,7 @@ Install Vite+ if it's not already installed.
 
 Create the project in a new empty directory, using the project name I provide or my-app by default:
 
-vp create fate my-app --framework react
+vp create fate -- --framework react
 cd my-app
 vp run dev:setup
 

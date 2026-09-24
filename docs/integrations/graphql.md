@@ -9,13 +9,13 @@ Use the GraphQL transport when your backend already exposes GraphQL and you want
 Create a client for an existing GraphQL server with:
 
 ```bash
-vp create fate my-app --template graphql-client
+vp create fate -- --template graphql-client
 ```
 
 Create a full GraphQL + Prisma example app with:
 
 ```bash
-vp create fate my-app --template graphql
+vp create fate -- --template graphql
 ```
 
 The client-only template is the smallest reference for the integration. It contains a `src/fate/graphql.ts` file that maps your GraphQL schema to fate views and roots.

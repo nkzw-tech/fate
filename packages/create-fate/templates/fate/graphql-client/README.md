@@ -7,7 +7,7 @@
 Use this template when you want to use _fate_ with an existing GraphQL server.
 
 ```bash
-vp create fate my-app --template graphql-client
+vp create fate -- --template graphql-client
 ```
 
 ## Connect Your Server

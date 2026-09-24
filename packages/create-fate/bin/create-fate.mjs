@@ -696,8 +696,8 @@ const configureVueReadme = (targetPath, selectedVariant) => {
       .replaceAll('fbtee setup, and ', '')
       .replaceAll(', fbtee setup,', ',')
       .replaceAll(
-        `vp create fate my-app --template ${selectedVariant}`,
-        `vp create fate my-app --template ${selectedVariant} --framework vue`,
+        `vp create fate -- --template ${selectedVariant}`,
+        `vp create fate -- --template ${selectedVariant} --framework vue`,
       )
       .replaceAll('modern data client for React', 'modern data client for Vue')
       .replaceAll(
