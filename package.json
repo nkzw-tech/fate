@@ -25,7 +25,7 @@
     "dev:graphql-server": "cd example/server-graphql && vp run dev",
     "dev:persistence": "vp run --filter @nkzw/fate build && vp run --filter react-fate build && cd example/persistence && vp dev",
     "dev:server": "cd example/server-prisma && vp run dev",
-    "dev:setup": "vp run --filter '@nkzw/fate' build && vp run --filter react-fate build && (cd example/server-prisma && vp run dev:setup) && (cd example/server-graphql && vp run dev:setup) && vp run fate:generate",
+    "dev:setup": "vp run --filter '@nkzw/fate' build && vp run --filter react-fate build && vp run --filter void-fate build && (cd example/server-prisma && vp run dev:setup) && (cd example/server-graphql && vp run dev:setup) && vp run fate:generate && (cd example/void && vp run prepare:void && vp run fate:generate) && vp run build:api-docs",
     "dev:void": "cd example/void && vp dev",
     "dev:vue": "vp run --filter '@nkzw/fate' build && vp run --filter vue-fate build && npm-run-all --parallel dev:vue-client dev:server",
     "dev:vue-client": "cd example/client-vue && vp dev",
@@ -33,7 +33,8 @@
     "generate-readme": "node --conditions=development --no-warnings --import @oxc-node/core/register scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",
-    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public"
+    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public",
+    "test:all": "vp run dev:setup && vp check && vp test"
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
