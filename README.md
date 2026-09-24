@@ -128,14 +128,6 @@ yarn add @nkzw/fate
 
 :::
 
-> [!NOTE]
->
-> **_fate_** 1.0 is ready for production use. See the [1.0 release notes](/posts/fate-1.0) for details.
-
-If you'd like to try the example app in GitHub Codespaces, click the button below:
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nkzw-tech/fate)
-
 ## Core Concepts
 
 **_fate_** has a minimal API surface and is aimed at reducing data fetching complexity.

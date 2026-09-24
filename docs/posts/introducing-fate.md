@@ -190,10 +190,6 @@ The template selector can create a Void app with Drizzle, a tRPC app with Drizzl
 
 Read about the [Core Concepts](/guide/core-concepts), or jump right in and learn about [Views](/guide/views).
 
-_You can also try a runnable demo directly in your browser:_
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nkzw-tech/fate)
-
 ## Future
 
 <!--@include: ../parts/outro.md#future -->
