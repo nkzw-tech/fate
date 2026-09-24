@@ -13,13 +13,13 @@ Deploy the same app to your own Cloudflare account or the Void platform.
 For a new Void app, start from the Void template:
 
 ```sh
-vp create fate my-app --template void
+vp create fate -- --template void
 ```
 
 Use Vue instead of React with:
 
 ```sh
-vp create fate my-app --template void --framework vue
+vp create fate -- --template void --framework vue
 ```
 
 ## Existing Project
@@ -27,7 +27,7 @@ vp create fate my-app --template void --framework vue
 For an existing Void project, add the packages directly:
 
 ```sh
-pnpm add @nkzw/fate react-fate void-fate void
+pnpm add @nkzw/fate react-fate void-fate void @void/react
 ```
 
 ## Cloudflare Deployment
