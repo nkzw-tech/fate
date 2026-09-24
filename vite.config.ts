@@ -128,13 +128,6 @@ export default defineConfig({
       'workspaces/no-relative-imports': 'error',
     },
   },
-  run: {
-    tasks: {
-      'test:all': {
-        command: 'vp run dev:setup && vp check && vp test',
-      },
-    },
-  },
   staged: {
     '*': 'vp check --fix',
   },
