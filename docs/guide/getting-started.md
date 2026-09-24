@@ -68,9 +68,9 @@ yarn add @nkzw/fate
 
 :::
 
-> [!WARNING]
+> [!NOTE]
 >
-> **_fate_** is currently in alpha and not production ready. If something doesn't work for you, please open a pull request.
+> **_fate_** 1.0 is ready for production use. See the [1.0 release notes](/posts/fate-1.0) for details.
 
 If you'd like to try the example app in GitHub Codespaces, click the button below:
 
