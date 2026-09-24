@@ -128,6 +128,28 @@ export default defineConfig({
       'workspaces/no-relative-imports': 'error',
     },
   },
+  run: {
+    tasks: {
+      'dev:setup': {
+        cache: true,
+        command: [
+          "vp run --cache --filter '@nkzw/fate' build",
+          'vp run --cache --filter react-fate build',
+          'vp run --cache --filter void-fate build',
+          "vp run --cache --filter '@nkzw/fate-server' dev:setup",
+          "vp run --cache --filter '@nkzw/fate-server-graphql' dev:setup",
+          'vp run --cache fate:generate',
+          "vp run --cache --filter '@nkzw/fate-void-example' prepare:void",
+          "vp run --cache --filter '@nkzw/fate-void-example' fate:generate",
+          'vp run --cache build:api-docs',
+        ],
+      },
+      'test:all': {
+        cache: true,
+        command: 'vp run dev:setup && vp check && vp test',
+      },
+    },
+  },
   staged: {
     '*': 'vp check --fix',
   },
