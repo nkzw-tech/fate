@@ -131,7 +131,6 @@ export default defineConfig({
   run: {
     tasks: {
       'dev:setup': {
-        cache: true,
         command: [
           "vp run --cache --filter '@nkzw/fate' build",
           'vp run --cache --filter react-fate build',
@@ -145,7 +144,6 @@ export default defineConfig({
         ],
       },
       'test:all': {
-        cache: true,
         command: 'vp run dev:setup && vp check && vp test',
       },
     },
