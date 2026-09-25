@@ -9,7 +9,6 @@
   },
   "type": "module",
   "scripts": {
-    "build": "vp build",
     "db:generate": "void db generate",
     "db:migrate": "void db migrate",
     "db:seed": "void db seed --file db/seed.ts",

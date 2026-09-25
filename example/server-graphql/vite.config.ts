@@ -48,6 +48,9 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      build: {
+        command: 'vp pack',
+      },
       'test:all': {
         command: 'vp check && vp test',
       },
