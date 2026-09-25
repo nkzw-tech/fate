@@ -149,7 +149,7 @@ export default defineConfig({
         ],
       },
       'test:all': {
-        command: 'vp run dev:setup && vp check && vp test',
+        command: ['vp run dev:setup', 'vp check', 'vp test'],
       },
     },
   },
