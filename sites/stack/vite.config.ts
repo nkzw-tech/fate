@@ -38,6 +38,13 @@ export default defineConfig({
     ] as never;
   }),
   resolve: { dedupe: ['react', 'react-dom'] },
+  run: {
+    tasks: {
+      build: {
+        command: 'vp build',
+      },
+    },
+  },
   server: { port: 4006 },
   ssr: { optimizeDeps: { include: optimizedDeps } },
   staged: { '*': 'vp check --fix' },
