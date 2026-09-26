@@ -108,6 +108,7 @@ export default defineConfig({
             './example/server-graphql/src/index.test.tsx',
             './example/server-graphql/vite.config.ts',
             './prisma.config.ts',
+            './packages/*/vite.config.ts',
             './scripts/**/*.tsx',
             './scripts/**/*.mjs',
             './src/index.test.tsx',
@@ -130,8 +131,34 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      'build:all': {
+        command: ['vp run -r build', 'vp run generate-readme', 'vp run copy-files'],
+      },
+      'build:api-docs': {
+        command:
+          "pnpm --filter '@nkzw/fate-docs-toolchain' exec typedoc --options ../../typedoc.json",
+      },
+      'build:docs': {
+        command: ['vp run build:api-docs', 'vp run copy-package-docs', 'vitepress build'],
+      },
+      'build:stack': {
+        command: 'vp run --filter fatestack build',
+      },
+      'dev:setup': {
+        command: [
+          "vp run --filter '@nkzw/fate' build",
+          'vp run --filter react-fate build',
+          'vp run --filter void-fate build',
+          "vp run --cache --filter '@nkzw/fate-server' dev:setup",
+          "vp run --cache --filter '@nkzw/fate-server-graphql' dev:setup",
+          'vp run --cache fate:generate',
+          "vp run --cache --filter '@nkzw/fate-void-example' prepare:void",
+          "vp run --cache --filter '@nkzw/fate-void-example' fate:generate",
+          'vp run build:api-docs',
+        ],
+      },
       'test:all': {
-        command: 'vp run dev:setup && vp check && vp test',
+        command: ['vp run dev:setup', 'vp check', 'vp test'],
       },
     },
   },

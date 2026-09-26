@@ -20,6 +20,7 @@ import {
 import { expect, test, vi } from 'vite-plus/test';
 import { createApp, defineComponent, h, nextTick, ref } from 'vue';
 import type { ShallowRef } from 'vue';
+import viteConfig from '../../vite.config.ts';
 import {
   FateClient,
   useFateClient,
@@ -814,9 +815,10 @@ test('manual dispose releases live-list subscriptions', async () => {
 test('exposes the fate CLI bin from the Vue package', () => {
   const packageJson = JSON.parse(readFileSync('packages/vue-fate/package.json', 'utf8')) as {
     bin?: Record<string, string>;
-    scripts?: Record<string, string>;
   };
 
   expect(packageJson.bin).toEqual({ fate: './lib/cli.mjs' });
-  expect(packageJson.scripts?.build).toContain('src/cli.ts');
+  expect(viteConfig.run?.tasks?.build).toEqual({
+    command: expect.stringContaining('src/cli.ts'),
+  });
 });
