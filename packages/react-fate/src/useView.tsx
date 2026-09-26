@@ -205,8 +205,8 @@ export function useView<V extends View<any, any>>(
       const subscriptions = new Map<EntityId, () => void>();
 
       const onChange = () => {
-        updateSubscriptions();
         onStoreChange();
+        updateSubscriptions();
       };
 
       const subscribe = (entityId: EntityId, paths: ReadonlySet<string>) => {
