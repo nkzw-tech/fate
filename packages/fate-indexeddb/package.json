@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/fate-indexeddb",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Optional IndexedDB persistence adapter for fate.",
   "license": "MIT",
   "files": [
