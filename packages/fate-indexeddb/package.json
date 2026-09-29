@@ -15,9 +15,6 @@
       "default": "./lib/index.mjs"
     }
   },
-  "scripts": {
-    "build": "vp pack --tsconfig tsconfig.json -d lib src/index.ts"
-  },
   "dependencies": {
     "idb": "^8.0.3"
   },

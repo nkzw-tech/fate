@@ -47,6 +47,13 @@ export default defineConfig({
     }),
   ],
   resolve: { conditions: ['@nkzw/source'] },
+  run: {
+    tasks: {
+      build: {
+        command: 'vp build',
+      },
+    },
+  },
   server: { port: 6001 },
   ssr: { noExternal: ['void-fate'] },
 });

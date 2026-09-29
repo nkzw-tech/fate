@@ -39,9 +39,6 @@
       "default": "./lib/vite.mjs"
     }
   },
-  "scripts": {
-    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.tsx src/client.ts src/cli.ts src/vite.ts"
-  },
   "dependencies": {
     "@nkzw/fate": "workspace:*"
   },
@@ -49,7 +46,8 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vite-plus": "catalog:"
   },
   "peerDependencies": {
     "react": "^19.2.0",

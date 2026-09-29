@@ -74,9 +74,6 @@
       "default": "./lib/idempotency.mjs"
     }
   },
-  "scripts": {
-    "build": "vp pack --tsconfig tsconfig.json -d lib --target=node24 src/index.ts src/clientStub.ts src/list.ts src/cli.ts src/server.ts src/server/drizzle.ts src/server/prisma.ts src/graphqlTransport.ts src/vite.ts src/persistence.ts src/idempotency.ts"
-  },
   "dependencies": {
     "superjson": "^2.2.6",
     "zod": "^4.6.5"
@@ -85,7 +82,8 @@
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "drizzle-orm": "^0.45.2",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "peerDependencies": {
     "@trpc/client": "^11.6.0",
