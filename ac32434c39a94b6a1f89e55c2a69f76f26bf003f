@@ -1,0 +1,21 @@
+example/client-vue/src/ui/CommentCard.vue
+  s_4ebfd9dd549587::t_7c5043cbd4e736 2
+packages/create-fate/templates/fate/_shared/vue-app/src/ui/Header.vue
+  s_4ebfd9dd549587::t_1cf6e62cafc27c 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ac32434c39a94b6a1f89e55c2a69f76f26bf003f",
+  "prompts": {},
+  "sessions": {
+    "s_4ebfd9dd549587": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a07-4a1f-7ef1-911c-fa4a86d6c77c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+example/client-vue/src/ui/CommentCard.vue
+  s_4ebfd9dd549587::t_7c5043cbd4e736 2
+packages/create-fate/templates/fate/_shared/vue-app/src/ui/Header.vue
+  s_4ebfd9dd549587::t_1cf6e62cafc27c 2
+example/client-vue/package.json
+  s_f4ca83444c8a7c::t_911dffe661b491 15-16,20-21,25,30-34
+example/client/package.json
+  s_f4ca83444c8a7c::t_162428ca62d4d4 15,20-23,27,33,39-42,44,46
+example/cloudflare/package.json
+  s_f4ca83444c8a7c::t_321ce6702d99eb 23,29,32
+example/server-drizzle/package.json
+  s_f4ca83444c8a7c::t_b0158270e64213 22,27-28,30-31,35
+example/server-prisma/package.json
+  s_f4ca83444c8a7c::t_ec5d34d104b939 17,24-26,30
+example/void/package.json
+  s_f4ca83444c8a7c::t_cff5f9db2b0042 25-27,31,37,42-44,46-47
+packages/cf-fate/package.json
+  s_f4ca83444c8a7c::t_122c8a3133e84c 43
+packages/create-fate/templates/fate/_shared/vue-app/package.json
+  s_f4ca83444c8a7c::t_3cc431b69b7997 20
+packages/void-fate/package.json
+  s_f4ca83444c8a7c::t_d38d20b0b5a18f 43-44,47,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "349e554da5cad8fae99a61bf7afb383d7b9070e1",
+  "prompts": {},
+  "sessions": {
+    "s_4ebfd9dd549587": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a07-4a1f-7ef1-911c-fa4a86d6c77c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    },
+    "s_f4ca83444c8a7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f69ff-dd9f-7721-9487-e76c7205bc7c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
