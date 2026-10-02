@@ -1,0 +1,33 @@
+example/client-vue/src/ui/Button.vue
+  s_b99afdd2a8c147::t_f24f73c3db65b1 69
+example/client/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_a5b688695a0bc3 3,101
+example/void/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_34f87ab00b3f16 3,79
+packages/create-fate/templates/fate/drizzle/client/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_ac5ee9aebbd119 3,101
+packages/create-fate/templates/fate/graphql/client/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_22b0d3932db6d4 3,101
+packages/create-fate/templates/fate/http/client/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_bb3c5a38340849 3,101
+packages/create-fate/templates/fate/prisma/client/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_866e7ddd1b942c 3,101
+packages/create-fate/templates/fate/void/src/ui/Button.tsx
+  s_b99afdd2a8c147::t_08264af41e89b9 3,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "abb1661b1e8513b23803fda6b12ec12278c420f2",
+  "prompts": {},
+  "sessions": {
+    "s_b99afdd2a8c147": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fbd0-9f4b-7cb0-9c09-e07bc5995e4d",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
