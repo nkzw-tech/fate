@@ -104,6 +104,7 @@ export default defineConfig({
           { link: '/guide/requests', text: 'Requests' },
           { link: '/guide/deferred-views', text: 'Deferred Views' },
           { link: '/guide/vue', text: 'Vue' },
+          { link: '/guide/preact', text: 'Preact' },
         ],
         text: 'Guide',
       },

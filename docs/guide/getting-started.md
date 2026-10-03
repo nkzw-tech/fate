@@ -50,6 +50,24 @@ yarn add vue-fate
 
 :::
 
+For a Preact client, install `preact-fate`. It requires Preact 11:
+
+::: code-group
+
+```bash [npm]
+npm add preact-fate
+```
+
+```bash [pnpm]
+pnpm add preact-fate
+```
+
+```bash [yarn]
+yarn add preact-fate
+```
+
+:::
+
 If your server is a separate package, install `@nkzw/fate` there as a runtime dependency too. Install `@nkzw/fate` on the client only for a barebones integration without a framework adapter:
 
 ::: code-group

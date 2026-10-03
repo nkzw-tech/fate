@@ -103,6 +103,7 @@ export default defineConfig({
             './example/client/vite.config.ts',
             './example/client/vite.graphql.config.ts',
             './example/client-vue/vite.config.ts',
+            './example/client-preact/vite.config.ts',
             './example/server-graphql/prisma.config.ts',
             './example/server-graphql/scripts/**/*.tsx',
             './example/server-graphql/src/index.test.tsx',

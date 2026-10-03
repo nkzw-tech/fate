@@ -1,0 +1,1 @@
+import '@nkzw/fate/cli';

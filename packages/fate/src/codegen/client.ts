@@ -14,7 +14,7 @@ import {
 import { createSchema, isDataView } from './schema.ts';
 
 type ModuleExports = Record<string, any>;
-type ClientModule = '@nkzw/fate' | 'react-fate' | 'vue-fate';
+type ClientModule = '@nkzw/fate' | 'preact-fate' | 'react-fate' | 'vue-fate';
 
 const formatRelation = (value: {
   array?: boolean;

@@ -18,6 +18,7 @@ const files = [
   'docs/guide/actions.md',
   'docs/guide/persistence.md',
   'docs/guide/vue.md',
+  'docs/guide/preact.md',
   'docs/integrations/graphql.md',
   'docs/integrations/server.md',
   'docs/integrations/void.md',
