@@ -1,0 +1,19 @@
+.vitepress/config.ts
+  s_b1928fbb557fcc::t_78e55253f90ab5 101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e441bc37ecba212ede9880d5435dfd1dfb42e17d",
+  "prompts": {},
+  "sessions": {
+    "s_b1928fbb557fcc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10a5e-1f83-7cf1-bb63-033de16935ba",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
