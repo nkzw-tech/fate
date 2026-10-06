@@ -223,6 +223,40 @@ describe('create-fate templates', () => {
     30_000,
   );
 
+  test.each(templateNames())('points React agents to bundled docs for %s', async (templateName) => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-react-docs-'));
+    try {
+      const target = join(tempRoot, 'app');
+      await execFileAsync(
+        process.execPath,
+        [
+          join(packageRoot, 'bin/create-fate.mjs'),
+          target,
+          '--template',
+          templateName,
+          '--no-setup',
+        ],
+        {
+          cwd: tempRoot,
+          encoding: 'utf8',
+          env: { ...process.env, npm_config_registry: registryURL },
+          timeout: 30_000,
+        },
+      );
+
+      const docsDir =
+        templateName === 'void' || templateName === 'graphql-client'
+          ? 'node_modules/react-fate/docs/'
+          : 'client/node_modules/react-fate/docs/';
+      const agents = readFileSync(join(target, 'AGENTS.md'), 'utf8');
+      expect(agents).toContain(`\`${docsDir}\``);
+      expect(agents).toContain('`index.md`');
+      expect(agents).not.toContain('react-fate/README.md');
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   test('generates Vue projects for every backend template', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-vue-'));
     try {
@@ -319,6 +353,14 @@ describe('create-fate templates', () => {
         expect.soft(readme, templateName).not.toContain('React Compiler');
         expect.soft(agents, templateName).toContain('Vue applications');
         expect.soft(agents, templateName).toContain('vue-fate');
+        const docsDir =
+          templateName === 'void' || templateName === 'graphql-client'
+            ? 'node_modules/vue-fate/docs/'
+            : 'client/node_modules/vue-fate/docs/';
+        expect.soft(agents, templateName).toContain(`\`${docsDir}\``);
+        expect.soft(agents, templateName).toContain('`index.md`');
+        expect.soft(agents, templateName).toContain('`guide/vue.md`');
+        expect.soft(agents, templateName).not.toContain('vue-fate/README.md');
         expect.soft(agents, templateName).not.toContain('React applications');
         expect.soft(agents, templateName).not.toContain('React Actions');
         expect.soft(agents, templateName).not.toContain('Async React');

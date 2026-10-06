@@ -25,6 +25,11 @@ const packages = [
     name: 'react-fate',
     target: 'packages/react-fate/docs',
   },
+  {
+    api: [{ index: 'vue-fate/index.md', path: 'vue-fate', title: 'Vue' }],
+    name: 'vue-fate',
+    target: 'packages/vue-fate/docs',
+  },
 ] as const;
 
 const assertDirectory = (path: string) => {

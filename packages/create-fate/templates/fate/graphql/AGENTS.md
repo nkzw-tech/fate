@@ -29,7 +29,7 @@ This guidance is for agents working in projects bootstrapped from the fate templ
 - **fate client support** fate's local client support files are maintained by the Vite/fate tooling. Do not manually edit `.fate` files; make the proper schema changes on the server and run `pnpm fate:generate` when working outside Vite dev.
 - **Library Versions:** This repository uses the most recent releases of React, fate, Vite, GraphQL, and more. You might not know about the new releases yet, please don't get confused. The versions you see are real, and there are no feature or version mismatches. You can search the internet for more information about them.
 
-Full documentation can be found on the filesystem at `./client/node_modules/react-fate/README.md` or online at [fate.technology](https://fate.technology/).
+Before working on fate, read only the relevant Markdown docs in `client/node_modules/react-fate/docs/`. Start with `index.md` to find guides, integrations, and API references. The docs match the installed package version. Online documentation is at [fate.technology](https://fate.technology/).
 
 ## Review Checklist for Agents
 

@@ -10,7 +10,8 @@
     "packages/fate/src/server/drizzle.ts",
     "packages/fate/src/server/prisma.ts",
     "packages/fate/src/vite.ts",
-    "packages/react-fate/src/index.tsx"
+    "packages/react-fate/src/index.tsx",
+    "packages/vue-fate/src/index.ts"
   ],
   "excludeExternals": true,
   "excludeInternal": true,

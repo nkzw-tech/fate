@@ -364,7 +364,7 @@ const reactPackageEntries = [
   'react-fate',
 ];
 
-const vueAgentsGuide = `# Using _fate_ for Vue applications
+const vueAgentsGuide = (docsDir) => `# Using _fate_ for Vue applications
 
 This guidance is for agents working in projects bootstrapped from the fate Vue template. It focuses on Vue-native composables for fate's view composition and request execution.
 
@@ -391,7 +391,7 @@ This guidance is for agents working in projects bootstrapped from the fate Vue t
 - **\`useRequest\` only at route roots:** Create a dedicated \`useRequest\` call per screen root that pulls together all child views; do not scatter \`useRequest\` across leaf components unless it is necessary to issue a separate request.
 - **fate client support:** fate's local client support files are maintained by the Vite/fate tooling. Do not manually edit \`.fate\` files; make the proper schema changes on the server and run \`pnpm fate:generate\` when working outside Vite dev.
 
-Full documentation can be found on the filesystem at \`./client/node_modules/vue-fate/README.md\` or online at [fate.technology](https://fate.technology/).
+Before working on fate, read only the relevant Markdown docs in \`${docsDir}/\`. Start with \`index.md\` to find guides, integrations, and API references; read \`guide/vue.md\` for Vue-specific APIs. The docs match the installed package version. Online documentation is at [fate.technology](https://fate.technology/).
 
 ## Review Checklist for Agents
 
@@ -667,17 +667,25 @@ const configureVueVoidServerFiles = (frontendRoot) => {
   );
 };
 
-const configureVueAgents = (targetPath) => {
+const configureVueAgents = (targetPath, selectedVariant) => {
   const agentsPath = path.join(targetPath, 'AGENTS.md');
+  const docsDir = path
+    .relative(
+      targetPath,
+      path.join(frontendRootForVariant(targetPath, selectedVariant), 'node_modules/vue-fate/docs'),
+    )
+    .split(path.sep)
+    .join('/');
+  const guide = vueAgentsGuide(docsDir);
   if (!fs.existsSync(agentsPath)) {
-    fs.writeFileSync(agentsPath, `${vueAgentsGuide}\n`);
+    fs.writeFileSync(agentsPath, `${guide}\n`);
     return;
   }
 
   const agents = fs.readFileSync(agentsPath, 'utf8');
   const vitePlusIndex = agents.indexOf('<!--VITE PLUS START-->');
   const suffix = vitePlusIndex === -1 ? agents : agents.slice(vitePlusIndex);
-  fs.writeFileSync(agentsPath, `${vueAgentsGuide}\n\n${suffix.trim()}\n`);
+  fs.writeFileSync(agentsPath, `${guide}\n\n${suffix.trim()}\n`);
 };
 
 const configureVueReadme = (targetPath, selectedVariant) => {
@@ -771,7 +779,7 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
   if (frontendRoot !== targetPath) {
     configureVueRootPackageJson(targetPath);
   }
-  configureVueAgents(targetPath);
+  configureVueAgents(targetPath, selectedVariant);
   if (selectedVariant === 'void') {
     configureVueVoidDemoContent(targetPath);
   }

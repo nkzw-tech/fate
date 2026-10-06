@@ -30,6 +30,7 @@ packages/**/README.md
 !packages/void-fate/README.md
 packages/fate/docs/
 packages/react-fate/docs/
+packages/vue-fate/docs/
 tsconfig.tsbuildinfo
 vite.config.ts.timestamp-*
 
