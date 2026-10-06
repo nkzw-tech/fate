@@ -24,6 +24,23 @@ test('bundles guides and the matching API reference for every package that ships
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, '# Docs\n\n[Vue](/guide/vue#installation)\n[API](/api)\n');
     }
+    const sharedApi = 'docs/api/react-fate/src/type-aliases/Deferred.md';
+    const referencedApi = 'docs/api/fate/src/type-aliases/ViewRef.md';
+    for (const file of [sharedApi, referencedApi]) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+    }
+    writeFileSync(
+      join(root, sharedApi),
+      '# Deferred\n\n[ViewRef](../../../fate/src/type-aliases/ViewRef.md#type-parameters)\n',
+    );
+    writeFileSync(
+      join(root, referencedApi),
+      '# ViewRef\n\n[Deferred](../../../react-fate/src/type-aliases/Deferred.md)\n',
+    );
+    writeFileSync(
+      join(root, 'docs/api/vue-fate/index.md'),
+      '# Vue\n\n[Deferred](../react-fate/src/type-aliases/Deferred.md)\n',
+    );
 
     await execFileAsync(process.execPath, [join(import.meta.dirname, '../copy-package-docs.ts')], {
       cwd: root,
@@ -58,6 +75,11 @@ test('bundles guides and the matching API reference for every package that ships
     expect(readFileSync(join(root, 'packages/vue-fate/docs/api/index.md'), 'utf8')).toContain(
       '[Vue](vue-fate/index.md)',
     );
+    for (const file of [sharedApi, referencedApi]) {
+      expect(readFileSync(join(root, 'packages/vue-fate', file), 'utf8')).toBe(
+        readFileSync(join(root, file), 'utf8'),
+      );
+    }
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

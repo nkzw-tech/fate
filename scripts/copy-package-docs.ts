@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const root = process.cwd();
 
@@ -40,6 +40,36 @@ const assertDirectory = (path: string) => {
 
 const toMarkdownPath = (fromDirectory: string, targetPath: string) =>
   relative(fromDirectory, targetPath).replaceAll('\\', '/');
+
+const markdownFiles = (directory: string): Array<string> =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return markdownFiles(path);
+    }
+    return entry.isFile() && entry.name.endsWith('.md') ? [path] : [];
+  });
+
+// TypeDoc can document a shared export under another entry point. Keep those
+// linked pages, including their own references, available in each npm bundle.
+const copyApiReferences = (targetRoot: string) => {
+  const files = markdownFiles(targetRoot);
+  for (const file of files) {
+    for (const [, link] of readFileSync(file, 'utf8').matchAll(/\]\(([^)#]+\.md)(?:#[^)]*)?\)/g)) {
+      if (!link || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(link)) {
+        continue;
+      }
+      const target = resolve(dirname(file), link);
+      const apiPath = toMarkdownPath(targetRoot, target);
+      if (apiPath.startsWith('../') || isAbsolute(apiPath) || existsSync(target)) {
+        continue;
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(join(root, 'docs/api', apiPath), target);
+      files.push(target);
+    }
+  }
+};
 
 const rewriteDocsLinks = (targetRoot: string, directory = targetRoot) => {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -87,6 +117,7 @@ for (const packageDocs of packages) {
       recursive: true,
     });
   }
+  copyApiReferences(join(target, 'api'));
   cpSync(guideSource, join(target, 'guide'), { recursive: true });
   cpSync(integrationsSource, join(target, 'integrations'), { recursive: true });
   writeFileSync(
