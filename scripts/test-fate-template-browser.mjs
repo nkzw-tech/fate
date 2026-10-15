@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
+import { stripVTControlCharacters } from 'node:util';
 import { chromium, expect } from '@playwright/test';
 
 const [target, framework] = process.argv.slice(2);
@@ -42,7 +43,7 @@ const startServer = (args, cwd, readyMessage, env = process.env) => {
     const onOutput = (chunk) => {
       output = `${output}${chunk}`.slice(-20_000);
       serverOutput += chunk;
-      if (serverOutput.includes(readyMessage)) {
+      if (stripVTControlCharacters(serverOutput).includes(readyMessage)) {
         clearTimeout(timeout);
         resolve();
       }
