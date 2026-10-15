@@ -79,12 +79,12 @@
   },
   "dependencies": {
     "superjson": "^2.2.6",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
-    "drizzle-orm": "^0.45.3",
+    "drizzle-orm": "^0.45.4",
     "esbuild": "^0.28.2",
     "vite": "catalog:"
   },

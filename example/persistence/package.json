@@ -13,11 +13,11 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-fate": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "vite": "catalog:",

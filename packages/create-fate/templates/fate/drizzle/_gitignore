@@ -1,6 +1,7 @@
 .fate/
 **/.fate/
 .void/
+.wrangler/
 **/.void/
 .eslintcache
 .pnpm-debug.log

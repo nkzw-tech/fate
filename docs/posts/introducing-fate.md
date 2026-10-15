@@ -104,8 +104,8 @@ Let me show you a basic _fate_ code example that declares its data requirements 
 
 ```tsx
 import type { Post } from '@org/server/views.ts';
-import { UserView } from './UserCard.tsx';
 import { useView, view, ViewRef } from 'react-fate';
+import { UserView } from './UserCard.tsx';
 
 export const PostView = view<Post>()({
   author: UserView,

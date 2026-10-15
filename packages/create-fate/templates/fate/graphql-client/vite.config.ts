@@ -16,17 +16,7 @@ export default defineConfig({
   environments: {
     void_worker: {
       optimizeDeps: {
-        exclude: [
-          '@nkzw/fate',
-          '@nkzw/fate/client',
-          '@nkzw/fate/server',
-          '@void/react',
-          '@void/react/pages-server',
-          'lucide-react',
-          'react-error-boundary',
-          'react-fate',
-          'react-fate/client',
-        ],
+        exclude: ['@nkzw/fate', '@nkzw/fate/client', '@nkzw/fate/server', 'react-fate/client'],
       },
     },
   },

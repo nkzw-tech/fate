@@ -15,8 +15,8 @@ vp add @nkzw/fate-indexeddb
 Then pass `persistence` when creating the client:
 
 ```tsx
-import { createPersistence } from '@nkzw/fate/persistence';
 import { createIndexedDBStorage } from '@nkzw/fate-indexeddb';
+import { createPersistence } from '@nkzw/fate/persistence';
 import { createFateClient } from 'react-fate/client';
 
 const fate = createFateClient({

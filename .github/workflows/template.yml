@@ -27,12 +27,15 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.template }}
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.template }}-${{ matrix.framework }}
       cancel-in-progress: true
 
     strategy:
       fail-fast: false
       matrix:
+        framework:
+          - react
+          - vue
         template:
           - graphql
           - graphql-client
@@ -55,5 +58,5 @@ jobs:
       - name: Install browser
         run: vp exec playwright install --with-deps chromium
 
-      - name: Test ${{ matrix.template }} template
-        run: scripts/test-fate-template.sh ${{ matrix.template }}
+      - name: Test ${{ matrix.template }} template (${{ matrix.framework }})
+        run: scripts/test-fate-template.sh ${{ matrix.template }} ${{ matrix.framework }}

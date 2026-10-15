@@ -282,8 +282,8 @@ ViewRefs carry a set of view names they can resolve. `useView` throws if a ref d
 A view can take parameters. Define the selection with a function, then bind its parameters where you request or compose the view:
 
 ```tsx
-import { alias, useRequest, useView, view, when, type ViewRef } from 'react-fate';
 import type { User } from '@your-org/server/views';
+import { alias, useRequest, useView, view, when, type ViewRef } from 'react-fate';
 
 const AccountView = view<User>()({ email: true });
 

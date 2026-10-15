@@ -22,6 +22,13 @@
       "when": 1789707495097,
       "tag": "20260918045815_legal_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792036733755,
+      "tag": "20261015035853_better_auth_accounts",
+      "breakpoints": true
     }
   ]
 }

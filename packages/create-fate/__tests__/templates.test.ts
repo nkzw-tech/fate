@@ -113,7 +113,6 @@ describe('create-fate templates', () => {
       'utf8',
     );
 
-    expect(voidViteConfig).toContain("'@void/react'");
     expect(voidViteConfig).toContain("'@nkzw/fate/client'");
     expect(voidViteConfig).toContain("'react-fate/client'");
     expect(voidViteConfig).toContain("'void-fate/react'");
@@ -165,6 +164,14 @@ describe('create-fate templates', () => {
           )
           .all(),
       ).toEqual([]);
+      database.exec(`
+        INSERT INTO account (id, accountId, providerId, userId, createdAt, updatedAt)
+        SELECT 'new-account', id, 'credential', id, unixepoch(), unixepoch()
+        FROM user LIMIT 1;
+      `);
+      expect(database.prepare("SELECT id FROM account WHERE id = 'new-account'").get()).toEqual({
+        id: 'new-account',
+      });
     } finally {
       database.close();
     }

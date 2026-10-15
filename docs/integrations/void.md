@@ -61,9 +61,9 @@ export default defineConfig({
 
 ```ts [Vue]
 import { voidVue } from '@void/vue/plugin';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite-plus';
 import { voidPlugin } from 'void';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [

@@ -26,7 +26,7 @@
     "@nkzw/define-env": "^1.1.0",
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.3.3",
-    "@void/react": "^0.24.0",
+    "@void/react": "^1.1.0",
     "better-auth": "^1.7.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -37,7 +37,7 @@
     "react-error-boundary": "^6.1.3",
     "react-fate": "latest",
     "tailwind-merge": "^3.6.0",
-    "void": "^0.24.0"
+    "void": "^1.1.0"
   },
   "devDependencies": {
     "@nkzw/fbtee-compiler": "^5.0.0",

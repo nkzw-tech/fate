@@ -651,6 +651,31 @@ const configureVueRootPackageJson = (targetPath) => {
   writePackageJson(packagePath, packageJson);
 };
 
+const configureVueRootViteConfig = (targetPath) => {
+  const configPath = path.join(targetPath, 'vite.config.ts');
+  const config = fs.readFileSync(configPath, 'utf8');
+  fs.writeFileSync(
+    configPath,
+    config.replace(
+      'overrides: [',
+      `overrides: [
+      {
+        env: { browser: true },
+        files: ['**/*.vue'],
+        globals: {
+          defineEmits: 'readonly',
+          defineExpose: 'readonly',
+          defineModel: 'readonly',
+          defineOptions: 'readonly',
+          defineProps: 'readonly',
+          defineSlots: 'readonly',
+          withDefaults: 'readonly',
+        },
+      },`,
+    ),
+  );
+};
+
 const configureVueVoidServerFiles = (frontendRoot) => {
   const oldSessionUser = path.join(frontendRoot, 'src', 'user', 'SessionUser.tsx');
   const nextSessionUser = path.join(frontendRoot, 'src', 'user', 'SessionUser.ts');
@@ -778,6 +803,7 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
   configureVuePackageJson(frontendRoot, selectedVariant, originalPackageJson);
   if (frontendRoot !== targetPath) {
     configureVueRootPackageJson(targetPath);
+    configureVueRootViteConfig(targetPath);
   }
   configureVueAgents(targetPath, selectedVariant);
   if (selectedVariant === 'void') {

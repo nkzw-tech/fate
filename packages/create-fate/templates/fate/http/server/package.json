@@ -25,7 +25,7 @@
     "@nkzw/define-env": "^1.1.0",
     "@nkzw/fate": "latest",
     "better-auth": "^1.7.7",
-    "drizzle-orm": "^0.45.3",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.5",
     "pg": "^8.23.1",
     "zod": "^4.4.3"

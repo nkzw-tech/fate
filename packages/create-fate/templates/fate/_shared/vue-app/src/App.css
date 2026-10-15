@@ -2,12 +2,7 @@
 
 body {
   font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'Open Sans',
-    'Helvetica Neue',
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Open Sans', 'Helvetica Neue',
     sans-serif;
 
   background-color: hsl(var(--background));

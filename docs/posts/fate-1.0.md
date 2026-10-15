@@ -44,8 +44,8 @@ A `View` is co-located with your React Components and might look like this:
 
 ```tsx
 import type { Post } from '@org/server/views.ts';
-import { UserView } from './UserCard.tsx';
 import { useView, view, ViewRef } from 'react-fate';
+import { UserView } from './UserCard.tsx';
 
 export const PostView = view<Post>()({
   author: UserView,

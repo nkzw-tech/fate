@@ -2,10 +2,11 @@
 set -euo pipefail
 
 template="${1:-void}"
+framework="${2:-react}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work_root="${repo_root}/.template-tests/apps"
-target_dir="${work_root}/${template}"
-package_dir="${work_root}/${template}-packages"
+target_dir="${work_root}/${template}-${framework}"
+package_dir="${work_root}/${template}-${framework}-packages"
 templates_root="${repo_root}/packages/create-fate/templates/fate"
 
 if [[ ! -d "${templates_root}/${template}" ]]; then
@@ -13,16 +14,24 @@ if [[ ! -d "${templates_root}/${template}" ]]; then
   exit 1
 fi
 
+if [[ "${framework}" != "react" && "${framework}" != "vue" ]]; then
+  echo "Unknown UI framework: ${framework}" >&2
+  exit 1
+fi
+
 cd "${repo_root}"
 vp run --filter '@nkzw/fate' build
 vp run --filter react-fate build
+if [[ "${framework}" == "vue" ]]; then
+  vp run --filter vue-fate build
+fi
 if [[ "${template}" == "void" ]]; then
   vp run --filter void-fate build
 fi
 
 rm -rf "${target_dir}"
 mkdir -p "${work_root}"
-node "${repo_root}/packages/create-fate/bin/create-fate.mjs" "${target_dir}" --template "${template}" --no-setup
+node "${repo_root}/packages/create-fate/bin/create-fate.mjs" "${target_dir}" --template "${template}" --framework "${framework}" --no-setup
 
 # Isolate generated-project checks from the repository ignore rules.
 git init -q "${target_dir}"
@@ -31,6 +40,9 @@ git init -q "${target_dir}"
 mkdir -p "${package_dir}"
 vp pm pack --filter '@nkzw/fate' --out "${package_dir}/fate.tgz"
 vp pm pack --filter react-fate --out "${package_dir}/react-fate.tgz"
+if [[ "${framework}" == "vue" ]]; then
+  vp pm pack --filter vue-fate --out "${package_dir}/vue-fate.tgz"
+fi
 if [[ "${template}" == "void" ]]; then
   vp pm pack --filter void-fate --out "${package_dir}/void-fate.tgz"
 fi
@@ -55,8 +67,11 @@ EOF
 fi
 
 TEMPLATE_DIR="${target_dir}" \
+TEMPLATE="${template}" \
+FRAMEWORK="${framework}" \
 FATE_PACKAGE="file:${package_dir}/fate.tgz" \
 REACT_FATE_PACKAGE="file:${package_dir}/react-fate.tgz" \
+VUE_FATE_PACKAGE="file:${package_dir}/vue-fate.tgz" \
 VOID_FATE_PACKAGE="file:${package_dir}/void-fate.tgz" \
 node --input-type=module <<'EOF'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -65,7 +80,10 @@ const path = `${process.env.TEMPLATE_DIR}/pnpm-workspace.yaml`;
 const overrides = [
   `  '@nkzw/fate': ${JSON.stringify(process.env.FATE_PACKAGE)}`,
   `  react-fate: ${JSON.stringify(process.env.REACT_FATE_PACKAGE)}`,
-  ...(process.env.TEMPLATE_DIR?.endsWith('/void')
+  ...(process.env.FRAMEWORK === 'vue'
+    ? [`  vue-fate: ${JSON.stringify(process.env.VUE_FATE_PACKAGE)}`]
+    : []),
+  ...(process.env.TEMPLATE === 'void'
     ? [`  void-fate: ${JSON.stringify(process.env.VOID_FATE_PACKAGE)}`]
     : []),
 ].join('\n');
@@ -95,6 +113,10 @@ if [[ "${template}" == "prisma" || "${template}" == "graphql" ]]; then
   vp run --filter '@app/server' prisma db seed
 fi
 vp check --fix
-vp check
 vp test
 vp run build
+vp check
+
+if [[ "${template}" != "graphql-client" ]]; then
+  node "${repo_root}/scripts/test-fate-template-browser.mjs" "${target_dir}" "${framework}"
+fi

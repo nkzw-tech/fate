@@ -437,8 +437,8 @@ ViewRefs carry a set of view names they can resolve. `useView` throws if a ref d
 A view can take parameters. Define the selection with a function, then bind its parameters where you request or compose the view:
 
 ```tsx
-import { alias, useRequest, useView, view, when, type ViewRef } from 'react-fate';
 import type { User } from '@your-org/server/views';
+import { alias, useRequest, useView, view, when, type ViewRef } from 'react-fate';
 
 const AccountView = view<User>()({ email: true });
 
@@ -1391,8 +1391,8 @@ export const fate = createFateServer({
 The equivalent tRPC mutation lives in your router and returns the selected shape that the client asked for:
 
 ```tsx
-import { z } from 'zod';
 import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { z } from 'zod';
 import { procedure, router } from '../init.ts';
 import { postDataView, PostItem } from '../views.ts';
 
@@ -1525,8 +1525,8 @@ vp add @nkzw/fate-indexeddb
 Then pass `persistence` when creating the client:
 
 ```tsx
-import { createPersistence } from '@nkzw/fate/persistence';
 import { createIndexedDBStorage } from '@nkzw/fate-indexeddb';
+import { createPersistence } from '@nkzw/fate/persistence';
 import { createFateClient } from 'react-fate/client';
 
 const fate = createFateClient({
@@ -1863,9 +1863,9 @@ If your server lives in a separate package, install `@nkzw/fate` there as a runt
 Use the Vue adapter's Vite plugin in the client app:
 
 ```ts
-import { fate } from 'vue-fate/vite';
-import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
@@ -2213,8 +2213,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
@@ -2737,8 +2737,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
@@ -2877,8 +2877,8 @@ Pass the `Root` export from `views.ts` to fate in your tRPC `init.ts` file. fate
 Use `createPrismaFate` from `@nkzw/fate/server/prisma` next to your tRPC helpers. By default, fate reads Prisma delegates from `ctx.prisma` using each data view's type name:
 
 ```tsx
-import { initTRPC } from '@trpc/server';
 import { createPrismaFate } from '@nkzw/fate/server/prisma';
+import { initTRPC } from '@trpc/server';
 import type { AppContext } from './context.ts';
 import { Root } from './views.ts';
 
@@ -2926,8 +2926,8 @@ return plan.resolve(post);
 Use `createDrizzleFate` from `@nkzw/fate/server/drizzle`. fate matches data view type names to Drizzle tables from your schema. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
 
 ```tsx
-import { initTRPC } from '@trpc/server';
 import { createDrizzleFate } from '@nkzw/fate/server/drizzle';
+import { initTRPC } from '@trpc/server';
 import db from '../drizzle/db.ts';
 import schema from '../drizzle/schema.ts';
 import type { AppContext } from './context.ts';
@@ -3168,8 +3168,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
@@ -3327,9 +3327,9 @@ export default defineConfig({
 
 ```ts [Vue]
 import { voidVue } from '@void/vue/plugin';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite-plus';
 import { voidPlugin } from 'void';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [

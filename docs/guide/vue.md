@@ -31,9 +31,9 @@ If your server lives in a separate package, install `@nkzw/fate` there as a runt
 Use the Vue adapter's Vite plugin in the client app:
 
 ```ts
-import { fate } from 'vue-fate/vite';
-import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [

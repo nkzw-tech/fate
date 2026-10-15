@@ -47,6 +47,7 @@ export const session = sqliteTable(
     createdAt: timestampColumn(),
     expiresAt: integer({ mode: 'timestamp' }).notNull(),
     id: idColumn().primaryKey(),
+    impersonatedBy: text(),
     ipAddress: text(),
     token: text().notNull(),
     updatedAt: timestampColumn(),
@@ -55,7 +56,10 @@ export const session = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
   },
-  (table) => [uniqueIndex('session_token_key').on(table.token)],
+  (table) => [
+    uniqueIndex('session_token_key').on(table.token),
+    index('session_userId_idx').on(table.userId),
+  ],
 );
 
 export const account = sqliteTable(
@@ -67,7 +71,6 @@ export const account = sqliteTable(
     createdAt: timestampColumn(),
     id: idColumn().primaryKey(),
     idToken: text(),
-    issuer: text().notNull(),
     password: text(),
     providerId: text().notNull(),
     refreshToken: text(),
@@ -78,7 +81,20 @@ export const account = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
   },
-  (table) => [uniqueIndex('account_issuer_accountId_key').on(table.issuer, table.accountId)],
+  (table) => [index('account_userId_idx').on(table.userId)],
+);
+
+export const verification = sqliteTable(
+  'verification',
+  {
+    createdAt: timestampColumn(),
+    expiresAt: integer({ mode: 'timestamp' }).notNull(),
+    id: idColumn().primaryKey(),
+    identifier: text().notNull(),
+    updatedAt: timestampColumn(),
+    value: text().notNull(),
+  },
+  (table) => [index('verification_identifier_idx').on(table.identifier)],
 );
 
 export const category = sqliteTable(
@@ -319,6 +335,7 @@ const schema = {
   tagRelations,
   user,
   userRelations,
+  verification,
 } as const;
 
 export default schema;

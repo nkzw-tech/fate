@@ -203,8 +203,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
@@ -343,8 +343,8 @@ Pass the `Root` export from `views.ts` to fate in your tRPC `init.ts` file. fate
 Use `createPrismaFate` from `@nkzw/fate/server/prisma` next to your tRPC helpers. By default, fate reads Prisma delegates from `ctx.prisma` using each data view's type name:
 
 ```tsx
-import { initTRPC } from '@trpc/server';
 import { createPrismaFate } from '@nkzw/fate/server/prisma';
+import { initTRPC } from '@trpc/server';
 import type { AppContext } from './context.ts';
 import { Root } from './views.ts';
 
@@ -392,8 +392,8 @@ return plan.resolve(post);
 Use `createDrizzleFate` from `@nkzw/fate/server/drizzle`. fate matches data view type names to Drizzle tables from your schema. The `db` option can be a Drizzle database object or a function that receives your tRPC context and returns a request-scoped database object:
 
 ```tsx
-import { initTRPC } from '@trpc/server';
 import { createDrizzleFate } from '@nkzw/fate/server/drizzle';
+import { initTRPC } from '@trpc/server';
 import db from '../drizzle/db.ts';
 import schema from '../drizzle/schema.ts';
 import type { AppContext } from './context.ts';
@@ -634,8 +634,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [

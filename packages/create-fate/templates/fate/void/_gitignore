@@ -1,5 +1,6 @@
 .fate/
 .void/
+.wrangler/
 .eslintcache
 .pnpm-debug.log
 node_modules/

@@ -1,11 +1,14 @@
 import nkzw from '@nkzw/oxlint-config';
 import tailwindcss from '@tailwindcss/vite';
+import vue from '@vitejs/plugin-vue';
 import { voidVue } from '@void/vue/plugin';
 import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 import { fate } from 'vue-fate/vite';
 
 /* __ENV_CONFIG__ */
+
+const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
 
 export default defineConfig({
   /* __BUILD_CONFIG__ */
@@ -31,6 +34,7 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: true },
     overrides: [
       {
+        env: { browser: true },
         files: ['**/*.vue'],
         globals: {
           defineEmits: 'readonly',
@@ -42,13 +46,20 @@ export default defineConfig({
           withDefaults: 'readonly',
         },
       },
+      {
+        files: ['db/seed.ts', '**/__tests__/**'],
+        rules: {
+          'no-console': 'off',
+        },
+      },
     ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   plugins: [
-    ...(lazyPlugins(() => [tailwindcss(), voidPlugin(), voidVue()]) ?? []),
+    ...(lazyPlugins(() => [tailwindcss(), ...(isTest ? [vue()] : [voidPlugin(), voidVue()])]) ??
+      []),
     fate({
       module: '__FATE_MODULE__',
       /* __FATE_TRANSPORT__ */

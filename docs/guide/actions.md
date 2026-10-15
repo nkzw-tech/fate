@@ -187,8 +187,8 @@ export const fate = createFateServer({
 The equivalent tRPC mutation lives in your router and returns the selected shape that the client asked for:
 
 ```tsx
-import { z } from 'zod';
 import { connectionArgs, createResolver } from '@nkzw/fate/server';
+import { z } from 'zod';
 import { procedure, router } from '../init.ts';
 import { postDataView, PostItem } from '../views.ts';
 

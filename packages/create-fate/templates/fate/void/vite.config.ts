@@ -19,13 +19,6 @@ export default defineConfig({
         exclude: [
           '@nkzw/fate/client',
           '@nkzw/fate/server',
-          '@nkzw/stack',
-          '@radix-ui/react-slot',
-          '@void/react',
-          '@void/react/pages-server',
-          'lucide-react',
-          'react-error-boundary',
-          'react-fate',
           'react-fate/client',
           'void-fate/react',
           'void-fate/server',

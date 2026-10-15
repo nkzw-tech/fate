@@ -124,8 +124,8 @@ export default defineConfig({
 
 ```ts [Vue]
 import vue from '@vitejs/plugin-vue';
-import { fate } from 'vue-fate/vite';
 import { defineConfig } from 'vite';
+import { fate } from 'vue-fate/vite';
 
 export default defineConfig({
   plugins: [
