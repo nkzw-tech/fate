@@ -1,0 +1,19 @@
+scripts/test-fate-template-browser.mjs
+  s_7221c1bcb91c4b::t_c78e74384409cb 8,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c7433421777ddf5efab1462e0c60cc4eda06ea83",
+  "prompts": {},
+  "sessions": {
+    "s_7221c1bcb91c4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13db3-ffa8-7700-a2db-12d8495ab52b",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
