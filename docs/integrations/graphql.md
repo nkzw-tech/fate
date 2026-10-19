@@ -200,7 +200,7 @@ const fate = createFateClient({
 });
 ```
 
-GraphQL operations issued in the same microtask are batched into a single GraphQL query or mutation document with aliased fields.
+GraphQL queries issued in the same microtask are batched into a single document with aliased fields. Mutations use separate requests so a non-null failure cannot skip another mutation or discard its result. Mutations queued in the same microtask execute in invocation order, and a failed mutation does not prevent the next one from executing. The transport does not automatically retry mutations.
 
 Deferred view fields work with the GraphQL transport through the same normalized cache flow as native HTTP: the eager query omits `defer(...)` fields, and `useView`, `useListView`, or `useLiveListView` fetches the missing selection through `nodes(ids:)` when the deferred handle is read. GraphQL `@defer` is the natural wire format for this feature, but fate's GraphQL transport currently expects one JSON result per operation and does not consume incremental multipart patches yet.
 

@@ -648,7 +648,7 @@ const graphQLRequest = async ({
   const payload = assertGraphQLResponse(await response.json());
 
   return {
-    data: isRecord(payload.data) ? payload.data : {},
+    data: payload.data,
     errors: payload.errors ?? [],
     status: response.status,
   };
@@ -781,81 +781,102 @@ export function createGraphQLTransport<
       }
     });
 
+  const execute = async (operations: ReadonlyArray<PendingOperation>) => {
+    if (!operations.length) {
+      return;
+    }
+    const kind = operations[0].kind;
+    try {
+      const variables = Object.assign(
+        {},
+        ...operations.map((entry) => entry.variables),
+      ) as NonNullable<PendingOperation['variables']>;
+      const definitions = Object.entries(variables).map(
+        ([name, variable]) => `$${name}: ${variable.type}`,
+      );
+      const variableDefinitions = definitions.length ? `(${definitions.join(', ')})` : '';
+      const { data, errors, status } = await graphQLRequest({
+        fetchImpl,
+        headers,
+        query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions} { ${operations
+          .map((entry) => `${entry.alias}: ${entry.selection}`)
+          .join(' ')} }`,
+        url: endpoint,
+        variables: schema
+          ? Object.fromEntries(
+              Object.entries(variables).map(([name, variable]) => [name, variable.value]),
+            )
+          : undefined,
+      });
+      const aliases = new Set(operations.map((operation) => operation.alias));
+      const errorsByAlias = new Map<string, Array<GraphQLErrorPayload>>();
+      const globalErrors: Array<GraphQLErrorPayload> = [];
+
+      for (const error of errors) {
+        const alias = typeof error.path?.[0] === 'string' ? error.path[0] : undefined;
+        if (alias && aliases.has(alias)) {
+          const aliasErrors = errorsByAlias.get(alias) ?? [];
+          aliasErrors.push(error);
+          errorsByAlias.set(alias, aliasErrors);
+        } else {
+          globalErrors.push(error);
+        }
+      }
+
+      if (globalErrors.length || !isRecord(data)) {
+        throw new GraphQLRequestError(errors, {
+          data,
+          message: 'fate(graphql): Expected a GraphQL response data object.',
+          status,
+        });
+      }
+
+      for (const operation of operations) {
+        const operationErrors = errorsByAlias.get(operation.alias);
+        if (operationErrors?.length) {
+          operation.reject(
+            new GraphQLRequestError(operationErrors, { data: data[operation.alias], status }),
+          );
+          continue;
+        }
+
+        if (!Object.hasOwn(data, operation.alias)) {
+          operation.reject(
+            new GraphQLRequestError([], {
+              data,
+              message: `fate(graphql): Response is missing result '${operation.alias}'.`,
+              status,
+            }),
+          );
+          continue;
+        }
+
+        operation.resolve(operation.transform(data[operation.alias]));
+      }
+    } catch (error) {
+      for (const operation of operations) {
+        operation.reject(error);
+      }
+    }
+  };
+
   const flush = async () => {
     scheduled = false;
     const batch = pending;
     pending = [];
 
-    if (!batch.length) {
-      return;
-    }
-
-    await Promise.all(
-      (['query', 'mutation'] as const).map(async (kind) => {
-        const operations = batch.filter((entry) => entry.kind === kind);
-        if (operations.length === 0) {
-          return;
-        }
-
-        try {
-          const variables = Object.assign(
-            {},
-            ...operations.map((entry) => entry.variables),
-          ) as NonNullable<PendingOperation['variables']>;
-          const definitions = Object.entries(variables).map(
-            ([name, variable]) => `$${name}: ${variable.type}`,
-          );
-          const variableDefinitions = definitions.length ? `(${definitions.join(', ')})` : '';
-          const { data, errors, status } = await graphQLRequest({
-            fetchImpl,
-            headers,
-            query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions} { ${operations
-              .map((entry) => `${entry.alias}: ${entry.selection}`)
-              .join(' ')} }`,
-            url: endpoint,
-            variables: schema
-              ? Object.fromEntries(
-                  Object.entries(variables).map(([name, variable]) => [name, variable.value]),
-                )
-              : undefined,
-          });
-          const aliases = new Set(operations.map((operation) => operation.alias));
-          const errorsByAlias = new Map<string, Array<GraphQLErrorPayload>>();
-          const globalErrors: Array<GraphQLErrorPayload> = [];
-
-          for (const error of errors) {
-            const alias = typeof error.path?.[0] === 'string' ? error.path[0] : undefined;
-            if (alias && aliases.has(alias)) {
-              const aliasErrors = errorsByAlias.get(alias) ?? [];
-              aliasErrors.push(error);
-              errorsByAlias.set(alias, aliasErrors);
-            } else {
-              globalErrors.push(error);
-            }
-          }
-
-          if (globalErrors.length) {
-            throw new GraphQLRequestError(errors, { data, status });
-          }
-
-          for (const operation of operations) {
-            const operationErrors = errorsByAlias.get(operation.alias);
-            if (operationErrors?.length) {
-              operation.reject(
-                new GraphQLRequestError(operationErrors, { data: data[operation.alias], status }),
-              );
-              continue;
-            }
-
-            operation.resolve(operation.transform(data[operation.alias]));
-          }
-        } catch (error) {
-          for (const operation of operations) {
-            operation.reject(error);
+    await Promise.all([
+      execute(batch.filter((operation) => operation.kind === 'query')),
+      (async () => {
+        // Separate executions prevent non-null failures from skipping sibling mutations.
+        // Preserve the invocation order that GraphQL previously provided within each batch.
+        for (const operation of batch) {
+          if (operation.kind === 'mutation') {
+            await execute([operation]);
           }
         }
-      }),
-    );
+      })(),
+    ]);
   };
 
   const transport: Transport<Mutations> = {

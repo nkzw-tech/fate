@@ -931,11 +931,12 @@ test('keeps query and mutation variables separate from selection arguments', asy
     { name: 'Grassland', state: 'Desert' },
     { name: 'Desert' },
   ]);
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
   expect(update.mock.calls[0][0]).toEqual({ input: { biome: 'Grassland', limit: 4 } });
   const bodies = fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
   expect(Object.keys(bodies[0].variables)).toHaveLength(1);
-  expect(Object.keys(bodies[1].variables)).toHaveLength(3);
+  expect(Object.keys(bodies[1].variables)).toHaveLength(2);
+  expect(Object.keys(bodies[2].variables)).toHaveLength(1);
 });
 
 test('preserves a real mutation argument named args alongside selection arguments', async () => {
