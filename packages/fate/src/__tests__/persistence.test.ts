@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
+import { GraphQLRequestError } from '../graphql-error.ts';
 import { mutation } from '../mutation.ts';
 import type { MutationIdentity, PersistenceSession } from '../persistence-types.ts';
 import { createPersistence, type PersistenceStorage } from '../persistence.ts';
@@ -355,6 +356,56 @@ test('persist false uses the existing action API without journaling or identity'
   expect(result.result?.title).toBe('Immediate');
   expect(mutate.mock.calls[0][3]).toBeUndefined();
   expect(session.getSnapshot().mutations).toHaveLength(0);
+});
+
+test('explicit GraphQL client errors fail durable delivery once and roll back optimism', async () => {
+  const error = new GraphQLRequestError(
+    [{ extensions: { http: { status: 409 } }, message: 'ongoing-invasion' }],
+    { status: 200 },
+  );
+  const { client, mutate, session } = setup({
+    mutate: async () => {
+      throw error;
+    },
+    online: () => true,
+  });
+  await session.ready;
+  client.write('Note', { id: '1', title: 'Original' }, new Set(['id', 'title']));
+  const result = client.mutations.edit({
+    input: { id: '1', title: 'Invalid' },
+    optimistic: { title: 'Optimistic' },
+  });
+  void result.catch(() => {});
+  await vi.waitFor(() => expect(session.getSnapshot().mutations[0]?.status).toBe('failed'));
+  await expect(result).resolves.toMatchObject({
+    error: { message: 'ongoing-invasion' },
+    result: undefined,
+  });
+  expect(client.store.read(noteId)?.title).toBe('Original');
+  expect(mutate).toHaveBeenCalledTimes(1);
+});
+
+test('unclassified GraphQL errors remain retryable for durable delivery', async () => {
+  let attempts = 0;
+  const { client, mutate } = setup({
+    mutate: async (input) => {
+      if (++attempts === 1) {
+        throw new GraphQLRequestError([{ message: 'Temporary execution failure' }], {
+          status: 200,
+        });
+      }
+      return { ...input, __typename: 'Note' };
+    },
+    online: () => true,
+  });
+  await expect(
+    client.mutations.edit({
+      input: { id: '1', title: 'Confirmed' },
+      optimistic: { title: 'Optimistic' },
+    }),
+  ).resolves.toMatchObject({ error: undefined, result: { title: 'Confirmed' } });
+  expect(mutate).toHaveBeenCalledTimes(2);
+  expect(client.store.read(noteId)?.title).toBe('Confirmed');
 });
 
 test('storage failure prevents execution and optimistic writes', async () => {

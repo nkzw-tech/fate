@@ -1,8 +1,10 @@
 import type { TRPCError } from '@trpc/server';
 import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
+import { GraphQLRequestError } from './graphql-error.ts';
 import type { MutationIdentity } from './persistence-types.ts';
 import { FateRequestError } from './protocol.ts';
+import { isRecord } from './record.ts';
 import { toEntityId } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import type {
@@ -333,7 +335,11 @@ export function wrapMutation<
 const handleMutationError = (key: string, error: unknown): { error: Error; result: undefined } => {
   if (error instanceof Error) {
     const statusCode = getErrorStatusCode(error);
-    const errorCategory = statusCode ? categorizeHTTPErrorStatus(statusCode) : 'boundary';
+    const errorCategory = statusCode
+      ? categorizeHTTPErrorStatus(statusCode)
+      : error instanceof GraphQLRequestError && error.kind === 'execution' && error.errors.length
+        ? 'callSite'
+        : 'boundary';
     if (errorCategory === 'boundary') {
       throw error;
     }
@@ -344,9 +350,61 @@ const handleMutationError = (key: string, error: unknown): { error: Error; resul
 
 export type ErrorHandlingScope = 'callSite' | 'boundary';
 
+const graphQLErrorStatuses = new Map<string, number>([
+  ['BAD_REQUEST', 400],
+  ['BAD_USER_INPUT', 400],
+  ['GRAPHQL_PARSE_FAILED', 400],
+  ['GRAPHQL_VALIDATION_FAILED', 400],
+  ['VALIDATION_ERROR', 400],
+  ['UNAUTHENTICATED', 401],
+  ['UNAUTHORIZED', 401],
+  ['FORBIDDEN', 403],
+  ['NOT_FOUND', 404],
+  ['TIMEOUT', 408],
+  ['CONFLICT', 409],
+  ['PRECONDITION_FAILED', 412],
+  ['UNPROCESSABLE_CONTENT', 422],
+  ['TOO_MANY_REQUESTS', 429],
+  ['INTERNAL_ERROR', 500],
+  ['INTERNAL_SERVER_ERROR', 500],
+  ['NOT_IMPLEMENTED', 501],
+  ['BAD_GATEWAY', 502],
+  ['SERVICE_UNAVAILABLE', 503],
+  ['GATEWAY_TIMEOUT', 504],
+]);
+
+const isErrorStatus = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 400 && value <= 599;
+
 export const getErrorStatusCode = (error: Error): number | undefined => {
   if (error instanceof FateRequestError) {
     return error.status;
+  }
+
+  if (error instanceof GraphQLRequestError) {
+    if (error.kind === 'protocol') {
+      return undefined;
+    }
+    let statusCode = isErrorStatus(error.status) ? error.status : undefined;
+    if (statusCode && categorizeHTTPErrorStatus(statusCode) === 'boundary') {
+      return statusCode;
+    }
+    for (const { extensions } of error.errors) {
+      const httpStatus = isRecord(extensions?.http) ? extensions.http.status : undefined;
+      const codeStatus =
+        typeof extensions?.code === 'string'
+          ? graphQLErrorStatuses.get(extensions.code)
+          : undefined;
+      for (const status of [httpStatus, codeStatus]) {
+        if (isErrorStatus(status)) {
+          if (categorizeHTTPErrorStatus(status) === 'boundary') {
+            return status;
+          }
+          statusCode ??= status;
+        }
+      }
+    }
+    return statusCode;
   }
 
   const { data } = error as { data?: unknown };

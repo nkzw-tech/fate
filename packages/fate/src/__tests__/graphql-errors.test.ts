@@ -1,7 +1,10 @@
 import { buildSchema, graphql, parse } from 'graphql';
 import { expect, test, vi } from 'vite-plus/test';
+import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
+import { GraphQLRequestError } from '../graphql-error.ts';
 import { createGraphQLTransport } from '../graphqlTransport.ts';
+import { mutation } from '../mutation.ts';
 
 const errors = [
   { extensions: { code: 'FORBIDDEN' }, message: 'Private field', path: ['f1', 'email'] },
@@ -135,5 +138,70 @@ test.each([0, 1])(
         expect(operation.selectionSet.selections).toHaveLength(1);
       }
     }
+  },
+);
+
+test.each(['mutation', 'action'] as const)(
+  'GraphQL execution errors reach %s callers and roll back instead of normalizing partial data',
+  async (kind) => {
+    type User = { __typename: 'User'; id: string; name: string };
+    const error = { message: 'ongoing-invasion', path: ['f1', 'name'] };
+    const transport = createGraphQLTransport<{
+      rename: { input: { id: string; name: string }; output: User };
+    }>({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            data: { f1: { id: 'User-1', name: 'Partial' } },
+            errors: [error],
+          }),
+        ),
+      live: false,
+      mutations: { rename: { entity: 'User', field: 'rename', inputArg: false } },
+      types: [{ type: 'User' }],
+      url: '/graphql',
+    });
+    const mutations = { rename: mutation<User, { id: string; name: string }, User>('User') };
+    const roots = {};
+    const client = createClient<[typeof roots, typeof mutations]>({
+      mutations,
+      roots,
+      transport,
+      types: [{ type: 'User' }],
+    });
+    client.write('User', { id: '1', name: 'Original' }, new Set(['id', 'name']));
+    const options = { input: { id: '1', name: 'New' }, optimistic: { name: 'Optimistic' } };
+    const result =
+      kind === 'action' ? client.actions.rename(null, options) : client.mutations.rename(options);
+    expect(client.store.read('User:1')?.name).toBe('Optimistic');
+    await expect(result).resolves.toMatchObject({
+      error: { data: { id: 'User-1', name: 'Partial' }, errors: [error], status: 200 },
+      result: undefined,
+    });
+    expect((await result).error).toBeInstanceOf(GraphQLRequestError);
+    expect(client.store.read('User:1')?.name).toBe('Original');
+  },
+);
+
+test.each([{}, { data: false, errors: [{ message: 'Not an execution result' }] }])(
+  'malformed mutation responses still reject instead of becoming expected execution errors (%j)',
+  async (body) => {
+    const mutations = { rename: mutation<{ __typename: 'User' }, object, object>('User') };
+    const roots = {};
+    const client = createClient<[typeof roots, typeof mutations]>({
+      mutations,
+      roots,
+      transport: createGraphQLTransport<{ rename: { input: object; output: object } }>({
+        fetch: async () => new Response(JSON.stringify(body)),
+        live: false,
+        mutations: { rename: { entity: 'User', field: 'rename', inputArg: false } },
+        types: [{ type: 'User' }],
+        url: '/graphql',
+      }),
+      types: [{ type: 'User' }],
+    });
+    await expect(client.mutations.rename({ input: {} })).rejects.toBeInstanceOf(
+      GraphQLRequestError,
+    );
   },
 );

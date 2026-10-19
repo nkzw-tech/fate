@@ -826,6 +826,7 @@ export function createGraphQLTransport<
       if (globalErrors.length || !isRecord(data)) {
         throw new GraphQLRequestError(errors, {
           data,
+          kind: isRecord(data) || (data == null && errors.length > 0) ? 'execution' : 'protocol',
           message: 'fate(graphql): Expected a GraphQL response data object.',
           status,
         });
@@ -844,6 +845,7 @@ export function createGraphQLTransport<
           operation.reject(
             new GraphQLRequestError([], {
               data,
+              kind: 'protocol',
               message: `fate(graphql): Response is missing result '${operation.alias}'.`,
               status,
             }),

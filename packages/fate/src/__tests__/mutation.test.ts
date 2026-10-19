@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
-import { mutation } from '../mutation.ts';
+import { GraphQLRequestError, type GraphQLErrorPayload } from '../graphql-error.ts';
+import { getErrorStatusCode, mutation } from '../mutation.ts';
 import { FateRequestError } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
 
@@ -61,6 +62,91 @@ test.each([
     } else {
       await expect(result).resolves.toEqual({ error, result: undefined });
     }
+    expect(client.store.read(noteId)?.title).toBe('Original');
+  },
+);
+
+test.each<{
+  code?: string;
+  http?: number;
+  rejects: boolean;
+  status?: number;
+  statusCode?: number;
+}>([
+  { rejects: false, status: 200 },
+  { code: 'ongoing-invasion', rejects: false, status: 200 },
+  { code: 'BAD_USER_INPUT', rejects: false, status: 200, statusCode: 400 },
+  { code: 'NOT_FOUND', rejects: false, status: 200, statusCode: 404 },
+  { code: 'CONFLICT', rejects: false, status: 200, statusCode: 409 },
+  { code: 'TOO_MANY_REQUESTS', rejects: false, status: 200, statusCode: 429 },
+  { http: 422, rejects: false, status: 200, statusCode: 422 },
+  { http: 409, rejects: false, statusCode: 409 },
+  { http: 500, rejects: true, status: 200, statusCode: 500 },
+  { code: 'INTERNAL_SERVER_ERROR', rejects: true, status: 200, statusCode: 500 },
+  { code: 'INTERNAL_ERROR', rejects: true, status: 200, statusCode: 500 },
+  { code: 'SERVICE_UNAVAILABLE', rejects: true, status: 200, statusCode: 503 },
+  { code: 'UNAUTHENTICATED', rejects: true, status: 200, statusCode: 401 },
+  { code: 'FORBIDDEN', rejects: true, status: 200, statusCode: 403 },
+  { rejects: false, status: 400, statusCode: 400 },
+  { rejects: false, status: 409, statusCode: 409 },
+  { rejects: true, status: 401, statusCode: 401 },
+  { rejects: true, status: 403, statusCode: 403 },
+  { code: 'BAD_USER_INPUT', rejects: true, status: 500, statusCode: 500 },
+  { http: 422, rejects: true, status: 503, statusCode: 503 },
+])(
+  'GraphQL errors preserve identity and rollback with code $code, HTTP $status, and extension status $http',
+  async ({ code, http, rejects, status, statusCode }) => {
+    const error = new GraphQLRequestError(
+      [
+        {
+          extensions: { code, http: http === undefined ? undefined : { status: http } },
+          message: 'Rejected',
+        },
+      ],
+      { data: { code: 'INTERNAL_SERVER_ERROR', title: 'Partial' }, status },
+    );
+    const { client } = setup(async () => {
+      throw error;
+    });
+    const result = client.actions.edit(null, { input, optimistic: { title: 'Optimistic' } });
+    if (rejects) {
+      await expect(result).rejects.toBe(error);
+    } else {
+      await expect(result).resolves.toEqual({ error, result: undefined });
+    }
+    expect(getErrorStatusCode(error)).toBe(statusCode);
+    expect(error.status).toBe(status);
+    expect(client.store.read(noteId)?.title).toBe('Original');
+  },
+);
+
+test.each([false, true])(
+  'an unexpected GraphQL error in a mixed response takes priority regardless of position (%s)',
+  async (reverse) => {
+    const errors: Array<GraphQLErrorPayload> = [
+      { extensions: { code: 'BAD_USER_INPUT' }, message: 'Invalid name' },
+      { extensions: { code: 'INTERNAL_SERVER_ERROR' }, message: 'Database unavailable' },
+    ];
+    const error = new GraphQLRequestError(reverse ? errors.reverse() : errors, { status: 200 });
+    const { client } = setup(async () => {
+      throw error;
+    });
+    await expect(
+      client.mutations.edit({ input, optimistic: { title: 'Optimistic' } }),
+    ).rejects.toBe(error);
+    expect(client.store.read(noteId)?.title).toBe('Original');
+  },
+);
+
+test.each([new Error('Disconnected'), new GraphQLRequestError([], { status: 200 })])(
+  'unclassified transport and response failures continue to reject (%s)',
+  async (error) => {
+    const { client } = setup(async () => {
+      throw error;
+    });
+    await expect(
+      client.mutations.edit({ input, optimistic: { title: 'Optimistic' } }),
+    ).rejects.toBe(error);
     expect(client.store.read(noteId)?.title).toBe('Original');
   },
 );

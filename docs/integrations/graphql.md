@@ -442,3 +442,24 @@ handling. It is unnormalized diagnostic data, not a successful typed result, and
 fate does not write it to the cache. Successful sibling operations in the same
 batch still resolve normally, including legitimate `null` results. Mutation
 functions retain their `{ result, error }` result contract.
+
+For actions and mutations without durable delivery, GraphQL execution errors are
+returned as `{ error, result: undefined }` so the caller can handle domain errors
+using `error.errors` and `error.extensions`. Optimistic changes roll back, and
+partial data never enters the cache. Query errors still reject normally.
+
+Fate recognizes standard `extensions.code` values such as `BAD_USER_INPUT`,
+`CONFLICT`, and `INTERNAL_SERVER_ERROR`, as well as numeric
+`extensions.http.status` values. HTTP failures and these extension statuses follow
+the existing action error policy: validation and conflict errors are handled at
+the call site; authentication, authorization, and server failures throw. If any
+error in a response requires a boundary, the entire mutation throws its original
+`GraphQLRequestError`. The error's `status` remains the original HTTP status,
+including `200` for execution errors.
+
+Malformed successful responses have `error.kind === 'protocol'` and throw, as do network
+failures. For durable delivery, an execution error without a recognized status
+remains retryable; fate does not infer terminal rejection from an error message or
+a custom code. Return a standard code or `extensions.http.status` to identify a
+terminal client rejection. This preserves pending writes when a server failure's
+outcome is unknown.

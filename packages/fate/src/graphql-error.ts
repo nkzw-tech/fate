@@ -8,15 +8,22 @@ export type GraphQLErrorPayload = Readonly<{
 export class GraphQLRequestError extends Error {
   override readonly name = 'GraphQLRequestError';
   readonly errors: ReadonlyArray<GraphQLErrorPayload>;
+  readonly kind: 'execution' | 'protocol';
   readonly status?: number;
   readonly data?: unknown;
 
   constructor(
     errors: ReadonlyArray<GraphQLErrorPayload>,
-    options: { data?: unknown; message?: string; status?: number } = {},
+    options: {
+      data?: unknown;
+      kind?: 'execution' | 'protocol';
+      message?: string;
+      status?: number;
+    } = {},
   ) {
     super(errors[0]?.message ?? options.message ?? 'GraphQL request failed.');
     this.errors = Object.freeze([...errors]);
+    this.kind = options.kind ?? 'execution';
     this.status = options.status;
     this.data = options.data;
   }
