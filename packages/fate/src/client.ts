@@ -444,6 +444,7 @@ export class FateClient<
 > {
   private writeGeneration = 0;
   private applyingGeneration: number | undefined;
+  private applyingPaginationList: string | undefined;
   private readonly writeVersions = new Map<string, number>();
 
   private acceptWrite(key: string, generation: number): boolean {
@@ -454,6 +455,9 @@ export class FateClient<
       return false;
     }
     this.writeVersions.set(key, generation);
+    if (key.startsWith('list:') && key !== `list:${this.applyingPaginationList}`) {
+      this.writeVersions.set(`refresh:${key}`, generation);
+    }
     return true;
   }
 
@@ -464,6 +468,16 @@ export class FateClient<
       return apply();
     } finally {
       this.applyingGeneration = previous;
+    }
+  }
+
+  private withPaginationWrite<T>(key: string, generation: number, apply: () => T): T {
+    const previous = this.applyingPaginationList;
+    this.applyingPaginationList = key;
+    try {
+      return this.withWriteGeneration(generation, apply);
+    } finally {
+      this.applyingPaginationList = previous;
     }
   }
 
@@ -506,6 +520,7 @@ export class FateClient<
   >();
   private readonly rootLists = new Map<string, Set<string>>();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
+  private readonly connectionRequests = new Map<string, Promise<List | undefined>>();
   private readonly pendingDeferred = new Map<string, PromiseLike<DeferredSnapshot<any>>>();
   private readonly pendingOptimisticMutations = new Map<EntityId, Set<Promise<unknown>>>();
   private readonly optimisticEntityResolutions = new Map<EntityId, EntityId>();
@@ -2087,18 +2102,55 @@ export class FateClient<
     args: Record<string, unknown>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
-    return await this.trackPendingRequest(() =>
-      this.loadConnectionInternal(view, connection, args, options),
+    const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
+    const selection = resolveSelectionPlan(view, requestArgs);
+    const key = hashArgs({
+      args: selection.argsPayload,
+      connection: connection.key,
+      direction: options.direction ?? 'forward',
+      field: connection.field,
+      invalidation: this.liveConnectionInvalidations.get(connection.key),
+      owner: connection.owner,
+      refresh: this.writeVersions.get(`refresh:list:${connection.key}`),
+      root: connection.root ?? false,
+      select: [...selection.plan.paths].sort(),
+      type: connection.type,
+    });
+    const pending = this.connectionRequests.get(key);
+    if (pending) {
+      return await pending;
+    }
+    const request = this.trackPendingRequest(() =>
+      this.loadConnectionInternal(connection, requestArgs, selection, options),
     );
+    this.connectionRequests.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.connectionRequests.delete(key);
+    }
   }
 
-  private async loadConnectionInternal<V extends View<any, any>>(
-    view: V,
+  private async loadConnectionInternal(
     connection: ConnectionMetadata,
-    args: Record<string, unknown>,
+    requestArgs: Record<string, unknown>,
+    { argsPayload, plan }: ReturnType<typeof resolveSelectionPlan>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
+    const generation = ++this.writeGeneration;
     const direction = options.direction ?? 'forward';
+    const isPage = getPaginationMergeInfo(requestArgs).hasCursorArg;
+    const listVersionKey = `list:${connection.key}`;
+    const refreshVersionKey = `refresh:${listVersionKey}`;
+    const refreshVersion = this.writeVersions.get(refreshVersionKey);
+    const acceptsList = () =>
+      isPage
+        ? this.writeVersions.get(refreshVersionKey) === refreshVersion
+        : (this.writeVersions.get(listVersionKey) ?? 0) <= generation;
+    const applyResponse = <T>(apply: () => T) =>
+      isPage
+        ? this.withPaginationWrite(connection.key, generation, apply)
+        : this.withWriteGeneration(generation, apply);
     if (connection.root) {
       if (!this.transport.fetchList) {
         throw new Error(
@@ -2106,8 +2158,6 @@ export class FateClient<
         );
       }
 
-      const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
-      const { argsPayload, plan } = resolveSelectionPlan(view, requestArgs);
       const connectionResult = await this.transport.fetchList(
         connection.field,
         plan.paths,
@@ -2124,38 +2174,50 @@ export class FateClient<
         return this.store.getListState(connection.key);
       }
 
-      this.store.update(() => {
-        const incomingIds: Array<EntityId> = [];
-        const incomingCursors: Array<string | undefined> = [];
+      applyResponse(() =>
+        this.store.update(() => {
+          const incomingIds: Array<EntityId> = [];
+          const incomingCursors: Array<string | undefined> = [];
 
-        for (const entry of items) {
-          const id = this.write(connection.type, entry.node as AnyRecord, plan.paths, plan, 'none');
-          incomingIds.push(id);
-          incomingCursors.push(entry.cursor);
-        }
+          for (const entry of items) {
+            const id = this.write(
+              connection.type,
+              entry.node as AnyRecord,
+              plan.paths,
+              plan,
+              'none',
+            );
+            if (!this.store.read(id)) {
+              continue;
+            }
+            incomingIds.push(id);
+            incomingCursors.push(entry.cursor);
+          }
 
-        const previous = this.store.getListState(connection.key);
+          // A refresh replaces the page window; independent page loads can still merge.
+          if (!acceptsList()) {
+            return;
+          }
+          const previous = this.store.getListState(connection.key);
 
-        const nextListState = this.mergeListState(
-          previous,
-          incomingIds,
-          incomingCursors,
-          pagination,
-          { ...getPaginationMergeInfo(requestArgs), replace: true },
-        );
+          const nextListState = this.mergeListState(
+            previous,
+            incomingIds,
+            incomingCursors,
+            pagination,
+            { ...getPaginationMergeInfo(requestArgs), replace: true },
+          );
 
-        if (!filterConnectionArgs(connection.args)) {
-          this.registerRootList(connection.type, connection.key);
-        }
-        this.store.setList(connection.key, nextListState);
-      });
+          if (!filterConnectionArgs(connection.args)) {
+            this.registerRootList(connection.type, connection.key);
+          }
+          this.store.setList(connection.key, nextListState);
+        }),
+      );
       return this.store.getListState(connection.key);
     }
 
     const owner = parseEntityId(connection.owner);
-    const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
-
-    const { argsPayload, plan } = resolveSelectionPlan(view, requestArgs);
     const nodeSelection = plan.paths;
     const scopedArgsPayload = argsPayload
       ? scopeArgsPayload(argsPayload, connection.field)
@@ -2193,50 +2255,63 @@ export class FateClient<
       return this.store.getListState(connection.key);
     }
 
-    this.store.update(() => {
-      const incomingIds: Array<EntityId> = [];
-      const incomingCursors: Array<string | undefined> = [];
+    applyResponse(() =>
+      this.store.update(() => {
+        const incomingIds: Array<EntityId> = [];
+        const incomingCursors: Array<string | undefined> = [];
 
-      const nodeType = this.getListNodeType(owner.type, connection.field);
+        const nodeType = this.getListNodeType(owner.type, connection.field);
 
-      for (const entry of connectionPayload.items) {
-        const { node } = entry;
-        const id = this.write(nodeType, node, nodeSelection, plan);
-        incomingIds.push(id);
-        incomingCursors.push(entry.cursor);
-      }
+        for (const entry of connectionPayload.items) {
+          const { node } = entry;
+          const id = this.write(nodeType, node, nodeSelection, plan, 'none');
+          if (!this.store.read(id)) {
+            continue;
+          }
+          incomingIds.push(id);
+          incomingCursors.push(entry.cursor);
+        }
 
-      const previous = this.store.getListState(connection.key);
-      const previousIds = previous?.ids ?? [];
-      const previousSet = new Set(previousIds);
-      const newIds = incomingIds.filter((id) => !previousSet.has(id));
-      const nextListState = this.mergeListState(
-        previous,
-        incomingIds,
-        incomingCursors,
-        connectionPayload.pagination,
-        { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
-      );
+        if (
+          !acceptsList() ||
+          (this.writeVersions.get(JSON.stringify([connection.owner])) ?? 0) > generation
+        ) {
+          return;
+        }
+        const previous = this.store.getListState(connection.key);
+        const previousIds = previous?.ids ?? [];
+        const previousSet = new Set(previousIds);
+        const newIds = incomingIds.filter((id) => !previousSet.has(id));
+        const nextListState = this.mergeListState(
+          previous,
+          incomingIds,
+          incomingCursors,
+          connectionPayload.pagination,
+          { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
+        );
 
-      this.store.setList(connection.key, nextListState);
+        this.store.setList(connection.key, nextListState);
 
-      const current = this.store.read(connection.owner);
-      const existingField = Array.isArray(
-        current?.[argumentFieldKey(connection.field, connection.hash)],
-      )
-        ? (current?.[argumentFieldKey(connection.field, connection.hash)] as Array<unknown>) || []
-        : [];
-      const nodeRefs = createNodeRefsForIds(newIds, undefined);
-      const nextField =
-        direction === 'forward' ? [...existingField, ...nodeRefs] : [...nodeRefs, ...existingField];
+        const current = this.store.read(connection.owner);
+        const existingField = Array.isArray(
+          current?.[argumentFieldKey(connection.field, connection.hash)],
+        )
+          ? (current?.[argumentFieldKey(connection.field, connection.hash)] as Array<unknown>) || []
+          : [];
+        const nodeRefs = createNodeRefsForIds(newIds, undefined);
+        const nextField =
+          direction === 'forward'
+            ? [...existingField, ...nodeRefs]
+            : [...nodeRefs, ...existingField];
 
-      this.viewDataCache.invalidate(connection.owner);
-      this.store.merge(
-        connection.owner,
-        { [argumentFieldKey(connection.field, connection.hash)]: nextField },
-        [argumentFieldKey(connection.field, connection.hash)],
-      );
-    });
+        this.viewDataCache.invalidate(connection.owner);
+        this.store.merge(
+          connection.owner,
+          { [argumentFieldKey(connection.field, connection.hash)]: nextField },
+          [argumentFieldKey(connection.field, connection.hash)],
+        );
+      }),
+    );
     return this.store.getListState(connection.key);
   }
 
