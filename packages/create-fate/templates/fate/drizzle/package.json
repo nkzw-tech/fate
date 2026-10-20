@@ -23,10 +23,10 @@
     "@app/server": "workspace:*",
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/oxlint-config": "^2.0.1",
-    "@oxc-node/core": "^0.1.0",
-    "@swc/core": "^1.16.1",
-    "@types/node": "^26.4.0",
-    "dotenv": "^17.4.2",
+    "@oxc-node/core": "^0.1.7",
+    "@swc/core": "^1.16.18",
+    "@types/node": "^26.6.5",
+    "dotenv": "^18.0.8",
     "dotenv-cli": "^11.0.0",
     "npm-run-all2": "^9.0.3",
     "typescript": "^7.0.2",
@@ -38,5 +38,5 @@
     "node": ">=24.0.0",
     "pnpm": ">=11.0.0"
   },
-  "packageManager": "pnpm@11.0.6"
+  "packageManager": "pnpm@12.6.0"
 }

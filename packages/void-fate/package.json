@@ -47,7 +47,7 @@
     "@types/react": "catalog:",
     "react": "catalog:",
     "vite": "catalog:",
-    "void": "^1.1.0"
+    "void": "^1.1.12"
   },
   "peerDependencies": {
     "@nkzw/fate": "^1.0.0-rc.0",

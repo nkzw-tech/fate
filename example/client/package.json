@@ -23,18 +23,18 @@
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.5.0",
     "@trpc/client": "^11.19.0",
-    "@void/react": "^1.1.0",
-    "better-auth": "^1.7.7",
+    "@void/react": "^1.1.12",
+    "better-auth": "^1.7.11",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "graphql-sse": "^2.6.2",
-    "lucide-react": "^1.56.0",
+    "graphql-sse": "^2.6.3",
+    "lucide-react": "^1.59.0",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-error-boundary": "^6.1.6",
     "react-fate": "workspace:*",
     "tailwind-merge": "^3.7.0",
-    "void": "^1.1.0"
+    "void": "^1.1.12"
   },
   "devDependencies": {
     "@nkzw/fate": "workspace:*",
