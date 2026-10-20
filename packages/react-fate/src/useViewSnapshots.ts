@@ -24,6 +24,30 @@ type Snapshot = Readonly<{
 }>;
 type ReadSnapshot = () => PromiseLike<Snapshot>;
 
+// A mounted reader keeps its error stable for React to deliver to a boundary.
+// Core in-flight requests are released on failure so a fresh reader can retry.
+const cacheReadError = (read: ReadSnapshot): ReadSnapshot => {
+  let current: PromiseLike<Snapshot> | undefined;
+  let failed = false;
+  return () => {
+    if (failed) {
+      return current!;
+    }
+    const snapshot = read();
+    if (current !== snapshot) {
+      current = snapshot;
+      if (!isFulfilledThenable(snapshot)) {
+        Promise.resolve(snapshot).catch(() => {
+          if (current === snapshot) {
+            failed = true;
+          }
+        });
+      }
+    }
+    return snapshot;
+  };
+};
+
 const createReader = <V extends View<any, any>>(
   client: FateClient<any, any>,
   view: V,
@@ -124,7 +148,7 @@ const createArrayReader = <V extends View<any, any>>(
     if (index === undefined) {
       index = readers.length;
       indexes.set(ref, index);
-      readers.push(createReader(client, view, ref));
+      readers.push(cacheReadError(createReader(client, view, ref)));
     }
     return index;
   });
@@ -276,7 +300,10 @@ export function useViewSnapshots<V extends View<any, any>>(
 
 export function useViewSnapshot<V extends View<any, any>>(view: V, ref: ViewInput<V>): unknown {
   const client = useFateClient();
-  const getSnapshot = useMemo(() => createReader(client, view, ref), [client, view, ref]);
+  const getSnapshot = useMemo(
+    () => cacheReadError(createReader(client, view, ref)),
+    [client, view, ref],
+  );
   return useSnapshot(client, getSnapshot, false);
 }
 

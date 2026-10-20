@@ -165,9 +165,10 @@ test('refreshes coverage after a subscribed ref needs to load again', async () =
 
 test('reports a rejected pending read to an error boundary', async () => {
   const request = Promise.withResolvers<Array<Partial<Post>>>();
+  const fetchById = vi.fn(() => request.promise);
   const client = createClient({
     roots: {},
-    transport: { fetchById: vi.fn(() => request.promise) },
+    transport: { fetchById },
     types: [{ type: 'Post' }],
   });
   const PostView = view<Post>()({ content: true, id: true });
@@ -181,10 +182,10 @@ test('reports a rejected pending read to an error boundary', async () => {
   );
   const container = document.createElement('div');
   const root = createRoot(container, { onCaughtError: vi.fn() });
-  const render = (id: string) =>
+  const render = (id: string, attempt = 0) =>
     act(async () => {
       root.render(
-        <ErrorBoundary>
+        <ErrorBoundary key={attempt}>
           <FateClient client={client}>
             <Suspense fallback={null}>
               <Component postRef={client.ref<Post>('Post', id, PostView)} />
@@ -198,6 +199,11 @@ test('reports a rejected pending read to an error boundary', async () => {
     await render('post-2');
     await act(async () => request.reject(new Error('Request failed')));
     expect(container.textContent).toBe('Request failed');
+    expect(fetchById).toHaveBeenCalledTimes(1);
+    fetchById.mockResolvedValue([{ __typename: 'Post', content: 'Recovered', id: 'post-2' }]);
+    await render('post-2', 1);
+    expect(container.textContent).toBe('Recovered');
+    expect(fetchById).toHaveBeenCalledTimes(2);
   } finally {
     await act(async () => root.unmount());
   }
