@@ -738,7 +738,7 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
   const entityAliases = argumentSchema
     ? [
         ...new Set([
-          ...types.map(({ type }) => type),
+          ...byIdTypes.map(({ type }) => type),
           ...mutationEntries
             .filter(({ entity }) => entity !== '__value__')
             .map(({ entity }) => entity),

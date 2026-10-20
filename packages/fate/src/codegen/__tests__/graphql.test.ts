@@ -15,12 +15,13 @@ const schema = `
   enum Biome { Grassland Desert }
   input Filter { biome: Biome!, limit: Int! = 5, next: Filter, biomes: [Biome!] }
   scalar JSON
+  type Replay implements Node { id: ID!, content: String! }
   type Image { url: String!, width: Int }
   interface Node { id: ID! }
   type MapEdge { cursor: String, node: Map }
   type PageInfo { hasNextPage: Boolean!, hasPreviousPage: Boolean!, endCursor: String, startCursor: String }
   type MapConnection { edges: [MapEdge], pageInfo: PageInfo! }
-  type Map implements Node { related: MapConnection, id: ID!, name: String!, image: Image, json: JSON, state(biome: Biome!): String! }
+  type Map implements Node { replay: Replay, related: MapConnection, id: ID!, name: String!, image: Image, json: JSON, state(biome: Biome!): String! }
   union Result = Map | Image
   type Price { amount: Int! }
   type Receipt { code: String! }
@@ -82,8 +83,8 @@ test('generates concrete identity metadata for GraphQL interface relations', () 
     moduleName: './contract.ts',
     transport: 'graphql',
   });
-  expect(source).toContain('owner: { type: \'Node\', possibleTypes: ["Map"] }');
-  expect(source).toContain('possibleTypes: ["Map"]');
+  expect(source).toContain('owner: { type: \'Node\', possibleTypes: ["Replay","Map"] }');
+  expect(source).toContain('possibleTypes: ["Replay","Map"]');
   expect(source).toContain("type: 'Node'");
 });
 
@@ -172,6 +173,8 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       void badProjection;
       const MapView = view<Map>()({ name: true });
       const ImageView = view<Map>()({ image: { url: true } });
+      const ReplayView = view<GraphQLEntities['Replay']>()({ content: true });
+      client.request({ replay: { id: 'Replay-1', view: ReplayView } });
       const RelatedView = view<Map>()({ related: { items: { node: { name: true } } } });
       void ImageView;
       // @ts-expect-error Generated entities reject fields absent from GraphQL.
