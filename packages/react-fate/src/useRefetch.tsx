@@ -11,14 +11,18 @@ export function useRefetch<const R extends Request>(
   const client = useFateClient();
   const key = client.getRequestKey(request);
   const maxAge = options?.persist?.maxAge;
+  const timeout = options?.timeout;
+  const signal = options?.signal;
   return useCallback(
     () =>
       client.request(request, {
         mode: 'network-only',
         persist: maxAge === undefined ? undefined : { maxAge },
+        signal,
+        timeout,
       }),
     // Equivalent inline selections share the same request identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [client, key, maxAge],
+    [client, key, maxAge, timeout, signal],
   );
 }

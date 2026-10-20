@@ -74,15 +74,25 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     requestKey = null;
   };
 
-  const execute = () => {
+  const execute = (refresh = false) => {
     const currentToken = ++token;
     cleanupRequest();
 
     const client = clientSource.value;
-    const prepared = client.prepareRequestForRender(toValue(request), options);
+    const currentRequest = toValue(request);
+    const prepared = refresh
+      ? {
+          promise: client.request(currentRequest, { ...options, mode: 'network-only' }),
+          requestKey: null,
+        }
+      : client.prepareRequestForRender(currentRequest, options);
     activeClient = client;
     requestKey = prepared.requestKey;
-    retainDispose = client.retainRequestKey(prepared.requestKey, mode).dispose;
+    retainDispose = (
+      prepared.requestKey === null
+        ? client.retain(currentRequest)
+        : client.retainRequestKey(prepared.requestKey, mode)
+    ).dispose;
     pending.value = true;
     errorState.value = null;
 
@@ -136,6 +146,6 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     error: errorState,
     pending,
     ready: () => currentPromise ?? execute(),
-    refresh: execute,
+    refresh: () => execute(true),
   };
 }

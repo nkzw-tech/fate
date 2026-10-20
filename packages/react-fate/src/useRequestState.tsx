@@ -19,16 +19,20 @@ export function useRequestState<const R extends Request>(
   const mode = options.mode ?? 'cache-first';
   const enabled = options.enabled !== false;
   const maxAge = options.persist?.maxAge;
+  const timeout = options?.timeout;
+  const signal = options?.signal;
   const observer = useMemo(
     () =>
       client.observeRequest(request, {
         enabled,
         mode,
         persist: maxAge === undefined ? undefined : { maxAge },
+        signal,
+        timeout,
       }),
     // Equivalent inline selections share the same request identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [client, key, mode, enabled, maxAge],
+    [client, key, mode, enabled, maxAge, timeout, signal],
   );
   return useSyncExternalStore(
     observer.subscribe,

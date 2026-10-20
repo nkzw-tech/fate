@@ -956,3 +956,39 @@ test('Vue preserves null and undefined through optional view resources', async (
   expect(subscribe).not.toHaveBeenCalled();
   app.unmount();
 });
+
+test('request timeouts surface in the resource and explicit refresh can recover', async () => {
+  vi.useFakeTimers();
+  const fetchQuery = vi.fn().mockImplementation(() => new Promise(() => {}));
+  const client = createClient({
+    roots: { viewer: clientRoot<User, 'User'>('User') },
+    transport: { fetchById: vi.fn(), fetchQuery },
+    types: [{ type: 'User' }],
+  });
+  const UserView = view<User>()({ name: true });
+  let resource!: ReturnType<typeof useRequest>;
+  const Component = defineComponent({
+    setup() {
+      resource = useRequest({ viewer: { view: UserView } }, { timeout: 10 });
+      return () =>
+        h('span', resource.error.value instanceof Error ? resource.error.value.name : 'Ready');
+    },
+  });
+  const { app, container } = mount(Component, client);
+  try {
+    const result = resource.ready().catch((error) => error);
+    await vi.advanceTimersByTimeAsync(10);
+    await nextTick();
+    expect(await result).toMatchObject({ name: 'TimeoutError' });
+    expect(resource.pending.value).toBe(false);
+    expect(container.textContent).toBe('TimeoutError');
+    fetchQuery.mockResolvedValueOnce({ id: '1', name: 'Recovered' });
+    await expect(resource.refresh()).resolves.toMatchObject({ viewer: { id: '1' } });
+    expect(resource.error.value).toBeNull();
+    expect(resource.pending.value).toBe(false);
+    expect(fetchQuery).toHaveBeenCalledTimes(2);
+  } finally {
+    app.unmount();
+    vi.useRealTimers();
+  }
+});

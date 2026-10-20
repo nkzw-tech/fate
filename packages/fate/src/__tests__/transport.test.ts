@@ -198,3 +198,25 @@ test('throws when invoking missing mutation resolver', async () => {
     transport.mutate?.('post.create', { content: 'Kiwi' }, new Set(['id'])),
   ).rejects.toThrowError("fate(trpc): Missing mutation resolver for procedure 'post.create'.");
 });
+
+test('forwards read signals to tRPC query options without adding them to inputs', async () => {
+  const signal = new AbortController().signal;
+  const byId = vi.fn(async () => []);
+  const list = vi.fn(async () => ({
+    items: [],
+    pagination: { hasNext: false, hasPrevious: false },
+  }));
+  const query = vi.fn(async () => null);
+  const transport = createTRPCTransport({
+    byId: { Post: () => byId },
+    client: {} as any,
+    lists: { posts: () => list },
+    queries: { viewer: () => query },
+  });
+  await transport.fetchById('Post', ['1'], ['id'], undefined, { signal });
+  await transport.fetchList!('posts', ['id'], undefined, { signal });
+  await transport.fetchQuery!('viewer', ['id'], undefined, { signal });
+  expect(byId).toHaveBeenCalledWith({ args: undefined, ids: ['1'], select: ['id'] }, { signal });
+  expect(list).toHaveBeenCalledWith({ args: undefined, select: ['id'] }, { signal });
+  expect(query).toHaveBeenCalledWith({ args: undefined, select: ['id'] }, { signal });
+});

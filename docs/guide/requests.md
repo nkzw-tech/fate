@@ -92,6 +92,43 @@ const { posts } = useRequest(
 );
 ```
 
+## Timeouts and cancellation
+
+Read requests accept an optional `timeout` in milliseconds and an `AbortSignal`:
+
+```tsx
+const result = useRequest(request, { timeout: 10_000 });
+const refetch = useRefetch(request, { timeout: 10_000 });
+
+const controller = new AbortController();
+await client.request(request, { timeout: 10_000, signal: controller.signal });
+// From another event handler: controller.abort();
+```
+
+The default has no deadline. A timeout rejects with an error named `TimeoutError`;
+external cancellation rejects with `signal.reason` (normally an `AbortError`).
+The deadline starts when the read starts, includes persistence initialization,
+and stays fixed across equivalent Suspense rerenders. Use a stable signal when
+passing one to a hook. An already-aborted signal prevents a new fetch.
+
+Each imperative caller has its own deadline. Identical pending reads can share
+work, but cancelling one caller keeps that work alive for the others. Batched HTTP
+and GraphQL requests abort their shared fetch only when every operation cancels.
+Cancelled operations cannot write late network results to the cache. Custom
+transports receive the signal in their optional read context and should forward
+it to their network implementation; fate still rejects and ignores their late
+results if they do not support cancellation. The tRPC adapter passes the signal
+in the resolver's second argument, matching tRPC query options.
+
+`useRequest` sends initial failures to your error boundary. Handle errors from
+`useRefetch` or `client.request` in the calling event handler; these failures
+preserve existing data. An explicit retry starts a new deadline. The same options
+work with `useRequestState`, `client.observeRequest`, and Vue `useRequest`.
+For `stale-while-revalidate`, cached data returns immediately while the deadline
+bounds the background refresh. These controls apply to the request's initial
+reads; later view reads, deferred fields, pagination, live streams, and mutations
+have separate lifetimes and do not inherit them.
+
 ## Cache Lifetime
 
 fate stores records in a normalized cache keyed by `__typename` and `id`. Lists and root queries point at those records, and views read from the normalized cache. When a `useRequest` call is mounted, fate retains the request so the records and lists needed by that screen stay in memory. When the component unmounts, the request is released and fate schedules garbage collection.

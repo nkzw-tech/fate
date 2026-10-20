@@ -11,6 +11,7 @@ import type {
   FateProtocolResponse,
 } from './protocol.ts';
 import { errorCodeFromStatus, FateRequestError } from './protocol.ts';
+import { abortable, batchReadControl } from './read-control.ts';
 import { isRecord } from './record.ts';
 import type { Transport } from './transport.ts';
 import type { MutationShape, Pagination } from './types.ts';
@@ -65,6 +66,7 @@ type PendingOperation = {
   operation: FateOperation;
   reject: (error: unknown) => void;
   resolve: (value: unknown) => void;
+  signal?: AbortSignal;
 };
 
 type LiveSubscription = {
@@ -290,39 +292,56 @@ export function createHTTPTransport<
   let pending: Array<PendingOperation> = [];
   let scheduled = false;
 
-  const enqueue = (operation: Omit<FateOperation, 'id'>) =>
-    new Promise<unknown>((resolve, reject) => {
-      pending.push({
-        operation: {
-          ...operation,
-          id: String(++nextId),
-        },
-        reject,
-        resolve,
-      });
+  const enqueue = (operation: Omit<FateOperation, 'id'>, signal?: AbortSignal) =>
+    abortable(
+      new Promise<unknown>((resolve, reject) => {
+        pending.push({
+          operation: {
+            ...operation,
+            id: String(++nextId),
+          },
+          reject,
+          resolve,
+          signal,
+        });
 
-      if (!scheduled) {
-        scheduled = true;
-        queueMicrotask(flush);
-      }
-    });
+        if (!scheduled) {
+          scheduled = true;
+          queueMicrotask(flush);
+        }
+      }),
+      signal,
+    );
 
   const flush = async () => {
     scheduled = false;
-    const batch = pending;
+    const batch = pending.filter((entry) => {
+      if (entry.signal?.aborted) {
+        entry.reject(entry.signal.reason);
+        return false;
+      }
+      return true;
+    });
     pending = [];
 
     if (!batch.length) {
       return;
     }
 
+    const control = batchReadControl(batch);
     try {
+      const requestHeadersValue = await requestHeaders(
+        { 'content-type': 'application/json' },
+        headers,
+      );
+      control?.signal.throwIfAborted();
       const response = await fetchImpl(endpoint, {
+        ...(control ? { signal: control.signal } : {}),
         body: JSON.stringify({
           operations: batch.map((entry) => entry.operation),
           version: batch.some((entry) => entry.operation.mutation) ? 2 : 1,
         } satisfies FateProtocolRequest),
-        headers: await requestHeaders({ 'content-type': 'application/json' }, headers),
+        headers: requestHeadersValue,
         method: 'POST',
       });
       if (!response.ok) {
@@ -332,6 +351,10 @@ export function createHTTPTransport<
       const results = new Map(payload.results.map((result) => [result.id, result]));
 
       for (const entry of batch) {
+        if (entry.signal?.aborted) {
+          entry.reject(entry.signal.reason);
+          continue;
+        }
         const result = results.get(entry.operation.id);
         if (!result) {
           entry.reject(
@@ -350,37 +373,48 @@ export function createHTTPTransport<
       for (const entry of batch) {
         entry.reject(error);
       }
+    } finally {
+      control?.dispose();
     }
   };
 
   const transport: Transport<Mutations> = {
-    fetchById(type, ids, select, args) {
-      return enqueue({
-        args,
-        ids,
-        kind: 'byId',
-        select: [...select],
-        type,
-      }) as Promise<Array<unknown>>;
+    fetchById(type, ids, select, args, context) {
+      return enqueue(
+        {
+          args,
+          ids,
+          kind: 'byId',
+          select: [...select],
+          type,
+        },
+        context?.signal,
+      ) as Promise<Array<unknown>>;
     },
-    fetchList(name, select, args) {
-      return enqueue({
-        args,
-        kind: 'list',
-        name,
-        select: [...select],
-      }) as Promise<{
+    fetchList(name, select, args, context) {
+      return enqueue(
+        {
+          args,
+          kind: 'list',
+          name,
+          select: [...select],
+        },
+        context?.signal,
+      ) as Promise<{
         items: Array<{ cursor: string | undefined; node: unknown }>;
         pagination: Pagination;
       }>;
     },
-    fetchQuery(name, select, args) {
-      return enqueue({
-        args,
-        kind: 'query',
-        name,
-        select: [...select],
-      });
+    fetchQuery(name, select, args, context) {
+      return enqueue(
+        {
+          args,
+          kind: 'query',
+          name,
+          select: [...select],
+        },
+        context?.signal,
+      );
     },
     mutate(name, input, select) {
       return enqueue({

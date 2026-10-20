@@ -8,6 +8,8 @@ import { AnyRecord, Pagination, type MutationShape } from './types.ts';
  */
 export type ResolvedArgsPayload = AnyRecord;
 
+export type ReadContext = Readonly<{ refetch?: string; signal?: AbortSignal }>;
+
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
 type Bivariant<Fn extends (...args: Array<any>) => any> = {
@@ -56,11 +58,13 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     ids: Array<string | number>,
     select: Iterable<string>,
     args?: ResolvedArgsPayload,
+    context?: ReadContext,
   ): Promise<Array<unknown>>;
   fetchList?(
     proc: string,
     select: Iterable<string>,
     args?: ResolvedArgsPayload,
+    context?: ReadContext,
   ): Promise<{
     items: Array<{ cursor: string | undefined; node: unknown }>;
     pagination: Pagination;
@@ -69,7 +73,7 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     proc: string,
     select: Iterable<string>,
     args?: ResolvedArgsPayload,
-    context?: Readonly<{ refetch: string }>,
+    context?: ReadContext,
   ): Promise<unknown>;
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
@@ -114,13 +118,14 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
  */
 export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
   string,
-  (
-    client: TRPCClient<AppRouter>,
-  ) => (input: {
-    args?: ResolvedArgsPayload;
-    ids: Array<string | number>;
-    select: Array<string>;
-  }) => Promise<unknown>
+  (client: TRPCClient<AppRouter>) => (
+    input: {
+      args?: ResolvedArgsPayload;
+      ids: Array<string | number>;
+      select: Array<string>;
+    },
+    options?: Pick<ReadContext, 'signal'>,
+  ) => Promise<unknown>
 >;
 
 /**
@@ -128,7 +133,9 @@ export type TRPCByIdResolvers<AppRouter extends AnyRouter> = Record<
  */
 export type TRPCListResolvers<AppRouter extends AnyRouter> = Record<
   string,
-  (client: TRPCClient<AppRouter>) => Bivariant<(input: any) => Promise<TRPCListResult>>
+  (
+    client: TRPCClient<AppRouter>,
+  ) => Bivariant<(input: any, options?: Pick<ReadContext, 'signal'>) => Promise<TRPCListResult>>
 >;
 
 /**
@@ -138,7 +145,10 @@ export type TRPCQueryResolvers<AppRouter extends AnyRouter> = Record<
   string,
   (
     client: TRPCClient<AppRouter>,
-  ) => (input: { args?: ResolvedArgsPayload; select: Array<string> }) => Promise<unknown>
+  ) => (
+    input: { args?: ResolvedArgsPayload; select: Array<string> },
+    options?: Pick<ReadContext, 'signal'>,
+  ) => Promise<unknown>
 >;
 
 /**
@@ -187,18 +197,21 @@ export function createTRPCTransport<
   queries?: TRPCQueryResolvers<AppRouter>;
 }): Transport<MutationMapFromResolvers<Mutations>> {
   const transport: Transport<MutationMapFromResolvers<Mutations>> = {
-    async fetchById(type, ids, select, args) {
+    async fetchById(type, ids, select, args, context) {
       const resolver = byId[type];
       if (!resolver) {
         throw new Error(`fate(trpc): No 'byId' resolver configured for entity type '${type}'.`);
       }
-      return (await resolver(client)({
-        args,
-        ids,
-        select: [...select],
-      })) as Array<unknown>;
+      return (await resolver(client)(
+        {
+          args,
+          ids,
+          select: [...select],
+        },
+        ...(context?.signal ? [{ signal: context.signal }] : []),
+      )) as Array<unknown>;
     },
-    async fetchList(procedure, select, args) {
+    async fetchList(procedure, select, args, context) {
       if (!lists) {
         throw new Error(`fate(trpc): No list resolvers configured; cannot call "${procedure}".`);
       }
@@ -206,15 +219,18 @@ export function createTRPCTransport<
       if (!resolver) {
         throw new Error(`fate(trpc): Missing list resolver for procedure "${procedure}"`);
       }
-      return (await resolver(client)({
-        args,
-        select: [...select],
-      })) as {
+      return (await resolver(client)(
+        {
+          args,
+          select: [...select],
+        },
+        ...(context?.signal ? [{ signal: context.signal }] : []),
+      )) as {
         items: Array<{ cursor: string | undefined; node: unknown }>;
         pagination: Pagination;
       };
     },
-    async fetchQuery(procedure, select, args) {
+    async fetchQuery(procedure, select, args, context) {
       if (!queries) {
         throw new Error(`fate(trpc): No query resolvers configured; cannot call "${procedure}".`);
       }
@@ -224,10 +240,13 @@ export function createTRPCTransport<
         throw new Error(`fate(trpc): Missing query resolver for procedure "${procedure}"`);
       }
 
-      return resolver(client)({
-        args,
-        select: [...select],
-      });
+      return resolver(client)(
+        {
+          args,
+          select: [...select],
+        },
+        ...(context?.signal ? [{ signal: context.signal }] : []),
+      );
     },
     mutateDurably,
   };

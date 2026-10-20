@@ -9,6 +9,7 @@ import {
   type GraphQLArgumentSchema,
   type GraphQLByIdConfig,
 } from './graphqlSchema.ts';
+import { abortable, batchReadControl } from './read-control.ts';
 import { isRecord } from './record.ts';
 import { encodeRefetchArgs, getRefetchFields } from './refetch.ts';
 import type { Transport } from './transport.ts';
@@ -128,6 +129,7 @@ type PendingOperation = {
   reject: (error: unknown) => void;
   resolve: (value: unknown) => void;
   selection: string;
+  signal?: AbortSignal;
   transform: (value: unknown) => unknown;
   variables?: Record<string, { type: string; value: unknown }>;
 };
@@ -642,18 +644,23 @@ const graphQLRequest = async ({
   fetchImpl,
   headers,
   query,
+  signal,
   url,
   variables,
 }: {
   fetchImpl: FetchLike;
   headers: HeadersFactory | undefined;
   query: string;
+  signal?: AbortSignal;
   url: string;
   variables?: Record<string, unknown>;
 }) => {
+  const requestHeadersValue = await requestHeaders({ 'content-type': 'application/json' }, headers);
+  signal?.throwIfAborted();
   const response = await fetchImpl(url, {
+    ...(signal ? { signal } : {}),
     body: JSON.stringify({ query, variables }),
-    headers: await requestHeaders({ 'content-type': 'application/json' }, headers),
+    headers: requestHeadersValue,
     method: 'POST',
   });
 
@@ -788,25 +795,36 @@ export function createGraphQLTransport<
   let graphQLSSEModule: Promise<GraphQLSSEModule> | undefined;
 
   const enqueue = (operation: Omit<PendingOperation, 'alias' | 'reject' | 'resolve'>) =>
-    new Promise<unknown>((resolve, reject) => {
-      pending.push({
-        ...operation,
-        alias: `f${++nextId}`,
-        reject,
-        resolve,
-      });
+    abortable(
+      new Promise<unknown>((resolve, reject) => {
+        pending.push({
+          ...operation,
+          alias: `f${++nextId}`,
+          reject,
+          resolve,
+        });
 
-      if (!scheduled) {
-        scheduled = true;
-        queueMicrotask(flush);
+        if (!scheduled) {
+          scheduled = true;
+          queueMicrotask(flush);
+        }
+      }),
+      operation.signal,
+    );
+
+  const execute = async (queued: ReadonlyArray<PendingOperation>) => {
+    const operations = queued.filter((operation) => {
+      if (operation.signal?.aborted) {
+        operation.reject(operation.signal.reason);
+        return false;
       }
+      return true;
     });
-
-  const execute = async (operations: ReadonlyArray<PendingOperation>) => {
     if (!operations.length) {
       return;
     }
     const kind = operations[0].kind;
+    const control = batchReadControl(operations);
     try {
       const variables = Object.assign(
         {},
@@ -822,6 +840,7 @@ export function createGraphQLTransport<
         query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions} { ${operations
           .map((entry) => `${entry.alias}: ${entry.selection}`)
           .join(' ')} }`,
+        signal: control?.signal,
         url: endpoint,
         variables: schema
           ? Object.fromEntries(
@@ -854,6 +873,10 @@ export function createGraphQLTransport<
       }
 
       for (const operation of operations) {
+        if (operation.signal?.aborted) {
+          operation.reject(operation.signal.reason);
+          continue;
+        }
         const operationErrors = errorsByAlias.get(operation.alias);
         if (operationErrors?.length) {
           operation.reject(
@@ -880,6 +903,8 @@ export function createGraphQLTransport<
       for (const operation of operations) {
         operation.reject(error);
       }
+    } finally {
+      control?.dispose();
     }
   };
 
@@ -903,7 +928,7 @@ export function createGraphQLTransport<
   };
 
   const transport: Transport<Mutations> = {
-    fetchById(type, ids, select, args) {
+    fetchById(type, ids, select, args, context) {
       if (!ids.length) {
         return Promise.resolve([]);
       }
@@ -926,6 +951,7 @@ export function createGraphQLTransport<
           return {
             kind: 'query' as const,
             selection: `${mapping.field}${fieldArgs} { ${selection} }`,
+            signal: context?.signal,
             transform: (value: unknown) =>
               normalizeGraphQLValue({
                 decodeNodeId,
@@ -962,6 +988,7 @@ export function createGraphQLTransport<
           type,
           'type',
         )} { ${selection} } }`,
+        signal: context?.signal,
         transform: (value) =>
           (Array.isArray(value) ? value : []).filter(Boolean).map((entry) =>
             normalizeGraphQLValue({
@@ -975,7 +1002,7 @@ export function createGraphQLTransport<
         variables,
       }) as Promise<Array<unknown>>;
     },
-    fetchList(name, select, args) {
+    fetchList(name, select, args, context) {
       const root = roots?.[name];
       if (!root) {
         throw new Error(`fate(graphql): Missing root list mapping for '${name}'.`);
@@ -1002,6 +1029,7 @@ export function createGraphQLTransport<
       return enqueue({
         kind: 'query',
         selection: `${field}${rootArgs} { edges { cursor node { ${selection} } } pageInfo { endCursor hasNextPage hasPreviousPage startCursor } }`,
+        signal: context?.signal,
         transform: (value) =>
           normalizeGraphQLValue({
             decodeNodeId,
@@ -1017,12 +1045,13 @@ export function createGraphQLTransport<
       } | null>;
     },
     fetchQuery(name, select, args, context) {
-      if (context) {
-        const recipe = types.get(context.refetch)?.refetch;
+      const refetch = context?.refetch;
+      if (refetch) {
+        const recipe = types.get(refetch)?.refetch;
         if (!recipe || recipe.root !== name) {
-          throw new Error(`fate(graphql): Missing refetch recipe for '${context.refetch}'.`);
+          throw new Error(`fate(graphql): Missing refetch recipe for '${refetch}'.`);
         }
-        args = encodeRefetchArgs(recipe, args ?? {}, (id) => encodeNodeId(context.refetch, id));
+        args = encodeRefetchArgs(recipe, args ?? {}, (id) => encodeNodeId(refetch, id));
       }
       const root = roots?.[name];
       if (!root) {
@@ -1054,6 +1083,7 @@ export function createGraphQLTransport<
       return enqueue({
         kind: 'query',
         selection: `${field}${rootArgs}${selection ? ` { ${selection} }` : ''}`,
+        signal: context?.signal,
         transform: (value) =>
           normalizeGraphQLValue({
             decodeNodeId,

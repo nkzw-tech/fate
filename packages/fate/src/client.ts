@@ -45,6 +45,7 @@ import type {
   RequestPersistenceOptions,
 } from './persistence-types.ts';
 import { FateRequestError, type FateLiveConnectionEvent } from './protocol.ts';
+import { abortable, readControl, SharedReads, validateTimeout } from './read-control.ts';
 import { isRecord } from './record.ts';
 import {
   assignViewTag,
@@ -122,6 +123,10 @@ export type RequestOptions = Readonly<{
   mode?: RequestMode;
   /** Override disk retention in milliseconds; only used with persistence. */
   persist?: RequestPersistenceOptions;
+  /** Cancel this reader without cancelling other readers of shared work. */
+  signal?: AbortSignal;
+  /** Maximum read duration in milliseconds, including persistence initialization. Opt-in. */
+  timeout?: number;
 }>;
 
 export type DeferredSnapshot<T> = Readonly<{
@@ -2506,7 +2511,7 @@ export class FateClient<
               ? 'cache-first'
               : (options.mode ?? 'cache-first'),
           { revalidateExisting: true },
-          { persist: options.persist },
+          { persist: options.persist, signal: options.signal, timeout: options.timeout },
         ),
       subscribe: (listener) => this.subscribeRequestDescriptor(descriptor, listener),
     });
@@ -2569,8 +2574,25 @@ export class FateClient<
 
     return {
       promise: this.requestWithDescriptor(descriptor, mode, { revalidateExisting: false }, options),
-      requestKey: descriptor.key,
+      requestKey: this.requestCacheKey(descriptor, options),
     };
+  }
+
+  private readonly readRequests = new SharedReads<void>();
+  private readonly signalKeys = new WeakMap<AbortSignal, number>();
+  private nextSignalKey = 0;
+  private readonly controlledRequestKeys = new Map<string, Set<string>>();
+
+  private requestCacheKey(descriptor: RequestDescriptor, options?: RequestOptions) {
+    if (options?.timeout === undefined && !options?.signal) {
+      return descriptor.key;
+    }
+    let signalKey = 0;
+    if (options.signal) {
+      signalKey = this.signalKeys.get(options.signal) ?? ++this.nextSignalKey;
+      this.signalKeys.set(options.signal, signalKey);
+    }
+    return JSON.stringify(['controlled', descriptor.key, options.timeout, signalKey]);
   }
 
   private requestWithDescriptor<R extends Request>(
@@ -2590,8 +2612,11 @@ export class FateClient<
     ) {
       throw new Error('fate: Persistence maxAge must be a non-negative finite duration.');
     }
-    const requestKey = descriptor.key;
-    const existingRequest = this.requests.get(requestKey)?.get(mode);
+    validateTimeout(options?.timeout);
+    const controlled = options?.timeout !== undefined || options?.signal !== undefined;
+    const cacheHandle = !controlled || !revalidateExisting;
+    const requestKey = this.requestCacheKey(descriptor, options);
+    const existingRequest = cacheHandle ? this.requests.get(requestKey)?.get(mode) : undefined;
     if (existingRequest) {
       if (persistence && options?.persist) {
         const executionOptions = this.requestExecutionOptions.get(existingRequest.descriptor);
@@ -2626,6 +2651,18 @@ export class FateClient<
       () => this.getRequestResultFromDescriptor(descriptor),
     );
 
+    if (!cacheHandle) {
+      this.executeRequestHandle(handle, mode, options);
+      return handle as unknown as Promise<RequestResult<Roots, R>>;
+    }
+    if (controlled) {
+      let keys = this.controlledRequestKeys.get(descriptor.key);
+      if (!keys) {
+        keys = new Set();
+        this.controlledRequestKeys.set(descriptor.key, keys);
+      }
+      keys.add(requestKey);
+    }
     let requests = this.requests.get(requestKey);
     if (!requests) {
       requests = new Map();
@@ -2639,7 +2676,11 @@ export class FateClient<
   }
 
   releaseRequest(request: Request, mode: RequestMode): void {
-    this.releaseRequestKey(this.createRequestDescriptor(request).key, mode);
+    const key = this.createRequestDescriptor(request).key;
+    this.releaseRequestKey(key, mode);
+    for (const controlledKey of this.controlledRequestKeys.get(key) ?? []) {
+      this.releaseRequestKey(controlledKey, mode);
+    }
   }
 
   releaseRequestKey(requestKey: string, mode: RequestMode): void {
@@ -2648,7 +2689,15 @@ export class FateClient<
       return;
     }
 
+    const descriptor = requests.get(mode)?.descriptor;
     requests.delete(mode);
+    if (requests.size === 0 && descriptor) {
+      const keys = this.controlledRequestKeys.get(descriptor.key);
+      keys?.delete(requestKey);
+      if (!keys?.size) {
+        this.controlledRequestKeys.delete(descriptor.key);
+      }
+    }
     if (requests.size === 0) {
       this.requests.delete(requestKey);
     }
@@ -2847,32 +2896,74 @@ export class FateClient<
     options?: RequestOptions,
   ) {
     const persistence = this.persistenceRuntime;
+    const control = readControl(options);
+    let background = false;
     const executionOptions = {
       fetchAll: mode !== 'cache-first',
       persist: options?.persist ? { ...options.persist } : undefined,
+      signal: control?.signal,
     };
     if (persistence) {
       this.requestExecutionOptions.set(handle.descriptor, executionOptions);
     }
     const execute = (): Promise<RequestResult<Roots, Request>> => {
       this.assertPersistenceActive();
-      if (mode === 'stale-while-revalidate') {
-        return this.handleStoreAndNetworkRequest(handle.descriptor, executionOptions);
+      control?.signal.throwIfAborted();
+      if (mode === 'stale-while-revalidate' && this.hasRequestData(handle.descriptor)) {
+        background = true;
+        void this.executeRequest(handle.descriptor, executionOptions).then(
+          () => {
+            control?.dispose();
+            this.notifyRequests(this.requestDependencies(handle.descriptor));
+          },
+          () => {
+            control?.dispose();
+            this.notifyRequests(this.requestDependencies(handle.descriptor));
+          },
+        );
+        return Promise.resolve(this.getRequestResultFromDescriptor(handle.descriptor));
       }
       return this.executeRequest(handle.descriptor, executionOptions).then(() =>
         this.getRequestResultFromDescriptor(handle.descriptor),
       );
     };
+    const execution = persistence
+      ? this.withPersistenceLifecycle(() =>
+          persistence.ready
+            .then(() => {
+              control?.signal.throwIfAborted();
+              return mode === 'network-only'
+                ? undefined
+                : persistence.restoreRequest(handle.descriptor);
+            })
+            .then(execute),
+        )
+      : control?.signal.aborted
+        ? Promise.reject(control.signal.reason)
+        : execute();
     handle.start(
-      persistence
-        ? this.withPersistenceLifecycle(() =>
-            persistence.ready
-              .then(() =>
-                mode === 'network-only' ? undefined : persistence.restoreRequest(handle.descriptor),
-              )
-              .then(execute),
-          )
-        : execute(),
+      abortable(execution, control?.signal).then(
+        (result) => {
+          if (!background) {
+            control?.dispose();
+          }
+          for (const key of this.controlledRequestKeys.get(handle.descriptor.key) ?? []) {
+            const requests = this.requests.get(key);
+            for (const [mode, previous] of requests ?? []) {
+              if (previous.status === 'rejected') {
+                this.releaseRequestKey(key, mode);
+              }
+            }
+          }
+          return result;
+        },
+        (error) => {
+          if (!background) {
+            control?.dispose();
+          }
+          throw error;
+        },
+      ),
     );
     void handle.then(
       () => this.notifyRequests(this.requestDependencies(handle.descriptor)),
@@ -2975,24 +3066,6 @@ export class FateClient<
     }
   }
 
-  private async handleStoreAndNetworkRequest<R extends Request>(
-    request: RequestDescriptor,
-    options: { fetchAll: boolean; persist?: { maxAge: number } },
-  ): Promise<RequestResult<Roots, R>> {
-    const hasData = this.hasRequestData(request);
-    if (!hasData) {
-      await this.executeRequest(request, options);
-      return this.getRequestResultFromDescriptor(request) as RequestResult<Roots, R>;
-    }
-
-    const result = this.getRequestResultFromDescriptor(request) as RequestResult<Roots, R>;
-    void this.executeRequest(request, options).then(
-      () => this.notifyRequests(this.requestDependencies(request)),
-      () => this.notifyRequests(this.requestDependencies(request)),
-    );
-    return result;
-  }
-
   private getRootType(name: string): string {
     const root = this.roots[name];
     if (!root) {
@@ -3049,9 +3122,21 @@ export class FateClient<
     return true;
   }
 
-  private async executeRequest(
+  private executeRequest(
+    request: RequestDescriptor,
+    options: { fetchAll?: boolean; persist?: { maxAge: number }; signal?: AbortSignal } = {},
+  ) {
+    return this.readRequests.run(
+      JSON.stringify([request.key, !!options.fetchAll, options.persist?.maxAge]),
+      (signal) => this.executeRequestWork(request, options, signal),
+      options.signal,
+    );
+  }
+
+  private async executeRequestWork(
     request: RequestDescriptor,
     options: { fetchAll?: boolean; persist?: { maxAge: number } } = {},
+    signal?: AbortSignal,
   ) {
     const fetchAll = options.fetchAll ?? false;
     type GroupKey = string;
@@ -3099,7 +3184,7 @@ export class FateClient<
       } else {
         if (item.kind === 'value') {
           if (fetchAll || !this.rootValues.has(item.queryKey)) {
-            promises.push(this.fetchValue(item));
+            promises.push(this.fetchValue(item, signal));
             fetchedItems.push(item);
           } else {
             fetchedAll = false;
@@ -3116,7 +3201,7 @@ export class FateClient<
               : item.plan.paths;
 
           if (fetchAll || !hasResult || (entityId && missing.size > 0)) {
-            promises.push(this.fetchQueryAndNormalize(item));
+            promises.push(this.fetchQueryAndNormalize(item, signal));
             fetchedItems.push(item);
           } else {
             fetchedAll = false;
@@ -3135,7 +3220,7 @@ export class FateClient<
           fetchedAll = false;
           continue;
         }
-        promises.push(this.fetchListAndNormalize(item));
+        promises.push(this.fetchListAndNormalize(item, signal));
         fetchedItems.push(item);
       }
     }
@@ -3144,7 +3229,14 @@ export class FateClient<
       ...promises,
       ...Array.from(groups.values()).map((group) =>
         group.ids.length
-          ? this.fetchByIdAndNormalize(group.type, group.ids, group.fields, group.plan)
+          ? this.fetchByIdAndNormalize(
+              group.type,
+              group.ids,
+              group.fields,
+              group.plan,
+              null,
+              signal,
+            )
           : Promise.resolve(),
       ),
     ]);
@@ -3307,7 +3399,7 @@ export class FateClient<
     return value;
   }
 
-  private readonly entityRefetches = new Map<string, Promise<EntityFetchResult>>();
+  private readonly entityRefetches = new SharedReads<EntityFetchResult>();
 
   private async fetchEntities(
     type: string,
@@ -3315,14 +3407,18 @@ export class FateClient<
     select: Iterable<string>,
     generation: number,
     args?: AnyRecord,
+    signal?: AbortSignal,
   ): Promise<Array<EntityFetchResult>> {
     const config = this.getTypeConfig(type);
     const selection = expandRefetchSelection(this.types, type, select);
     if (!config.refetch) {
-      return (await this.transport.fetchById(type, ids, selection, args)).map((record) => ({
-        generation,
-        record,
-      }));
+      const records = await abortable(
+        signal
+          ? this.transport.fetchById(type, ids, selection, args, { signal })
+          : this.transport.fetchById(type, ids, selection, args),
+        signal,
+      );
+      return records.map((record) => ({ generation, record }));
     }
     const recipe = config.refetch;
     if (!this.transport.fetchQuery) {
@@ -3353,38 +3449,37 @@ export class FateClient<
           fieldArgsSignature,
           selectionSignature,
         ]);
-        const pending = this.entityRefetches.get(key);
-        if (pending) {
-          return pending;
-        }
-        const request = (async () => {
-          const record = await this.transport.fetchQuery!(recipe.root, selection, requestArgs, {
-            refetch: type,
-          });
-          this.assertPersistenceActive();
-          if (record == null) {
-            throw new FateRequestError(
-              'NOT_FOUND',
-              `fate: Refetch query '${recipe.root}' did not find '${entityId}'. Refresh its parent query to recover the locator.`,
+        return this.entityRefetches.run(
+          key,
+          async (signal) => {
+            const record = await abortable(
+              this.transport.fetchQuery!(recipe.root, selection, requestArgs, {
+                refetch: type,
+                ...(signal ? { signal } : {}),
+              }),
+              signal,
             );
-          }
-          if (
-            !isRecord(record) ||
-            (record.__typename != null && record.__typename !== type) ||
-            toEntityId(type, config.getId(record)) !== entityId
-          ) {
-            throw new Error(
-              `fate: Refetch query '${recipe.root}' returned a different entity for '${entityId}'.`,
-            );
-          }
-          return { generation, record };
-        })();
-        this.entityRefetches.set(key, request);
-        try {
-          return await request;
-        } finally {
-          this.entityRefetches.delete(key);
-        }
+            signal?.throwIfAborted();
+            this.assertPersistenceActive();
+            if (record == null) {
+              throw new FateRequestError(
+                'NOT_FOUND',
+                `fate: Refetch query '${recipe.root}' did not find '${entityId}'. Refresh its parent query to recover the locator.`,
+              );
+            }
+            if (
+              !isRecord(record) ||
+              (record.__typename != null && record.__typename !== type) ||
+              toEntityId(type, config.getId(record)) !== entityId
+            ) {
+              throw new Error(
+                `fate: Refetch query '${recipe.root}' returned a different entity for '${entityId}'.`,
+              );
+            }
+            return { generation, record };
+          },
+          signal,
+        );
       }),
     );
   }
@@ -3395,11 +3490,13 @@ export class FateClient<
     select: Set<string>,
     plan?: SelectionPlan,
     prefix: string | null = null,
+    signal?: AbortSignal,
   ) {
     const resolvedArgs = resolvedArgsFromPlan(plan);
     const generation = ++this.writeGeneration;
     await this.trackPendingRequest(async () => {
-      const records = await this.fetchEntities(type, ids, select, generation, resolvedArgs);
+      const records = await this.fetchEntities(type, ids, select, generation, resolvedArgs, signal);
+      signal?.throwIfAborted();
       this.assertPersistenceActive();
       for (const { generation, record } of records) {
         this.withWriteGeneration(generation, () =>
@@ -3409,7 +3506,7 @@ export class FateClient<
     });
   }
 
-  private async fetchQueryAndNormalize(item: QueryRequestDescriptor) {
+  private async fetchQueryAndNormalize(item: QueryRequestDescriptor, signal?: AbortSignal) {
     if (!this.transport.fetchQuery) {
       throw new Error(
         `fate: transport does not support queries. Please add support for 'fetchQuery' in your transport for '${item.name}'.`,
@@ -3418,11 +3515,16 @@ export class FateClient<
 
     const generation = ++this.writeGeneration;
     await this.trackPendingRequest(async () => {
-      const record = await this.transport.fetchQuery!(
-        item.procedure,
-        expandRefetchSelection(this.types, item.type, item.plan.paths),
-        item.argsPayload,
+      const record = await abortable(
+        this.transport.fetchQuery!(
+          item.procedure,
+          expandRefetchSelection(this.types, item.type, item.plan.paths),
+          item.argsPayload,
+          ...(signal ? [{ signal }] : []),
+        ),
+        signal,
       );
+      signal?.throwIfAborted();
       this.assertPersistenceActive();
       if (!record || typeof record !== 'object') {
         if (this.acceptWrite(`root:${item.queryKey}`, generation)) {
@@ -3440,17 +3542,22 @@ export class FateClient<
     });
   }
 
-  private async fetchValue(item: ValueRequestDescriptor) {
+  private async fetchValue(item: ValueRequestDescriptor, signal?: AbortSignal) {
     if (!this.transport.fetchQuery) {
       throw new Error(`fate: transport does not support value queries for '${item.name}'.`);
     }
     const generation = ++this.writeGeneration;
     await this.trackPendingRequest(async () => {
-      const value = await this.transport.fetchQuery!(
-        item.procedure,
-        expandRefetchSelection(this.types, item.type, item.plan.paths),
-        item.argsPayload,
+      const value = await abortable(
+        this.transport.fetchQuery!(
+          item.procedure,
+          expandRefetchSelection(this.types, item.type, item.plan.paths),
+          item.argsPayload,
+          ...(signal ? [{ signal }] : []),
+        ),
+        signal,
       );
+      signal?.throwIfAborted();
       this.assertPersistenceActive();
       if (this.acceptWrite(`root:${item.queryKey}`, generation)) {
         this.rootValues.set(item.queryKey, value);
@@ -3458,7 +3565,7 @@ export class FateClient<
     });
   }
 
-  private async fetchListAndNormalize(item: ListRequestDescriptor) {
+  private async fetchListAndNormalize(item: ListRequestDescriptor, signal?: AbortSignal) {
     if (!this.transport.fetchList) {
       throw new Error(
         `fate: 'transport.fetchList' is not configured but request includes a list for key '${item.name}'.`,
@@ -3467,11 +3574,16 @@ export class FateClient<
 
     const generation = ++this.writeGeneration;
     await this.trackPendingRequest(async () => {
-      const connection = await this.transport.fetchList!(
-        item.procedure,
-        expandRefetchSelection(this.types, item.type, item.plan.paths),
-        item.argsPayload,
+      const connection = await abortable(
+        this.transport.fetchList!(
+          item.procedure,
+          expandRefetchSelection(this.types, item.type, item.plan.paths),
+          item.argsPayload,
+          ...(signal ? [{ signal }] : []),
+        ),
+        signal,
       );
+      signal?.throwIfAborted();
       this.assertPersistenceActive();
       const acceptList = this.acceptWrite(`list:${item.listKey}`, generation);
       if (connection === null) {
