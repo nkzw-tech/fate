@@ -1300,39 +1300,39 @@ export class FateClient<
       }
 
       const promise = this.trackPendingRequest(async () => {
-        const persistence = this.persistenceRuntime;
-        if (persistence) {
-          const persistedRequest: RequestDescriptor = {
-            items: [
-              {
-                ids: [id],
-                kind: 'node',
-                name: type,
-                plan,
-                refViewNames: new Set(),
-                type,
-                viewSignature: '',
-              },
-            ],
-            key: `view:${key}`,
-          };
-          await persistence.restoreRequest(persistedRequest);
-          const remaining = this.missingForSelection(entityId, selectedPaths, plan);
-          if (remaining.size) {
-            await this.fetchByIdAndNormalize(type, [id], remaining, plan);
-            persistence.fetched({
-              ...persistedRequest,
-              items: persistedRequest.items.map((item) => ({
-                ...item,
-                plan: { ...item.plan, paths: remaining },
-              })),
-              key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
-            });
-          }
-        } else {
-          await this.fetchByIdAndNormalize(type, [id], missing, plan);
-        }
         try {
+          const persistence = this.persistenceRuntime;
+          if (persistence) {
+            const persistedRequest: RequestDescriptor = {
+              items: [
+                {
+                  ids: [id],
+                  kind: 'node',
+                  name: type,
+                  plan,
+                  refViewNames: new Set(),
+                  type,
+                  viewSignature: '',
+                },
+              ],
+              key: `view:${key}`,
+            };
+            await persistence.restoreRequest(persistedRequest);
+            const remaining = this.missingForSelection(entityId, selectedPaths, plan);
+            if (remaining.size) {
+              await this.fetchByIdAndNormalize(type, [id], remaining, plan);
+              persistence.fetched({
+                ...persistedRequest,
+                items: persistedRequest.items.map((item) => ({
+                  ...item,
+                  plan: { ...item.plan, paths: remaining },
+                })),
+                key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
+              });
+            }
+          } else {
+            await this.fetchByIdAndNormalize(type, [id], missing, plan);
+          }
           const remainingMissing = this.missingForSelection(entityId, selectedPaths, plan);
 
           if (remainingMissing.size > 0) {
