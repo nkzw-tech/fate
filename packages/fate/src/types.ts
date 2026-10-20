@@ -349,11 +349,11 @@ type ConnectionMask<T extends Entity, S> = S extends {
   ? {
       items: ItemSelection extends {
         readonly cursor?: infer CursorSelection;
-        readonly node: unknown;
+        readonly node: infer NodeSelection;
       }
         ? Array<
             (CursorSelection extends true ? { cursor: string } : Record<string, never>) & {
-              node: ViewRef<T['__typename']>;
+              node: Mask<T, NodeSelection>;
             }
           >
         : Array<{ node: ViewRef<T['__typename']> }>;
@@ -401,8 +401,16 @@ type MaskNonNullish<T, S> =
             ? ViewRef<EntityName<NonNullish<T>>>
             : ViewRef<EntityName<NonNullable<T>>>
           : {
-              [K in keyof S as K extends 'args' ? never : K]: MaskSelectionEntry<T, K, S[K]>;
-            } & (T extends Entity ? Pick<NonNullish<T>, '__typename'> : Record<never, never>)
+              [K in keyof S as K extends SelectionMetadata ? never : K]: MaskSelectionEntry<
+                T,
+                K,
+                S[K]
+              >;
+            } & (T extends Entity
+              ? typeof __FateEntityBrand extends keyof S
+                ? ViewRef<T['__typename']>
+                : Pick<T, '__typename'>
+              : Record<never, never>)
         : T;
 
 export type Mask<T, S> = S extends SelectionArgs
