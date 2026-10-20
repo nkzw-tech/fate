@@ -48,6 +48,27 @@ A `ViewRef` is a reference to a concrete object of a specific type, for example 
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
+## Resolving Multiple Refs with `useViews`
+
+Use `useViews` when a component needs selected data from an array of refs, for example to filter or sort a list before rendering it:
+
+```tsx
+import { useViews, type ViewRef } from 'react-fate';
+
+function PostTitles({ posts: postRefs }: { posts: ReadonlyArray<ViewRef<'Post'>> }) {
+  const posts = useViews(PostView, postRefs);
+  const sorted = [...posts].sort((a, b) => a.title.localeCompare(b.title));
+
+  return sorted.map((post) => <h2 key={post.id}>{post.title}</h2>);
+}
+```
+
+Call the hook once with the whole array. The array can grow, shrink, or reorder between renders. Results preserve the input order, duplicates, and any `null` or `undefined` entries. Readonly tuples preserve their position types. Each ref carries its own parameter bindings, so refs for the same entity can select different arguments.
+
+Like `useView`, `useViews` masks unselected fields, subscribes to selected fields on each entity and its nested entities, suspends while required data is missing, and sends read errors to the nearest error boundary. It starts all missing reads together. Writes to unrelated fields do not rerender the component. The returned array stays identical while the refs and their selected snapshots stay unchanged, including when the input array is constructed inline.
+
+`useViews` also accepts deferred refs. It subscribes to their owning selections as well as the resolved entities. Removing refs or unmounting the component releases their subscriptions. It works with every fate transport; it is not specific to GraphQL.
+
 ## Fetching Data with `useRequest`
 
 Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
