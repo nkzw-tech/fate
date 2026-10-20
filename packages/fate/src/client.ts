@@ -451,6 +451,7 @@ export class FateClient<
   HydrationScope extends string = string,
 > {
   private writeGeneration = 0;
+  private mutationWrite: { fields?: ReadonlySet<string> } | undefined;
   private applyingGeneration: number | undefined;
   private applyingPaginationList: string | undefined;
   private readonly writeVersions = new Map<string, number>();
@@ -1121,6 +1122,32 @@ export class FateClient<
     insert?: InsertPosition,
   ) {
     return this.writeEntity(type, data, select, plan, null, insert);
+  }
+
+  /** @internal Normalize mutation snapshots while retaining unrelated loaded pages. */
+  writeMutationResult(
+    type: string,
+    data: AnyRecord,
+    select: ReadonlySet<string>,
+    plan?: SelectionPlan,
+    insert?: InsertPosition,
+  ) {
+    const previous = this.mutationWrite;
+    const fields = plan ? new Set<string>() : undefined;
+    if (fields && plan) {
+      for (const path of plan.paths) {
+        const parts = path.split('.');
+        for (let index = 1; index <= parts.length; index++) {
+          fields.add(parts.slice(0, index).join('.'));
+        }
+      }
+    }
+    this.mutationWrite = { fields };
+    try {
+      return this.write(type, data, select, plan, insert);
+    } finally {
+      this.mutationWrite = previous;
+    }
   }
 
   deleteRecord(type: string, id: string | number) {
@@ -2006,16 +2033,14 @@ export class FateClient<
       replace?: boolean;
     },
   ): List {
-    const existingIds = previous?.ids ?? [];
+    // A snapshot starts a new window; only cursor pages extend the old one.
+    const previousWindow = options.replace && !options.hasCursorArg ? undefined : previous;
+    const existingIds = previousWindow?.ids ?? [];
     const existingSet = new Set(existingIds);
     const isBackward = options.direction === 'backward';
 
     const mergeIds = () => {
-      if (!previous) {
-        return [...incomingIds];
-      }
-
-      if (!options.hasCursorArg && options.replace) {
+      if (!previousWindow) {
         return [...incomingIds];
       }
 
@@ -2033,8 +2058,8 @@ export class FateClient<
     const hasIncomingCursor = incomingCursors.some((cursor) => cursor !== undefined);
 
     const cursorMap = new Map<EntityId, string | undefined>();
-    if (previous?.cursors) {
-      previous.cursors.forEach((cursor, index) => {
+    if (previousWindow?.cursors) {
+      previousWindow.cursors.forEach((cursor, index) => {
         cursorMap.set(existingIds[index], cursor);
       });
     }
@@ -2045,10 +2070,10 @@ export class FateClient<
     });
 
     const shouldStoreCursors =
-      hasIncomingCursor || Boolean(previous?.cursors) || options.hasCursorArg;
+      hasIncomingCursor || Boolean(previousWindow?.cursors) || options.hasCursorArg;
     const cursors = shouldStoreCursors ? ids.map((id) => cursorMap.get(id)) : undefined;
 
-    const previousPagination = previous?.pagination;
+    const previousPagination = previousWindow?.pagination;
     const newPagination = incomingPagination;
     // Cursor pages extend one edge of the accumulated list. Keep the other
     // edge's flag and cursor instead of replacing them with the new page's.
@@ -2071,13 +2096,13 @@ export class FateClient<
     return {
       backwardPageLimit:
         !options.hasCursorArg && isBackward && options.pageLimit != null
-          ? Math.max(previous?.backwardPageLimit ?? 0, options.pageLimit)
-          : previous?.backwardPageLimit,
+          ? Math.max(previousWindow?.backwardPageLimit ?? 0, options.pageLimit)
+          : previousWindow?.backwardPageLimit,
       cursors,
       forwardPageLimit:
         !options.hasCursorArg && !isBackward && options.pageLimit != null
-          ? Math.max(previous?.forwardPageLimit ?? 0, options.pageLimit)
-          : previous?.forwardPageLimit,
+          ? Math.max(previousWindow?.forwardPageLimit ?? 0, options.pageLimit)
+          : previousWindow?.forwardPageLimit,
       ids,
       liveAfterIds: dropCanonicalListIds(previous?.liveAfterIds, ids),
       liveBeforeIds: dropCanonicalListIds(previous?.liveBeforeIds, ids),
@@ -3854,13 +3879,24 @@ export class FateClient<
               const previousList = this.store.getListState(listKey);
               const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
-              const nextListState = this.mergeListState(
-                previousList,
-                ids,
-                cursors,
-                connection.pagination as List['pagination'],
-                getPaginationMergeInfo(argsValue),
-              );
+              const mergeInfo = getPaginationMergeInfo(argsValue);
+              const pagination = connection.pagination as List['pagination'];
+              const complete =
+                Array.isArray(value) ||
+                (mergeInfo.direction === 'forward'
+                  ? pagination?.hasNext === false && pagination.hasPrevious !== true
+                  : pagination?.hasPrevious === false && pagination.hasNext !== true);
+              // Queries are authoritative windows. Mutations can return only a
+              // partial page or extra unselected relations; retain loaded pages
+              // unless the selected relation is a complete snapshot.
+              const replace =
+                !this.mutationWrite ||
+                ((!this.mutationWrite.fields || this.mutationWrite.fields.has(fieldPath)) &&
+                  complete);
+              const nextListState = this.mergeListState(previousList, ids, cursors, pagination, {
+                ...mergeInfo,
+                replace,
+              });
 
               const listChanged = !areListStatesEqual(previousList, nextListState);
               result[storageKey] = createNodeRefsForIds(

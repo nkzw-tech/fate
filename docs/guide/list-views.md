@@ -74,6 +74,10 @@ When `loadNext` runs, fate sends the next cursor as `after` and keeps the page s
 
 Concurrent loads with the same connection, selection, arguments, and cursor share pending work. A failed load rejects its callers and can be retried. Late pages preserve newer confirmed fields and deletions, and cannot restore a page window replaced by a newer refresh. Forward and backward pages can still extend opposite ends of the same list concurrently.
 
+Refreshing a query without `after` or `before` replaces its connection window, including removed entries and empty results. This applies to nested connections as well as root lists. Cursor-based requests continue to append or prepend pages.
+
+Complete selected relationships returned by mutations likewise replace their membership. Partial mutation pages preserve previously loaded entries outside that page, and optimistic changes are replayed over the latest confirmed snapshot. Removing a relationship does not delete its shared entity records.
+
 Additional arguments on a root request are scoped to that root list:
 
 ```tsx

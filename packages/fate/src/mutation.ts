@@ -250,7 +250,7 @@ export function prepareMutation(
     commit: (result: unknown) =>
       settle(() => {
         if (result && typeof result === 'object' && (!deleteRecord || plan)) {
-          client.write(
+          client.writeMutationResult(
             entity,
             result as AnyRecord,
             collectImplicitSelectedPaths(result as AnyRecord),
