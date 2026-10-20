@@ -22,8 +22,10 @@ const schema = `
   type MapConnection { edges: [MapEdge], pageInfo: PageInfo! }
   type Map implements Node { related: MapConnection, id: ID!, name: String!, image: Image, json: JSON, state(biome: Biome!): String! }
   union Result = Map | Image
-  type Read { map(filter: Filter!): Map, optionalMap(biome: Biome): Map, viewer: Map }
-  type Write { edit(input: Filter!): Map, rename(id: ID!, name: String!): Map }
+  type Price { amount: Int! }
+  type Receipt { code: String! }
+  type Read { prices: Price!, map(filter: Filter!): Map, optionalMap(biome: Biome): Map, viewer: Map }
+  type Write { end: Boolean!, receipt: Receipt!, edit(input: Filter!): Map, rename(id: ID!, name: String!): Map }
 `;
 type MapEntity = { __typename: 'Map'; id: string; name: string; state: string };
 const mapDataView = dataView<MapEntity>('Map')({ id: true, name: true, state: true });
@@ -31,12 +33,14 @@ const moduleExports = {
   fateGraphQL: {
     mutations: {
       edit: graphqlMutation<MapEntity, unknown, MapEntity>('Map', { field: 'edit' }),
+      end: { entity: '__value__', field: 'end', inputArg: false },
+      receipt: { entity: '__value__', field: 'receipt', inputArg: false, type: 'Receipt' },
       rename: graphqlMutation<MapEntity, unknown, MapEntity>('Map', {
         field: 'rename',
         inputArg: false,
       }),
     },
-    roots: { selectedMap: { field: 'map' } },
+    roots: { prices: { embedded: true, type: 'Price' }, selectedMap: { field: 'map' } },
     schema,
   },
   mapDataView,
@@ -158,6 +162,9 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       type Map = GraphQLEntities['Map'];
       import { createFateClient, type GraphQLFieldArguments } from './client.ts';
       const client = createFateClient({ url: '/graphql' });
+      client.request({ prices: { value: { amount: true } } });
+      client.mutations.end({ input: {} });
+      client.mutations.receipt({ input: {}, select: { code: true } });
       const projection = { filter: { object: { biome: { value: 'Grassland' } } } } satisfies RefetchArguments<Map, GraphQLFieldArguments['Read']['map']>;
       void projection;
       // @ts-expect-error Projection fields must have compatible GraphQL argument types.

@@ -321,3 +321,69 @@ test('generates and executes the schema-driven GraphQL client template', async (
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test.each(['react-fate', 'vue-fate'] as const)(
+  'executes generated value roots and mutations through %s exports',
+  async (clientModule) => {
+    const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-value-'));
+    let server: Awaited<ReturnType<typeof createServer>> | undefined;
+    try {
+      await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
+      await writeFile(
+        path.join(root, 'graphql.ts'),
+        `export const fateGraphQL = {
+        schema: 'type Query { prices: Price! } type Price { amount: Int! } type Mutation { end: Boolean! }',
+        roots: { prices: { embedded: true, type: 'Price' } },
+        mutations: { end: { entity: '__value__', field: 'end', inputArg: false } },
+      };`,
+      );
+      server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [fate({ clientModule, module: './graphql.ts', transport: 'graphql' })],
+        resolve: {
+          alias: [
+            {
+              find: new RegExp(`^${clientModule}$`),
+              replacement: path.resolve(
+                import.meta.dirname,
+                '../../../',
+                clientModule,
+                clientModule === 'react-fate' ? 'src/index.tsx' : 'src/index.ts',
+              ),
+            },
+            {
+              find: /^@nkzw\/fate$/,
+              replacement: path.resolve(import.meta.dirname, '../index.ts'),
+            },
+          ],
+        },
+        root,
+        server: { middlewareMode: true },
+      });
+      const generated = await server.ssrLoadModule(`${clientModule}/client`);
+      const client = generated.createFateClient({
+        fetch: async (_url: string, init: RequestInit) => {
+          const mutation = JSON.parse(init.body as string).query.startsWith('mutation');
+          return new Response(
+            JSON.stringify({
+              data: { [mutation ? 'f2' : 'f1']: mutation ? false : { amount: 7 } },
+            }),
+          );
+        },
+        live: false,
+        url: '/graphql',
+      });
+      expect(await client.request({ prices: { value: { amount: true } } })).toEqual({
+        prices: { amount: 7 },
+      });
+      expect(await client.mutations.end({ input: {} })).toEqual({
+        error: undefined,
+        result: false,
+      });
+    } finally {
+      await server?.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  },
+);
