@@ -229,6 +229,52 @@ Nested pagination uses the owner ID only for the mapped query field. Pagination 
 
 Choose fields with the appropriate authorization rules for the consuming views. The adapter does not switch between public and authenticated lookup fields automatically.
 
+### Refetching through existing queries
+
+An entity's cache identity does not need to be its lookup argument. With a schema, configure ordinary entity query roots directly and assign a refetch recipe:
+
+```tsx
+export const fateGraphQL = {
+  schema,
+  nodes: false,
+  roots: {
+    user: { type: 'User' },
+    viewer: { type: 'User' },
+  },
+  refetch: {
+    User: {
+      root: 'user',
+      args: { username: { field: 'username' } },
+    },
+  },
+};
+```
+
+Here `user` maps to `Query.user(username:)`. Aliased root names can specify their GraphQL `field` as usual. Codegen checks the root's return type, required arguments, projected field types, nullability, and constants. A recipe references a single entity query, not a connection or embedded value root. Existing data-view root declarations remain supported.
+
+Fate automatically selects `username` whenever this entity appears in a query, connection, or mutation response. The locator stays inside the normalized cache and does not appear in a component's masked view unless selected. Entity reads, deferred selections, explicit ID requests, and nested pagination use the recipe instead of `byId` or `nodes`. Matching pending refetches deduplicate, and GraphQL batches distinct lookups using aliases. Legacy `byId` mappings continue working for types without a recipe.
+
+References retain their stable `(typename, id)` identity. Fate constructs lookup arguments from **confirmed** cached values, so optimistic renames cannot redirect a lookup. The returned identity must match before any normalization occurs. Missing results report `FateRequestError('NOT_FOUND')` without deleting the cached record. A username changed elsewhere may require refreshing an authoritative parent or viewer query. A cold ID without its locator reports an actionable error instead of falling back to an ID lookup. Recipes with no field dependencies, such as a viewer query, can fetch cold identities but still check the result's identity.
+
+Arguments use `{ field: 'username' }` for scalar field projections, `{ value: ... }` for JSON constants, and `{ object: { ... } }` for nested input objects. The explicit object wrapper also supports input fields literally named `field`, `value`, or `object`. For example:
+
+```tsx
+args: {
+  input: {
+    object: {
+      tenant: { value: 'public' },
+      username: { field: 'username' },
+    },
+  },
+}
+```
+
+Use `RefetchArguments<User, GraphQLFieldArguments['Query']['user']>` from `@nkzw/fate` to type-check projections while authoring a recipe. Projected `id` fields use the GraphQL transport's node ID encoder during automatic refetches; ordinary root arguments retain their existing wire representation.
+
+Implicit locators are retained and persisted with their entities. Adding or changing a recipe does not change mutation-journal compatibility; restored cache records missing required locator coverage are refreshed through their requested root. Existing server refetch endpoints can remain available to older deployed clients.
+
+For other transports, put the same recipe in `TypeConfig.refetch`. Implement `fetchQuery`; Fate adds implicit scalar selections to entity reads and entity mutation calls. Query transports receive an optional fourth `{ refetch: typeName }` context on automatic entity lookups. GraphQL also adds locator selections inside embedded results and concrete interface results.
+
 ## Object IDs
 
 The transport converts between fate entity IDs and GraphQL node IDs. By default, it sends IDs as `${type}-${id}` and strips that prefix from returned IDs. Override this if your schema uses Relay global IDs, raw database IDs, or another encoding:

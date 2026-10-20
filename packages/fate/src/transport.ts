@@ -65,7 +65,12 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     items: Array<{ cursor: string | undefined; node: unknown }>;
     pagination: Pagination;
   } | null>;
-  fetchQuery?(proc: string, select: Iterable<string>, args?: ResolvedArgsPayload): Promise<unknown>;
+  fetchQuery?(
+    proc: string,
+    select: Iterable<string>,
+    args?: ResolvedArgsPayload,
+    context?: Readonly<{ refetch: string }>,
+  ): Promise<unknown>;
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],

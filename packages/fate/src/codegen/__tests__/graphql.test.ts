@@ -153,11 +153,16 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         path.join(directory, 'usage.ts'),
         `
       import '${clientModule}/client';
-      import { view, type ViewData } from '@nkzw/fate';
+      import { view, type ViewData, type RefetchArguments } from '@nkzw/fate';
       import type { GraphQLEntities, GraphQLTypes } from './client.ts';
       type Map = GraphQLEntities['Map'];
       import { createFateClient, type GraphQLFieldArguments } from './client.ts';
       const client = createFateClient({ url: '/graphql' });
+      const projection = { filter: { object: { biome: { value: 'Grassland' } } } } satisfies RefetchArguments<Map, GraphQLFieldArguments['Read']['map']>;
+      void projection;
+      // @ts-expect-error Projection fields must have compatible GraphQL argument types.
+      const badProjection = { filter: { object: { biome: { field: 'name' } } } } satisfies RefetchArguments<Map, GraphQLFieldArguments['Read']['map']>;
+      void badProjection;
       const MapView = view<Map>()({ name: true });
       const ImageView = view<Map>()({ image: { url: true } });
       const RelatedView = view<Map>()({ related: { items: { node: { name: true } } } });
@@ -333,4 +338,64 @@ test('rejects output mappings that disagree with the GraphQL schema', () => {
       roots: { ...moduleExports.fateGraphQL.roots, viewer: { type: 'Image' } },
     }),
   ).toThrow(/returns 'Map', not 'Image'/);
+});
+
+const refetchSchema = `
+  input Lookup { username: String!, tenant: Int! }
+  type User { id: ID!, username: String!, count: Int!, optional: String }
+  type Query { user(username: String!): User, lookup(input: Lookup!): User, users: [User!]! }
+`;
+const refetchSource = (refetch: unknown) =>
+  createClientSource({
+    moduleExports: {
+      fateGraphQL: {
+        nodes: false,
+        refetch: { User: refetch },
+        roots: { lookup: { type: 'User' }, profile: { field: 'user', type: 'User' } },
+        schema: refetchSchema,
+      },
+    },
+    moduleName: './contract.ts',
+    transport: 'graphql',
+  });
+
+test('generates query-based refetch recipes using ordinary roots without data views', () => {
+  const source = refetchSource({ args: { username: { field: 'username' } }, root: 'profile' });
+  expect(source).toContain('refetch: {"args":{"username":{"field":"username"}},"root":"profile"}');
+  expect(source).toContain("'profile': clientRoot<User | null");
+  expect(source).toContain('"nodes": false');
+});
+
+test('supports nested refetch input projections checked against the schema', () => {
+  expect(() =>
+    refetchSource({
+      args: { input: { object: { tenant: { value: 7 }, username: { field: 'username' } } } },
+      root: 'lookup',
+    }),
+  ).not.toThrow();
+});
+
+test.each([
+  [{ args: { username: { field: 'missing' } }, root: 'profile' }, /incompatible/],
+  [{ args: { username: { field: 'count' } }, root: 'profile' }, /incompatible/],
+  [{ args: { username: { field: 'optional' } }, root: 'profile' }, /incompatible/],
+  [{ args: {}, root: 'profile' }, /Missing refetch argument/],
+  [
+    { args: { username: { field: 'username' }, wrong: { value: 1 } }, root: 'profile' },
+    /Unknown refetch argument/,
+  ],
+  [
+    { args: { input: { object: { username: { field: 'username' } } } }, root: 'lookup' },
+    /Missing refetch argument/,
+  ],
+  [
+    {
+      args: { input: { object: { tenant: { value: 'wrong' }, username: { field: 'username' } } } },
+      root: 'lookup',
+    },
+    /Invalid input/,
+  ],
+  [{ args: { username: { field: 'username' } }, root: 'missing' }, /must be a query/],
+])('rejects invalid refetch recipe %j', (refetch, error) => {
+  expect(() => refetchSource(refetch)).toThrow(error);
 });

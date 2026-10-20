@@ -5,10 +5,12 @@ import {
   graphQLOutputRelations,
   validateGraphQLArguments,
   validateGraphQLRefetchMappings,
+  validateGraphQLQueryRefetch,
   type GraphQLArgumentSchema,
   type GraphQLByIdConfig,
 } from './graphqlSchema.ts';
 import { isRecord } from './record.ts';
+import { encodeRefetchArgs, getRefetchFields } from './refetch.ts';
 import type { Transport } from './transport.ts';
 import type { AnyRecord, Entity, MutationShape, Pagination, TypeConfig } from './types.ts';
 
@@ -440,7 +442,11 @@ const buildRecordSelection = ({
     embedded = false,
   ): string => {
     const config = getTypeConfig(types, currentType);
-    const fields = new Set([...currentTree.keys(), ...(embedded ? [] : ['id', '__typename'])]);
+    const fields = new Set([
+      ...currentTree.keys(),
+      ...(embedded ? [] : ['id', '__typename']),
+      ...getRefetchFields(config.refetch),
+    ]);
     const lines: Array<string> = [];
 
     for (const field of [...fields].sort()) {
@@ -505,6 +511,16 @@ const buildRecordSelection = ({
       lines.push(`${fieldName}${fieldArguments}`);
     }
 
+    for (const concrete of config.possibleTypes ?? []) {
+      const fields = [...getRefetchFields(types.get(concrete)?.refetch)].filter(
+        (field) => !currentTree.has(field),
+      );
+      if (fields.length) {
+        lines.push(
+          `... on ${assertIdentifier(concrete, 'type')} { ${fields.map((field) => `${field}${argumentsForField(concrete, field)}`).join(' ')} }`,
+        );
+      }
+    }
     return lines.join(' ');
   };
 
@@ -721,6 +737,11 @@ export function createGraphQLTransport<
       ...config,
       fields: { ...inferred?.fields, ...config.fields },
     } as TypeConfig);
+  }
+  for (const config of types.values()) {
+    if (config.refetch) {
+      validateGraphQLQueryRefetch(config.type, config.refetch, roots, schema);
+    }
   }
   let nextId = 0;
   let nextVariableId = 0;
@@ -995,7 +1016,14 @@ export function createGraphQLTransport<
         pagination: Pagination;
       } | null>;
     },
-    fetchQuery(name, select, args) {
+    fetchQuery(name, select, args, context) {
+      if (context) {
+        const recipe = types.get(context.refetch)?.refetch;
+        if (!recipe || recipe.root !== name) {
+          throw new Error(`fate(graphql): Missing refetch recipe for '${context.refetch}'.`);
+        }
+        args = encodeRefetchArgs(recipe, args ?? {}, (id) => encodeNodeId(context.refetch, id));
+      }
       const root = roots?.[name];
       if (!root) {
         throw new Error(`fate(graphql): Missing root query mapping for '${name}'.`);

@@ -106,3 +106,5 @@ export type { RequestObserver, RequestState, RequestStateOptions } from './reque
 export { when, type ConditionalSelection } from './when.ts';
 
 export type { GraphQLSelectedResult } from './graphql-types.ts';
+
+export type { RefetchConfig, RefetchArgument, RefetchArguments } from './refetch.ts';

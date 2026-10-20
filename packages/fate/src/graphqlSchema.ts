@@ -1,4 +1,5 @@
 import { isRecord } from './record.ts';
+import { getRefetchFields, type RefetchConfig, type RefetchArgument } from './refetch.ts';
 import type { RelationDescriptor } from './types.ts';
 
 export type GraphQLArgument = Readonly<{ hasDefault?: boolean; type: string }>;
@@ -181,4 +182,88 @@ export const validateGraphQLArguments = (
     result[key] = validateGraphQLInput(schema, definition.type, value, `${path}.${key}`);
   }
   return result;
+};
+
+const compatibleRefetchType = (output: string, input: string): boolean => {
+  if (input.endsWith('!') && !output.endsWith('!')) {
+    return false;
+  }
+  const from = output.replace(/!$/, '');
+  const to = input.replace(/!$/, '');
+  return from.startsWith('[') && to.startsWith('[')
+    ? compatibleRefetchType(from.slice(1, -1), to.slice(1, -1))
+    : from === to || (from === 'Int' && to === 'Float');
+};
+
+/** Validate declarative query locators against actual root and input contracts. */
+export const validateGraphQLQueryRefetch = (
+  type: string,
+  recipe: RefetchConfig,
+  roots: Readonly<Record<string, { embedded?: boolean; field?: string; type: string }>> | undefined,
+  schema?: GraphQLArgumentSchema,
+) => {
+  getRefetchFields(recipe);
+  const root = roots?.[recipe.root];
+  if (!root || root.type !== type || root.embedded) {
+    throw new Error(`fate(graphql): Refetch root '${recipe.root}' must be a query for '${type}'.`);
+  }
+  if (!schema) {
+    return;
+  }
+  const field = root.field ?? recipe.root;
+  if (
+    !schema.outputs?.[type]?.id ||
+    schema.outputs?.[schema.queryType]?.[field]?.replace(/!$/, '') !== type
+  ) {
+    throw new Error(`fate(graphql): Refetch field '${field}' must return one '${type}' entity.`);
+  }
+  const object = (
+    definitions: GraphQLArguments,
+    values: Readonly<Record<string, RefetchArgument>>,
+    path: string,
+  ) => {
+    for (const key of Object.keys(values)) {
+      if (!definitions[key]) {
+        throw new Error(`fate(graphql): Unknown refetch argument '${path}.${key}'.`);
+      }
+    }
+    for (const [key, definition] of Object.entries(definitions)) {
+      const value = values[key];
+      const currentPath = `${path}.${key}`;
+      if (!value) {
+        if (definition.type.endsWith('!') && !definition.hasDefault) {
+          throw new Error(`fate(graphql): Missing refetch argument '${currentPath}'.`);
+        }
+        continue;
+      }
+      if ('field' in value && typeof value.field === 'string') {
+        const output = schema.outputs?.[type]?.[value.field];
+        if (
+          !output ||
+          schema.outputs?.[baseGraphQLType(output)] ||
+          Object.keys(schema.fields[type]?.[value.field] ?? {}).length ||
+          !compatibleRefetchType(output, definition.type)
+        ) {
+          throw new Error(
+            `fate(graphql): Locator '${type}.${value.field}' is incompatible with '${currentPath}' (${definition.type}).`,
+          );
+        }
+      } else if ('value' in value) {
+        validateGraphQLInput(schema, definition.type, value.value, currentPath);
+      } else if ('object' in value) {
+        const input = schema.inputs[definition.type.replace(/!$/, '')];
+        if (input?.kind !== 'object') {
+          throw new Error(
+            `fate(graphql): Refetch argument '${currentPath}' expects ${definition.type}.`,
+          );
+        }
+        object(input.fields, value.object, currentPath);
+      }
+    }
+  };
+  object(
+    schema.fields[schema.queryType]?.[field] ?? {},
+    recipe.args,
+    `${schema.queryType}.${field}`,
+  );
 };

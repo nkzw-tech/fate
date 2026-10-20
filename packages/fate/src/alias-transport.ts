@@ -177,8 +177,12 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
           ) as ReturnType<NonNullable<Transport<M>['fetchList']>>
       : undefined,
     fetchQuery: transport.fetchQuery
-      ? (name, select, args) =>
-          readAliases(select, args, (fields, scoped) => transport.fetchQuery!(name, fields, scoped))
+      ? (name, select, args, context) =>
+          readAliases(select, args, (fields, scoped) =>
+            context
+              ? transport.fetchQuery!(name, fields, scoped, context)
+              : transport.fetchQuery!(name, fields, scoped),
+          )
       : undefined,
     mutate: transport.mutate
       ? (name, input, select, selectionArgs) =>

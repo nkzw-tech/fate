@@ -19,7 +19,9 @@ import {
 } from './persistence-utils.ts';
 import type { PersistenceStorage } from './persistence.ts';
 import { isRecord } from './record.ts';
+import { parseEntityId } from './ref.ts';
 import { toEntityId } from './ref.ts';
+import { getRefetchFields } from './refetch.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
 import type { SelectionPlan } from './selection.ts';
 import { getListKey, type List, type StoreChange } from './store.ts';
@@ -785,7 +787,11 @@ export class PersistenceCache {
       }
     }
     for (let index = 0; index < queue.length; index++) {
-      const { id, paths, plan, prefix } = queue[index];
+      const { id, plan, prefix } = queue[index];
+      const locator = getRefetchFields(this.client.getTypeConfig(parseEntityId(id).type).refetch);
+      const paths = locator.size
+        ? [...new Set([...queue[index].paths, ...locator])]
+        : queue[index].paths;
       const key = recordKey(id);
       const seen = nodes.get(key);
       const contexts = visited.get(plan) ?? new Map<string, Set<string>>();

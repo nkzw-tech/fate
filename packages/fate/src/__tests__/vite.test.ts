@@ -1,5 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { buildSchema, graphql } from 'graphql';
 import { createServer } from 'vite';
 import { expect, test } from 'vite-plus/test';
 import { fate } from '../vite.ts';
@@ -156,6 +157,78 @@ test('bootstraps GraphQL schema types imported by the mapping module on a clean 
     );
     expect(code).not.toContain('GraphQLEntities');
     expect(code).not.toContain('buildSchema');
+  } finally {
+    await server?.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('generated GraphQL clients refetch by username through configured query roots', async () => {
+  const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-refetch-'));
+  const sdl =
+    'type Query { viewer: User, user(username: String!): User } type User { id: ID!, username: String!, bio: String! }';
+  const schema = buildSchema(sdl);
+  const user = { bio: 'Biography', id: 'User-1', username: 'cpojer' };
+  const queries: Array<string> = [];
+  let server: Awaited<ReturnType<typeof createServer>> | undefined;
+  try {
+    await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
+    await writeFile(
+      path.join(root, 'graphql.ts'),
+      `
+      export const fateGraphQL = ${JSON.stringify({
+        nodes: false,
+        refetch: { User: { args: { username: { field: 'username' } }, root: 'user' } },
+        roots: { user: { type: 'User' }, viewer: { type: 'User' } },
+        schema: sdl,
+      })};
+    `,
+    );
+    server = await createServer({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [fate({ module: './graphql.ts', transport: 'graphql' })],
+      resolve: {
+        alias: [
+          { find: /^@nkzw\/fate$/, replacement: path.resolve(import.meta.dirname, '../index.ts') },
+        ],
+      },
+      root,
+      server: { middlewareMode: true },
+    });
+    const runtime = await server.ssrLoadModule('@nkzw/fate');
+    const generated = await server.ssrLoadModule('@nkzw/fate/client');
+    const client = generated.createFateClient({
+      fetch: async (_url: string, init: RequestInit) => {
+        const { query, variables } = JSON.parse(init.body as string);
+        queries.push(query);
+        return new Response(
+          JSON.stringify(
+            await graphql({
+              rootValue: {
+                user: ({ username }: { username: string }) =>
+                  username === user.username ? user : null,
+                viewer: () => user,
+              },
+              schema,
+              source: query,
+              variableValues: variables,
+            }),
+          ),
+        );
+      },
+      live: false,
+      url: '/graphql',
+    });
+    const Identity = runtime.view()({ id: true });
+    const Profile = runtime.view()({ bio: true });
+    await client.request({ viewer: { view: Identity } });
+    expect(client.store.read('User:1')).toHaveProperty('username', 'cpojer');
+    await client.request({ user: { id: '1', view: Profile } });
+    expect(client.store.read('User:1')).toHaveProperty('bio', 'Biography');
+    expect(queries).toHaveLength(2);
+    expect(queries[1]).toContain('user(');
+    expect(queries[1]).not.toContain('nodes(');
   } finally {
     await server?.close();
     await rm(root, { force: true, recursive: true });

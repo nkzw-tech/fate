@@ -1,6 +1,7 @@
 import type { AliasedSelection, AliasedView } from './alias.ts';
 import type { SelectedGraphQLResult, GraphQLSelectedResult } from './graphql-types.ts';
 import { FateMutations } from './mutation.ts';
+import type { RefetchConfig } from './refetch.ts';
 import type { ConditionalSelection } from './when.ts';
 
 /** Canonical runtime name for an entity type as returned by the server. */
@@ -130,6 +131,7 @@ export type TypeConfig = {
   fields?: Record<string, RelationDescriptor>;
   getId: (record: unknown) => string | number;
   possibleTypes?: ReadonlyArray<string>;
+  refetch?: RefetchConfig;
   type: string;
 };
 

@@ -2,8 +2,10 @@ import type { GraphQLSchema } from 'graphql';
 import {
   graphQLOutputRelations,
   validateGraphQLRefetchMappings,
+  validateGraphQLQueryRefetch,
   type GraphQLByIdConfig,
 } from '../graphqlSchema.ts';
+import type { RefetchConfig } from '../refetch.ts';
 import { sortObjectKeys } from '../sortObjectKeys.ts';
 import type { FateViteTransport } from '../viteTypes.ts';
 import {
@@ -34,6 +36,7 @@ const formatTypes = (
   types: ReadonlyArray<{
     fields?: Record<string, any>;
     possibleTypes?: ReadonlyArray<string>;
+    refetch?: RefetchConfig;
     type: string;
   }>,
 ) => {
@@ -53,6 +56,9 @@ const formatTypes = (
     }
     if (typeConfig.possibleTypes) {
       lines.push(`    possibleTypes: ${JSON.stringify(typeConfig.possibleTypes)},`);
+    }
+    if (typeConfig.refetch) {
+      lines.push(`    refetch: ${JSON.stringify(typeConfig.refetch)},`);
     }
     lines.push(`    type: '${typeConfig.type}',`, '  },');
   }
@@ -445,6 +451,7 @@ const createGraphQLClientSource = ({
       { entity: string; field: string; inputArg?: false | string; type?: string }
     >;
     nodes?: boolean;
+    refetch?: Readonly<Record<string, RefetchConfig>>;
     roots?: Record<string, { embedded?: boolean; field?: string; type?: string }>;
     scalars?: GraphQLScalarTypes;
     schema?: string | GraphQLSchema;
@@ -454,6 +461,23 @@ const createGraphQLClientSource = ({
     ? createGraphQLArgumentSchema(graphQLConfig.schema)
     : undefined;
   validateGraphQLRefetchMappings(graphQLConfig.byId, argumentSchema);
+  for (const [name, root] of Object.entries(graphQLConfig.roots ?? {})) {
+    if (roots[name] || root.embedded) {
+      continue;
+    }
+    const output = argumentSchema?.outputs?.[argumentSchema.queryType]?.[root.field ?? name];
+    const type = root.type ?? output?.replace(/!$/, '');
+    if (!type || !argumentSchema?.outputs?.[type]?.id) {
+      throw new Error(
+        `fate(graphql): Root '${name}' needs an entity query or an explicit embedded mapping.`,
+      );
+    }
+    roots[name] = { kind: 'query', procedure: name, router: lowerTypeName(type), type };
+    if (!types.some((entry) => entry.type === type)) {
+      types.push({ type });
+    }
+  }
+
   if (argumentSchema) {
     const assertOutput = (parent: string, field: string, expected?: string, list = false) => {
       const output = argumentSchema.outputs?.[parent]?.[field];
@@ -520,6 +544,22 @@ const createGraphQLClientSource = ({
         !(graphQLConfig.types ?? []).some((type) => type.type === entry.type),
     ),
   ];
+  for (const [type, refetch] of Object.entries(graphQLConfig.refetch ?? {})) {
+    const entry = transportTypes.find((entry) => entry.type === type);
+    if (!entry) {
+      throw new Error(`fate(graphql): Unknown refetch entity type '${type}'.`);
+    }
+    Object.assign(entry, { refetch });
+    const root = roots[refetch.root];
+    validateGraphQLQueryRefetch(
+      type,
+      refetch,
+      root
+        ? { [refetch.root]: { field: graphQLConfig.roots?.[refetch.root]?.field, type: root.type } }
+        : undefined,
+      argumentSchema,
+    );
+  }
   const selectionTypes = [
     ...transportTypes,
     ...inferredTypes.filter((entry) => !transportTypes.some((type) => type.type === entry.type)),
@@ -625,11 +665,13 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
     type: config.type,
   }));
   const rootEntries = [
-    ...byIdEntries.map(({ name, type }) => ({
-      name,
-      type,
-      value: `'${name}': clientRoot<Array<${type}>, '${type}'>('${type}'),`,
-    })),
+    ...byIdEntries
+      .filter(({ name }) => !roots[name] && !graphQLConfig.roots?.[name])
+      .map(({ name, type }) => ({
+        name,
+        type,
+        value: `'${name}': clientRoot<Array<${type}>, '${type}'>('${type}'),`,
+      })),
     ...Object.entries(roots)
       .filter(([name]) => !graphQLConfig.roots?.[name]?.embedded)
       .map(([name, root]) => ({

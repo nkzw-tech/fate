@@ -53,6 +53,7 @@ import {
   parseEntityId,
   toEntityId,
 } from './ref.ts';
+import { expandRefetchSelection, getRefetchFields, resolveRefetchArgs } from './refetch.ts';
 import {
   createRequestDescriptor,
   getPaginationArgsInfo,
@@ -127,6 +128,8 @@ export type DeferredSnapshot<T> = Readonly<{
   coverage: ReadonlyArray<readonly [id: EntityId, paths: ReadonlySet<string>]>;
   data: T;
 }>;
+
+type EntityFetchResult = Readonly<{ generation: number; record: unknown }>;
 
 type FateClientOptions<
   Roots extends FateRoots,
@@ -605,7 +608,7 @@ export class FateClient<
     this.persistenceDisposal = options.persistence ? new AbortController() : undefined;
     this.actions = Object.create(null) as MutationActionsFor<Mutations>;
     this.mutationMap = Object.create(null);
-    if (options.persistence) {
+    if (options.persistence || options.types.some((config) => config.refetch)) {
       this.mutationEntities = new Map(
         Object.entries(options.mutations ?? {}).map(([key, definition]) => [
           key,
@@ -626,6 +629,22 @@ export class FateClient<
     this.roots = options.roots;
     this.transport = withAliasSupport(options.transport);
     this.types = new Map(options.types.map((entity) => [entity.type, { getId, ...entity }]));
+
+    for (const config of this.types.values()) {
+      if (config.refetch) {
+        for (const field of getRefetchFields(config.refetch)) {
+          const descriptor = config.fields?.[field];
+          if (descriptor && descriptor !== 'scalar') {
+            throw new Error(
+              `fate: Refetch locator '${config.type}.${field}' must be a scalar field.`,
+            );
+          }
+        }
+        if (!this.transport.fetchQuery) {
+          throw new Error(`fate: Refetching '${config.type}' requires transport.fetchQuery.`);
+        }
+      }
+    }
 
     if (options.mutations) {
       for (const [key, definition] of Object.entries(options.mutations)) {
@@ -1049,6 +1068,10 @@ export class FateClient<
       );
     }
 
+    const entity = this.mutationEntities?.get(key);
+    if (entity && entity !== '__value__') {
+      select = new Set(expandRefetchSelection(this.types, entity, select));
+    }
     const baseRecord = input && typeof input === 'object' ? (input as AnyRecord) : undefined;
     const separateSelectionArgs = this.transport.separateMutationSelectionArgs;
     const inputArgs =
@@ -2137,7 +2160,7 @@ export class FateClient<
     { argsPayload, plan }: ReturnType<typeof resolveSelectionPlan>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
-    const generation = ++this.writeGeneration;
+    let generation = ++this.writeGeneration;
     const direction = options.direction ?? 'forward';
     const isPage = getPaginationMergeInfo(requestArgs).hasCursorArg;
     const listVersionKey = `list:${connection.key}`;
@@ -2145,7 +2168,8 @@ export class FateClient<
     const refreshVersion = this.writeVersions.get(refreshVersionKey);
     const acceptsList = () =>
       isPage
-        ? this.writeVersions.get(refreshVersionKey) === refreshVersion
+        ? this.writeVersions.get(refreshVersionKey) === refreshVersion &&
+          (this.writeVersions.get(refreshVersionKey) ?? 0) <= generation
         : (this.writeVersions.get(listVersionKey) ?? 0) <= generation;
     const applyResponse = <T>(apply: () => T) =>
       isPage
@@ -2160,7 +2184,7 @@ export class FateClient<
 
       const connectionResult = await this.transport.fetchList(
         connection.field,
-        plan.paths,
+        expandRefetchSelection(this.types, connection.type, plan.paths),
         argsPayload,
       );
       this.assertPersistenceActive();
@@ -2228,14 +2252,17 @@ export class FateClient<
       parentSelection.add(`${connection.field}.${path}`);
     }
 
-    const [parentRecord] = await this.transport.fetchById(
+    const [response] = await this.fetchEntities(
       owner.type,
       [owner.id],
       parentSelection,
+      generation,
       scopedArgsPayload,
     );
     this.assertPersistenceActive();
 
+    generation = response?.generation ?? generation;
+    const parentRecord = response?.record;
     if (!parentRecord || typeof parentRecord !== 'object') {
       return this.store.getListState(connection.key);
     }
@@ -2976,7 +3003,8 @@ export class FateClient<
     paths: Iterable<string>,
     plan: SelectionPlan,
   ): Set<string> {
-    const storagePaths = new Map([...paths].map((path) => [getStoragePath(path, plan), path]));
+    const selection = expandRefetchSelection(this.types, parseEntityId(entityId).type, paths);
+    const storagePaths = new Map([...selection].map((path) => [getStoragePath(path, plan), path]));
     return new Set(
       [...this.store.missingForSelection(entityId, storagePaths.keys())].map((path) =>
         storagePaths.get(path)!,
@@ -3268,6 +3296,88 @@ export class FateClient<
     return value;
   }
 
+  private readonly entityRefetches = new Map<string, Promise<EntityFetchResult>>();
+
+  private async fetchEntities(
+    type: string,
+    ids: Array<string | number>,
+    select: Iterable<string>,
+    generation: number,
+    args?: AnyRecord,
+  ): Promise<Array<EntityFetchResult>> {
+    const config = this.getTypeConfig(type);
+    const selection = expandRefetchSelection(this.types, type, select);
+    if (!config.refetch) {
+      return (await this.transport.fetchById(type, ids, selection, args)).map((record) => ({
+        generation,
+        record,
+      }));
+    }
+    const recipe = config.refetch;
+    if (!this.transport.fetchQuery) {
+      throw new Error(`fate: Refetching '${type}' requires transport.fetchQuery.`);
+    }
+    const selectionSignature = JSON.stringify([...selection].sort());
+    const fieldArgsSignature = args ? hashArgs(args) : '';
+    return Promise.all(
+      ids.map(async (id) => {
+        const entityId = toEntityId(type, id);
+        const locator = resolveRefetchArgs(
+          recipe,
+          this.store.readConfirmed(entityId)?.record,
+          type,
+        );
+        for (const key of Object.keys(locator)) {
+          if (args && Object.hasOwn(args, key)) {
+            throw new Error(
+              `fate: Refetch argument '${key}' conflicts with selected field arguments. Use a field alias.`,
+            );
+          }
+        }
+        const requestArgs = { ...args, ...locator };
+        const key = JSON.stringify([
+          entityId,
+          recipe.root,
+          hashArgs(locator),
+          fieldArgsSignature,
+          selectionSignature,
+        ]);
+        const pending = this.entityRefetches.get(key);
+        if (pending) {
+          return pending;
+        }
+        const request = (async () => {
+          const record = await this.transport.fetchQuery!(recipe.root, selection, requestArgs, {
+            refetch: type,
+          });
+          this.assertPersistenceActive();
+          if (record == null) {
+            throw new FateRequestError(
+              'NOT_FOUND',
+              `fate: Refetch query '${recipe.root}' did not find '${entityId}'. Refresh its parent query to recover the locator.`,
+            );
+          }
+          if (
+            !isRecord(record) ||
+            (record.__typename != null && record.__typename !== type) ||
+            toEntityId(type, config.getId(record)) !== entityId
+          ) {
+            throw new Error(
+              `fate: Refetch query '${recipe.root}' returned a different entity for '${entityId}'.`,
+            );
+          }
+          return { generation, record };
+        })();
+        this.entityRefetches.set(key, request);
+        try {
+          return await request;
+        } finally {
+          this.entityRefetches.delete(key);
+        }
+      }),
+    );
+  }
+
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
@@ -3278,9 +3388,9 @@ export class FateClient<
     const resolvedArgs = resolvedArgsFromPlan(plan);
     const generation = ++this.writeGeneration;
     await this.trackPendingRequest(async () => {
-      const records = await this.transport.fetchById(type, ids, select, resolvedArgs);
+      const records = await this.fetchEntities(type, ids, select, generation, resolvedArgs);
       this.assertPersistenceActive();
-      for (const record of records) {
+      for (const { generation, record } of records) {
         this.withWriteGeneration(generation, () =>
           this.writeEntity(type, record as AnyRecord, select, plan, prefix),
         );
@@ -3299,7 +3409,7 @@ export class FateClient<
     await this.trackPendingRequest(async () => {
       const record = await this.transport.fetchQuery!(
         item.procedure,
-        item.plan.paths,
+        expandRefetchSelection(this.types, item.type, item.plan.paths),
         item.argsPayload,
       );
       this.assertPersistenceActive();
@@ -3327,7 +3437,7 @@ export class FateClient<
     await this.trackPendingRequest(async () => {
       const value = await this.transport.fetchQuery!(
         item.procedure,
-        item.plan.paths,
+        expandRefetchSelection(this.types, item.type, item.plan.paths),
         item.argsPayload,
       );
       this.assertPersistenceActive();
@@ -3348,7 +3458,7 @@ export class FateClient<
     await this.trackPendingRequest(async () => {
       const connection = await this.transport.fetchList!(
         item.procedure,
-        item.plan.paths,
+        expandRefetchSelection(this.types, item.type, item.plan.paths),
         item.argsPayload,
       );
       this.assertPersistenceActive();
@@ -3444,6 +3554,12 @@ export class FateClient<
         return entityId;
       }
       const result: AnyRecord = {};
+      if (config.refetch) {
+        select = new Set([
+          ...select,
+          ...[...getRefetchFields(config.refetch)].filter((field) => Object.hasOwn(record, field)),
+        ]);
+      }
       const selectionTree = groupSelectionByPrefix(select);
 
       const fields = Object.fromEntries(
