@@ -1,23 +1,22 @@
-import { isDeferred, type Deferred, type DeferredSnapshot, type Pagination } from '@nkzw/fate';
+import { isDeferred, type Deferred, type DeferredSnapshot } from '@nkzw/fate';
 import { use, useEffect, useEffectEvent } from 'react';
 import { useFateClient } from './context.tsx';
 import {
   useListViewInfo,
   type ConnectionItems,
   type ConnectionSelection,
+  type ConnectionValue,
+  type ResolvedConnection,
   type LoadMoreFn,
 } from './listView.ts';
 import { useListView } from './useListView.tsx';
 
-type ConnectionValue = { items?: ReadonlyArray<any>; pagination?: Pagination };
-type ResolvedConnection<C> = C extends Deferred<infer Value> ? Value : NonNullable<C>;
-
 /**
  * Subscribes to a connection field, returning live-updating items and pagination
- * helpers to load the next or previous page.
+ * helpers to load the next or previous page. Nullish connections return undefined items.
  */
 export function useLiveListView<
-  C extends ConnectionValue | Deferred<ConnectionValue> | null | undefined,
+  C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
 >(
   selection: ConnectionSelection,
   connection: C,
@@ -27,8 +26,8 @@ export function useLiveListView<
     isDeferred(connection)
       ? (
           use(
-            client.readDeferred(connection as Deferred<ConnectionValue>),
-          ) as DeferredSnapshot<ConnectionValue>
+            client.readDeferred(connection as Deferred<ConnectionValue | null | undefined>),
+          ) as DeferredSnapshot<ConnectionValue | null | undefined>
         ).data
       : (connection as ConnectionValue | null | undefined)
   ) as ConnectionValue | null | undefined;

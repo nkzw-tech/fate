@@ -4359,6 +4359,10 @@ export class FateClient<
     }
 
     const fieldArgs = plan.args.get(field);
+    // A confirmed null relation has no list state and needs no page fetch.
+    if (this.store.read(owner)?.[argumentFieldKey(field, fieldArgs?.hash)] === null) {
+      return false;
+    }
     const listState = this.store.getListState(getListKey(owner, field, fieldArgs?.hash));
     if (!listState) {
       return true;

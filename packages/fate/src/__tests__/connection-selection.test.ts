@@ -118,3 +118,11 @@ test('inline node data and bound child refs stay typed and masked after paginati
   expect(next.pagination.hasNext).toBe(false);
   expect(fetchById).toHaveBeenCalledTimes(2);
 });
+
+test('metadata filtering preserves selected schema fields that share configuration names', () => {
+  type LiveMap = MapData & { live: boolean };
+  type Owner = { __typename: 'Owner'; maps: Array<LiveMap> };
+  const Inline = view<Owner>()({ maps: { items: { node: { live: true } } } });
+  type Node = ViewData<Owner, SelectionOf<typeof Inline>>['maps']['items'][number]['node'];
+  expectTypeOf<Node['live']>().toEqualTypeOf<boolean>();
+});

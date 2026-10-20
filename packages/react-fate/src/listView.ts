@@ -1,5 +1,6 @@
 import {
   ConnectionTag,
+  type Deferred,
   isViewTag,
   type ConnectionMetadata,
   type Pagination,
@@ -7,9 +8,12 @@ import {
 } from '@nkzw/fate';
 import { useMemo } from 'react';
 
+export type ConnectionValue = { items?: ReadonlyArray<any>; pagination?: Pagination };
+export type ResolvedConnection<C> = C extends Deferred<infer Value> ? Value : C;
+
 export type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
-  ? ReadonlyArray<Item>
-  : ReadonlyArray<never>;
+  ? ReadonlyArray<Item> | Extract<C['items'], undefined>
+  : undefined;
 
 export type LoadMoreFn = () => Promise<void>;
 

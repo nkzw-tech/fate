@@ -401,11 +401,9 @@ type MaskNonNullish<T, S> =
             ? ViewRef<EntityName<NonNullish<T>>>
             : ViewRef<EntityName<NonNullable<T>>>
           : {
-              [K in keyof S as K extends SelectionMetadata ? never : K]: MaskSelectionEntry<
-                T,
-                K,
-                S[K]
-              >;
+              [
+                K in keyof S as K extends Exclude<SelectionMetadata, keyof T> | 'args' ? never : K
+              ]: MaskSelectionEntry<T, K, S[K]>;
             } & (T extends Entity
               ? typeof __FateEntityBrand extends keyof S
                 ? ViewRef<T['__typename']>

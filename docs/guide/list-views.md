@@ -48,7 +48,15 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 }
 ```
 
-If `loadNext` is undefined, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be undefined.
+If `loadNext` is `null`, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be `null`.
+
+When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. The types preserve this absence for optional and nullable deferred connections. Default the items when the UI should render an empty list:
+
+```tsx
+const [comments = [], loadNext] = useListView(CommentConnectionView, post?.comments);
+```
+
+A present connection with an empty `items` array returns that empty array. `useLiveListView` follows the same rules.
 
 ## Pagination Arguments
 
