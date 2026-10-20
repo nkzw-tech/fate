@@ -4,7 +4,7 @@ packages:
 
 allowBuilds:
   '@swc/core': true
-  better-sqlite3: true
+  better-sqlite3: false
   drizzle-kit: true
   esbuild: true
   sharp: true

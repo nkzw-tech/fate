@@ -10,7 +10,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "dotenv -e server/.env -- vp run --filter '@app/client' --filter '@app/server' build",
+    "build": "dotenv run -f server/.env -- vp run --filter '@app/client' --filter '@app/server' build",
     "dev": "npm-run-all --parallel dev:client dev:server",
     "dev:client": "cd client && vp dev",
     "dev:server": "cd server && vp run dev",
@@ -27,7 +27,6 @@
     "@swc/core": "^1.16.18",
     "@types/node": "^26.6.5",
     "dotenv": "^18.0.8",
-    "dotenv-cli": "^11.0.0",
     "npm-run-all2": "^9.0.3",
     "prisma": "^7.10.0",
     "typescript": "^7.0.2",
