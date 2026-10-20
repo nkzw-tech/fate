@@ -185,7 +185,18 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
           ? ''
           : `
       import { useRequest } from '${clientModule}';
-      ${clientModule === 'react-fate' ? `import { useActionState } from 'react'; const [state, dispatch] = useActionState(client.actions.edit, null); dispatch({ input: { biome: 'Grassland' }, view: MapView }); void state;` : ''}
+      ${
+        clientModule === 'react-fate'
+          ? `import { useRefetch } from 'react-fate';
+        const refetch = useRefetch({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: MapView } });
+        void refetch();
+        // @ts-expect-error Refetch requires schema arguments too.
+        useRefetch({ selectedMap: { view: MapView } });
+        // @ts-expect-error Refetch validates enum arguments.
+        useRefetch({ selectedMap: { args: { filter: { biome: 'Lava' } }, view: MapView } });
+        import { useActionState } from 'react'; const [state, dispatch] = useActionState(client.actions.edit, null); dispatch({ input: { biome: 'Grassland' }, view: MapView }); void state;`
+          : ''
+      }
       useRequest({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: MapView } });
       // @ts-expect-error Adapter enforces required root arguments.
       useRequest({ selectedMap: { view: MapView } });

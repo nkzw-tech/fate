@@ -2508,23 +2508,34 @@ export class FateClient<
           { revalidateExisting: true },
           { persist: options.persist },
         ),
-      subscribe: (listener) => {
-        this.requestListeners.set(listener, { dependencies: new Set(), descriptor });
-        this.updateRequestListenerDependencies(listener);
-        return () => {
-          const entry = this.requestListeners.get(listener);
-          this.requestListeners.delete(listener);
-          this.pendingRequestListeners.delete(listener);
-          for (const dependency of entry?.dependencies ?? []) {
-            const listeners = this.requestListenersByDependency.get(dependency);
-            listeners?.delete(listener);
-            if (!listeners?.size) {
-              this.requestListenersByDependency.delete(dependency);
-            }
-          }
-        };
-      },
+      subscribe: (listener) => this.subscribeRequestDescriptor(descriptor, listener),
     });
+  }
+
+  private subscribeRequestDescriptor(descriptor: RequestDescriptor, listener: () => void) {
+    this.requestListeners.set(listener, { dependencies: new Set(), descriptor });
+    this.updateRequestListenerDependencies(listener);
+    return () => {
+      const entry = this.requestListeners.get(listener);
+      this.requestListeners.delete(listener);
+      this.pendingRequestListeners.delete(listener);
+      for (const dependency of entry?.dependencies ?? []) {
+        const listeners = this.requestListenersByDependency.get(dependency);
+        listeners?.delete(listener);
+        if (!listeners?.size) {
+          this.requestListenersByDependency.delete(dependency);
+        }
+      }
+    };
+  }
+
+  /** @internal Observes result identities without starting work or restricting view refs. */
+  observeRequestResult<R extends Request>(request: R) {
+    const descriptor = this.createRequestDescriptor(request);
+    return {
+      getSnapshot: () => this.getRequestResultFromDescriptor(descriptor) as RequestResult<Roots, R>,
+      subscribe: (listener: () => void) => this.subscribeRequestDescriptor(descriptor, listener),
+    };
   }
 
   request<const R extends Request>(

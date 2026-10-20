@@ -268,3 +268,27 @@ one operation. Selection path segments and corresponding argument keys then use
 `resultName:schemaField`, and returned records must use those same encoded keys.
 GraphQL performs that conversion automatically. Applications consume the declared
 result names, never the encoded transport names.
+
+## Imperative refresh with Suspense
+
+In React, use `useRefetch` alongside `useRequest` to refresh the same request from
+an event handler without changing the Suspense hook's return value:
+
+```tsx
+import { useRefetch, useRequest } from 'react-fate';
+
+const request = { viewer: { view: UserView } };
+const { viewer } = useRequest(request);
+const refetch = useRefetch(request);
+
+// In an event handler or React Action:
+await refetch();
+```
+
+Calling the hook does not fetch or subscribe. Its callback forces a network
+request and returns its typed result, rejecting on failure so the caller can
+handle the error. Existing cached data stays available while refreshing. Cache
+updates notify subscribed views and requests, including changed root results.
+Equivalent inline requests preserve the callback's identity. The optional second
+argument accepts `persist` options; the request mode is always `network-only`.
+Entity refreshes use the configured refetch query when one exists, across transports.
