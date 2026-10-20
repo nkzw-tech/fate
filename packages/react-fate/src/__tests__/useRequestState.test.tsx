@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
 import { useRequestState } from '../useRequestState.tsx';
+import { useView } from '../useView.tsx';
 
 // @ts-expect-error React test environment.
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -222,4 +223,50 @@ test('deduplicates concurrent explicit refreshes and refuses network work for di
     await expect(passive.getSnapshot().refetch()).rejects.toThrow(/disabled|cache-only/);
   }
   expect(fetchQuery).toHaveBeenCalledTimes(count + 1);
+});
+
+test('renders a viewer after its empty connection implicitly fetches a slug locator', async () => {
+  type Map = { __typename: 'Map'; id: string; slug: string };
+  type Viewer = { __typename: 'User'; id: string; maps: Array<Map>; username: string };
+  const ViewerView = view<Viewer>()({
+    maps: { args: { first: 1 }, items: { node: { id: true } } },
+  });
+  const fetchQuery = vi.fn(async () => ({
+    __typename: 'User',
+    id: '1',
+    maps: { items: [], pagination: { hasNext: false, hasPrevious: false } },
+    username: 'Sam',
+  }));
+  const client = createClient({
+    roots: { viewer: clientRoot<Viewer, 'User'>('User') },
+    transport: { fetchById: vi.fn(async () => []), fetchQuery },
+    types: [
+      { fields: { maps: { listOf: 'Map' } }, type: 'User' },
+      { refetch: { args: { slug: { field: 'slug' } }, root: 'map' }, type: 'Map' },
+    ],
+  });
+  function Viewer() {
+    const state = useRequestState({ viewer: { view: ViewerView } }, { mode: 'network-only' });
+    const viewer = useView(ViewerView, state.data?.viewer);
+    return (
+      <span>
+        {state.status}:{viewer?.maps.items.length}
+      </span>
+    );
+  }
+  const element = document.createElement('div');
+  const root = createRoot(element);
+  try {
+    await act(async () =>
+      root.render(
+        <FateClient client={client}>
+          <Viewer />
+        </FateClient>,
+      ),
+    );
+    expect(element.textContent).toBe('ready:0');
+    expect(fetchQuery).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+  }
 });

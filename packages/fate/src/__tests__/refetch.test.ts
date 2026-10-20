@@ -1,5 +1,6 @@
 import { buildSchema, graphql } from 'graphql';
 import { expect, test, vi } from 'vite-plus/test';
+import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
 import { defer } from '../defer.ts';
@@ -100,7 +101,7 @@ const setup = (persistence?: ReturnType<typeof createPersistence>, withRefetch =
     }),
     types,
   });
-  return { client, fetch, user };
+  return { client, connection, fetch, user };
 };
 
 test('fetches missing fields through the configured username query without leaking the locator', async () => {
@@ -529,4 +530,76 @@ test('a pagination refresh cannot reuse an older shared response to restore its 
   release.resolve();
   await Promise.all([oldPage, newPage]);
   expect(client.store.getListState(metadata.key)).toBe(refreshed);
+});
+
+test.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  'observes completed locator-only connections as ready (empty: %s, aliased: %s)',
+  async (empty, aliased) => {
+    const { client, connection, fetch } = setup();
+    if (empty) {
+      connection.edges.length = 0;
+    }
+    const selection = { args: { first: 1 }, items: { cursor: true, node: { id: true } } } as const;
+    const Friends = aliased
+      ? view<User>()({ contacts: alias('friends', selection) })
+      : view<User>()({ friends: selection });
+    const observer = client.observeRequest({ viewer: { view: Friends } }, { mode: 'network-only' });
+    const dispose = observer.subscribe(() => {});
+    try {
+      await observer.getSnapshot().refetch();
+      expect(observer.getSnapshot()).toMatchObject({
+        error: undefined,
+        isFetching: false,
+        status: 'ready',
+      });
+      expect(observer.getSnapshot().data?.viewer?.id).toBe('1');
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+    }
+  },
+);
+
+test.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  'reads implicitly fetched connection locators without another request (empty: %s, aliased: %s)',
+  async (empty, aliased) => {
+    const { client, connection, fetch } = setup();
+    if (empty) {
+      connection.edges.length = 0;
+    }
+    const selection = { args: { first: 1 }, items: { node: { id: true } } } as const;
+    const Friends = aliased
+      ? view<User>()({ contacts: alias('friends', selection) })
+      : view<User>()({ friends: selection });
+    const { viewer } = await client.request({ viewer: { view: Friends } });
+    const snapshot = await client.readView(Friends, viewer!);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(snapshot.data)).not.toContain('username');
+    if (!empty) {
+      expect(client.store.read('User:2')).toHaveProperty('username', 'friend');
+    }
+  },
+);
+
+test('keeps inline nested locator fields cached and masked', async () => {
+  const { client, fetch } = setup();
+  const Friends = view<User>()({ friends: { args: { first: 1 }, bio: true } });
+  const { viewer } = await client.request({ viewer: { view: Friends } });
+  const snapshot = await client.readView<User, ViewSelection<typeof Friends>, typeof Friends>(
+    Friends,
+    viewer!,
+  );
+  expect(snapshot.data.friends).toMatchObject([{ bio: 'Friend biography' }]);
+  expect(snapshot.data.friends[0]).not.toHaveProperty('username');
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

@@ -3677,11 +3677,13 @@ export class FateClient<
         return entityId;
       }
       const result: AnyRecord = {};
-      if (config.refetch) {
-        select = new Set([
-          ...select,
-          ...[...getRefetchFields(config.refetch)].filter((field) => Object.hasOwn(record, field)),
-        ]);
+      const expandedSelection = expandRefetchSelection(this.types, type, select);
+      if (expandedSelection !== select) {
+        select = new Set(
+          [...expandedSelection].filter(
+            (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
+          ),
+        );
       }
       const selectionTree = groupSelectionByPrefix(select);
 
