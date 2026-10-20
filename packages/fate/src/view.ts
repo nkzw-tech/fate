@@ -151,12 +151,13 @@ const getStableId = () => {
 export function view<T extends Entity>() {
   const viewId = getStableId();
 
-  function define<const S extends Selection<T>>(
-    select: S & ValidateSelection<T, S>,
-  ): View<T, MutableSelection<T, S>>;
+  // Contextualize callbacks before the open selection shape can widen their literals.
   function define<P extends object, const S extends Selection<T>>(
     select: (parameters: P) => S & ValidateSelection<T, S>,
   ): ParameterizedView<T, P, MutableSelection<T, S>>;
+  function define<const S extends Selection<T>>(
+    select: S & ValidateSelection<T, S>,
+  ): View<T, MutableSelection<T, S>>;
   function define(select: Selection<T> | ((parameters: AnyRecord) => Selection<T>)) {
     const create = (select: Selection<T>, tag: ViewTag, definition?: string) => {
       const payload = Object.freeze({ definition, select, [ViewKind]: true }) as ViewPayload<T>;

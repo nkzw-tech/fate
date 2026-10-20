@@ -6,7 +6,7 @@ import {
   type DeferredSelection,
 } from './types.ts';
 
-export function defer<S>(selection: S): DeferredSelection<S> {
+export function defer<const S>(selection: S): DeferredSelection<S> {
   return Object.freeze({
     [DeferTag]: selection,
   }) as DeferredSelection<S>;

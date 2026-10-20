@@ -158,7 +158,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         path.join(directory, 'usage.ts'),
         `
       import '${clientModule}/client';
-      import { view, type ViewData, type RefetchArguments } from '@nkzw/fate';
+      import { alias, when, view, type ViewData, type RefetchArguments } from '@nkzw/fate';
       import type { GraphQLEntities, GraphQLTypes } from './client.ts';
       type Map = GraphQLEntities['Map'];
       import { createFateClient, type GraphQLFieldArguments } from './client.ts';
@@ -172,6 +172,20 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       const badProjection = { filter: { object: { biome: { field: 'name' } } } } satisfies RefetchArguments<Map, GraphQLFieldArguments['Read']['map']>;
       void badProjection;
       const MapView = view<Map>()({ name: true });
+      const ConditionalView = view<Map>()(({ enabled }: { enabled: boolean }) => ({
+        name: true,
+        details: when(enabled, alias(MapView)),
+        image: { url: true },
+        related: { items: { node: { name: true } } },
+      }));
+
+      client.request({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: ConditionalView({ enabled: true }) } });
+      // @ts-expect-error Parameterized selections reject unknown fields.
+      view<Map>()(({ enabled }: { enabled: boolean }) => ({ name: true, absent: true, details: when(enabled, alias(MapView)) }));
+      // @ts-expect-error Parameterized selections reject unknown nested fields.
+      view<Map>()(({ enabled }: { enabled: boolean }) => ({ image: { missing: true }, details: when(enabled, alias(MapView)) }));
+      // @ts-expect-error Parameterized selections reject false scalar selections.
+      view<Map>()(({ enabled }: { enabled: boolean }) => ({ name: false, details: when(enabled, alias(MapView)) }));
       const ImageView = view<Map>()({ image: { url: true } });
       const ReplayView = view<GraphQLEntities['Replay']>()({ content: true });
       client.request({ replay: { id: 'Replay-1', view: ReplayView } });

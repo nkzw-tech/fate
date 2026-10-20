@@ -256,8 +256,8 @@ test('rejects selecting fields not defined on the entity', () => {
     >
   >();
 
+  // @ts-expect-error color is not a field on Fruit.
   view<Fruit>()({
-    // @ts-expect-error color is not a field on Fruit.
     color: true,
     id: true,
   });
