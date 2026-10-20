@@ -466,13 +466,21 @@ const createGraphQLClientSource = ({
       continue;
     }
     const output = argumentSchema?.outputs?.[argumentSchema.queryType]?.[root.field ?? name];
-    const type = root.type ?? output?.replace(/!$/, '');
+    const outputFields = argumentSchema?.outputs?.[output?.replace(/!$/, '') ?? ''];
+    const edge = outputFields?.pageInfo && outputFields.edges;
+    const node = edge && argumentSchema?.outputs?.[edge.replaceAll(/[![\]]/g, '')]?.node;
+    const type = root.type ?? (node ? node.replaceAll(/[![\]]/g, '') : output?.replace(/!$/, ''));
     if (!type || !argumentSchema?.outputs?.[type]?.id) {
       throw new Error(
         `fate(graphql): Root '${name}' needs an entity query or an explicit embedded mapping.`,
       );
     }
-    roots[name] = { kind: 'query', procedure: name, router: lowerTypeName(type), type };
+    roots[name] = {
+      kind: node ? 'list' : 'query',
+      procedure: name,
+      router: lowerTypeName(type),
+      type,
+    };
     if (!types.some((entry) => entry.type === type)) {
       types.push({ type });
     }
@@ -505,12 +513,12 @@ const createGraphQLClientSource = ({
         );
       }
     };
-    for (const [name, root] of Object.entries({ ...roots, ...graphQLConfig.roots })) {
+    for (const name of Object.keys({ ...roots, ...graphQLConfig.roots })) {
       assertOutput(
         argumentSchema.queryType,
         graphQLConfig.roots?.[name]?.field ?? name,
         graphQLConfig.roots?.[name]?.type ?? roots[name]?.type,
-        'kind' in root && root.kind === 'list',
+        roots[name]?.kind === 'list',
       );
     }
     for (const { entity, field, type } of Object.values(graphQLConfig.mutations ?? {})) {
@@ -646,7 +654,18 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
     const args = argumentSchema.fields[argumentSchema.queryType][field];
     return `, ${Object.keys(args).length ? `GraphQLFieldArguments[${JSON.stringify(argumentSchema.queryType)}][${JSON.stringify(field)}] & ` : ''}GraphQLSelectionArguments[${JSON.stringify(type)}]`;
   };
-  const byIdEntries = types.map((entry) => ({
+  const byIdTypes = argumentSchema
+    ? [
+        ...types,
+        ...transportTypes.filter(
+          (entry) =>
+            argumentSchema.outputs?.[entry.type]?.id &&
+            !argumentSchema.possibleTypes?.[entry.type] &&
+            !types.some((type) => type.type === entry.type),
+        ),
+      ]
+    : types;
+  const byIdEntries = byIdTypes.map((entry) => ({
     name: lowerTypeName(entry.type),
     type: entry.type,
   }));

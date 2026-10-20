@@ -1,8 +1,8 @@
-import type { Comment } from '@app/server/src/graphql/fate.ts';
 import Stack from '@nkzw/stack';
 import { X } from 'lucide-react';
 import { useView, view, ViewRef } from 'react-fate';
 import { useFateClient } from 'react-fate';
+import type { Comment } from '../fate/graphql.ts';
 import { Button } from './Button.tsx';
 import Link from './Link.tsx';
 

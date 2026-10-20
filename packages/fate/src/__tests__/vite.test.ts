@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildSchema, graphql } from 'graphql';
 import { createServer } from 'vite';
@@ -229,6 +229,93 @@ test('generated GraphQL clients refetch by username through configured query roo
     expect(queries).toHaveLength(2);
     expect(queries[1]).toContain('user(');
     expect(queries[1]).not.toContain('nodes(');
+  } finally {
+    await server?.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('generates and executes the schema-driven GraphQL client template', async () => {
+  const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-graphql-template-'));
+  const template = path.resolve(
+    import.meta.dirname,
+    '../../../create-fate/templates/fate/graphql-client/src/fate',
+  );
+  let server: Awaited<ReturnType<typeof createServer>> | undefined;
+  try {
+    await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
+    await mkdir(path.join(root, 'src/fate'), { recursive: true });
+    await cp(template, path.join(root, 'src/fate'), { recursive: true });
+    const schema = buildSchema(await readFile(path.join(template, 'schema.graphql'), 'utf8'));
+    server = await createServer({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [fate({ module: './src/fate/graphql.ts', transport: 'graphql' })],
+      resolve: {
+        alias: [
+          { find: /^@nkzw\/fate$/, replacement: path.resolve(import.meta.dirname, '../index.ts') },
+        ],
+      },
+      root,
+      server: { middlewareMode: true },
+    });
+    const runtime = await server.ssrLoadModule('@nkzw/fate');
+    const generated = await server.ssrLoadModule('@nkzw/fate/client');
+    const post = {
+      author: { id: 'User-1', name: 'Ada', username: 'ada' },
+      id: 'Post-1',
+      title: 'First',
+    };
+    const client = generated.createFateClient({
+      fetch: async (_url: string, init: RequestInit) => {
+        const { query, variables } = JSON.parse(init.body as string);
+        const result = await graphql({
+          rootValue: {
+            postLike: ({ input }: { input: { id: string } }) => {
+              expect(input.id).toBe('Post-1');
+              return { ...post, title: 'Liked' };
+            },
+            posts: ({ first }: { first: number }) => {
+              expect(first).toBe(10);
+              return {
+                edges: [{ cursor: 'first', node: post }],
+                pageInfo: {
+                  endCursor: 'first',
+                  hasNextPage: false,
+                  hasPreviousPage: false,
+                  startCursor: 'first',
+                },
+              };
+            },
+            viewer: () => post.author,
+          },
+          schema,
+          source: query,
+          variableValues: variables,
+        });
+        expect(result.errors).toBeUndefined();
+        return new Response(JSON.stringify(result));
+      },
+      live: false,
+      url: '/graphql',
+    });
+    const UserView = runtime.view()({ name: true });
+    const PostView = runtime.view()({ author: UserView, title: true });
+    const result = await client.request({
+      posts: { args: { first: 10 }, list: PostView },
+      viewer: { view: UserView },
+    });
+    expect(result.posts).toHaveLength(1);
+    expect((await client.readView(PostView, result.posts[0])).data.title).toBe('First');
+    const liked = await client.mutations.post.like({ input: { id: 'Post-1' }, view: PostView });
+    expect(liked).toMatchObject({ error: undefined, result: { id: '1', title: 'Liked' } });
+    expect((await client.readView(PostView, result.posts[0])).data.title).toBe('Liked');
+    const source = await readFile(path.join(root, '.fate/client.generated.ts'), 'utf8');
+    expect(source).not.toContain('readFileSync');
+    expect(source).not.toMatch(/import[^;]*src\/fate\/graphql\.ts/);
+    expect(await readFile(path.join(root, '.fate/schema.generated.ts'), 'utf8')).toContain(
+      'GraphQLEntities',
+    );
   } finally {
     await server?.close();
     await rm(root, { force: true, recursive: true });

@@ -120,6 +120,34 @@ test('uses schema object shapes for generated nested cache relations', () => {
   expect(source).toContain("messages: { listOf: 'Message', array: true }");
 });
 
+test('infers connection roots and related entity roots from the schema without data views', () => {
+  const source = createClientSource({
+    moduleExports: {
+      fateGraphQL: {
+        roots: { feed: { field: 'posts' }, viewer: {} },
+        schema: `
+          type Query { posts(first: Int): PostConnection!, viewer: User }
+          type PostConnection { edges: [PostEdge!]!, pageInfo: PageInfo! }
+          type PostEdge { cursor: String!, node: Post! }
+          type PageInfo { hasNextPage: Boolean! }
+          type Post { id: ID!, author: User!, tags: [Tag!]! }
+          type User { id: ID!, name: String! }
+          interface Node { id: ID! }
+          type Tag implements Node { id: ID!, name: String! }
+        `,
+      },
+    },
+    moduleName: '@org/blog',
+    transport: 'graphql',
+  });
+  expect(source).toContain('"connection": "relay"');
+  expect(source).toContain('"field": "posts"');
+  expect(source).toContain('node: Post');
+  expect(source).toContain("'tag': clientRoot<Array<Tag>, 'Tag'>('Tag')");
+  expect(source).not.toContain("'node': clientRoot<Array<Node>");
+  expect(source).not.toContain('import type {');
+});
+
 test('generates nullable connection result types from GraphQL schema', () => {
   type Post = { __typename: 'Post'; id: string };
   const post = dataView<Post>('Post')({ id: true });

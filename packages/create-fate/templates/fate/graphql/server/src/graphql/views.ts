@@ -138,49 +138,6 @@ export const eventDataView = dataView<EventItem>('Event')({
   type: true,
 });
 
-export type User = Entity<typeof userDataView, 'User'>;
-export type Tag = Entity<typeof tagDataView, 'Tag'>;
-export type Comment = Entity<
-  typeof commentDataView,
-  'Comment',
-  {
-    author: User;
-    post: Post;
-  }
->;
-export type EventAttendee = Entity<
-  typeof eventAttendeeDataView,
-  'EventAttendee',
-  {
-    user: User;
-  }
->;
-export type Post = Entity<
-  typeof postDataView,
-  'Post',
-  {
-    author: User;
-    category: Category | null;
-    comments: Array<Comment>;
-    tags: Array<Tag>;
-  }
->;
-export type Category = Entity<
-  typeof categoryDataView,
-  'Category',
-  {
-    posts: Array<Post>;
-  }
->;
-export type Event = Entity<
-  typeof eventDataView,
-  'Event',
-  {
-    attendees: Array<EventAttendee>;
-    host: User;
-  }
->;
-
 export const Root = {
   categories: list(categoryDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   commentSearch: {

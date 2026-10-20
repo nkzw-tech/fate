@@ -1,4 +1,3 @@
-import type { User } from '@app/server/src/graphql/fate.ts';
 import safeParse from '@nkzw/core/safeParse.js';
 import Stack, { VStack } from '@nkzw/stack';
 import { fbs } from 'fbtee';
@@ -7,6 +6,7 @@ import { view } from 'react-fate';
 import { useFateClient } from 'react-fate';
 import { ViewRef } from 'react-fate';
 import { useView } from 'react-fate';
+import type { User } from '../fate/graphql.ts';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import AuthClient from '../user/AuthClient.tsx';

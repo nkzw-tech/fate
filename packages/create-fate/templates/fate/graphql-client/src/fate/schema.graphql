@@ -1,0 +1,48 @@
+# Replace this sample with the schema exported by your GraphQL server.
+interface Node {
+  id: ID!
+}
+
+type User implements Node {
+  id: ID!
+  name: String
+  username: String
+}
+
+type Post implements Node {
+  author: User
+  id: ID!
+  title: String!
+}
+
+type Query {
+  node(id: ID!): Node
+  nodes(ids: [ID!]!): [Node]!
+  posts(first: Int, after: String): PostConnection!
+  viewer: User
+}
+
+type PostConnection {
+  edges: [PostEdge!]!
+  pageInfo: PageInfo!
+}
+
+type PostEdge {
+  cursor: String!
+  node: Post!
+}
+
+type PageInfo {
+  startCursor: String
+  endCursor: String
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+}
+
+type Mutation {
+  postLike(input: PostLikeInput!): Post
+}
+
+input PostLikeInput {
+  id: ID!
+}

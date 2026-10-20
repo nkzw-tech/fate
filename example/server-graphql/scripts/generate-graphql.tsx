@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
 import { styleText } from 'node:util';
+import { printSchemaWithDirectives } from '@graphql-tools/utils';
+import dotenv from 'dotenv';
 import { globSync } from 'glob';
 import { format } from 'vite-plus/fmt';
 
@@ -37,4 +39,8 @@ writeFileSync(
   ),
 );
 
-console.log(styleText(['green', 'bold'], '✓ Done generating GraphQL schema import map.'));
+dotenv.config({ path: join(root, '.env'), quiet: true });
+const { default: schema } = await import('../src/graphql/schema.tsx');
+writeFileSync(join(path, 'schema.graphql'), printSchemaWithDirectives(schema), 'utf8');
+
+console.log(styleText(['green', 'bold'], '✓ Done generating GraphQL schema and import map.'));

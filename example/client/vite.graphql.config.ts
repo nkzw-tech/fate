@@ -33,7 +33,7 @@ export default defineConfig({
   plugins: [
     ...(lazyPlugins(lazyClientPlugins) ?? []),
     fate({
-      module: '@nkzw/fate-server-graphql/src/graphql/fate.ts',
+      module: './graphql.ts',
       transport: 'graphql',
     }),
   ],

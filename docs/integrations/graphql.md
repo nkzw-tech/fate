@@ -472,6 +472,21 @@ const UserCardView = view<User>()({
 
 `GraphQLTypes` describes the GraphQL schema's output shapes, including discriminated interfaces and unions. `GraphQLEntities` describes selectable Fate shapes: connection fields expose their node arrays for view composition. `GraphQLResponses` describes transport normalization, where connections become `{ items, pagination }`. These are available schema fields, not promises that every response contains every field. Generating a union type does not add new runtime selection capabilities to the transport.
 
+Schema-backed mappings can expose entity queries and Relay-style connection roots
+without client `dataView` declarations. Types and mutation arguments come from the schema:
+
+```tsx
+export const fateGraphQL = {
+  schema,
+  roots: { posts: {}, viewer: {} },
+  mutations: { 'post.like': { entity: 'Post', field: 'postLike' } },
+} as const;
+```
+
+Use `field` when an application root name differs from the schema query field.
+Existing server data views may still implement resolvers and live updates; they
+are independent of these generated GraphQL contracts.
+
 With a schema, generated clients derive root and mutation output contracts from that schema rather than handwritten mapping generics. Direct mutation calls infer their unmasked results from the supplied `view` or `select`, including nested selections and nullable results. Without a selection, entity results promise only automatic identity fields. Mutation responses are not masked `ViewData` and do not carry view tags. React action state has one result contract across dispatches with different selections, so entity action results promise identity rather than dispatch-specific fields.
 
 Custom scalars default to `unknown`. Configure their TypeScript wire representations with `fateGraphQL.scalars`, for example `DateTime: 'string'`, or `{ input: 'string', output: 'string' }` when specifying both sides. A mapping changes types only; it does not decode values into JavaScript classes. For independent build tooling, `createGraphQLSchemaSource(schema, scalars)` from `@nkzw/fate/vite` generates the same contracts without loading a client mapping.

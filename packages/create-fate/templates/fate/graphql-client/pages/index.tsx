@@ -90,8 +90,8 @@ export default function HomePage() {
         </h1>
         <p className="max-w-2xl text-slate-600 dark:text-slate-300">
           <fbt desc="GraphQL client setup instructions">
-            Replace the sample views in <code>src/fate/graphql.ts</code> with your schema types and
-            point <code>VITE_GRAPHQL_URL</code> at your API.
+            Replace <code>src/fate/schema.graphql</code> with your server schema and point{' '}
+            <code>VITE_GRAPHQL_URL</code> at your API.
           </fbt>
         </p>
       </header>

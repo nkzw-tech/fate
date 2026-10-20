@@ -34,22 +34,24 @@ VITE_GRAPHQL_URL="https://api.example.com/graphql" vp run build
 
 These `VITE_*` values are embedded in the client bundle. Do not put credentials in them. Production builds do not read `.env`.
 
-Then edit `src/fate/graphql.ts`. This file is the mapping layer between your GraphQL schema and _fate_:
+Replace `src/fate/schema.graphql` with the schema exported by your existing
+GraphQL server, then edit `src/fate/graphql.ts` to map application names:
 
-- `dataView(...)` describes the fields React components are allowed to select.
-- `Root` describes the root GraphQL fields _fate_ can request.
-- `fateGraphQL.roots` maps _fate_ root names to GraphQL field names.
-- `fateGraphQL.mutations` maps _fate_ mutation names to GraphQL mutation fields.
+- `fateGraphQL.schema` supplies the SDL used during generation.
+- `fateGraphQL.roots` exposes query fields and optionally maps different names
+  through `field`. Entity and connection types are inferred from the schema.
+- `fateGraphQL.mutations` maps application mutation names to schema fields.
+- `fateGraphQL.scalars` optionally describes custom scalar wire types. Unmapped
+  custom scalars are `unknown`.
 
-The sample assumes your GraphQL server exposes:
+The sample schema includes `viewer`, `posts(first:, after:)`, `postLike(input:)`,
+`node(id:)`, and `nodes(ids:)`, with Relay-style connections. Replace it with your
+server's actual contract, including nullability and arguments.
 
-- `viewer`
-- `posts(first:, after:)`
-- `node(id:)` or `nodes(ids:)`
-- Relay-style connections with `edges`, `cursor`, `node`, and `pageInfo`
-- Entity objects with stable `id` and `__typename`
-
-Replace the sample `User` and `Post` views with your own schema types.
+Run `vp run fate:generate` to generate `.fate/schema.generated.ts`. Client views
+use `GraphQLEntities` from that file; there are no handwritten entity or mutation
+input types to keep synchronized. The schema and generation imports are excluded
+from the browser client.
 
 ## Development
 
@@ -74,7 +76,7 @@ vp run dev
 Common commands:
 
 - `vp run dev` starts the client.
-- `vp run fate:generate` refreshes _fate_ client support after changing `src/fate/graphql.ts`.
+- `vp run fate:generate` refreshes _fate_ client support after changing the schema or `src/fate/graphql.ts`.
 - `vp check --fix` formats, lints, and type-checks the project.
 - `vp run test:all` verifies the project.
 

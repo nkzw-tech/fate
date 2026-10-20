@@ -4,6 +4,8 @@ schema {
   subscription: Subscription
 }
 
+directive @auth(role: String, self: Boolean) on FIELD_DEFINITION | INTERFACE | OBJECT
+
 type Category implements Node {
   description: String
   id: ID!

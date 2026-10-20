@@ -1,4 +1,3 @@
-import type { Comment as InlineComment, Post } from '@app/server/src/graphql/fate.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { cx } from 'class-variance-authority';
 import { fbs } from 'fbtee';
@@ -21,6 +20,7 @@ import {
   view,
   ViewRef,
 } from 'react-fate';
+import type { Comment as InlineComment, Post } from '../fate/graphql.ts';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import AuthClient from '../user/AuthClient.tsx';

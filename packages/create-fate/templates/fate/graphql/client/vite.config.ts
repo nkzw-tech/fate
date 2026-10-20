@@ -29,7 +29,7 @@ export default defineConfig({
       voidReact({ react: { compiler: true } }),
     ]) ?? []),
     fate({
-      module: '@app/server/src/graphql/fate.ts',
+      module: './src/fate/graphql.ts',
       transport: 'graphql',
     }),
   ],

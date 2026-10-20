@@ -482,9 +482,9 @@ import env from '../src/lib/env.ts';`,
     envValues: `{
   SERVER_URL: import.meta.env.VITE_SERVER_URL,
 }`,
-    fateModule: '@app/server/src/graphql/fate.ts',
+    fateModule: './src/fate/graphql.ts',
     fateTransport: `transport: 'graphql',`,
-    typeModule: '@app/server/src/graphql/fate.ts',
+    typeModule: './fate/graphql.ts',
   },
   'graphql-client': {
     clientImports: ``,
@@ -795,6 +795,14 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
   removeReactFrontend(frontendRoot, selectedVariant);
   fs.mkdirSync(frontendRoot, { recursive: true });
   fs.cpSync(vueTemplatePackage(), frontendRoot, { recursive: true });
+
+  if (selectedVariant === 'graphql') {
+    fs.cpSync(
+      path.join(packageRoot, 'templates/fate/graphql/client/src/fate'),
+      path.join(frontendRoot, 'src/fate'),
+      { recursive: true },
+    );
+  }
 
   if (selectedVariant === 'void') {
     configureVueVoidServerFiles(frontendRoot);

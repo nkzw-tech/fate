@@ -14,14 +14,15 @@ vp run dev
 
 The server defaults to `http://localhost:9000/graphql`.
 
-To generate the Fate client against this server, point the Vite plugin at:
+The client mapping imports the SDL exported from the Pothos schema during `dev:setup`. From the client directory, configure the Vite plugin with:
 
 ```ts
 fate({
-  module: '@app/server/src/graphql/fate.ts',
+  module: './src/fate/graphql.ts',
   transport: 'graphql',
 });
 ```
 
-The generated client keeps the same Fate roots, views, mutations, store, and cache behavior;
-only the transport and server module change.
+Fate derives entity fields, connection roots, mutation inputs, and selected results from the schema.
+The server data views in `src/graphql/views.ts` remain responsible for live-event resolution,
+including authorization and computed fields. They do not define the GraphQL client types.

@@ -90,7 +90,7 @@ export default function HomePage() {
         </Card>
         {viewer?.id && <UserCard user={viewer} />}
       </div>
-      <PostFeed posts={posts} />
+      {posts && <PostFeed posts={posts} />}
     </Section>
   );
 }

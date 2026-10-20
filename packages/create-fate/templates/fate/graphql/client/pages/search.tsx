@@ -1,9 +1,9 @@
-import type { Comment, Post } from '@app/server/src/graphql/fate.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { fbs } from 'fbtee';
 import { Suspense, useDeferredValue, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useRequest, useView, view, ViewRef } from 'react-fate';
+import type { Comment, Post } from '../src/fate/graphql.ts';
 import cx from '../src/lib/cx.tsx';
 import Card from '../src/ui/Card.tsx';
 import CommentCard, { CommentView } from '../src/ui/CommentCard.tsx';
@@ -37,7 +37,7 @@ const SearchResults = ({ isStale, query }: { isStale: boolean; query: string }) 
     commentSearch: { args: { query }, list: CommentSearchView },
   });
 
-  if (commentSearch.length === 0) {
+  if (!commentSearch?.length) {
     return (
       <p>
         <fbt desc="No matches text">

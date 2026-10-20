@@ -16,6 +16,18 @@ vp create fate -- --template graphql
 
 Read the [Getting Started Guide](https://fate.technology/guide/core-concepts) to learn how to use _fate_ in your React applications.
 
+## GraphQL Types
+
+`client/src/fate/graphql.ts` imports the SDL exported from the Pothos schema during `dev:setup` and maps application root
+and mutation names. Fate generates `client/.fate/schema.generated.ts` from that
+schema; its `GraphQLEntities` types are used by the client views. Mutation inputs,
+output nullability, and connection shapes also come from the schema.
+
+Run `vp run --filter '@app/server' generate-graphql` after changing schema fields,
+then `vp run fate:generate` to update the client contracts. The server's
+Prisma data views implement live-event resolution and authorization; they are
+independent of these generated client contracts.
+
 ## Technologies
 
 This default template combines the Nakazawa Tech's [Web App Template](https://github.com/nkzw-tech/web-app-template) and [Server Template](https://github.com/nkzw-tech/server-template) into a monorepo, with unified tooling and _fate_ as the data client. It currently uses GraphQL with Pothos, Relay-style connections, and Prisma.

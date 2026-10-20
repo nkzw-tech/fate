@@ -187,9 +187,28 @@ describe('create-fate templates', () => {
     expect(readme).toContain('existing GraphQL server');
     expect(viteConfig).toContain("module: './src/fate/graphql.ts'");
     expect(viteConfig).toContain("transport: 'graphql'");
-    expect(fateManifest).toContain('export const Root');
+    expect(fateManifest).toContain("import schema from './schema.graphql?raw'");
+    expect(fateManifest).toContain('GraphQLEntities');
+    expect(fateManifest).not.toContain('dataView');
+    expect(readFileSync(join(templateRoot, 'src/fate/schema.graphql'), 'utf8')).toContain(
+      'type Query',
+    );
     expect(fateManifest).toContain('export const fateGraphQL');
     expect(packageJson).not.toContain('@app/server');
+  });
+
+  test('generates GraphQL contracts from the full template server schema', () => {
+    const templateRoot = join(packageRoot, 'templates/fate/graphql');
+    const mapping = readFileSync(join(templateRoot, 'client/src/fate/graphql.ts'), 'utf8');
+    expect(mapping).toContain("import schema from '@app/server/src/graphql/schema.graphql?raw'");
+    expect(mapping).toContain("GraphQLEntities['Post']");
+    expect(mapping).not.toContain('graphqlMutation');
+    expect(readFileSync(join(templateRoot, 'server/src/graphql/fate.ts'), 'utf8')).not.toContain(
+      'fateGraphQL',
+    );
+    expect(readFileSync(join(templateRoot, 'server/src/graphql/views.ts'), 'utf8')).not.toContain(
+      'Entity<',
+    );
   });
 
   test.each(['react', 'vue'])(
@@ -402,6 +421,15 @@ describe('create-fate templates', () => {
           expect.soft(seedMigration).toContain('vue-fate');
           expect.soft(seedMigration).not.toContain('React');
           expect.soft(seedMigration).not.toContain('react-fate');
+        }
+
+        if (templateName === 'graphql') {
+          expect(readFileSync(join(appRoot, 'src/fate/graphql.ts'), 'utf8')).toContain(
+            "import schema from '@app/server/src/graphql/schema.graphql?raw'",
+          );
+          expect(readFileSync(join(appRoot, 'src/fateViews.ts'), 'utf8')).toContain(
+            "from './fate/graphql.ts'",
+          );
         }
 
         if (templateName === 'graphql-client') {

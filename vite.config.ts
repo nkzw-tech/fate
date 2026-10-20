@@ -107,6 +107,7 @@ export default defineConfig({
             './oxlint.config.ts',
             './example/client/vite.config.ts',
             './example/client/vite.graphql.config.ts',
+            './example/client/graphql.ts',
             './example/client-vue/vite.config.ts',
             './example/server-graphql/prisma.config.ts',
             './example/server-graphql/scripts/**/*.tsx',
