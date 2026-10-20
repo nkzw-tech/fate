@@ -69,6 +69,8 @@ Like `useView`, `useViews` masks unselected fields, subscribes to selected field
 
 `useViews` also accepts deferred refs. It subscribes to their owning selections as well as the resolved entities. Removing refs or unmounting the component releases their subscriptions. It works with every fate transport; it is not specific to GraphQL.
 
+Vue provides the same `useViews(view, refs)` selection behavior as a reactive resource. Pass an array, ref, or getter, then read `.value` or await `.ready()`. See [Resolving Arrays of Refs in Vue](/guide/vue#resolving-arrays-of-refs).
+
 ## Fetching Data with `useRequest`
 
 Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:

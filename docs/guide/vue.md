@@ -1,6 +1,6 @@
 # Vue
 
-_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
+_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
 
 Vue components use fate through Vue resources built from refs, computed values, watchers, and `<Suspense>`. The view model, generated client, normalized cache, masking, request shapes, list views, live views, and mutations are shared with the React adapter.
 
@@ -176,6 +176,34 @@ const author = useView(UserView, () => post.value?.author ?? null);
 
 Pass reactive props through a getter so fate tracks prop changes. In script, resources are refs and need `.value`. In templates, Vue unwraps them automatically.
 
+## Resolving Arrays of Refs
+
+Use `useViews` when one component needs selected data from an array of refs, for example to filter or sort before rendering:
+
+```vue
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useViews, type ViewRef } from 'vue-fate';
+import { PostCardView } from '../fateViews';
+
+const props = defineProps<{ posts: ReadonlyArray<ViewRef<'Post'>> }>();
+const posts = useViews(PostCardView, () => props.posts);
+const sorted = computed(() => [...posts.value].sort((a, b) => a.title.localeCompare(b.title)));
+
+await posts.ready();
+</script>
+
+<template>
+  <h2 v-for="post in sorted" :key="post.id">{{ post.title }}</h2>
+</template>
+```
+
+`useViews` accepts a plain array, reactive ref, computed ref, or getter. Replacing, reordering, or mutating a reactive array updates the resource. The result preserves order, duplicates, `null` and `undefined` entries, readonly tuple positions, and each ref's parameter bindings. Deferred refs are supported too.
+
+The resource is a shallow ref with the same `pending`, `error`, `ready()`, `refresh()`, and `dispose()` members as `useView`. Await `ready()` in async setup to participate in Vue Suspense, or render the resource's pending and error states yourself. Its initial value is an empty array while the first read loads; later pending reads retain the previous data. `refresh()` rereads the current selection and fetches missing data.
+
+Selected fields and nested entities stay subscribed, so aggregate filtering reacts even when the outer array is unchanged. Unselected fields stay masked. Equivalent inputs and unchanged selected data preserve the result array's identity, and unrelated writes do not update it. Missing reads start together, duplicate refs share a read, and bursts of cache writes are coalesced. Scope disposal releases subscriptions and prevents late results from updating the resource.
+
 ## Lists and Live Views
 
 `useListView` subscribes to a connection returned from `useRequest` or from a nested view field:
@@ -248,7 +276,7 @@ The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `ins
 
 The names intentionally mirror `react-fate` where Vue has an equivalent API. The main differences are Vue framework differences:
 
-- `useRequest`, `useView`, and list hooks return Vue resources instead of throwing promises from render.
+- `useRequest`, `useView`, `useViews`, and list hooks return Vue resources instead of throwing promises from render.
 - Async setup and `<Suspense>` replace React's async component model.
 - Mutations use `fate.mutations` directly; React-only `fate.actions` and `useActionState` patterns do not apply.
 - Shared views are best kept in `.ts` modules instead of exporting named views from component files.

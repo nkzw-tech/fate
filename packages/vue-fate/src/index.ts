@@ -62,3 +62,4 @@ export { useLiveListView } from './useLiveListView.ts';
 export { useLiveView } from './useLiveView.ts';
 export { useRequest, type RequestResource } from './useRequest.ts';
 export { useView, type ViewResource } from './useView.ts';
+export { useViews } from './useViews.ts';
