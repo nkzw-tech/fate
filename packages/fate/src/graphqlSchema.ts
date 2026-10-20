@@ -57,7 +57,9 @@ export type GraphQLArgumentSchema = Readonly<{
   outputs?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   possibleTypes?: Readonly<Record<string, ReadonlyArray<string>>>;
   queryType: string;
+  scalars?: ReadonlyArray<string>;
   subscriptionType?: string;
+  unions?: Readonly<Record<string, ReadonlyArray<string>>>;
 }>;
 
 /** Infer relation storage shapes from GraphQL output types. */

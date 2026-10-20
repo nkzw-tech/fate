@@ -8,7 +8,8 @@ import { sortObjectKeys } from '../sortObjectKeys.ts';
 import type { FateViteTransport } from '../viteTypes.ts';
 import {
   createGraphQLArgumentSchema,
-  graphQLArgumentContracts,
+  createGraphQLSchemaSource,
+  type GraphQLScalarTypes,
   graphQLTypeScriptType,
 } from './graphql.ts';
 import { createSchema, isDataView } from './schema.ts';
@@ -445,6 +446,7 @@ const createGraphQLClientSource = ({
     >;
     nodes?: boolean;
     roots?: Record<string, { embedded?: boolean; field?: string; type?: string }>;
+    scalars?: GraphQLScalarTypes;
     schema?: string | GraphQLSchema;
     types?: ReadonlyArray<{ fields?: Record<string, any>; type: string }>;
   };
@@ -452,6 +454,45 @@ const createGraphQLClientSource = ({
     ? createGraphQLArgumentSchema(graphQLConfig.schema)
     : undefined;
   validateGraphQLRefetchMappings(graphQLConfig.byId, argumentSchema);
+  if (argumentSchema) {
+    const assertOutput = (parent: string, field: string, expected?: string, list = false) => {
+      const output = argumentSchema.outputs?.[parent]?.[field];
+      if (!output) {
+        throw new Error(
+          `fate(graphql): Unknown ${parent === argumentSchema.queryType ? 'query' : 'mutation'} field '${parent}.${field}'.`,
+        );
+      }
+      if (!expected || expected === '__value__') {
+        return;
+      }
+      let actual = output.replaceAll(/[![\]]/g, '');
+      if (list) {
+        const edge = argumentSchema.outputs?.[actual]?.edges;
+        actual = edge
+          ? (argumentSchema.outputs?.[edge.replaceAll(/[![\]]/g, '')]?.node?.replaceAll(
+              /[![\]]/g,
+              '',
+            ) ?? actual)
+          : actual;
+      }
+      if (actual !== expected) {
+        throw new Error(
+          `fate(graphql): Output '${parent}.${field}' returns '${output}', not '${expected}'.`,
+        );
+      }
+    };
+    for (const [name, root] of Object.entries({ ...roots, ...graphQLConfig.roots })) {
+      assertOutput(
+        argumentSchema.queryType,
+        graphQLConfig.roots?.[name]?.field ?? name,
+        graphQLConfig.roots?.[name]?.type ?? roots[name]?.type,
+        'kind' in root && root.kind === 'list',
+      );
+    }
+    for (const { entity, field, type } of Object.values(graphQLConfig.mutations ?? {})) {
+      assertOutput(argumentSchema.mutationType ?? 'Mutation', field, type ?? entity);
+    }
+  }
   const inferredTypes = graphQLOutputRelations(argumentSchema);
   const inferredByType = new Map(inferredTypes.map((entry) => [entry.type, entry]));
   const explicitByType = new Map((graphQLConfig.types ?? []).map((entry) => [entry.type, entry]));
@@ -508,7 +549,7 @@ const createGraphQLClientSource = ({
         `fate(graphql): Mutation '${field}' has additional required arguments; use inputArg: false.`,
       );
     }
-    return graphQLTypeScriptType(input.type, argumentSchema);
+    return graphQLTypeScriptType(input.type, argumentSchema, graphQLConfig.scalars);
   };
   if (argumentSchema) {
     for (const [name] of Object.entries({ ...roots, ...graphQLConfig.roots })) {
@@ -600,7 +641,7 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
   items: Array<{ cursor?: string; node: ${root.type} }>;
   pagination: import('${clientModule}').Pagination;
 }${nullableRoot(name) ? ' | null' : ''}`
-            : `${root.type} | null`
+            : `${root.type}${nullableRoot(name) || !argumentSchema ? ' | null' : ''}`
         }, '${root.type}'${rootArgumentsType(name, root.type)}>('${root.type}'),`,
       })),
     ...Object.entries(graphQLConfig.roots ?? {})
@@ -608,34 +649,54 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
       .map(([name]) => ({
         name,
         type: '__value__',
-        value: `'${name}': clientValueRoot<GraphQLRootOutput<typeof ${graphQLConfigExportName}.roots['${name}']>, GraphQLRootInput<typeof ${graphQLConfigExportName}.roots['${name}']>>(),`,
+        value: argumentSchema
+          ? `'${name}': clientValueRoot<GraphQLSelectedResult<GraphQLResponses[${JSON.stringify(argumentSchema.queryType)}][${JSON.stringify(graphQLConfig.roots?.[name]?.field ?? name)}]>, GraphQLFieldArguments[${JSON.stringify(argumentSchema.queryType)}][${JSON.stringify(graphQLConfig.roots?.[name]?.field ?? name)}]>(),`
+          : `'${name}': clientValueRoot<GraphQLRootOutput<typeof ${graphQLConfigExportName}.roots['${name}']>, GraphQLRootInput<typeof ${graphQLConfigExportName}.roots['${name}']>>(),`,
       })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   const importedTypes = Array.from(
     new Set([
-      ...types.map((type) => type.type),
+      ...(!argumentSchema ? types.map((type) => type.type) : []),
       ...mutationEntries
-        .filter((entry) => entry.entity !== '__value__')
+        .filter((entry) => !argumentSchema && entry.entity !== '__value__')
         .map((entry) => entry.entity),
-      ...(mutationEntries.length ||
-      Object.values(graphQLConfig.roots ?? {}).some((root) => root.embedded) ||
-      (!argumentSchema && graphQLConfig.mutations)
+      ...(!argumentSchema &&
+      (mutationEntries.length ||
+        Object.values(graphQLConfig.roots ?? {}).some((root) => root.embedded) ||
+        graphQLConfig.mutations)
         ? [graphQLConfigExportName]
         : []),
     ]),
   ).sort((a, b) => a.localeCompare(b));
 
+  const mutationOutputType = (name: string, field: string, selected = true) =>
+    argumentSchema
+      ? `${selected ? 'GraphQLSelectedResult<' : ''}GraphQLResponses[${JSON.stringify(argumentSchema.mutationType)}][${JSON.stringify(field)}]${selected ? '>' : ''}`
+      : `GraphQLMutationOutput<typeof ${graphQLConfigExportName}.mutations['${name}']>`;
+  const entityAliases = argumentSchema
+    ? [
+        ...new Set([
+          ...types.map(({ type }) => type),
+          ...mutationEntries
+            .filter(({ entity }) => entity !== '__value__')
+            .map(({ entity }) => entity),
+        ]),
+      ]
+        .map((type) => `type ${type} = GraphQLEntities[${JSON.stringify(type)}];`)
+        .join('\n')
+    : '';
+
   const mutationConfigLines = mutationEntries.map(({ entity, field, inputArg, name }) =>
     entity === '__value__'
       ? `'${name}': valueMutation<
   ${mutationInputType(name, field, inputArg)},
-  GraphQLMutationOutput<typeof ${graphQLConfigExportName}.mutations['${name}']>
+  ${mutationOutputType(name, field)}
 >(),`
       : `'${name}': mutation<
   ${entity},
   ${mutationInputType(name, field, inputArg)},
-  GraphQLMutationOutput<typeof ${graphQLConfigExportName}.mutations['${name}']>
+  ${mutationOutputType(name, field)}
 >('${entity}'),`,
   );
 
@@ -697,7 +758,7 @@ declare module '${clientDeclarationModule}' {
 }
 `;
   const mutationMapType = argumentSchema
-    ? `{ ${mutationEntries.map(({ field, inputArg, name }) => `${JSON.stringify(name)}: { input: ${mutationInputType(name, field, inputArg)}; output: GraphQLMutationOutput<typeof ${graphQLConfigExportName}.mutations[${JSON.stringify(name)}]> };`).join(' ')} }`
+    ? `{ ${mutationEntries.map(({ field, inputArg, name }) => `${JSON.stringify(name)}: { input: ${mutationInputType(name, field, inputArg)}; output: ${mutationOutputType(name, field, false)} };`).join(' ')} }`
     : graphQLConfig.mutations
       ? `GraphQLMutationMap<typeof ${graphQLConfigExportName}.mutations>`
       : 'Record<never, never>';
@@ -706,9 +767,10 @@ declare module '${clientDeclarationModule}' {
     : '';
 
   return `// @generated by @nkzw/fate/vite
-${typeImportLine}import { clientRoot, createClient, createGraphQLTransport${Object.values(graphQLConfig.roots ?? {}).some((root) => root.embedded) ? ', clientValueRoot, type GraphQLRootInput, type GraphQLRootOutput' : ''}${mutationEntries.some((entry) => entry.entity !== '__value__') ? ', mutation' : ''}${mutationEntries.some((entry) => entry.entity === '__value__') ? ', valueMutation' : ''}${mutationEntries.length ? ', type GraphQLMutationOutput' : ''}${!argumentSchema && graphQLConfig.mutations ? ', type GraphQLMutationMap' : ''}${!argumentSchema && mutationEntries.length ? ', type GraphQLMutationInput' : ''} } from '${clientModule}';
+${typeImportLine}import { clientRoot, createClient, createGraphQLTransport${Object.values(graphQLConfig.roots ?? {}).some((root) => root.embedded) ? `, clientValueRoot${argumentSchema ? '' : ', type GraphQLRootInput, type GraphQLRootOutput'}` : ''}${mutationEntries.some((entry) => entry.entity !== '__value__') ? ', mutation' : ''}${mutationEntries.some((entry) => entry.entity === '__value__') ? ', valueMutation' : ''}${argumentSchema ? ', type GraphQLSelectedResult' : mutationEntries.length ? ', type GraphQLMutationOutput' : ''}${!argumentSchema && graphQLConfig.mutations ? ', type GraphQLMutationMap' : ''}${!argumentSchema && mutationEntries.length ? ', type GraphQLMutationInput' : ''} } from '${clientModule}';
 
-${argumentSchema ? graphQLArgumentContracts(argumentSchema) : ''}
+${argumentSchema ? createGraphQLSchemaSource(argumentSchema, graphQLConfig.scalars) : ''}
+${entityAliases}
 ${selectionArguments}
 type GraphQLTransportMutations = ${mutationMapType};
 

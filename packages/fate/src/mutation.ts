@@ -2,6 +2,11 @@ import type { TRPCError } from '@trpc/server';
 import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import type { FateClient } from './client.js';
 import { GraphQLRequestError } from './graphql-error.ts';
+import type {
+  GraphQLSelectedResult,
+  GraphQLMutationCallResult,
+  GraphQLSelectionBrand,
+} from './graphql-types.ts';
 import type { MutationIdentity } from './persistence-types.ts';
 import { FateRequestError } from './protocol.ts';
 import { isRecord } from './record.ts';
@@ -22,20 +27,26 @@ import type {
 } from './types.ts';
 import { MutationKind } from './types.ts';
 
+type MutationDefinitionFor<T extends Entity, I, R> = [R] extends [
+  GraphQLSelectedResult<infer Result>,
+]
+  ? MutationDefinition<T, I, Result> & { readonly [GraphQLSelectionBrand]: Result }
+  : MutationDefinition<T, I, R>;
+
 /**
  * Defines a mutation for a given entity type, preserving the input and output
  * types for transports.
  */
 export function mutation<T extends Entity, I, R>(
   entity: T['__typename'],
-): MutationDefinition<T, I, R> {
+): MutationDefinitionFor<T, I, R> {
   return Object.freeze({
     entity,
     [MutationKind]: true,
-  }) as MutationDefinition<T, I, R>;
+  }) as MutationDefinitionFor<T, I, R>;
 }
 
-export function valueMutation<I, R>(): MutationDefinition<{ __typename: '__value__' }, I, R> {
+export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__value__' }, I, R> {
   return mutation<{ __typename: '__value__' }, I, R>('__value__');
 }
 
@@ -69,26 +80,29 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
  * Callable mutation entry point returned on the client that resolves to either
  * a successful result or an error.
  */
-export type MutationFunction<I extends MutationIdentifier<any, any, any>> = (
-  options: MutationOptions<I>,
-) => Promise<{ error: undefined; result: MutationResult<I> } | { error: Error; result: undefined }>;
+type MutationResponse<Result> = Promise<
+  { error: undefined; result: Result } | { error: Error; result: undefined }
+>;
 
-/**
- * React action-compatible wrapper that can be passed directly to form actions
- * or transitions.
- */
+export type MutationFunction<I extends MutationIdentifier<any, any, any>> = I extends {
+  readonly [GraphQLSelectionBrand]: unknown;
+}
+  ? <
+      const V extends MutationOptions<I>['view'] = undefined,
+      const S extends MutationOptions<I>['select'] = undefined,
+    >(
+      options: Omit<MutationOptions<I>, 'view' | 'select'> & { select?: S; view?: V },
+    ) => MutationResponse<GraphQLMutationCallResult<I, { select: S; view: V }, MutationResult<I>>>
+  : (options: MutationOptions<I>) => MutationResponse<MutationResult<I>>;
+
+/** React action state has a fixed result contract across differently selected dispatches. */
 export type MutationAction<I extends MutationIdentifier<any, any, any>> = (
   previousState: unknown,
-  /**
-   * Mutation options or 'reset' to reset the action state.
-   */
   options: MutationOptions<I> | 'reset',
-) => Promise<{ error: undefined; result: MutationResult<I> } | { error: Error; result: undefined }>;
+) => MutationResponse<GraphQLMutationCallResult<I, Record<never, never>, MutationResult<I>>>;
 
-type MutationIdentifierFor<K extends string, Def extends MutationDefinition<any, any, any>> =
-  Def extends MutationDefinition<infer T, infer I, infer R>
-    ? MutationIdentifier<T, I, R> & Readonly<{ key: K }>
-    : never;
+type MutationIdentifierFor<K extends string, Def extends MutationDefinition<any, any, any>> = Def &
+  Readonly<{ key: K }>;
 
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
   ? I
@@ -270,7 +284,7 @@ export function wrapMutation<
   const config =
     identifier.entity === '__value__' ? undefined : client.getTypeConfig(identifier.entity);
 
-  return async ({
+  return (async ({
     args,
     delete: deleteRecord,
     input,
@@ -329,7 +343,7 @@ export function wrapMutation<
     }
 
     return mutationPromise;
-  };
+  }) as MutationFunction<I>;
 }
 
 const handleMutationError = (key: string, error: unknown): { error: Error; result: undefined } => {

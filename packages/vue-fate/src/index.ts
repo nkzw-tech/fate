@@ -25,6 +25,7 @@ export {
   type GraphQLMutationInput,
   type GraphQLMutationMap,
   type GraphQLMutationOutput,
+  type GraphQLSelectedResult,
   type GraphQLTransportOptions,
   type FateDehydratedState,
   type HydrationLimits,

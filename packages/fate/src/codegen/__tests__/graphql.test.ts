@@ -7,14 +7,21 @@ import { expect, test } from 'vite-plus/test';
 import { graphqlMutation } from '../../graphqlTransport.ts';
 import { dataView } from '../../server/dataView.ts';
 import { createClientSource } from '../client.ts';
-import { createGraphQLArgumentSchema } from '../graphql.ts';
+import { createGraphQLArgumentSchema, createGraphQLSchemaSource } from '../graphql.ts';
 
 const execFileAsync = promisify(execFile);
 const schema = `
   schema { query: Read, mutation: Write }
   enum Biome { Grassland Desert }
   input Filter { biome: Biome!, limit: Int! = 5, next: Filter, biomes: [Biome!] }
-  type Map { id: ID!, name: String!, state(biome: Biome!): String! }
+  scalar JSON
+  type Image { url: String!, width: Int }
+  interface Node { id: ID! }
+  type MapEdge { cursor: String, node: Map }
+  type PageInfo { hasNextPage: Boolean!, hasPreviousPage: Boolean!, endCursor: String, startCursor: String }
+  type MapConnection { edges: [MapEdge], pageInfo: PageInfo! }
+  type Map implements Node { related: MapConnection, id: ID!, name: String!, image: Image, json: JSON, state(biome: Biome!): String! }
+  union Result = Map | Image
   type Read { map(filter: Filter!): Map, optionalMap(biome: Biome): Map, viewer: Map }
   type Write { edit(input: Filter!): Map, rename(id: ID!, name: String!): Map }
 `;
@@ -63,15 +70,15 @@ test('generates concrete identity metadata for GraphQL interface relations', () 
       fateGraphQL: {
         ...moduleExports.fateGraphQL,
         schema: schema.replace(
-          'type Map {',
-          'interface Node { id: ID! } type Map implements Node { related: Node,',
+          'type Map implements Node {',
+          'type Map implements Node { owner: Node,',
         ),
       },
     },
     moduleName: './contract.ts',
     transport: 'graphql',
   });
-  expect(source).toContain('related: { type: \'Node\', possibleTypes: ["Map"] }');
+  expect(source).toContain('owner: { type: \'Node\', possibleTypes: ["Map"] }');
   expect(source).toContain('possibleTypes: ["Map"]');
   expect(source).toContain("type: 'Node'");
 });
@@ -146,16 +153,34 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         path.join(directory, 'usage.ts'),
         `
       import '${clientModule}/client';
-      import { view } from '@nkzw/fate';
-      import type { Map } from './contract.ts';
+      import { view, type ViewData } from '@nkzw/fate';
+      import type { GraphQLEntities, GraphQLTypes } from './client.ts';
+      type Map = GraphQLEntities['Map'];
       import { createFateClient, type GraphQLFieldArguments } from './client.ts';
       const client = createFateClient({ url: '/graphql' });
       const MapView = view<Map>()({ name: true });
+      const ImageView = view<Map>()({ image: { url: true } });
+      const RelatedView = view<Map>()({ related: { items: { node: { name: true } } } });
+      void ImageView;
+      // @ts-expect-error Generated entities reject fields absent from GraphQL.
+      view<Map>()({ absent: true });
+      const union = null as unknown as GraphQLTypes['Result'];
+      if (union.__typename === 'Image') {
+        const url: string = union.url;
+        void url;
+        // @ts-expect-error Discriminated unions retain concrete schema fields.
+        union.name;
+      }
+      const custom = null as unknown as Map['json'];
+      // @ts-expect-error Unmapped custom scalars are unknown.
+      const json: string = custom;
+      void json;
       ${
         clientModule === '@nkzw/fate'
           ? ''
           : `
       import { useRequest } from '${clientModule}';
+      ${clientModule === 'react-fate' ? `import { useActionState } from 'react'; const [state, dispatch] = useActionState(client.actions.edit, null); dispatch({ input: { biome: 'Grassland' }, view: MapView }); void state;` : ''}
       useRequest({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: MapView } });
       // @ts-expect-error Adapter enforces required root arguments.
       useRequest({ selectedMap: { view: MapView } });
@@ -174,6 +199,31 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       client.request({ optionalMap: { args: { biome: 'Lava' }, view: MapView } });
       // @ts-expect-error Root without arguments does not accept arbitrary keys.
       client.request({ viewer: { args: { typo: true }, view: MapView } });
+      const edited = await client.mutations.edit({ input: { biome: 'Grassland' }, view: MapView });
+      if (!edited.error && edited.result) {
+        const name: string = edited.result.name;
+        const id: string = edited.result.id;
+        void [name, id];
+        // @ts-expect-error Fields not selected are not promised in mutation results.
+        edited.result.state;
+        // @ts-expect-error Raw mutation results are not masked ViewData with view tags.
+        const masked: ViewData<Map, { name: true }> = edited.result;
+        void masked;
+      }
+      const unselected = await client.mutations.edit({ input: { biome: 'Grassland' } });
+      if (!unselected.error && unselected.result) {
+        // @ts-expect-error No view means only automatic entity identity is promised.
+        unselected.result.name;
+      }
+      const related = await client.mutations.edit({ input: { biome: 'Grassland' }, view: RelatedView });
+      if (!related.error && related.result?.related) {
+        const name: string = related.result.related.items[0].node.name;
+        void name;
+        // @ts-expect-error Nested mutation results also respect selections.
+        related.result.related.items[0].node.state;
+      }
+      const nullable: typeof edited.result = null;
+      void nullable;
       client.mutations.edit({ input: { biome: 'Grassland' } });
       client.mutations.rename({ input: { id: 'Map-1', name: 'New' } });
       const nested = { biome: 'Grassland' } satisfies GraphQLFieldArguments['Map']['state'];
@@ -186,6 +236,8 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       client.request({ selectedMap: { args: { filter: { biome: 'Grassland' }, typo: true }, view: MapView } });
       // @ts-expect-error Non-null input even when defaulted.
       client.mutations.edit({ input: { biome: 'Grassland', limit: null } });
+      // @ts-expect-error Unknown mutation arguments are rejected.
+      client.mutations.rename({ input: { id: 'Map-1', name: 'Name', typo: true } });
       // @ts-expect-error Required input-object field.
       client.mutations.edit({ input: {} });
       // @ts-expect-error Mutation arguments come from the schema, not the manual unknown input.
@@ -209,6 +261,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
             paths: {
               '@nkzw/fate': [path.join(root, 'packages/fate/src/index.ts')],
               '@nkzw/fate/client': [path.join(root, 'packages/fate/lib/clientStub.d.mts')],
+              react: [path.join(root, 'packages/react-fate/node_modules/@types/react/index.d.ts')],
               'react-fate': [path.join(root, 'packages/react-fate/src/index.tsx')],
               'react-fate/client': [path.join(root, 'packages/react-fate/lib/client.d.mts')],
               'vue-fate': [path.join(root, 'packages/vue-fate/src/index.ts')],
@@ -235,3 +288,49 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
     }
   },
 );
+
+test('generates schema output contracts without handwritten application types', () => {
+  const source = createGraphQLSchemaSource(
+    `
+    scalar Timestamp
+    enum Role { Admin Player }
+    interface Node { id: ID! }
+    type User implements Node { id: ID!, username: String!, role: Role!, createdAt: Timestamp!, matrix: [[Int!]!]!, friends: [User], image: Image }
+    type Image { url: String! }
+    union SearchResult = User | Image
+    type Query { viewer: User!, search: [SearchResult!]! }
+  `,
+    { Timestamp: { input: 'string', output: 'number' } },
+  );
+  expect(source).toContain('export type GraphQLTypes =');
+  expect(source).toContain('readonly "username": string;');
+  expect(source).toContain('readonly "createdAt": number;');
+  expect(source).toContain('readonly "matrix": Array<Array<number>>;');
+  expect(source).toContain(
+    'readonly "SearchResult": GraphQLTypes["User"] | GraphQLTypes["Image"];',
+  );
+  expect(source).toContain('readonly "Node": GraphQLTypes["User"];');
+  expect(source).toContain('readonly "friends": Array<GraphQLTypes["User"] | null> | null;');
+  expect(source).not.toContain("from 'graphql'");
+});
+
+test('derives mutation output nullability from the schema instead of its manual declaration', () => {
+  const source = generate(moduleExports.fateGraphQL);
+  expect(source).toContain('GraphQLSelectedResult<GraphQLResponses["Write"]["edit"]>');
+  expect(source).not.toContain("GraphQLMutationOutput<typeof fateGraphQL.mutations['edit']>");
+});
+
+test('rejects output mappings that disagree with the GraphQL schema', () => {
+  expect(() =>
+    generate({
+      ...moduleExports.fateGraphQL,
+      mutations: { edit: { entity: 'Image', field: 'edit' } },
+    }),
+  ).toThrow(/returns 'Map', not 'Image'/);
+  expect(() =>
+    generate({
+      ...moduleExports.fateGraphQL,
+      roots: { ...moduleExports.fateGraphQL.roots, viewer: { type: 'Image' } },
+    }),
+  ).toThrow(/returns 'Map', not 'Image'/);
+});

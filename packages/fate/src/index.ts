@@ -104,3 +104,5 @@ export { GraphQLRequestError, type GraphQLErrorPayload } from './graphql-error.t
 export type { RequestObserver, RequestState, RequestStateOptions } from './request-observer.ts';
 
 export { when, type ConditionalSelection } from './when.ts';
+
+export type { GraphQLSelectedResult } from './graphql-types.ts';

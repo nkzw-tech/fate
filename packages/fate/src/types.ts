@@ -1,4 +1,5 @@
 import type { AliasedSelection, AliasedView } from './alias.ts';
+import type { SelectedGraphQLResult, GraphQLSelectedResult } from './graphql-types.ts';
 import { FateMutations } from './mutation.ts';
 import type { ConditionalSelection } from './when.ts';
 
@@ -483,7 +484,9 @@ type NullableRootResult<Result> = unknown extends Result
     : never;
 
 type ListResult<Item extends AnyRequestItem, Type extends TypeName, Result> = Item extends ValueItem
-  ? Result
+  ? Result extends GraphQLSelectedResult<infer Output>
+    ? SelectedGraphQLResult<Output, Item['value']>
+    : Result
   : Item extends AnyNodeItem
     ? ViewRef<Type>
     : Item extends AnyNodesItem

@@ -1,3 +1,4 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createServer } from 'vite';
 import { expect, test } from 'vite-plus/test';
@@ -119,5 +120,44 @@ test('serves the Void generated client with a root-resolved server runtime impor
     expect(code).not.toMatch(/import\(["']\.\/src\/fate\/server\.ts["']\)/);
   } finally {
     await server.close();
+  }
+});
+
+test('bootstraps GraphQL schema types imported by the mapping module on a clean checkout', async () => {
+  const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-schema-'));
+  let server: Awaited<ReturnType<typeof createServer>> | undefined;
+  try {
+    await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
+    await writeFile(
+      path.join(root, 'graphql.ts'),
+      `
+      import type { GraphQLEntities } from './.fate/schema.generated.ts';
+      export type User = GraphQLEntities['User'];
+      export const userDataView = { typeName: 'User', fields: { id: true, username: true } };
+      export const Root = { viewer: userDataView };
+      export const fateGraphQL = { schema: 'type Query { viewer: User! } type User { id: ID!, username: String! }' };
+    `,
+    );
+    server = await createServer({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [fate({ module: './graphql.ts', transport: 'graphql' })],
+      root,
+      server: { middlewareMode: true },
+    });
+    const resolved = await server.pluginContainer.resolveId('@nkzw/fate/client');
+    const loaded = await server.pluginContainer.load(resolved!.id);
+    const code = typeof loaded === 'string' ? loaded : loaded?.code;
+    expect(await readFile(path.join(root, '.fate/schema.generated.ts'), 'utf8')).toContain(
+      'export type GraphQLEntities',
+    );
+    expect(await readFile(path.join(root, '.fate/client.generated.ts'), 'utf8')).toContain(
+      'type User = GraphQLEntities["User"]',
+    );
+    expect(code).not.toContain('GraphQLEntities');
+    expect(code).not.toContain('buildSchema');
+  } finally {
+    await server?.close();
+    await rm(root, { force: true, recursive: true });
   }
 });

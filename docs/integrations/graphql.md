@@ -411,6 +411,25 @@ For example, given `maps(biome: Biome)`, an argument `{ biome: 'Grassland' }` is
 
 The generated client enforces root arguments in `client.request` and the React/Vue `useRequest` adapters. Mutation inputs are derived from the schema using the configured `inputArg`, replacing the manually declared input type for generated clients. Non-null arguments are required unless the schema supplies a default. Omitting an optional/defaulted value preserves its server default; explicit `null` remains distinct.
 
+Schema-aware generation also writes `.fate/schema.generated.ts`. Import its types directly in the mapping module or application code; these imports are erased, so generation works before that file exists on a clean checkout:
+
+```tsx
+import type { GraphQLEntities } from '../.fate/schema.generated.ts';
+
+type User = GraphQLEntities['User'];
+
+const UserCardView = view<User>()({
+  displayName: true,
+  username: true,
+});
+```
+
+`GraphQLTypes` describes the GraphQL schema's output shapes, including discriminated interfaces and unions. `GraphQLEntities` describes selectable Fate shapes: connection fields expose their node arrays for view composition. `GraphQLResponses` describes transport normalization, where connections become `{ items, pagination }`. These are available schema fields, not promises that every response contains every field. Generating a union type does not add new runtime selection capabilities to the transport.
+
+With a schema, generated clients derive root and mutation output contracts from that schema rather than handwritten mapping generics. Direct mutation calls infer their unmasked results from the supplied `view` or `select`, including nested selections and nullable results. Without a selection, entity results promise only automatic identity fields. Mutation responses are not masked `ViewData` and do not carry view tags. React action state has one result contract across dispatches with different selections, so entity action results promise identity rather than dispatch-specific fields.
+
+Custom scalars default to `unknown`. Configure their TypeScript wire representations with `fateGraphQL.scalars`, for example `DateTime: 'string'`, or `{ input: 'string', output: 'string' }` when specifying both sides. A mapping changes types only; it does not decode values into JavaScript classes. For independent build tooling, `createGraphQLSchemaSource(schema, scalars)` from `@nkzw/fate/vite` generates the same contracts without loading a client mapping.
+
 Generation also exports `GraphQLInputs`, `GraphQLFieldArguments`, and `GraphQLSelectionArguments` from `.fate/client.generated.ts`. Use field contracts to check arguments inside reusable views:
 
 ```tsx

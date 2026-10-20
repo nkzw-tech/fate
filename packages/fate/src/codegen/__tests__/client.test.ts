@@ -57,7 +57,7 @@ test('generates an ID-less object root as a cached value root', () => {
   });
 
   expect(source).toContain(
-    "'prices': clientValueRoot<GraphQLRootOutput<typeof fateGraphQL.roots['prices']>",
+    '\'prices\': clientValueRoot<GraphQLSelectedResult<GraphQLResponses["Query"]["prices"]>',
   );
   expect(source).toContain('"embedded": true');
   expect(source).toContain('"type": "Price"');
