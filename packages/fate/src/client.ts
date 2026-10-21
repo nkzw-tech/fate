@@ -452,6 +452,10 @@ const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string
 type NormalizationSelection = {
   children: ReadonlyMap<string, Set<string>>;
   paths: ReadonlySet<string>;
+  storagePaths: Map<
+    string,
+    Array<{ path: string; recordKey: string; storageKey: string; storagePath: string }>
+  >;
 };
 type NormalizationSelections = Map<ReadonlySet<string>, Map<string, NormalizationSelection>>;
 
@@ -3908,7 +3912,7 @@ export class FateClient<
       if (!normalized) {
         const expanded = expandRefetchSelection(this.types, type, select);
         const paths = expanded === select ? select : new Set(expanded);
-        normalized = { children: groupSelectionByPrefix(paths), paths };
+        normalized = { children: groupSelectionByPrefix(paths), paths, storagePaths: new Map() };
         let byType = selections.get(select);
         if (!byType) {
           byType = new Map();
@@ -4164,14 +4168,29 @@ export class FateClient<
       }
 
       const selectedPaths: Array<string> = [];
-      for (const path of select) {
-        const storagePath = getStoragePath(path, plan, pathPrefix ?? '');
-        const storageKey = storagePath.split('.')[0];
+      const prefix = pathPrefix ?? '';
+      let storagePaths = normalized.storagePaths.get(prefix);
+      if (!storagePaths) {
+        storagePaths = [...expandedSelection].map((path) => {
+          const storagePath = getStoragePath(path, plan, prefix);
+          return {
+            path,
+            recordKey: path.split('.')[0],
+            storageKey: storagePath.split('.')[0],
+            storagePath,
+          };
+        });
+        normalized.storagePaths.set(prefix, storagePaths);
+      }
+      for (const { path, recordKey, storageKey, storagePath } of storagePaths) {
+        if (!select.has(path)) {
+          continue;
+        }
         // JSON omits selected undefined fields; they still have coverage unless
         // a newer write has superseded this response.
         if (
           Object.hasOwn(result, storageKey) ||
-          (!Object.hasOwn(record, path.split('.')[0]) &&
+          (!Object.hasOwn(record, recordKey) &&
             this.acceptWrite(JSON.stringify([entityId, storageKey]), generation))
         ) {
           selectedPaths.push(storagePath);
