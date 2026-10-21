@@ -10,6 +10,9 @@ export const getFieldKey = (path: string, plan?: SelectionPlan): string =>
   argumentFieldKey(schemaField(path.slice(path.lastIndexOf('.') + 1)), plan?.args.get(path)?.hash);
 
 export const getStoragePath = (path: string, plan?: SelectionPlan, prefix = ''): string => {
+  if (!path.includes('.')) {
+    return getFieldKey(prefix ? `${prefix}.${path}` : path, plan);
+  }
   let current = prefix;
   return path
     .split('.')
