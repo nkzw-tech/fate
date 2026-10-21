@@ -673,6 +673,9 @@ importers:
       prisma:
         specifier: ^7.10.0
         version: 7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2)
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.3.0(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(playwright@1.64.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
 
   example/void:
     dependencies:
@@ -819,6 +822,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.3.0(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(playwright@1.64.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
 
   packages/fate-indexeddb:
     dependencies:
@@ -857,6 +863,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.3.0(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(playwright@1.64.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
 
   packages/void-fate:
     dependencies:
@@ -876,6 +885,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: '@voidzero-dev/vite-plus-core@1.3.0(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.3.0(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(playwright@1.64.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
       void:
         specifier: ^1.1.12
         version: 1.1.12(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.5)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.3.0(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.3)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.0(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.0.5)(vue@3.5.42(typescript@7.0.2))(wrangler@4.151.0(@cloudflare/workers-types@5.20261004.1)(@types/node@26.6.5))(zod@4.6.7)
@@ -886,6 +898,9 @@ importers:
         specifier: workspace:*
         version: link:../fate
     devDependencies:
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.3.0(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(playwright@1.64.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
       vue:
         specifier: ^3.5.44
         version: 3.5.44(typescript@7.0.2)

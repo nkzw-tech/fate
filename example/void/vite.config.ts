@@ -47,6 +47,38 @@ export default defineConfig({
     }),
   ],
   resolve: { conditions: ['@nkzw/source'] },
+  run: {
+    tasks: {
+      build: {
+        cache: {
+          input: [
+            { auto: true },
+            '!.',
+            '!.void',
+            '!.void/**',
+            '!.wrangler/deploy',
+            '!.wrangler/deploy/**',
+          ],
+        },
+        command: 'vp build',
+      },
+      'fate:generate': {
+        cache: {
+          input: [{ auto: true }, '!.', '!.fate', '!.fate/**', '!.void', '!.void/**'],
+          output: ['.fate/**', '.void/**'],
+        },
+        command:
+          'node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate',
+      },
+      'prepare:void': {
+        cache: {
+          input: [{ auto: true }, '!.', '!.void', '!.void/**'],
+          output: ['.void/**'],
+        },
+        command: 'void prepare',
+      },
+    },
+  },
   server: { port: 6001 },
   ssr: { noExternal: ['void-fate'] },
 });

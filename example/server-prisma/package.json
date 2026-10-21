@@ -11,7 +11,6 @@
   "scripts": {
     "db:migrate": "vp exec prisma migrate deploy",
     "dev": "NODE_ENV=development OXC_TSCONFIG_PATH=../../tsconfig.json node_modules/.bin/nodemon -q -I --exec node --no-warnings --experimental-specifier-resolution=node --import @oxc-node/core/register --env-file .env src/index.tsx",
-    "dev:setup": "vp exec prisma generate",
     "prisma": "prisma"
   },
   "dependencies": {
@@ -30,7 +29,8 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "nodemon": "^3.1.14",
-    "prisma": "^7.10.0"
+    "prisma": "^7.10.0",
+    "vite-plus": "catalog:"
   },
   "nodemonConfig": {
     "ext": "ts,tsx",
