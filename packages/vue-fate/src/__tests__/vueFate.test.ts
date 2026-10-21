@@ -820,7 +820,7 @@ test('exposes the fate CLI bin from the Vue package', () => {
   };
 
   expect(packageJson.bin).toEqual({ fate: './lib/cli.mjs' });
-  expect(viteConfig.run?.tasks?.build).toEqual({
+  expect(viteConfig.run?.tasks?.build).toMatchObject({
     command: expect.stringContaining('src/cli.ts'),
   });
 });

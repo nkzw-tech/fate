@@ -120,6 +120,7 @@ export default defineConfig({
             './src/index.test.tsx',
             './example/server-drizzle/drizzle.config.ts',
             './example/server-prisma/prisma.config.ts',
+            './example/server-prisma/vite.config.ts',
             './example/server-prisma/scripts/**/*.tsx',
             './example/void/vite.config.ts',
             './example/persistence/vite.config.ts',
@@ -140,6 +141,10 @@ export default defineConfig({
         command: ['vp run -r build', 'vp run generate-readme', 'vp run copy-files'],
       },
       'build:api-docs': {
+        cache: {
+          input: [{ auto: true }, '!docs/api', '!docs/api/**'],
+          output: ['docs/api/**'],
+        },
         command:
           "pnpm --filter '@nkzw/fate-docs-toolchain' exec typedoc --options ../../typedoc.json",
       },
@@ -150,14 +155,31 @@ export default defineConfig({
         command: [
           "vp run --filter '@nkzw/fate' build",
           'vp run --filter react-fate build',
+          'vp run --filter vue-fate build',
           'vp run --filter void-fate build',
-          "vp run --cache --filter '@nkzw/fate-server' dev:setup",
-          "vp run --cache --filter '@nkzw/fate-server-graphql' dev:setup",
-          'vp run --cache fate:generate',
-          "vp run --cache --filter '@nkzw/fate-void-example' prepare:void",
-          "vp run --cache --filter '@nkzw/fate-void-example' fate:generate",
+          "vp run --filter '@nkzw/fate-server' dev:setup",
+          "vp run --filter '@nkzw/fate-server-graphql' dev:setup",
+          'vp run fate:generate',
+          "vp run --filter '@nkzw/fate-void-example' prepare:void",
+          "vp run --filter '@nkzw/fate-void-example' fate:generate",
           'vp run build:api-docs',
         ],
+      },
+      'fate:generate': {
+        cache: {
+          input: [
+            { auto: true },
+            '!example/client',
+            '!example/client/.fate',
+            '!example/client/.fate/**',
+            '!example/client/.void',
+            '!example/client/.void/**',
+          ],
+          output: ['example/client/.fate/**', 'example/client/.void/**'],
+        },
+        command:
+          'OXC_TSCONFIG_PATH=../../tsconfig.json node --conditions=development --no-warnings --import @oxc-node/core/register ../../packages/fate/src/cli.ts generate',
+        cwd: 'example/client',
       },
       'test:all': {
         command: ['vp run dev:setup', 'vp check', 'vp test'],
