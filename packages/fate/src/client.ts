@@ -59,6 +59,7 @@ import {
   toEntityId,
 } from './ref.ts';
 import { expandRefetchSelection, getRefetchFields, resolveRefetchArgs } from './refetch.ts';
+import RenderReadErrors from './render-read-errors.ts';
 import {
   createRequestDescriptor,
   getPaginationArgsInfo,
@@ -562,6 +563,7 @@ export class FateClient<
   private readonly rootRequests = new Map<string, EntityId | null>();
   private readonly rootValues = new Map<string, unknown>();
   private readonly stalledRequests = new Set<string>();
+  private readonly renderReadErrors = new RenderReadErrors();
   private gcPending = false;
   private gcScheduled = false;
   private pendingNetworkRequests = 0;
@@ -1348,22 +1350,42 @@ export class FateClient<
     view: V,
     ref: ViewRef<T['__typename']>,
   ): FateThenable<ViewSnapshot<T, S>> {
+    return this.readViewInternal(view, ref, undefined);
+  }
+
+  /** @internal Keeps failures stable across discarded React render attempts. */
+  readViewForRender<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+    scope?: object,
+  ): FateThenable<ViewSnapshot<T, S>> {
+    return this.readViewInternal(view, ref, scope ?? null);
+  }
+
+  private readViewInternal<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+    renderScope: object | null | undefined,
+  ): FateThenable<ViewSnapshot<T, S>> {
     view = resolveView(view, ref);
-    if (this.persistence && this.persistence.getSnapshot().status !== 'ready') {
+    const persistence = this.persistence;
+    if (persistence && persistence.getSnapshot().status !== 'ready') {
       const key = `restore:${ref.__typename}:${ref.id}:${[...getViewNames(view)].sort().join(',')}`;
-      let pending = this.pending.get(key);
-      if (!pending) {
-        pending = this.persistence.ready
-          .then(() => {
-            if (this.persistence?.getSnapshot().status === 'disposed') {
-              throw new Error('fate: Persistence was disposed.');
-            }
-            return this.readView<T, S, V>(view, ref);
-          })
-          .finally(() => this.pending.delete(key));
-        this.pending.set(key, pending);
-      }
-      return pending as FateThenable<ViewSnapshot<T, S>>;
+      return this.renderReadErrors.read(view, ref, renderScope, key, () => {
+        let pending = this.pending.get(key);
+        if (!pending) {
+          pending = persistence.ready
+            .then(() => {
+              if (this.persistence?.getSnapshot().status === 'disposed') {
+                throw new Error('fate: Persistence was disposed.');
+              }
+              return this.readViewInternal<T, S, V>(view, ref, renderScope);
+            })
+            .finally(() => this.pending.delete(key));
+          this.pending.set(key, pending);
+        }
+        return pending as FateThenable<ViewSnapshot<T, S>>;
+      }) as FateThenable<ViewSnapshot<T, S>>;
     }
     const id = ref.id;
     const type = ref.__typename;
@@ -1385,9 +1407,10 @@ export class FateClient<
     const resolvedEntityId = this.optimisticEntityResolutions.get(entityId) ?? null;
     if (resolvedEntityId && resolvedEntityId !== entityId) {
       const { id: resolvedId, type: resolvedType } = parseEntityId(resolvedEntityId);
-      return this.readView<T, S, V>(
+      return this.readViewInternal<T, S, V>(
         view,
         this.stableRefWithViewNames(resolvedType, resolvedId, getViewNames(view)),
+        renderScope,
       );
     }
     const viewNames = getViewNames(view);
@@ -1403,6 +1426,7 @@ export class FateClient<
 
     const cached = this.viewDataCache.get(entityId, view, ref);
     if (cached) {
+      this.renderReadErrors.clear(view, ref);
       return cached as FateThenable<ViewSnapshot<T, S>>;
     }
 
@@ -1411,6 +1435,7 @@ export class FateClient<
     const missing = this.missingForSelection(entityId, selectedPaths, plan);
 
     const resolveSnapshot = () => {
+      this.renderReadErrors.clear(view, ref);
       const resolvedView = this.readViewSelection<T, S>(view, ref, entityId, plan);
       if (this.cacheOnlyRefs.has(ref)) {
         this.markCacheOnly(resolvedView.data);
@@ -1450,85 +1475,102 @@ export class FateClient<
         new Set([...missing].map((path) => getStoragePath(path, plan))),
       );
 
-      const pendingOptimistic = this.getPendingOptimisticMutations(entityId);
-      if (pendingOptimistic) {
-        const pending = this.pending.get(key);
-        if (pending) {
-          return pending as FateThenable<ViewSnapshot<T, S>>;
+      return this.renderReadErrors.read(view, ref, renderScope, key, () => {
+        const pendingOptimistic = this.getPendingOptimisticMutations(entityId);
+        if (pendingOptimistic) {
+          const pending = this.pending.get(key);
+          if (pending) {
+            return pending as FateThenable<ViewSnapshot<T, S>>;
+          }
+
+          const promise = Promise.all(pendingOptimistic)
+            .then(() => this.readView<T, S, V>(view, ref))
+            .finally(() => this.pending.delete(key));
+
+          this.pending.set(key, promise);
+          return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
+        }
+        if (this.stalledRequests.has(key)) {
+          return resolveSnapshot();
         }
 
-        const promise = Promise.all(pendingOptimistic)
-          .then(() => this.readView<T, S, V>(view, ref))
-          .finally(() => this.pending.delete(key));
+        const pendingPromise = this.pending.get(key) || null;
+        if (pendingPromise) {
+          return pendingPromise as FateThenable<ViewSnapshot<T, S>>;
+        }
+
+        const promise = this.trackPendingRequest(async () => {
+          try {
+            const persistence = this.persistenceRuntime;
+            if (persistence) {
+              const persistedRequest: RequestDescriptor = {
+                items: [
+                  {
+                    ids: [id],
+                    kind: 'node',
+                    name: type,
+                    plan,
+                    refViewNames: new Set(),
+                    type,
+                    viewSignature: '',
+                  },
+                ],
+                key: `view:${key}`,
+              };
+              await persistence.restoreRequest(persistedRequest);
+              const remaining = this.missingForSelection(entityId, selectedPaths, plan);
+              if (remaining.size) {
+                await this.fetchByIdAndNormalize(type, [id], remaining, plan);
+                persistence.fetched({
+                  ...persistedRequest,
+                  items: persistedRequest.items.map((item) => ({
+                    ...item,
+                    plan: { ...item.plan, paths: remaining },
+                  })),
+                  key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
+                });
+              }
+            } else {
+              await this.fetchByIdAndNormalize(type, [id], missing, plan);
+            }
+            const remainingMissing = this.missingForSelection(entityId, selectedPaths, plan);
+
+            if (remainingMissing.size > 0) {
+              this.stalledRequests.add(key);
+              return resolveSnapshot();
+            }
+
+            this.stalledRequests.delete(key);
+            return this.readView<T, S, V>(view, ref);
+          } finally {
+            this.pending.delete(key);
+          }
+        });
 
         this.pending.set(key, promise);
+
         return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
-      }
-      if (this.stalledRequests.has(key)) {
-        return resolveSnapshot();
-      }
-
-      const pendingPromise = this.pending.get(key) || null;
-      if (pendingPromise) {
-        return pendingPromise as FateThenable<ViewSnapshot<T, S>>;
-      }
-
-      const promise = this.trackPendingRequest(async () => {
-        try {
-          const persistence = this.persistenceRuntime;
-          if (persistence) {
-            const persistedRequest: RequestDescriptor = {
-              items: [
-                {
-                  ids: [id],
-                  kind: 'node',
-                  name: type,
-                  plan,
-                  refViewNames: new Set(),
-                  type,
-                  viewSignature: '',
-                },
-              ],
-              key: `view:${key}`,
-            };
-            await persistence.restoreRequest(persistedRequest);
-            const remaining = this.missingForSelection(entityId, selectedPaths, plan);
-            if (remaining.size) {
-              await this.fetchByIdAndNormalize(type, [id], remaining, plan);
-              persistence.fetched({
-                ...persistedRequest,
-                items: persistedRequest.items.map((item) => ({
-                  ...item,
-                  plan: { ...item.plan, paths: remaining },
-                })),
-                key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
-              });
-            }
-          } else {
-            await this.fetchByIdAndNormalize(type, [id], missing, plan);
-          }
-          const remainingMissing = this.missingForSelection(entityId, selectedPaths, plan);
-
-          if (remainingMissing.size > 0) {
-            this.stalledRequests.add(key);
-            return resolveSnapshot();
-          }
-
-          this.stalledRequests.delete(key);
-          return this.readView<T, S, V>(view, ref);
-        } finally {
-          this.pending.delete(key);
-        }
-      });
-
-      this.pending.set(key, promise);
-
-      return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
+      }) as FateThenable<ViewSnapshot<T, S>>;
     }
     return resolveSnapshot();
   }
 
   readDeferred<T>(deferred: Deferred<T>): PromiseLike<DeferredSnapshot<T>> {
+    return this.readDeferredInternal(deferred, undefined);
+  }
+
+  /** @internal Keeps deferred failures stable across discarded React renders. */
+  readDeferredForRender<T>(
+    deferred: Deferred<T>,
+    scope?: object,
+  ): PromiseLike<DeferredSnapshot<T>> {
+    return this.readDeferredInternal(deferred, scope ?? null);
+  }
+
+  private readDeferredInternal<T>(
+    deferred: Deferred<T>,
+    renderScope: object | null | undefined,
+  ): PromiseLike<DeferredSnapshot<T>> {
     const metadata = getDeferredMetadata(deferred);
     const resolvedOwner = this.optimisticEntityResolutions.get(metadata.owner) ?? metadata.owner;
     const parsedOwner = parseEntityId(resolvedOwner);
@@ -1547,6 +1589,7 @@ export class FateClient<
     const fetchPaths = listMissing ? selectedPaths : missing;
 
     const resolveSnapshot = () => {
+      this.renderReadErrors.clear(deferred, deferred);
       const snapshot = this.readViewSelection(
         { [metadata.field]: metadata.selection } as View<any, any>,
         this.stableRefWithViewNames(ownerType, rawOwnerId, new Set()),
@@ -1584,45 +1627,47 @@ export class FateClient<
       return resolveSnapshot();
     }
 
-    const pendingOptimistic = this.getPendingOptimisticMutations(resolvedOwner);
-    if (pendingOptimistic) {
-      const pending = this.pendingDeferred.get(key);
-      if (pending) {
-        return pending as PromiseLike<DeferredSnapshot<T>>;
-      }
-
-      const promise = Promise.all(pendingOptimistic)
-        .then(() => this.readDeferred(deferred))
-        .finally(() => this.pendingDeferred.delete(key));
-
-      this.pendingDeferred.set(key, promise);
-      return promise as PromiseLike<DeferredSnapshot<T>>;
-    }
-
-    const pendingPromise = this.pendingDeferred.get(key) || null;
-    if (pendingPromise) {
-      return pendingPromise as PromiseLike<DeferredSnapshot<T>>;
-    }
-
-    const promise = this.trackPendingRequest(async () => {
-      try {
-        await this.fetchByIdAndNormalize(ownerType, [rawOwnerId], fetchPaths, plan);
-        const remainingMissing = this.missingForSelection(resolvedOwner, selectedPaths, plan);
-
-        if (remainingMissing.size > 0 || hasMissingList()) {
-          this.stalledRequests.add(key);
-          return resolveSnapshot().value;
+    return this.renderReadErrors.read(deferred, deferred, renderScope, key, () => {
+      const pendingOptimistic = this.getPendingOptimisticMutations(resolvedOwner);
+      if (pendingOptimistic) {
+        const pending = this.pendingDeferred.get(key);
+        if (pending) {
+          return pending as PromiseLike<DeferredSnapshot<T>>;
         }
 
-        this.stalledRequests.delete(key);
-        return (this.readDeferred(deferred) as FateThenable<DeferredSnapshot<T>>).value;
-      } finally {
-        this.pendingDeferred.delete(key);
-      }
-    });
+        const promise = Promise.all(pendingOptimistic)
+          .then(() => this.readDeferred(deferred))
+          .finally(() => this.pendingDeferred.delete(key));
 
-    this.pendingDeferred.set(key, promise);
-    return promise;
+        this.pendingDeferred.set(key, promise);
+        return promise as PromiseLike<DeferredSnapshot<T>>;
+      }
+
+      const pendingPromise = this.pendingDeferred.get(key) || null;
+      if (pendingPromise) {
+        return pendingPromise as PromiseLike<DeferredSnapshot<T>>;
+      }
+
+      const promise = this.trackPendingRequest(async () => {
+        try {
+          await this.fetchByIdAndNormalize(ownerType, [rawOwnerId], fetchPaths, plan);
+          const remainingMissing = this.missingForSelection(resolvedOwner, selectedPaths, plan);
+
+          if (remainingMissing.size > 0 || hasMissingList()) {
+            this.stalledRequests.add(key);
+            return resolveSnapshot().value;
+          }
+
+          this.stalledRequests.delete(key);
+          return (this.readDeferred(deferred) as FateThenable<DeferredSnapshot<T>>).value;
+        } finally {
+          this.pendingDeferred.delete(key);
+        }
+      });
+
+      this.pendingDeferred.set(key, promise);
+      return promise;
+    });
   }
 
   assertLiveViewSupport() {

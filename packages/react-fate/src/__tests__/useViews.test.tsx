@@ -525,7 +525,7 @@ test('coalesces a burst of entity updates instead of rereading the array for eve
         </FateClient>,
       ),
     );
-    const read = vi.spyOn(client, 'readView');
+    const read = vi.spyOn(client, 'readViewForRender');
     await act(async () => {
       for (let index = 0; index < size; index++) {
         client.write('User', { id: String(index), name: `After ${index}` }, new Set(['name']));

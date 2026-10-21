@@ -25,7 +25,7 @@ type Snapshot = Readonly<{
 type ReadSnapshot = () => PromiseLike<Snapshot>;
 
 // A mounted reader keeps its error stable for React to deliver to a boundary.
-// Core in-flight requests are released on failure so a fresh reader can retry.
+// Client-owned render failures also survive discarded initial render attempts.
 const cacheReadError = (read: ReadSnapshot): ReadSnapshot => {
   let current: PromiseLike<Snapshot> | undefined;
   let failed = false;
@@ -52,13 +52,14 @@ const createReader = <V extends View<any, any>>(
   client: FateClient<any, any>,
   view: V,
   ref: ViewInput<V>,
+  scope: ReadScope,
 ): ReadSnapshot => {
   if (ref == null) {
     const snapshot = fulfilledThenable({ coverage: [], data: ref });
     return () => snapshot;
   }
   if (!isDeferred(ref)) {
-    return () => client.readView(view, ref);
+    return () => client.readViewForRender(view, ref, scope.current);
   }
 
   let pendingDeferred: PromiseLike<unknown> | undefined;
@@ -69,7 +70,7 @@ const createReader = <V extends View<any, any>>(
   const empty = fulfilledThenable({ coverage: [], data: null });
   const absent = fulfilledThenable({ coverage: [], data: undefined });
   return () => {
-    const deferred = client.readDeferred(ref);
+    const deferred = client.readDeferredForRender(ref, scope.current);
     const readResolved = (value: Awaited<typeof deferred>): PromiseLike<Snapshot> => {
       const resolved = value.data;
       const source: PromiseLike<Snapshot> =
@@ -77,9 +78,10 @@ const createReader = <V extends View<any, any>>(
           ? resolved === null
             ? empty
             : absent
-          : client.readView(
+          : client.readViewForRender(
               view,
               client.ref(resolved.__typename, resolved.id, resolveView(view, resolved)),
+              scope.current,
             );
       const sourceKey = isFulfilledThenable(source) ? source.value : source;
       if (sourceKey === mergedSource && sameCoverage(value.coverage, mergedCoverage)) {
@@ -139,6 +141,7 @@ const createArrayReader = <V extends View<any, any>>(
   client: FateClient<any, any>,
   view: V,
   refs: ReadonlyArray<ViewInput<V>>,
+  scope: ReadScope,
 ): ReadSnapshot => {
   // A duplicate ref must share its reader, including pending deferred reads.
   const indexes = new Map<ViewInput<V>, number>();
@@ -148,7 +151,7 @@ const createArrayReader = <V extends View<any, any>>(
     if (index === undefined) {
       index = readers.length;
       indexes.set(ref, index);
-      readers.push(cacheReadError(createReader(client, view, ref)));
+      readers.push(cacheReadError(createReader(client, view, ref, scope)));
     }
     return index;
   });
@@ -278,76 +281,57 @@ const createSubscribe =
     };
   };
 
-type ReaderEntry = {
-  client: FateClient<any, any>;
-  read: ReadSnapshot;
-  refs: ReadonlyArray<ViewInput<View<any, any>>>;
-  view: View<any, any>;
-};
-
-const createReaders = () => {
-  let entries: Array<ReaderEntry> = [];
-  let version = 0;
+// The client shares initial failures because React can discard uncommitted
+// hook state. A committed hook owns a weak scope so its errors disappear when
+// the hook unmounts, without retaining speculative readers or input arrays.
+const createReadScope = () => {
+  let current: object | undefined;
   return {
-    get<V extends View<any, any>>(
-      client: FateClient<any, any>,
-      view: V,
-      refs: ReadonlyArray<ViewInput<V>>,
-      batch: boolean,
-    ) {
-      const cached = entries.find(
-        (entry) =>
-          entry.client === client &&
-          entry.view === view &&
-          entry.refs.length === refs.length &&
-          refs.every((ref, index) => ref === entry.refs[index]),
-      );
-      if (cached) {
-        return cached.read;
-      }
-      const read = batch
-        ? createArrayReader(client, view, refs)
-        : cacheReadError(createReader(client, view, refs[0]));
-      entries.push({ client, read, refs: [...refs], view });
-      version++;
-      return read;
+    commit() {
+      current ??= {};
     },
-    retain(read: ReadSnapshot) {
-      if (entries.length > 1) {
-        entries = entries.filter((entry) => entry.read === read);
-      }
-    },
-    get version() {
-      return version;
+    get current() {
+      return current;
     },
   };
 };
+type ReadScope = ReturnType<typeof createReadScope>;
 
-function useReader<V extends View<any, any>>(
-  view: V,
-  refs: ReadonlyArray<ViewInput<V>>,
-  batch: boolean,
-): unknown {
-  const client = useFateClient();
-  const [readers] = useState(createReaders);
-  // Suspense retries must reuse the reader that observed a pending read or error.
-  const getSnapshot = readers.get(client, view, refs, batch);
-  const version = readers.version;
-  // A cancelled render can return to the same committed reader. Speculative
-  // additions must still be pruned when getSnapshot itself stays unchanged.
-  useEffect(() => readers.retain(getSnapshot), [getSnapshot, readers, version]);
-  return useSnapshot(client, getSnapshot, batch);
+function useReadScope() {
+  const [scope] = useState(createReadScope);
+  useEffect(() => scope.commit(), [scope]);
+  return scope;
 }
 
 export function useViewSnapshots<V extends View<any, any>>(
   view: V,
   refs: ReadonlyArray<ViewInput<V>>,
 ): ReadonlyArray<unknown> {
-  return useReader(view, refs, true) as ReadonlyArray<unknown>;
+  const client = useFateClient();
+  const scope = useReadScope();
+  const [previousRefs, setPreviousRefs] = useState(refs);
+  // Callers can construct arrays inline without rebuilding readers and subscriptions.
+  const unchanged =
+    refs.length === previousRefs.length && refs.every((ref, index) => ref === previousRefs[index]);
+  const stableRefs = unchanged ? previousRefs : refs;
+  if (!unchanged) {
+    setPreviousRefs(refs);
+  }
+  const getSnapshot = useMemo(
+    () => createArrayReader(client, view, stableRefs, scope),
+    [client, view, stableRefs, scope],
+  );
+  return useSnapshot(client, getSnapshot, true) as ReadonlyArray<unknown>;
 }
 
 export function useViewSnapshot<V extends View<any, any>>(view: V, ref: ViewInput<V>): unknown {
-  return useReader(view, [ref], false);
+  const client = useFateClient();
+  const scope = useReadScope();
+  const getSnapshot = useMemo(
+    () => cacheReadError(createReader(client, view, ref, scope)),
+    [client, view, ref, scope],
+  );
+  return useSnapshot(client, getSnapshot, false);
 }
 
 function useSnapshot(
