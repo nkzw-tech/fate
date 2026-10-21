@@ -11,6 +11,7 @@ import type { MutationIdentity } from './persistence-types.ts';
 import { FateRequestError } from './protocol.ts';
 import { isRecord } from './record.ts';
 import { toEntityId } from './ref.ts';
+import type { MergeSelectedResults, SelectedResult } from './selection-result.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import type {
   AnyRecord,
@@ -24,10 +25,14 @@ import type {
   MutationResult,
   OptimisticUpdate,
   Selection,
+  SelectionOf,
   TypeConfig,
+  ValidateSelection,
   View,
+  __FateEntityBrand,
+  __FateSelectionBrand,
 } from './types.ts';
-import { MutationKind } from './types.ts';
+import { getViewTag, MutationKind, ViewKind } from './types.ts';
 
 type MutationDefinitionFor<T extends Entity, I, R> = [R] extends [
   GraphQLSelectedResult<infer Result>,
@@ -161,11 +166,93 @@ export type MutationFunction<I extends MutationIdentifier<any, any, any>> = I ex
     ) => MutationResponse<GraphQLMutationCallResult<I, { select: S; view: V }, MutationResult<I>>>
   : (options: MutationOptions<I>) => MutationResponse<MutationResult<I>>;
 
-/** React action state has a fixed result contract across differently selected dispatches. */
-export type MutationAction<I extends MutationIdentifier<any, any, any>> = (
-  previousState: unknown,
-  options: MutationOptions<I> | 'reset',
-) => MutationResponse<GraphQLMutationCallResult<I, Record<never, never>, MutationResult<I>>>;
+type ActionEntity<I extends MutationIdentifier<any, any, any>> =
+  MutationEntity<I>['__typename'] extends '__value__'
+    ? Extract<NonNullable<MutationResult<I>>, object> & Entity
+    : MutationEntity<I>;
+
+type ActionSelection<S> = typeof __FateSelectionBrand extends keyof S ? SelectionOf<S> : S;
+
+type ValidateActionSelection<I extends MutationIdentifier<any, any, any>, S> = S extends (
+  ...args: Array<any>
+) => unknown
+  ? never
+  : typeof __FateEntityBrand extends keyof S
+    ? S extends View<ActionEntity<I>, any>
+      ? unknown
+      : never
+    : ValidateSelection<ActionEntity<I>, S>;
+
+type ActionOptions<
+  I extends MutationIdentifier<any, any, any>,
+  Bound extends boolean,
+> = Bound extends true
+  ? Omit<MutationOptions<I>, 'select' | 'view'> & { select?: never; view?: never }
+  : MutationOptions<I>;
+
+type ExpandedActionResult<
+  I extends MutationIdentifier<any, any, any>,
+  Result,
+  Added,
+  Bound extends boolean,
+> = MergeSelectedResults<
+  Bound extends true ? Result : SelectedResult<MutationResult<I>, Record<never, never>>,
+  SelectedResult<MutationResult<I>, ActionSelection<Added>>
+>;
+
+/** React action state has a fixed result contract, expanded by binding selections with `.with()`. */
+export type MutationAction<
+  I extends MutationIdentifier<any, any, any>,
+  Result = GraphQLMutationCallResult<I, Record<never, never>, MutationResult<I>>,
+  Bound extends boolean = false,
+> = {
+  (previousState: unknown, options: ActionOptions<I, Bound>): MutationResponse<Result>;
+  (previousState: unknown, options: 'reset'): Promise<null>;
+  (
+    previousState: unknown,
+    options: ActionOptions<I, Bound> | 'reset',
+  ): Promise<Awaited<MutationResponse<Result>> | null>;
+  with<const Added extends object>(
+    selection: Added & ValidateActionSelection<I, Added>,
+  ): MutationAction<I, ExpandedActionResult<I, Result, Added, Bound>, true>;
+};
+
+/** @internal Bind reusable selections without changing the underlying mutation's behavior. */
+export function wrapAction<I extends MutationIdentifier<any, any, any>>(
+  mutation: MutationFunction<I>,
+  selections: ReadonlyArray<AnyRecord> = [],
+): MutationAction<I> {
+  const view = selections.length
+    ? (Object.fromEntries(
+        selections.map((select, index) => [
+          getViewTag(`action:${index}`),
+          { select, [ViewKind]: true },
+        ]),
+      ) as View<MutationEntity<I>>)
+    : undefined;
+  if (view) {
+    getSelectionPlan(view, null);
+  }
+  return Object.assign(
+    async (_previousState: unknown, options: MutationOptions<I> | 'reset') => {
+      if (options === 'reset') {
+        return null;
+      }
+      if (view && ('view' in options || 'select' in options)) {
+        throw new Error('fate: An action selection bound with .with() cannot be overridden.');
+      }
+      return mutation(view ? { ...options, view } : options);
+    },
+    {
+      with: (selection: AnyRecord) => {
+        if (!isRecord(selection)) {
+          throw new Error('fate: Action .with() requires a selection with view parameters bound.');
+        }
+        return wrapAction(mutation, [...selections, selection]);
+      },
+    },
+  ) as MutationAction<I>;
+}
 
 type MutationIdentifierFor<K extends string, Def extends MutationDefinition<any, any, any>> = Def &
   Readonly<{ key: K }>;

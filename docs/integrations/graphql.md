@@ -350,7 +350,7 @@ if (result) {
 }
 ```
 
-Without a selection, entity results expose only identity fields. React clients can also use `fate.actions` with `useActionState`; those action results expose identity fields, while selected fields update the cache for views to read.
+Without a selection, entity results expose only identity fields. For React Actions, use [`.with()`](/guide/actions#selecting-a-view-with-actions) to select additional fields.
 
 For mappings without a schema, use `graphqlMutation` from `@nkzw/fate` to declare mutation types manually.
 

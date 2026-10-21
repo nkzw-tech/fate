@@ -101,6 +101,14 @@ addComment({
 
 The server returns the selected fields, and views that display the post's comment count update automatically.
 
+Use `.with()` before `useActionState` to include selected fields in `state.result`:
+
+```tsx
+const [state, addComment] = useActionState(fate.actions.comment.add.with(CommentView), null);
+```
+
+Pass a view or a raw selection. Chaining `.with()` adds fields to the existing selection, for example `.with(CommentView).with({ post: { commentCount: true } })`.
+
 ## Mutations
 
 Use `fate.mutations` to call a mutation outside a React Action, or when calls should run without waiting for earlier actions to finish:

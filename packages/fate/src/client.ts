@@ -32,11 +32,11 @@ import {
   MutationActionsFor,
   MutationFunction,
   MutationFunctionsFor,
-  MutationOptions,
   type MutationInsertion,
   type ResolvedInsertion,
   type ResolvedMutationInsertion,
   type MutationCommand,
+  wrapAction,
   wrapMutation,
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
@@ -92,7 +92,6 @@ import {
   type Entity,
   type EntityId,
   type FateThenable,
-  type MutationIdentifier,
   type MutationMapFromDefinitions,
   type Pagination,
   type Request,
@@ -672,14 +671,7 @@ export class FateClient<
 
         setNestedValue(this.mutations as AnyRecord, key, mutation);
 
-        setNestedValue(
-          this.actions as AnyRecord,
-          key,
-          async <I extends MutationIdentifier<any, any, any>>(
-            _previousState: unknown,
-            data: MutationOptions<I> | 'reset',
-          ) => (data === 'reset' ? null : await this.mutationMap[key](data)),
-        );
+        setNestedValue(this.actions as AnyRecord, key, wrapAction(mutation));
       }
     }
 

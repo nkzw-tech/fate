@@ -4,6 +4,7 @@ import { GraphQLRequestError, type GraphQLErrorPayload } from '../graphql-error.
 import { getErrorStatusCode, mutation } from '../mutation.ts';
 import { FateRequestError } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
+import { view } from '../view.ts';
 
 type Note = { __typename: 'Note'; id: string; title: string };
 const noteId = toEntityId('Note', '1');
@@ -108,7 +109,10 @@ test.each<{
     const { client } = setup(async () => {
       throw error;
     });
-    const result = client.actions.edit(null, { input, optimistic: { title: 'Optimistic' } });
+    const result = client.actions.edit.with(view<Note>()({ title: true }))(null, {
+      input,
+      optimistic: { title: 'Optimistic' },
+    });
     if (rejects) {
       await expect(result).rejects.toBe(error);
     } else {

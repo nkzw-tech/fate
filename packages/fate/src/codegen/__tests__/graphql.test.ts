@@ -218,7 +218,48 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         useRefetch({ selectedMap: { view: MapView } });
         // @ts-expect-error Refetch validates enum arguments.
         useRefetch({ selectedMap: { args: { filter: { biome: 'Lava' } }, view: MapView } });
-        import { useActionState } from 'react'; const [state, dispatch] = useActionState(client.actions.edit, null); dispatch({ input: { biome: 'Grassland' }, view: MapView }); void state;`
+        import { useActionState } from 'react';
+        const [state, dispatch] = useActionState(client.actions.edit, null);
+        dispatch({ input: { biome: 'Grassland' }, view: MapView });
+        void state;
+        const [selectedState, selectedDispatch] = useActionState(
+          client.actions.edit.with(MapView).with({ image: { url: true }, json: true }).with({ json: true }), null,
+        );
+        selectedDispatch({ input: { biome: 'Grassland' } });
+        selectedDispatch('reset');
+        // @ts-expect-error Required mutation arguments remain required.
+        selectedDispatch({ input: {} });
+        // @ts-expect-error A dispatch cannot replace the fixed selection.
+        selectedDispatch({ input: { biome: 'Grassland' }, view: MapView });
+        if (selectedState && !selectedState.error && selectedState.result) {
+          const name: string = selectedState.result.name;
+          const url: string | undefined = selectedState.result.image?.url;
+          const json: typeof selectedState.result.json = null as unknown;
+          void name; void url; void json;
+          // @ts-expect-error Unselected fields are not part of the action state.
+          selectedState.result.state;
+          // @ts-expect-error Nested unselected fields are not exposed either.
+          selectedState.result.image?.width;
+        }
+        const [receiptState] = useActionState(client.actions.receipt.with({ code: true }), null);
+        if (receiptState && !receiptState.error) {
+          const code: string = receiptState.result.code;
+          void code;
+        }
+        const [overlappingState] = useActionState(
+          client.actions.edit.with(MapView).with({ name: when(false, true) }), null,
+        );
+        if (overlappingState && !overlappingState.error && overlappingState.result) {
+          const name: string = overlappingState.result.name;
+          void name;
+        }
+        // @ts-expect-error Unknown fields cannot be bound to an action.
+        client.actions.edit.with({ absent: true });
+        // @ts-expect-error Unknown nested fields are rejected too.
+        client.actions.edit.with({ image: { absent: true } });
+        // @ts-expect-error Views for other entities cannot be bound to this action.
+        client.actions.edit.with(ReplayView);
+        `
           : ''
       }
       useRequest({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: MapView } });
