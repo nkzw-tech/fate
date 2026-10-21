@@ -147,6 +147,25 @@ const [postItems, loadNext] = useListView(PostCardView, posts);
 
 Awaiting `ready()` in `<script setup>` participates in Vue Suspense. If you do not await it, read `request.data.value`, `request.pending.value`, and `request.error.value` in script, or use the refs directly in templates.
 
+## Request State
+
+Use `useRequestState` to observe a request without awaiting `ready()` or using Suspense. It returns a shallow ref whose `.value` contains `data`, `status`, `isFetching`, `error`, and `refetch()`, plus a `dispose()` method on the ref:
+
+```ts
+const enabled = ref(false);
+const state = useRequestState(
+  { viewer: { view: UserView } },
+  () => ({ enabled: enabled.value }),
+);
+
+// Starts when enabled becomes true.
+enabled.value = true;
+```
+
+The request and options accept plain values, refs, or getters. Disabled requests do not fetch. With `{ mode: 'cache-only' }`, the resource observes cached data without fetching missing fields. `status` is `disabled`, `missing`, `pending`, `ready`, or `error`.
+
+`refetch()` forces a network request and rejects on failure. Cached data stays available while refreshing, with `isFetching` and `error` reporting background work. Disabled and cache-only requests reject calls to `refetch()`. Scope disposal releases the observer automatically.
+
 ## Views in Components
 
 Use `useView` to read a `ViewRef` from the normalized cache and subscribe to updates for the selected fields:
