@@ -6066,3 +6066,44 @@ test.each([undefined, 'filter-id'])(
     );
   },
 );
+
+test('keeps concrete refetch coverage independent for sibling records', async () => {
+  type Team = { __typename: 'Team'; id: string; slug: string };
+  type Group = { __typename: 'Group'; id: string; members: Array<User | Team> };
+  const client = createClient({
+    roots: {
+      group: clientRoot<Group, 'Group'>('Group'),
+      team: clientRoot<Team, 'Team'>('Team'),
+      user: clientRoot<User, 'User'>('User'),
+    },
+    transport: {
+      fetchById: async () => [],
+      fetchQuery: async () => ({
+        id: 'group',
+        members: {
+          items: [
+            { node: { __typename: 'User', id: 'first', name: 'First' } },
+            { node: { __typename: 'User', id: 'second' } },
+            { node: { __typename: 'Team', id: 'third', slug: 'third-team' } },
+          ],
+        },
+      }),
+    },
+    types: [
+      {
+        fields: { members: { listOf: 'Node', possibleTypes: ['User', 'Team'] } },
+        type: 'Group',
+      },
+      { possibleTypes: ['User', 'Team'], type: 'Node' },
+      { refetch: { args: { name: { field: 'name' } }, root: 'user' }, type: 'User' },
+      { refetch: { args: { slug: { field: 'slug' } }, root: 'team' }, type: 'Team' },
+    ],
+  });
+  const Members = view<Group>()({ members: { items: { node: { id: true } } } });
+  await client.request({ group: { view: Members } });
+  expect(client.store.read('User:first')).toMatchObject({ name: 'First' });
+  expect(client.store.missingForSelection('User:first', ['name'])).toEqual(new Set());
+  expect(client.store.missingForSelection('User:second', ['name'])).toEqual(new Set(['name']));
+  expect(client.store.read('Team:third')).toMatchObject({ slug: 'third-team' });
+  expect(client.store.missingForSelection('Team:third', ['slug'])).toEqual(new Set());
+});

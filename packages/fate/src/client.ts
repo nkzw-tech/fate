@@ -449,6 +449,12 @@ const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string
   return result;
 };
 
+type NormalizationSelection = {
+  children: ReadonlyMap<string, Set<string>>;
+  paths: ReadonlySet<string>;
+};
+type NormalizationSelections = Map<ReadonlySet<string>, Map<string, NormalizationSelection>>;
+
 /**
  * Core client that normalizes records, manages the view cache, and coordinates
  * data fetching.
@@ -3879,6 +3885,7 @@ export class FateClient<
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
     insert?: InsertPosition,
+    selections: NormalizationSelections = new Map(),
   ): EntityId {
     return this.store.update(() => {
       type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
@@ -3897,15 +3904,27 @@ export class FateClient<
         return entityId;
       }
       const result: AnyRecord = {};
-      const expandedSelection = expandRefetchSelection(this.types, type, select);
-      if (expandedSelection !== select) {
+      let normalized = selections.get(select)?.get(type);
+      if (!normalized) {
+        const expanded = expandRefetchSelection(this.types, type, select);
+        const paths = expanded === select ? select : new Set(expanded);
+        normalized = { children: groupSelectionByPrefix(paths), paths };
+        let byType = selections.get(select);
+        if (!byType) {
+          byType = new Map();
+          selections.set(select, byType);
+        }
+        byType.set(type, normalized);
+      }
+      const expandedSelection = normalized.paths;
+      if (expandedSelection.size !== select.size) {
         select = new Set(
           [...expandedSelection].filter(
             (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
           ),
         );
       }
-      const selectionTree = groupSelectionByPrefix(select);
+      const selectionTree = normalized.children;
 
       const fields = Object.fromEntries(
         Object.keys(record).map((key) => [key, config.fields?.[schemaField(key)]]),
@@ -3957,7 +3976,15 @@ export class FateClient<
                 result[storageKey] = createNodeRef(childId);
               }
 
-              this.writeEntity(childType, value as AnyRecord, childPaths, plan, fieldPath);
+              this.writeEntity(
+                childType,
+                value as AnyRecord,
+                childPaths,
+                plan,
+                fieldPath,
+                undefined,
+                selections,
+              );
             }
           } else if (
             relationDescriptor &&
@@ -4012,9 +4039,13 @@ export class FateClient<
               const ids: Array<EntityId> = [];
               const cursors: Array<string | undefined> = [];
 
-              const nodeSelection = childPaths.size > 0 ? new Set<string>() : childPaths;
+              const nodeSelection = [...childPaths].some(
+                (path) => path.startsWith('items.') || path.startsWith('node.'),
+              )
+                ? new Set<string>()
+                : childPaths;
 
-              if (childPaths.size > 0) {
+              if (nodeSelection !== childPaths) {
                 for (const path of childPaths) {
                   if (path.startsWith('items.node.')) {
                     nodeSelection.add(path.slice('items.node.'.length));
@@ -4057,7 +4088,15 @@ export class FateClient<
                   }
                   const childId = toEntityId(concreteType, childConfig.getId(node as AnyRecord));
 
-                  this.writeEntity(concreteType, node as AnyRecord, nodeSelection, plan, fieldPath);
+                  this.writeEntity(
+                    concreteType,
+                    node as AnyRecord,
+                    nodeSelection,
+                    plan,
+                    fieldPath,
+                    undefined,
+                    selections,
+                  );
 
                   ids.push(childId);
                   continue;
