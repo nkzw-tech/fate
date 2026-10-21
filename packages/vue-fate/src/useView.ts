@@ -85,10 +85,13 @@ export function useView<V extends View<any, any>>(
   let currentPromise: Promise<
     ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null | undefined
   > | null = null;
-  const subscriptions = new Map<EntityId, () => void>();
+  const subscriptions = new Map<
+    EntityId,
+    { paths: ReadonlySet<string>; unsubscribe: () => void }
+  >();
 
   const cleanupSubscriptions = (nextIds: ReadonlySet<EntityId> = new Set()) => {
-    for (const [entityId, unsubscribe] of subscriptions) {
+    for (const [entityId, { unsubscribe }] of subscriptions) {
       if (!nextIds.has(entityId)) {
         unsubscribe();
         subscriptions.delete(entityId);
@@ -102,13 +105,34 @@ export function useView<V extends View<any, any>>(
       return;
     }
 
+    const coverage = new Map<EntityId, Set<string>>();
     for (const [entityId, paths] of snapshot.coverage) {
-      if (!subscriptions.has(entityId)) {
-        subscriptions.set(entityId, activeClient.store.subscribe(entityId, paths, refresh));
+      const selected = coverage.get(entityId);
+      if (selected) {
+        for (const path of paths) {
+          selected.add(path);
+        }
+      } else {
+        coverage.set(entityId, new Set(paths));
       }
     }
 
-    cleanupSubscriptions(new Set(snapshot.coverage.map(([id]) => id)));
+    for (const [entityId, paths] of coverage) {
+      const previous = subscriptions.get(entityId);
+      if (
+        !previous ||
+        paths.size !== previous.paths.size ||
+        [...paths].some((path) => !previous.paths.has(path))
+      ) {
+        previous?.unsubscribe();
+        subscriptions.set(entityId, {
+          paths,
+          unsubscribe: activeClient.store.subscribe(entityId, paths, refresh),
+        });
+      }
+    }
+
+    cleanupSubscriptions(new Set(coverage.keys()));
   };
 
   const readViewSnapshot = (
