@@ -541,34 +541,6 @@ const buildRecordSelection = ({
   return walk(type, tree, path, embedded);
 };
 
-const relayToFateConnection = (value: unknown) => {
-  if (!isRecord(value) || (value.edges !== null && !Array.isArray(value.edges))) {
-    return value;
-  }
-
-  const pageInfo = isRecord(value.pageInfo) ? value.pageInfo : {};
-  const edges = Array.isArray(value.edges) ? value.edges : [];
-
-  return {
-    items: edges.flatMap((edge) =>
-      isRecord(edge) && edge.node != null
-        ? [
-            {
-              cursor: typeof edge.cursor === 'string' ? edge.cursor : undefined,
-              node: edge.node,
-            },
-          ]
-        : [],
-    ),
-    pagination: {
-      hasNext: pageInfo.hasNextPage === true,
-      hasPrevious: pageInfo.hasPreviousPage === true,
-      nextCursor: typeof pageInfo.endCursor === 'string' ? pageInfo.endCursor : undefined,
-      previousCursor: typeof pageInfo.startCursor === 'string' ? pageInfo.startCursor : undefined,
-    } satisfies Pagination,
-  };
-};
-
 const normalizeGraphQLValue = ({
   decodeNodeId,
   selection,
@@ -588,18 +560,25 @@ const normalizeGraphQLValue = ({
     );
   }
 
-  const connection = relayToFateConnection(value);
-  if (connection !== value) {
-    const connectionRecord = connection as {
-      items: Array<{ cursor: string | undefined; node: unknown }>;
-      pagination: Pagination;
-    };
+  if (isRecord(value) && (value.edges === null || Array.isArray(value.edges))) {
+    const pageInfo = isRecord(value.pageInfo) ? value.pageInfo : {};
+    const items: Array<{ cursor: string | undefined; node: unknown }> = [];
+    for (const edge of value.edges ?? []) {
+      if (isRecord(edge) && edge.node != null) {
+        items.push({
+          cursor: typeof edge.cursor === 'string' ? edge.cursor : undefined,
+          node: normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: edge.node }),
+        });
+      }
+    }
     return {
-      ...connectionRecord,
-      items: connectionRecord.items.map((entry) => ({
-        ...entry,
-        node: normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: entry.node }),
-      })),
+      items,
+      pagination: {
+        hasNext: pageInfo.hasNextPage === true,
+        hasPrevious: pageInfo.hasPreviousPage === true,
+        nextCursor: typeof pageInfo.endCursor === 'string' ? pageInfo.endCursor : undefined,
+        previousCursor: typeof pageInfo.startCursor === 'string' ? pageInfo.startCursor : undefined,
+      } satisfies Pagination,
     };
   }
 

@@ -1096,3 +1096,65 @@ test('resolves response aliases independently at each level of a connection', as
     'totals:stats': { 'total:score': 42 },
   });
 });
+
+test.each([null, [], [null, {}, { node: null }]])(
+  'normalizes empty and sparse connection edges (%j)',
+  async (edges) => {
+    const transport = createGraphQLTransport({
+      fetch: async () => jsonResponse({ data: { f1: { edges, pageInfo: null } } }),
+      live: false,
+      roots: { posts: { type: 'Post' } },
+      types: [{ type: 'Post' }],
+      url: '/graphql',
+    });
+    await expect(transport.fetchList!('posts', ['id'])).resolves.toEqual({
+      items: [],
+      pagination: {
+        hasNext: false,
+        hasPrevious: false,
+        nextCursor: undefined,
+        previousCursor: undefined,
+      },
+    });
+  },
+);
+
+test('preserves connection order and cursor validation while skipping absent nodes', async () => {
+  const transport = createGraphQLTransport({
+    fetch: async () =>
+      jsonResponse({
+        data: {
+          f1: {
+            edges: [
+              { node: null },
+              { cursor: 'first', node: { __typename: 'Post', id: 'Post-2' } },
+              null,
+              { cursor: 3, node: { __typename: 'Post', id: 'Post-1' } },
+            ],
+            pageInfo: {
+              endCursor: 'last',
+              hasNextPage: true,
+              hasPreviousPage: false,
+              startCursor: 1,
+            },
+          },
+        },
+      }),
+    live: false,
+    roots: { posts: { type: 'Post' } },
+    types: [{ type: 'Post' }],
+    url: '/graphql',
+  });
+  await expect(transport.fetchList!('posts', ['id'])).resolves.toEqual({
+    items: [
+      { cursor: 'first', node: { __typename: 'Post', id: '2' } },
+      { cursor: undefined, node: { __typename: 'Post', id: '1' } },
+    ],
+    pagination: {
+      hasNext: true,
+      hasPrevious: false,
+      nextCursor: 'last',
+      previousCursor: undefined,
+    },
+  });
+});
