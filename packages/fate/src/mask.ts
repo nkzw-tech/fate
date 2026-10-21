@@ -20,19 +20,24 @@ export function addPath(mask: FieldMask, path: string) {
     return;
   }
 
-  const parts = path.split('.');
   let current = mask;
-  for (let i = 0; i < parts.length; i++) {
+  let start = 0;
+  while (true) {
     if (current.all) {
       return;
     }
-    const seg = parts[i];
+    const separator = path.indexOf('.', start);
+    const seg = separator === -1 ? path.slice(start) : path.slice(start, separator);
     let child = current.children.get(seg);
     if (!child) {
       child = emptyMask();
       current.children.set(seg, child);
     }
     current = child;
+    if (separator === -1) {
+      break;
+    }
+    start = separator + 1;
   }
 
   current.all = true;
