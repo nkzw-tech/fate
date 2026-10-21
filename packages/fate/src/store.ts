@@ -1,6 +1,7 @@
 import ViewDataCache from './cache.ts';
 import { argumentFieldKey } from './field-key.ts';
 import {
+  addPath,
   cloneMask,
   diffPaths,
   emptyMask,
@@ -670,7 +671,10 @@ export class Store {
       this.coverage.set(id, mask);
     }
 
-    union(mask, fromPaths(selectedPaths));
+    const coveragePaths = [...selectedPaths];
+    for (const path of coveragePaths) {
+      addPath(mask, path);
+    }
 
     if (previous) {
       let hasChanges = false;

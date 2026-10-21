@@ -23,6 +23,9 @@ export function addPath(mask: FieldMask, path: string) {
   const parts = path.split('.');
   let current = mask;
   for (let i = 0; i < parts.length; i++) {
+    if (current.all) {
+      return;
+    }
     const seg = parts[i];
     let child = current.children.get(seg);
     if (!child) {

@@ -232,3 +232,17 @@ test('removes references using updated record reference indexes', () => {
   const tags = store.read(postId)?.tags as Array<ReturnType<typeof createNodeRef>>;
   expect(tags.map(getNodeRefId)).toEqual(['Tag:2']);
 });
+
+test('consumes coverage iterables before extending the existing field mask', () => {
+  const store = new Store();
+  store.merge('Post:coverage', { id: 'coverage' }, ['profile.name']);
+  function* paths() {
+    yield 'profile';
+    expect(store.missingForSelection('Post:coverage', ['profile.age'])).toEqual(
+      new Set(['profile.age']),
+    );
+    yield 'extra';
+  }
+  store.merge('Post:coverage', {}, paths());
+  expect(store.missingForSelection('Post:coverage', ['profile.age', 'extra'])).toEqual(new Set());
+});
