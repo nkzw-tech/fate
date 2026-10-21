@@ -20,6 +20,7 @@ export {
   graphqlMutation,
   graphqlValueMutation,
   graphqlValueRoot,
+  GraphQLRequestError,
   mutation,
   valueMutation,
   toEntityId,
