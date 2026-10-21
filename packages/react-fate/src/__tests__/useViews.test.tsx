@@ -341,7 +341,7 @@ test.each([false, true])(
       );
     await render(['1']);
     await render(['missing']);
-    expect(container.textContent).toBe('Name 1');
+    expect(container.textContent).toBe('pending');
     await render(['2']);
     expect(container.textContent).toBe('Name 2');
     const count = subscribe.mock.calls.length;

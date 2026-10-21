@@ -8,7 +8,7 @@ import {
   type ViewEntityName,
   type ViewRef,
 } from '@nkzw/fate';
-import { use, useDeferredValue, useMemo, useState, useSyncExternalStore } from 'react';
+import { use, useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useFateClient } from './context.tsx';
 import { fulfilledThenable, isFulfilledThenable } from './thenable.ts';
 
@@ -278,33 +278,66 @@ const createSubscribe =
     };
   };
 
+type ReaderEntry = {
+  client: FateClient<any, any>;
+  read: ReadSnapshot;
+  refs: ReadonlyArray<ViewInput<View<any, any>>>;
+  view: View<any, any>;
+};
+
+const createReaders = () => {
+  let entries: Array<ReaderEntry> = [];
+  return {
+    get<V extends View<any, any>>(
+      client: FateClient<any, any>,
+      view: V,
+      refs: ReadonlyArray<ViewInput<V>>,
+      batch: boolean,
+    ) {
+      const cached = entries.find(
+        (entry) =>
+          entry.client === client &&
+          entry.view === view &&
+          entry.refs.length === refs.length &&
+          refs.every((ref, index) => ref === entry.refs[index]),
+      );
+      if (cached) {
+        return cached.read;
+      }
+      const read = batch
+        ? createArrayReader(client, view, refs)
+        : cacheReadError(createReader(client, view, refs[0]));
+      entries.push({ client, read, refs: [...refs], view });
+      return read;
+    },
+    retain(read: ReadSnapshot) {
+      entries = entries.filter((entry) => entry.read === read);
+    },
+  };
+};
+
+function useReader<V extends View<any, any>>(
+  view: V,
+  refs: ReadonlyArray<ViewInput<V>>,
+  batch: boolean,
+): unknown {
+  const client = useFateClient();
+  const [readers] = useState(createReaders);
+  // Suspense retries must reuse the reader that observed a pending read or error.
+  const getSnapshot = readers.get(client, view, refs, batch);
+  useEffect(() => readers.retain(getSnapshot), [getSnapshot, readers]);
+  return useSnapshot(client, getSnapshot, batch);
+}
+
 export function useViewSnapshots<V extends View<any, any>>(
   view: V,
   refs: ReadonlyArray<ViewInput<V>>,
 ): ReadonlyArray<unknown> {
-  const client = useFateClient();
-  const [previousRefs, setPreviousRefs] = useState(refs);
-  // Callers can construct arrays inline without rebuilding readers and subscriptions.
-  const unchanged =
-    refs.length === previousRefs.length && refs.every((ref, index) => ref === previousRefs[index]);
-  const stableRefs = unchanged ? previousRefs : refs;
-  if (!unchanged) {
-    setPreviousRefs(refs);
-  }
-  const getSnapshot = useMemo(
-    () => createArrayReader(client, view, stableRefs),
-    [client, view, stableRefs],
-  );
-  return useSnapshot(client, getSnapshot, true) as ReadonlyArray<unknown>;
+  return useReader(view, refs, true) as ReadonlyArray<unknown>;
 }
 
 export function useViewSnapshot<V extends View<any, any>>(view: V, ref: ViewInput<V>): unknown {
-  const client = useFateClient();
-  const getSnapshot = useMemo(
-    () => cacheReadError(createReader(client, view, ref)),
-    [client, view, ref],
-  );
-  return useSnapshot(client, getSnapshot, false);
+  return useReader(view, [ref], false);
 }
 
 function useSnapshot(
@@ -316,6 +349,9 @@ function useSnapshot(
     () => createSubscribe(client, getSnapshot, batch),
     [client, getSnapshot, batch],
   );
-  const snapshot = use(useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot)));
+  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const input = useMemo(() => ({ reader: getSnapshot, snapshot: current }), [getSnapshot, current]);
+  const deferred = useDeferredValue(input);
+  const snapshot = use(deferred.reader === getSnapshot ? deferred.snapshot : current);
   return snapshot.data;
 }
