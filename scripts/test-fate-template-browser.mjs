@@ -128,6 +128,8 @@ try {
         ]);
       }
     } else {
+      // Live delivery can briefly overlap the optimistic comment before reconciliation.
+      await expect(page.getByText(comment, { exact: true })).toHaveCount(1, { timeout: 30_000 });
       await expect(page.getByText(comment, { exact: true })).toBeVisible({ timeout: 30_000 });
     }
     await expect(observer.getByText(comment, { exact: true })).toBeVisible({ timeout: 30_000 });
