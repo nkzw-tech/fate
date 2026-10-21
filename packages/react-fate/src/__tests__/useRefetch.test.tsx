@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { clientRoot, createClient, view, type ViewRef } from '@nkzw/fate';
-import { act, Suspense } from 'react';
+import { act, Component, type ReactNode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { FateClient, useRefetch, useRequest, useView } from '../index.tsx';
@@ -136,5 +136,71 @@ test.each(['cache-first', 'network-only'] as const)(
     });
     expect(container.textContent).toBe('No viewer');
     await act(async () => root.unmount());
+  },
+);
+
+class RequestErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    return this.state.error ? this.state.error.message : this.props.children;
+  }
+}
+
+test.each(['cache-first', 'stale-while-revalidate'] as const)(
+  'recovers an initially rejected %s request after explicit refetch and boundary reset',
+  async (mode) => {
+    const { client, fetchQuery } = setup();
+    const error = new Error('Unavailable');
+    fetchQuery.mockRejectedValueOnce(error);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const request = { viewer: { view: UserView } };
+    let refetch!: () => Promise<unknown>;
+    function Content() {
+      const { viewer } = useRequest(request, { mode });
+      return viewer ? <UserName user={viewer} /> : null;
+    }
+    function Page({ attempt }: { attempt: number }) {
+      refetch = useRefetch(request);
+      return (
+        <RequestErrorBoundary key={attempt}>
+          <Suspense fallback="Loading">
+            <Content />
+          </Suspense>
+        </RequestErrorBoundary>
+      );
+    }
+    const render = (attempt: number) =>
+      act(async () =>
+        root.render(
+          <FateClient client={client}>
+            <Page attempt={attempt} />
+          </FateClient>,
+        ),
+      );
+    try {
+      await render(0);
+      expect(container.textContent).toBe('Unavailable');
+      fetchQuery.mockRejectedValueOnce(error);
+      await act(async () => {
+        await expect(refetch()).rejects.toBe(error);
+      });
+      expect(container.textContent).toBe('Unavailable');
+      await act(async () => {
+        await refetch();
+      });
+      await render(1);
+      expect(container.textContent).toBe('Ada');
+      const calls = fetchQuery.mock.calls.length;
+      await render(1);
+      expect(fetchQuery).toHaveBeenCalledTimes(calls);
+    } finally {
+      await act(async () => root.unmount());
+      consoleError.mockRestore();
+    }
   },
 );

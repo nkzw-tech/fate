@@ -3125,7 +3125,10 @@ export class FateClient<
           if (!background) {
             control?.dispose();
           }
-          for (const key of this.controlledRequestKeys.get(handle.descriptor.key) ?? []) {
+          for (const key of [
+            handle.descriptor.key,
+            ...(this.controlledRequestKeys.get(handle.descriptor.key) ?? []),
+          ]) {
             const requests = this.requests.get(key);
             for (const [mode, previous] of requests ?? []) {
               if (previous.status === 'rejected') {
