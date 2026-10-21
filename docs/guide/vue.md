@@ -1,6 +1,6 @@
 # Vue
 
-_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
+_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useRequestState`, `useRefetch`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
 
 Vue components use fate through Vue resources built from refs, computed values, watchers, and `<Suspense>`. The view model, generated client, normalized cache, masking, request shapes, list views, live views, and mutations are shared with the React adapter.
 
@@ -153,10 +153,7 @@ Use `useRequestState` to observe a request without awaiting `ready()` or using S
 
 ```ts
 const enabled = ref(false);
-const state = useRequestState(
-  { viewer: { view: UserView } },
-  () => ({ enabled: enabled.value }),
-);
+const state = useRequestState({ viewer: { view: UserView } }, () => ({ enabled: enabled.value }));
 
 // Starts when enabled becomes true.
 enabled.value = true;
@@ -165,6 +162,20 @@ enabled.value = true;
 The request and options accept plain values, refs, or getters. Disabled requests do not fetch. With `{ mode: 'cache-only' }`, the resource observes cached data without fetching missing fields. `status` is `disabled`, `missing`, `pending`, `ready`, or `error`.
 
 `refetch()` forces a network request and rejects on failure. Cached data stays available while refreshing, with `isFetching` and `error` reporting background work. Disabled and cache-only requests reject calls to `refetch()`. Scope disposal releases the observer automatically.
+
+## Refetching on Demand
+
+Use `useRefetch` when a button or event should refresh data without starting a request during setup:
+
+```ts
+const refresh = useRefetch(() => ({
+  viewer: { view: UserView },
+}));
+
+await refresh();
+```
+
+The callback always uses `network-only` mode. It reads the current request, options, and provided client when called, so refs and getters work without recreating the callback. The optional second argument accepts `persist`, `timeout`, and `signal`. Failures reject the returned promise. Existing request and view resources observe successful updates while keeping their current data during the refresh.
 
 ## Views in Components
 
