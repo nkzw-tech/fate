@@ -56,10 +56,13 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   let activeClient: FateClientT<any, any> | null = null;
   let requestKey: null | string = null;
   let retainDispose: (() => void) | null = null;
+  let unsubscribe: (() => void) | null = null;
   let token = 0;
   let currentPromise: Promise<RequestResult<O, R>> | null = null;
 
   const cleanupRequest = () => {
+    releaseDisposable(unsubscribe);
+    unsubscribe = null;
     releaseDisposable(retainDispose);
     retainDispose = null;
 
@@ -95,11 +98,20 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     ).dispose;
     pending.value = true;
     errorState.value = null;
+    const observer = client.observeRequestResult(currentRequest);
+    let resolved = false;
+    const updateResult = () => {
+      if (!disposed && currentToken === token && resolved) {
+        data.value = markRaw(observer.getSnapshot()) as RequestResult<O, R>;
+      }
+    };
+    unsubscribe = observer.subscribe(updateResult);
 
     currentPromise = Promise.resolve(prepared.promise).then(
       (value) => {
         if (!disposed && currentToken === token) {
-          data.value = markRaw(value) as RequestResult<O, R>;
+          resolved = true;
+          updateResult();
           pending.value = false;
         }
         return value as RequestResult<O, R>;
