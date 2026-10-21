@@ -1,12 +1,10 @@
 # Persistence
 
-fate can optionally keep data available across page reloads and save mutations while a user is offline. When the user comes back, their views can show previously loaded data and their pending changes continue where they left off.
-
-Persistence builds on fate's normalized cache, [Requests](/guide/requests), and [Actions](/guide/actions). You configure storage only once, without changing how you use fate.
+fate can keep data across page reloads and save mutations while a user is offline. When they come back, their views can show previously loaded data and their pending changes continue where they left off.
 
 ## Client Setup
 
-The persistence layer is part of `@nkzw/fate`, with storage adapters installed separately. For a browser app using IndexedDB, add the adapter:
+For a browser app, install the IndexedDB adapter:
 
 ```sh
 vp add @nkzw/fate-indexeddb
@@ -28,26 +26,26 @@ const fate = createFateClient({
 });
 ```
 
-By default, fate keeps loaded data for **one day**, with a storage budget of **25 MiB**. You can change both values:
+By default, fate saves loaded data for **one day**, with a storage budget of **25 MiB**. Use `maxAge` (milliseconds) and `maxBytes` to change those defaults:
 
 ```tsx
 persistence: createPersistence({
   key: `workspace:${workspaceId}:user:${userId}`,
-  maxAge: 24 * 60 * 60 * 1000,
-  maxBytes: 25 * 1024 * 1024,
+  maxAge: 3 * 24 * 60 * 60 * 1000,
+  maxBytes: 50 * 1024 * 1024,
   storage: createIndexedDBStorage(),
 }),
 ```
 
-Create the browser client after you know which user is signed in. The `key` separates saved data and mutations by account and workspace, and must match the authenticated scope in the [server setup](#server-deduplication). When switching accounts, dispose the previous persistence session and create a new client with the new account's key.
+Create the client after you know which user is signed in. Use a different `key` for each account and workspace, matching the authenticated scope in your [server setup](#server-deduplication). When switching accounts, dispose the old persistence session and create a new client.
 
 > [!NOTE]
 >
-> Persistence saves your app's data. To load the app itself while offline, you'll also need a service worker that makes its HTML, JavaScript, and other assets available. fate does not install a service worker or download pages the user hasn't visited.
+> Persistence saves data. To load the app itself while offline, you'll also need a service worker for its HTML, JavaScript, and other assets.
 
 ## Cache Lifetime
 
-You can keep the data for a specific screen longer by passing `persist` to `useRequest`. For example, to keep a list of posts for three days:
+You can keep a screen's data longer by passing `persist` to its request. For example, to save posts for three days:
 
 ```tsx
 const { posts } = useRequest(
@@ -60,29 +58,15 @@ const { posts } = useRequest(
 );
 ```
 
-The same option works with `fate.request(...)` and Vue's `useRequest`. If a screen uses several requests, set the option on each request whose data you want to keep longer.
+The same option works with `fate.request(...)` and Vue's `useRequest`. Objects shared by several requests are saved once, and remain available while a saved request needs them.
 
-fate stores objects by their type and ID, just like the in-memory cache. If a post appears in both your feed and a detail screen, both requests share the same saved post. Each request describes which fields and related objects it needs, including list membership and pagination state.
+`maxAge` starts when data is fetched successfully. Reading saved data does not extend it. Pass `persist: { maxAge: 0 }` to skip saving a request; other requests may still save data they share with it.
 
-For example, your feed might keep posts for one day, while the detail screen keeps them for three days. After one day, the fields needed by the detail screen remain available. Fields selected only by the feed can be removed. You don't need to coordinate separate copies of the same post or manually patch each request's cache.
-
-`maxAge` is measured in milliseconds from when the data was fetched successfully. Reading saved data or rendering the screen again does not restart that lifetime. If a request fetches one missing post, it only renews the data it fetched. Other posts already in the cache keep their original age. Changing a cached request's `maxAge` also uses the original fetch time.
-
-When callers share a pending request, the latest explicit `persist.maxAge` also applies to that request's eventual cache write.
-
-Pass `persist: { maxAge: 0 }` to skip saving data for a request. Shared objects may still be saved for other requests, so this option does not delete all copies of an object.
-
-The [in-memory garbage collector](/guide/requests#cache-lifetime) continues to work independently. A post can be removed from memory while its saved copy remains available for a later visit. On startup, fate restores pending mutations, then loads saved data as requests need it. It does not load the entire saved cache into memory.
+Saved data can outlive the [in-memory cache](/guide/requests#cache-lifetime). fate loads it when a request needs it, rather than restoring the whole cache at startup.
 
 ## Refreshing Data
 
-Keeping data for three days doesn't mean waiting three days for updates. You can use the existing [request modes](/guide/requests#request-modes) to choose when to fetch fresh data:
-
-- `cache-first` (_default_): Uses available saved data and fetches missing data from the network.
-- `stale-while-revalidate`: Shows saved data and refreshes it in the background. If the refresh fails, the saved data stays visible.
-- `network-only`: Requires a network response, even if saved data is available.
-
-For example, to show the previous session's posts immediately and update them on reload:
+Keeping data for three days doesn't mean waiting three days for updates. Request modes still control when to fetch fresh data. For example, to show saved posts immediately and refresh them in the background:
 
 ```tsx
 const { posts } = useRequest(
@@ -96,25 +80,17 @@ const { posts } = useRequest(
 );
 ```
 
-Expiration controls how long data stays in storage. It does not remove data from a mounted view or change the in-memory fetch policy. For ongoing server updates, use [Live Views](/guide/live-views).
+Use `cache-first` to fetch only missing data, or `network-only` to require a fresh response. Expiration affects saved data, not data already displayed by a mounted view. See [Request Modes](/guide/requests#request-modes) and [Live Views](/guide/live-views).
 
 ## Cache Size
 
-When saved data reaches `maxBytes`, fate removes expired data first, then releases the least recently used requests until the new data fits. Objects still needed by another saved request remain available, and shared objects count toward the budget only once. A response that is too large to save can still be used in memory without removing other saved requests to make room for it.
+When storage reaches `maxBytes`, fate removes expired data and the least recently used saved requests. Shared objects remain available while another saved request needs them.
 
-The budget includes encoded data, keys, cache metadata, and the saved mutation queue. Your storage backend may use additional space for its own bookkeeping. `maxBytes` controls saved data; the existing garbage collector controls the lifetime of data in memory.
-
-fate batches cache writes and yields during large traversals and writes so other work on the page can continue. The mutation journal stores each entry separately and writes only changed entries, so confirming a mutation does not rewrite the entire queue. Changes to scalar fields write the affected record, while changes to relationships also update the saved data that depends on them.
-
-Pending mutations are never removed to make room for cached data. If a new mutation cannot fit, it fails before fate applies its optimistic update or sends it to the server.
-
-> [!NOTE]
->
-> Already accepted mutations must still be able to finish. Their recovery data and saved results can exceed the budget if they grow or you lower `maxBytes`. In that case, fate releases the read cache and rejects new durable mutations until capacity is available. Local confirmation receipts count toward the budget until their cache changes have been saved. fate then removes them automatically, making room for new mutations.
+Pending mutations are never evicted to make room for cached data. If a new mutation cannot fit, it fails before being applied optimistically or sent to the server. Already accepted mutations can still finish, even if their saved results temporarily exceed the budget.
 
 ## Actions & Mutations
 
-With persistence configured, fate saves actions and mutations locally before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/guide/actions):
+With persistence configured, fate saves mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/guide/actions):
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
@@ -125,15 +101,15 @@ like({
 });
 ```
 
-If the user likes a post while offline, the like count updates immediately. Reloading the page restores the pending action and its optimistic update. When the connection returns and a client is running, fate sends the action to the server and updates the post with the confirmed result.
+If the user likes a post while offline, the count updates immediately. Reloading restores the pending action and its optimistic update. When the connection returns and the app is running, fate sends it to the server.
 
-Mutations from one client are saved in invocation order and sent in the order they were saved, one at a time for each persistence key. Tabs sharing that key coordinate delivery. Temporary network and server failures are retried with increasing delays, up to 30 seconds between attempts. Authentication failures stay pending so delivery can resume after the user signs in again. A terminal client error rolls back the optimistic update and follows fate's existing [error handling](/guide/actions#action--mutation-error-handling).
+Mutations are delivered in the order they were saved, one at a time per persistence key. Tabs sharing a key coordinate delivery. Temporary failures are retried. Authentication failures wait for the user to sign in again. A terminal client error rolls back the optimistic update.
 
-The mutation promise resolves after remote confirmation has been saved locally. It can remain pending while offline. Closing the page loses the JavaScript promise, but the saved mutation and optimistic update remain. After a reload, use the [persistence state](#persistence-state) to show pending and failed changes.
+The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
 ### Skipping Persistence
 
-For a call that should run immediately without being saved or retried, pass `persist: false`:
+For a call that should not be saved or retried, pass `persist: false`:
 
 ```tsx
 await fate.mutations.analytics.record({
@@ -142,23 +118,23 @@ await fate.mutations.analytics.record({
 });
 ```
 
-The same option works with `fate.actions`. A successful result can still update the normal cache. Without persistence configured, actions and mutations keep their existing behavior.
+The same option works with `fate.actions`.
 
 ### Creating Objects Offline
 
-Use a stable, client-generated ID when creating an object offline. For example, a new comment and a later edit to that comment can use the same ID, allowing fate to send the creation before the edit when the user reconnects.
+Use client-generated IDs when creating objects that later offline mutations depend on. For example, creating a comment and then editing it can use the same ID for both calls.
 
-If your server assigns IDs, wait for the creation result before constructing a dependent mutation. fate does not rewrite arbitrary foreign keys inside saved inputs. A failed creation also does not automatically cancel later mutations; your server should validate them as usual.
+If the server assigns IDs, wait for the creation result before sending a dependent mutation. fate does not rewrite IDs inside mutation inputs or cancel later mutations when a creation fails.
 
-Mutation inputs and optimistic updates must be serializable with fate's hydration codec. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false` for the upload itself.
+Inputs and optimistic updates must be serializable. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false`.
 
 ## Server Deduplication
 
-A connection can fail after the server has already applied a mutation. For example, the server might increment a post's like count, but the response never reaches the browser. Retrying that mutation without server support would increment the count twice.
+A connection can fail after the server has applied a mutation. Retrying a lost response must not increment a like count twice.
 
-fate assigns an identity to each saved mutation and reuses it on every attempt. The server records the result alongside the mutation's database changes, in **the same transaction**. When the same mutation arrives again, the server returns the saved result.
+fate gives each saved mutation an identity and reuses it on retries. Your server must save the result and the database changes in **the same transaction**, then return that result if the mutation arrives again.
 
-For the native HTTP transport, configure `createMutationIdempotency` on your server. The following example uses application-provided helpers to lock a mutation identity and read or insert its receipt:
+For the native HTTP transport, use `createMutationIdempotency`:
 
 ```ts
 import { createMutationIdempotency } from '@nkzw/fate/persistence/server';
@@ -183,26 +159,17 @@ const server = createFateServer({
 });
 ```
 
-Your app supplies `database`, `lockMutationIdentity`, `readReceipt`, and `insertReceipt`. The lock must serialize attempts with the same `(scope, id)` across server processes, including the first attempt before a receipt exists. Mutation resolvers must use the transaction's `ctx.db`, so their changes and the receipt commit together. A unique index on the receipt table alone cannot protect changes made outside that transaction.
+Your app supplies the database and receipt helpers. Lock each `(scope, id)` across server processes, and use `ctx.db` for mutation writes so they share the receipt's transaction. See the [complete SQLite example](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts).
 
-See [`example/persistence/server.ts`](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts) for a complete SQLite implementation, including the receipt table and transaction handling.
-
-The helper checks the identity against the authenticated scope and rejects reuse with different mutation names, inputs, or selections. Server receipts do not expire: a user might reconnect much later with a mutation whose response was lost. Keep receipts for as long as an old mutation could still arrive.
-
-A database transaction cannot roll back an email, payment, or webhook sent to another service. For those effects, use a transactional outbox and the destination's idempotency support. The transaction integration guarantees one committed database effect; network requests and resolver attempts can still happen more than once.
-
-Native HTTP sends durable mutations and receipt-only recovery using protocol version 2, so older servers reject unsupported requests before executing them. Ordinary requests and live subscriptions continue to use version 1. A current server without the idempotency integration also rejects durable mutations before running their resolvers.
+Keep receipts for as long as an offline client might retry. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
 
 ## tRPC, GraphQL, and Custom Transports
 
-For tRPC, GraphQL, or a custom transport, provide a `mutateDurably(name, input, select, identity)` method that sends the identity to an endpoint with server deduplication. Regular calls continue to use `mutate(name, input, select)`. GraphQL passes selected field arguments as an optional fifth parameter to `mutateDurably` (fourth for `mutate`), separate from the mutation input. Forward that parameter if the durable response selects fields with arguments.
-
-Both `createTRPCTransport` and `createGraphQLTransport`, including their generated clients, accept `mutateDurably`. For example, you can use a native fate endpoint for durable mutations alongside your existing transport:
+For other transports, provide `mutateDurably(name, input, select, identity)` with the same server deduplication. One option is to use a native fate endpoint alongside your existing backend:
 
 ```tsx
 const durableHTTP = createHTTPTransport<MyAPI>({
   url: '/api/fate',
-  // Use the same authenticated headers as your other transport.
 });
 
 const fate = createFateClient({
@@ -212,9 +179,9 @@ const fate = createFateClient({
 });
 ```
 
-Both endpoints need to agree on mutation names, inputs, results, and entity IDs. A custom GraphQL adapter should unwrap its response and decode GraphQL global IDs before returning data to fate.
+Use the same authentication, mutation names, inputs, results, and IDs on both endpoints. A GraphQL adapter must decode global IDs and return the unwrapped result. It also receives selected field arguments as a fifth parameter; forward them when needed.
 
-You can also use the same idempotency helper inside an existing tRPC or GraphQL resolver. Validate the input and identity at the endpoint, then pass them to `execute`:
+You can use the idempotency helper inside an existing resolver too:
 
 ```ts
 return idempotency.execute({
@@ -227,11 +194,11 @@ return idempotency.execute({
 });
 ```
 
-The adapter must pass the entire identity on every attempt, including `replayOnly` when present. With `replayOnly: true`, the endpoint must return the existing receipt or a 404 if none exists, without executing the mutation. `createMutationIdempotency` handles both delivery and receipt-only recovery. Adding an identity to a header that the server ignores does not prevent duplicate effects.
+Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-If a client has registered mutations but no durable adapter, the persistence session reports a configuration error. Saved reads and `persist: false` calls still work. New durable calls fail before being queued, and existing queued mutations stay saved until a client with the adapter can deliver them.
+Without a durable adapter, saved reads and `persist: false` calls still work, but new durable mutations fail before being queued.
 
-For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` to identify a terminal client error. Execution errors without a recognized status remain retryable, so a custom error message or code alone does not reject a saved mutation permanently.
+For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.
 
 ## Persistence State
 
@@ -247,27 +214,25 @@ const unsubscribe = session.subscribe(() => {
 });
 ```
 
-`getSnapshot` returns a stable value between updates and can be used with React's `useSyncExternalStore`. The same subscription API works with Vue. Each mutation exposes its ID, name, input, status (`queued`, `sending`, or `failed`), and last error.
+Each mutation exposes its ID, name, input, status (`queued`, `sending`, or `failed`), and last error. `getSnapshot()` also works with React's `useSyncExternalStore`.
 
-A failed initial restoration rejects `ready`. Storage errors also appear in the snapshot. If reading the saved cache fails, fate can still fetch the data from the network. If saving a new mutation fails, the call rejects before it is sent.
+A failed initial restore rejects `ready`. Storage errors appear in the snapshot. A cache read failure can fall back to the network, but a mutation that cannot be saved is not sent.
 
-Cache writes are batched. To save the latest read cache before a reload you control, call `flush()`:
+Read-cache writes are batched. Before a reload you control, call `flush()` to save the latest data:
 
 ```tsx
-await fate.persistence!.flush();
+await session.flush();
 window.location.reload();
 ```
 
-A failed cache write keeps its pending data for a later `flush()` retry. Mutations are saved individually before delivery and do not depend on a delayed cache write or a page-unload event. On confirmation, fate saves the receipt, its confirmed cache changes, and the remaining mutations' recovery data together before resolving the call. Saving the read cache separately means a cache write failure cannot block an already confirmed mutation. The receipt and confirmed cache changes remain in the journal until the read cache checkpoint succeeds, then fate removes them. A tab that missed the confirmation recovers its result from the server receipt when it reconnects. This lookup cannot execute a discarded mutation. After a restart, fate repairs those changes before serving saved reads; if storage is still unavailable, reads fall back to the network instead of returning stale saved data.
-
-You can also retry delivery or discard a mutation:
+Mutations are saved automatically before delivery. You can retry delivery or discard an unsent or failed mutation:
 
 ```tsx
 session.retry();
 await session.discard(mutationId);
 ```
 
-`retry()` respects the saved retry deadline. `discard()` removes an unsent mutation or a terminal failure. A mutation that was already attempted cannot be discarded while its result is unknown: it may have committed remotely, and fate must recover that result first.
+`retry()` respects the retry delay. Once a mutation has been attempted, it cannot be discarded until its outcome is known: it may have committed on the server.
 
 When leaving an account, dispose its session and unsubscribe:
 
@@ -276,7 +241,7 @@ session.dispose();
 unsubscribe();
 ```
 
-Disposing stops that client's delivery, rejects its pending promises, and removes its optimistic updates from memory. Saved mutations remain available to the next client using the same key. Responses arriving after disposal cannot update the old client's cache.
+Disposal stops delivery and removes optimistic updates from memory. Saved mutations remain available to the next client using the same key.
 
 ## Clearing Saved Data
 
@@ -286,15 +251,13 @@ To remove the saved read cache, call `clearCache()`:
 await fate.persistence!.clearCache();
 ```
 
-This leaves current in-memory data, queued mutations, and their recovery data intact. Confirmation receipts waiting for a cache checkpoint also remain available; fate removes them after a successful checkpoint.
+This leaves in-memory data and queued mutations intact.
 
-For a complete local account reset, stop every client using the key before removing its journal header, individual mutation entries, and namespaced cache entries from storage. This also removes unsent changes. It cannot undo mutations that already ran on the server.
-
-Saved data carries the client's [hydration scope](/guide/requests#ssr-and-hydration). An incompatible read cache is discarded, while incompatible queued mutations are kept as failures for inspection. Change `hydrationScope` when deploying incompatible cache schemas or changing the meaning of mutation inputs. An unknown or corrupt mutation journal blocks restoration and is left untouched so the saved work can be recovered.
+Change `hydrationScope` when deploying incompatible data models or mutation inputs. Incompatible saved reads are discarded; incompatible queued mutations remain visible as failures so the app can handle them.
 
 ## Other Storage Backends
 
-The core persistence layer has no IndexedDB dependency. You can use another backend by implementing `PersistenceStorage`:
+To use storage other than IndexedDB, implement `PersistenceStorage`:
 
 ```ts
 interface PersistenceStorage {
@@ -310,14 +273,10 @@ interface PersistenceStorage {
 }
 ```
 
-Values use fate's hydration codec and can be stored as JSON. The adapter handles storage and coordination:
+Values can be stored as JSON. `scan` returns keys in ascending order after the optional cursor, up to the limit (64 by default). `writeBatch` must commit all entries atomically; `undefined` deletes a key.
 
-- `read` returns the saved value for a key.
-- `scan` returns keys under a prefix in ascending order, strictly after the optional cursor, up to the limit (64 by default). Use your backend's ordered index to keep each scan small.
-- `writeBatch` commits all entries atomically and resolves after they have committed. An `undefined` value deletes the key. Use a one-entry batch for a single write.
-- `exclusive` coordinates every tab or process sharing the backend. Different lock names are independent: fate holds a delivery lock during network work and acquires a separate write lock when updating storage. Your adapter must allow that nesting.
-- `subscribe` notifies other clients after a change commits, including keys changed by `writeBatch`. Without notifications, clients check saved mutations during delivery attempts and explicit `retry()` calls.
+`exclusive` coordinates tabs or processes sharing storage. Different lock names must be independent and allow nesting. `subscribe` notifies other clients after a write commits; without it, clients check during delivery and explicit retries.
 
-The IndexedDB adapter implements this with `idb`, IndexedDB transactions, Web Locks, and BroadcastChannel. It requires a secure browser context with Web Locks. Browser storage can still be cleared or evicted; if your app needs stronger retention, request persistent browser storage or choose another backend.
+The IndexedDB adapter requires a secure browser context with Web Locks. Browser storage can be cleared or evicted, so choose another backend if your app needs stronger retention.
 
-Persistence coordinates mutation delivery across tabs, but it does not keep every tab's read cache synchronized or resolve application conflicts. Use refetching or [Live Views](/guide/live-views) to receive fresh server data.
+Persistence coordinates delivery across tabs. Use refetching or [Live Views](/guide/live-views) to receive fresh server data.

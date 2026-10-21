@@ -1,6 +1,6 @@
 # Deferred Views
 
-Use `defer` when a field should not block the parent view. The parent view receives a deferred handle immediately after the eager fields are available, and the component that reads that handle with `useView`, `useListView`, or `useLiveListView` decides which `Suspense` boundary handles the loading state.
+Let's say a post's comments take longer to load than its title and content. Wrap `comments` in `defer` so the post can render first, and give the comments their own `Suspense` boundary:
 
 ```tsx
 import { Suspense } from 'react';
@@ -55,8 +55,6 @@ function PostComments({
 }
 ```
 
-Deferred fields are not optional data. They are explicit handles that existing view APIs can read. If the deferred selection is missing from the normalized cache, fate fetches only that missing selection and suspends the component that tried to resolve it.
+`title` and `content` are available when `useView(PostView, postRef)` returns. Reading the comments with `useListView` loads any missing data and suspends only `PostComments`.
 
-This keeps parent components simple: eager fields like `title` and `content` are available when `useView(PostView, postRef)` returns, while slower or secondary fields such as `comments` can load under their own boundary.
-
-GraphQL transports use the same client semantics today. The deferred field is omitted from the eager request and fetched when the deferred handle is resolved. GraphQL `@defer` is the natural transport representation for this feature, but consuming incremental multipart patches requires additional transport support before fate can safely normalize streamed patches from a single GraphQL response.
+`useView` and `useLiveListView` can read deferred values too. This works with every transport. GraphQL currently fetches deferred fields with separate queries, rather than streaming `@defer` responses.

@@ -1,8 +1,6 @@
 # GraphQL Integration
 
-_fate_ can use an existing GraphQL API as its transport. This keeps the adapter APIs, view composition, normalized cache, masking, requests, list views, live views, and mutations the same while replacing the native or tRPC backend with GraphQL operations.
-
-Use the GraphQL transport when your backend already exposes GraphQL and you want fate's client model without adding fate's native server protocol.
+If your backend already exposes GraphQL, you can use it with fate. Define views and call requests and mutations as usual; fate builds the GraphQL operations for you.
 
 ## Template
 
@@ -18,7 +16,7 @@ Create a full GraphQL + Prisma example app with:
 vp create fate -- --template graphql
 ```
 
-The client-only template is the smallest reference for the integration. It contains a `src/fate/graphql.ts` file that maps your GraphQL schema to fate views and roots.
+Both templates include `src/fate/graphql.ts`, where you map your schema's queries and mutations to fate.
 
 ## GraphQL Schema Shape
 
@@ -66,7 +64,7 @@ The `schema` option accepts schema definition language (SDL) text or a `GraphQLS
 
 fate derives entity types, query arguments, and mutation inputs and results from the schema. Use `field` when a fate root name differs from its GraphQL query field, for example `viewer: { field: 'currentUser' }`. The schema is used during generation and is excluded from the browser bundle.
 
-You can also describe selectable fields with [data views](/integrations/server#data-views) and export `Root` from the mapping module. Existing mappings without a schema remain supported.
+You can also define a mapping manually with [data views](/integrations/server#data-views) and a `Root` export.
 
 ## Vite Plugin
 
@@ -124,11 +122,11 @@ const UserCardView = view<User>()({
 });
 ```
 
-These types describe fields available to select. A view only exposes the fields it selects. Connection fields in `GraphQLEntities` expose node arrays for view composition. The generated file also exports `GraphQLTypes` for schema output shapes and `GraphQLResponses` for transport results, where connections use `{ items, pagination }`.
+These types describe the fields you can select; the view exposes only the fields it selects. Connections appear as node arrays for composing views. Use `GraphQLTypes` for the original schema shapes or `GraphQLResponses` for response types with fate's `{ items, pagination }` connections.
 
 Custom scalars default to `unknown`. Set `fateGraphQL.scalars` to describe their TypeScript types, for example `{ DateTime: 'string' }`. Use `{ input: 'string', output: 'string' }` when specifying each side separately. These mappings change types; they do not convert returned values.
 
-After updating the schema, run `fate generate` again to refresh the client types. Use `import type` for generated types so the mapping module can load before those files exist.
+Use `import type` for generated types. After updating the schema, run `fate generate` to refresh them.
 
 ## Creating a Client
 
@@ -188,9 +186,9 @@ const fate = createFateClient({
 });
 ```
 
-GraphQL queries issued in the same microtask are batched into a single document. Mutations queued together run in order as separate requests, so one failure does not prevent the next mutation from running. The transport does not automatically retry mutations.
+Queries made together are batched into one GraphQL operation. Mutations run separately and are not retried unless you configure [Persistence](/guide/persistence).
 
-Deferred view fields work with the GraphQL transport through the same normalized cache flow as native HTTP: the eager query omits `defer(...)` fields, and `useView`, `useListView`, or `useLiveListView` fetches the missing selection through `nodes(ids:)` when the deferred handle is read. GraphQL `@defer` is the natural wire format for this feature, but fate's GraphQL transport currently expects one JSON result per operation and does not consume incremental multipart patches yet.
+[Deferred fields](/guide/deferred-views) load when a component reads them. This uses ordinary GraphQL queries; incremental `@defer` responses are not supported yet.
 
 ## Refetch Fields
 
@@ -207,15 +205,9 @@ export const fateGraphQL = {
 } as const;
 ```
 
-`idArg` defaults to `id`. Each mapped field must return one entity of the named type, optionally nullable. The adapter batches multiple IDs into aliased query fields in one request, preserves input order for returned records, and omits null results. Node ID encoding and decoding apply to mapped fetches too.
+`idArg` defaults to `id`. Each query must return one entity of the configured type and accept its ID. Other required arguments need defaults. With `nodes: false`, every type fetched by ID needs a mapping.
 
-Mappings take precedence over the default `nodes(ids:)` fallback. Set `nodes: false` to disable that fallback; fetching an unmapped type then reports a configuration error without issuing a request. Existing clients need no configuration changes. Direct users of `createGraphQLTransport` can pass the same `byId` and `nodes` options.
-
-When `schema` is supplied, codegen and transport construction validate the mapping: the field must exist, its ID argument must accept a single `ID`, `String`, or `Int`, its result must match the concrete entity type, and any other arguments must be optional or have defaults. Schema metadata also supplies the wire variable types. Without a schema, identifiers are validated and arguments use GraphQL literals.
-
-Nested pagination uses the owner ID only for the mapped query field. Pagination and filter arguments remain on the connection field. For example, fetching another page of a user's games produces `fetch__User(id: $owner) { games(first: $count, after: $cursor) { ... } }`.
-
-Choose fields with the appropriate authorization rules for the consuming views. The adapter does not switch between public and authenticated lookup fields automatically.
+Choose lookup fields with the authorization rules your app needs. These fields are also used to load deferred fields and additional pages of nested lists.
 
 ### Refetching Through Existing Queries
 
@@ -237,9 +229,9 @@ export const fateGraphQL = {
 } as const;
 ```
 
-Here `user` maps to `Query.user(username:)`. fate automatically selects and caches `username` whenever it fetches a user. Components only see the username if their view selects it. Later entity reads, deferred fields, and nested pagination use this query instead of `byId` or `nodes`.
+Here `user` maps to `Query.user(username:)`. fate selects `username` automatically and uses its confirmed value for later reads, deferred fields, and pagination. Components only see it if their view selects it.
 
-Refetch arguments use confirmed cached values, so optimistic username changes do not affect the lookup. The result must match the user's original ID. A missing user raises `FateRequestError('NOT_FOUND')` without deleting cached data. If the username changes elsewhere, refresh a parent or viewer query to get the new value. Requesting an ID before fate has cached its username fails because fate cannot construct the lookup.
+The user must have been fetched before fate can look it up by username. If the username changes elsewhere, refresh a parent or viewer query to get the new value.
 
 Use `{ field: 'username' }` to read a scalar field, `{ value: 'public' }` for a constant, or `{ object: { ... } }` for a nested input object:
 
@@ -388,43 +380,17 @@ const fate = createFateClient({
 });
 ```
 
-The live node subscription returns `{ data, delete, id, select }`. The live connection subscription returns events such as `appendNode`, `prependNode`, `deleteEdge`, and `invalidate`. These payloads match fate's live transport events, so the cache update behavior is the same as the native transport.
-
-If you do not need live views, disable them explicitly:
-
-```tsx
-const fate = createFateClient({
-  live: false,
-  url: '/graphql',
-});
-```
+Your server must implement these subscription fields. See the [GraphQL subscription example](https://github.com/nkzw-tech/fate/blob/main/example/server-graphql/src/graphql/live.tsx) for their event shapes and resolvers. For servers without these subscriptions, set `live: false`.
 
 ## Existing Servers
 
-The GraphQL transport is intentionally a mapping layer. It does not require `createFateServer`, the Prisma adapter, or the Drizzle adapter. Your GraphQL server remains responsible for authorization, validation, resolver behavior, cursor pagination, and mutation side effects.
-
-Keep authorization in your GraphQL server. Server data views can still resolve live updates and computed fields; client types come from the schema configured in `src/fate/graphql.ts`.
+Your GraphQL server continues to handle authorization, validation, pagination, and mutation side effects. You don't need fate's server or ORM adapters.
 
 ## Schema-Aware Arguments
 
-With a schema configured, fate sends arguments as typed GraphQL variables. For example, given `posts(category: PostCategory)`, `{ category: 'News' }` is sent as a variable of type `PostCategory`. Clients without a schema use literal arguments, which cannot represent enums correctly.
+With a schema configured, fate checks arguments and sends them as typed GraphQL variables, including enum values. Required arguments and server defaults follow the schema; omitting a value is different from passing `null`.
 
-Generated clients check query and mutation arguments against the schema. Non-null arguments are required unless they have a default. Omitting a value preserves its server default; passing `null` is distinct.
-
-SDL text must include definitions for every directive it uses. Some server-generated or Relay-oriented schema files contain annotations such as `@auth` or `@fetchable` without declaring them; strict SDL parsing rejects those files. Prefer adding the directive definitions to the exported SDL. If the omissions are intentional, pass a schema object instead:
-
-```tsx
-import { readFileSync } from 'node:fs';
-import { buildSchema } from 'graphql';
-
-const sdl = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8');
-export const fateGraphQL = {
-  schema: buildSchema(sdl, { assumeValidSDL: true }),
-  // ...roots and mutations...
-};
-```
-
-`assumeValidSDL` skips SDL validation, so use it only when the annotations are known and the schema is validated elsewhere.
+Use valid SDL, including definitions for any custom directives. You can also pass a `GraphQLSchema` object.
 
 Generation also exports `GraphQLInputs`, `GraphQLFieldArguments`, and `GraphQLSelectionArguments` from `.fate/client.generated.ts`. Use these types to check arguments inside reusable views:
 
@@ -441,13 +407,9 @@ const MapView = view<Map>()({
 });
 ```
 
-The transport also validates arguments before sending a request. Custom scalars still require server validation.
-
-For custom build tooling, use `createGraphQLSchemaSource` to generate schema types or `createGraphQLArgumentSchema` to extract transport metadata. Both helpers come from `@nkzw/fate/vite` and run outside the browser.
-
 ## Errors and Partial Results
 
-GraphQL query errors reject with `GraphQLRequestError`, exported by both `react-fate` and `vue-fate`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
+Query failures throw `GraphQLRequestError`, available from `react-fate` and `vue-fate`. You can inspect its `errors`, `path`, `extensions`, and HTTP `status`. Partial data is available as `error.data`, but isn't written to the cache.
 
 Actions and mutations follow the [action error policy](/guide/actions#action--mutation-error-handling). Expected failures such as validation errors return `{ error, result: undefined }`, and optimistic changes roll back:
 
@@ -461,6 +423,6 @@ if (error instanceof GraphQLRequestError && error.extensions?.code === 'BAD_USER
 }
 ```
 
-fate recognizes standard `extensions.code` values such as `BAD_USER_INPUT`, `CONFLICT`, and `INTERNAL_SERVER_ERROR`, as well as numeric `extensions.http.status` values. Authentication, authorization, and server failures throw. Without durable delivery, execution errors without a recognized status are returned to the caller. Network failures throw the original fetch error. Malformed responses throw a `GraphQLRequestError` with `error.kind === 'protocol'`.
+Use standard `extensions.code` values such as `BAD_USER_INPUT` and `CONFLICT`, or numeric `extensions.http.status` values, to identify expected errors. Authentication, authorization, server, and network failures throw.
 
-The error's `status` is the original HTTP status, which may be `200` even when GraphQL reports an execution error. For retry behavior with saved mutations, see [Persistence](/guide/persistence#trpc-graphql-and-custom-transports).
+The HTTP status may still be `200` when GraphQL reports an error. For retry behavior with saved mutations, see [Persistence](/guide/persistence#trpc-graphql-and-custom-transports).

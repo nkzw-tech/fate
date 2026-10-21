@@ -2,9 +2,6 @@
 
 `void-fate` is the [Void](https://void.cloud) adapter for fate. Deploy your app directly to your own Cloudflare account or to the Void platform with the same integration.
 
-Use this integration when your app runs on Void and you want the example app's
-setup without copying its adapter glue.
-
 ## New Project
 
 For a new Void app, start from the Void template. It includes the client, Void routes, Drizzle setup, live transport, auth wiring, and generated fate client setup.
@@ -79,9 +76,7 @@ export default defineConfig({
 
 :::
 
-The Void transport uses `/fate` for RPC requests and `/fate-live` for live
-updates by default. In SSR, it calls the exported fate server directly. In the
-browser, it uses fetch and the SSE live endpoint.
+The default routes are `/fate` for requests and `/fate-live` for live updates. Server rendering calls your fate server directly.
 
 ## Server Setup
 
@@ -123,7 +118,7 @@ live.connection('Post.comments', { id: postId }).appendNode('Comment', commentId
 });
 ```
 
-`changed` is optional. Void still uses generic topic fanout, while fate uses the changed field paths to refetch or write only the selected fields affected by the event.
+Pass `changed` to refresh only those fields, or omit it to refresh the whole selected view.
 
 ## Routes
 
@@ -161,9 +156,6 @@ import { fateStream } from '../src/fate/live.ts';
 
 export const { GET, POST } = defineVoidFateLiveRoute(fateStream);
 ```
-
-The live route handles `GET /fate-live` SSE connections and `POST /fate-live`
-control messages. `void-fate` does not use WebSockets.
 
 ## Layout
 
@@ -256,17 +248,11 @@ const fate = computed(() =>
 
 :::
 
-The route helper does not own the route path. Make sure your Void route filename
-or router configuration matches the paths you pass to the client.
+Make sure your route filenames match the paths passed to the client.
 
 ## Live Transport
 
-`createVoidFateLive` publishes entity and connection events through the `void/live`
-stream associated with the current request. Void manages the Durable Object
-transport that distributes events to connected clients across requests.
-
-The live transport is best-effort and does not replay missed events after a
-client reconnects. This matches fate's default in-memory live event bus.
+Void distributes live updates across requests and connected clients. Missed events are not replayed after a reconnect.
 
 ## Cloudflare Deployment
 

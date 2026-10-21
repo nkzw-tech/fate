@@ -5,11 +5,7 @@ fate does not provide hooks for mutations like traditional data fetching librari
 - `fate.actions` for use with [`useActionState`](https://react.dev/reference/react/useActionState) and React Actions.
 - `fate.mutations` for traditional imperative mutation calls.
 
-Server mutations are exposed automatically as actions and mutations by fate's Vite plugin. The transport determines where those mutations are declared:
-
-- With the [native HTTP transport](/integrations/server#native-fate-protocol), mutations come from the `mutations` object passed to `createFateServer`.
-- With the [tRPC adapter](/integrations/server#trpc-fate-setup), mutations come from tRPC mutation procedures exposed through your fate-enabled router.
-- With [Void](/integrations/void), mutations use the same native fate server shape and are exposed through the Void route helpers.
+fate's Vite plugin makes your server mutations available on the client. The API works the same way with native HTTP, tRPC, GraphQL, and Void.
 
 If you have a mutation named `post.like`, a `LikeButton` component using fate Actions and an async component library could look like this:
 
@@ -54,11 +50,9 @@ const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
 };
 ```
 
-By using `useActionState`, fate Actions integrate with Suspense and concurrent rendering.
-
 ## Optimistic Updates
 
-fate Actions support optimistic updates out of the box. For example, to update the post's like count optimistically, you can pass an `optimistic` object to the action call. This will immediately update the cache with the new like count and re-render all views that select the `likes` field:
+To update the like count before the server responds, pass an `optimistic` object:
 
 ```tsx
 like({
@@ -67,13 +61,11 @@ like({
 });
 ```
 
-When data changes through optimistic updates or otherwise, fate only re-renders the views that select the changed fields. In the above example, only views that select the `likes` field will re-render. If a view only selects the `title` field, it won't re-render when the `likes` field changes.
-
-If a mutation fails, the cache will be rolled back to its previous state and any views depending on the mutated data will be updated.
+Views that select `likes` update immediately. Views that only select other fields, such as `title`, do not re-render. If the mutation fails, fate rolls back the optimistic update.
 
 ## Inserting New Objects
 
-When a mutation inserts a new object, you can provide an optimistic object with a temporary ID to represent the new object in the cache until the server responds with the actual ID. For example, to add a new comment to a post optimistically, you can do the following:
+Let's add a comment to a post. Pass the comments list as `insert.into` and give the optimistic comment a temporary ID:
 
 ```tsx
 const content = 'New Comment text';
@@ -89,23 +81,9 @@ addComment({
 });
 ```
 
-By default, mutations update normalized records without adding them to lists. Specify a queried list or connection when a new record should appear in it. For a newest-first list:
+The comment appears immediately. When the server responds, fate replaces the temporary ID with the real one. If the mutation fails, the comment disappears and the count is restored.
 
-```tsx
-addComment({
-  input: { content, postId: post.id },
-  insert: { into: post.comments, position: 'before' },
-  optimistic: {
-    content,
-    id: `optimistic:${Date.now().toString(36)}`,
-    post: { id: post.id },
-  },
-});
-```
-
-Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
-
-Multiple pending optimistic inserts keep their visible order. For example, two scoped insertions with `position: 'before'` show the second optimistic item before the first. Failed mutations roll back the record and its insertions together; successful mutations replace temporary IDs without duplicating list entries.
+Use `position: 'before'` for a newest-first list. Without `insert`, fate updates existing records but does not add them to lists. See [Controlling List Insertion Behavior](#controlling-list-insertion-behavior) for deferred lists and inserting into more than one list.
 
 ## Selecting a View with Actions
 
@@ -121,21 +99,11 @@ addComment({
 });
 ```
 
-The server will return the selected fields and fate updates the cache and re-renders all views that depend on the changed data. The action result contains the newly added comment with the selected fields:
-
-```tsx
-const [result, addComment] = useActionState(fate.actions.comment.add, null);
-
-const newComment = result?.result;
-if (newComment) {
-  // All the fields selected in the view are available on `newComment`:
-  console.log(newComment.post.commentCount);
-}
-```
+The server returns the selected fields, and views that display the post's comment count update automatically.
 
 ## Mutations
 
-fate Actions are the recommended way to execute server mutations in React components. However, there are cases where you might want to call mutations imperatively, outside of React components, or without waiting for previous actions to finish like `useActionState` does. For such cases, you can use `fate.mutations` to call mutations imperatively:
+Use `fate.mutations` to call a mutation outside a React Action, or when calls should run without waiting for earlier actions to finish:
 
 ```tsx
 const result = await fate.mutations.comment.add({
@@ -143,108 +111,25 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-You can call mutations from anywhere, and without waiting for previous mutations to finish. The mutation API matches the API of fate Actions, including optimistic updates and view selection. With mutations, you'll need to handle loading states and errors manually, and the result is returned as a promise.
+The options are the same as for Actions, including `optimistic`, `insert`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
 
 ## Mutation Server Implementation
 
-fate Actions & Mutations are backed by regular server mutations. If you already know how your fate server is wired, the client-side API above is the same regardless of transport. If not, start with the server setup for your environment:
-
-- [Native HTTP custom mutations](/integrations/server#custom-mutations) use `createFateServer({ mutations })`.
-- [tRPC fate setup](/integrations/server#trpc-fate-setup) wires fate into your tRPC router; custom writes can use the same `fate.createPlan` and `fate.resolveById` helpers shown there.
-- [Void integration](/integrations/void) exposes a native fate server from Void routes; define mutations with the native `createFateServer({ mutations })` API and serve them through `defineVoidFateRoute`.
-
-Here is a native HTTP mutation for `post.like`:
-
-```tsx
-export const fate = createFateServer({
-  mutations: {
-    'post.like': {
-      input: likeInput,
-      resolve: async ({ ctx, input, select }) => {
-        await ctx.prisma.post.update({
-          data: {
-            likes: {
-              increment: 1,
-            },
-          },
-          where: { id: input.id },
-        });
-
-        return sources.resolveById({
-          ctx,
-          id: input.id,
-          input: { select },
-          view: postDataView,
-        });
-      },
-      type: 'Post',
-    },
-  },
-  roots: Root,
-  sources,
-});
-```
-
-The equivalent tRPC mutation lives in your router and returns the selected shape that the client asked for:
-
-```tsx
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
-import { z } from 'zod';
-import { procedure, router } from '../init.ts';
-import { postDataView, PostItem } from '../views.ts';
-
-export const postRouter = router({
-  like: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        id: z.string().min(1, 'Post id is required.'),
-        select: z.array(z.string()),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const { resolve, select } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-
-      return resolve(
-        await ctx.prisma.post.update({
-          data: {
-            likes: {
-              increment: 1,
-            },
-          },
-          select,
-          where: { id: input.id },
-        } as PostUpdateArgs),
-      );
-    }),
-});
-```
-
-See [Server Integration](/integrations/server) for complete native HTTP and tRPC setup examples, and [Void Integration](/integrations/void) for route helpers when your app runs on Void.
+Define mutations in your backend and return the fields requested by the client. See [Server Integration](/integrations/server#custom-mutations) for native HTTP and tRPC, [GraphQL Integration](/integrations/graphql#mutations) for an existing GraphQL API, or [Void Integration](/integrations/void) for a Void app.
 
 ## Action & Mutation Error Handling
 
-fate Actions & Mutations separate error handling into two scopes: "call site" and "boundary". Call site errors are expected to be handled at the location where the action or mutation is called. Boundary errors are unexpected errors that should be handled by a higher-level error boundary.
-
-If your server returns a `NOT_FOUND` error with code `404`, the result of an Action or Mutation will contain an error object that you can handle at the call site:
+Expected errors, such as a validation failure or a `404`, are returned in `result.error`. You can show a message next to the button or form:
 
 ```tsx
-const [result] = useActionState(fate.actions.post.delete, null);
+const [result, deletePost] = useActionState(fate.actions.post.delete, null);
 
 if (result?.error) {
-  if (result.error.code === 'NOT_FOUND') {
-    // Handle not found error at call site.
-  } else {
-    // Handle other *expected* errors.
-  }
+  return <p>Could not delete this post. Please try again.</p>;
 }
 ```
 
-However, if an `INTERNAL_SERVER_ERROR` error with code `500` occurs, it will be thrown and can be caught by the nearest React error boundary:
+Network failures, server errors, and authentication or authorization errors are thrown. React Actions send them to the nearest error boundary:
 
 ```tsx
 <ErrorBoundary FallbackComponent={ErrorComponent}>
@@ -254,11 +139,11 @@ However, if an `INTERNAL_SERVER_ERROR` error with code `500` occurs, it will be 
 </ErrorBoundary>
 ```
 
-You can find the error classification behavior in [`mutation.ts`](https://github.com/nkzw-tech/fate/blob/main/packages/fate/src/mutation.ts#L227-L254).
+When calling `fate.mutations` directly, use `try`/`catch` to handle thrown errors. Both kinds of failure roll back optimistic updates. GraphQL error codes are described in [Errors and Partial Results](/integrations/graphql#errors-and-partial-results).
 
 ## Deleting Records
 
-When you want to delete a record using fate Actions, you can pass a `delete: true` flag to the action call. This flag removes the object from the cache and re-renders all views that depend on the deleted data:
+Pass `delete: true` to remove an object immediately. fate also removes it from lists that contain it and restores it if the mutation fails:
 
 ```tsx
 const [result, deleteAction] = useActionState(fate.actions.post.delete, null);
@@ -271,25 +156,19 @@ deleteAction({
 
 ## Resetting Action State
 
-When using `useActionState`, the result of the action is cached until the component using the action is unmounted. When a mutation fails with an error, you might want to clear the error state without invoking the action again. fate Actions take a `'reset'` token to reset the action state:
+To clear an action's result without sending another mutation, dispatch `'reset'` inside a transition:
 
 ```tsx
+import { startTransition, useActionState } from 'react';
+
 const [result, like] = useActionState(fate.actions.post.like, null);
 
-useEffect(() => {
-  if (result?.error) {
-    // Reset the action state after 3 seconds.
-    const timeout = setTimeout(() => startTransition(() => like('reset')), 3000);
-    return () => clearTimeout(timeout);
-  }
-}, [like, result]);
+const dismiss = () => startTransition(() => like('reset'));
 ```
 
 ## Controlling List Insertion Behavior
 
-Mutations default to `insert: 'none'`. Returned records and optimistic fields still update every existing reference, but fate does not infer membership in other lists. Updating a map's rating must not add it to unrelated map searches; creating a private post must not add it to a public feed.
-
-To insert a returned entity, pass an object containing `into` and `position`. The target is the list or connection from a normal request or view:
+Choose which list should receive a new object with `insert`. For example, comments can be deferred and still used directly as an insertion target:
 
 ```tsx
 const PostCommentsView = view<Post>()({
@@ -315,9 +194,7 @@ const addComment = () =>
   });
 ```
 
-If the target list is not loaded yet, fate holds the insertion pending until a normal read fetches the real page. It preserves pagination and reconciles entries without duplicates.
-
-Resolved arrays and connections work too. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. Targets must belong to the same client; resolved lists must remain cached, and deferred references require their owner to remain cached.
+Passing `post.comments` does not fetch the comments. If they haven't loaded yet, fate keeps the insertion until they do. You can also pass a resolved array or connection from a request or view. Use the original value from the same client, rather than a copied or filtered array.
 
 Use an array of insertion objects to update multiple lists, with an independent position for each:
 
@@ -332,21 +209,10 @@ await fate.mutations.comment.add({
 });
 ```
 
-Only those lists change. The caller decides whether the entity belongs in each target; fate cannot evaluate server-side filters or infer sorted positions. A record already present in a target is updated without duplication or repositioning. Conflicting positions for the same target are rejected before sending the mutation.
+Only the named lists receive the new comment. Filters and sorting are still your app's choice: use `before` or `after` to match how each list is ordered. An object already in a list is updated without being duplicated or moved.
 
-Scoped insertions share the mutation's optimistic transaction, rollback, ID reconciliation, and pagination behavior. Durable mutations serialize the target identities so they can restore and replay the same insertions after restart.
-
-Explicit string options retain the previous broad behavior:
-
-```tsx
-addComment({
-  input: { content, postId: post.id },
-  insert: 'before',
-});
-```
-
-`'before'` and `'after'` opt into insertion across eligible same-type root lists and inferred parent lists. Prefer scoped objects when list membership depends on filters or a particular query. `'none'` explicitly disables inferred insertion and is also the default.
+Insertions work with pagination, optimistic updates, and [offline mutations](/guide/persistence). Appended comments stay after later pages as they load; prepended comments stay before earlier pages.
 
 ### Migrating from automatic insertion
 
-Previously, omitted `insert` behaved like `'after'`. Calls that relied on automatic insertion must now provide an explicit insertion option. Existing explicit `'before'`, `'after'`, and `'none'` calls keep their behavior. Ordinary updates need no option; applications can remove redundant `insert: 'none'` calls.
+Earlier versions appended mutation results automatically. Add an `insert` option to calls that relied on that behavior. The strings `'before'` and `'after'` still enable automatic list matching, but prefer an explicit target. `'none'` is now the default.

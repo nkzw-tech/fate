@@ -26,7 +26,7 @@ This component suspends or throws errors, which bubble up to the nearest error b
 
 > [!NOTE]
 >
-> `useRequest` may issue multiple operations in the same render pass. fate transports can batch those operations into fewer network requests: the native HTTP transport batches same-microtask operations into one `POST /fate` request, and the tRPC adapter can use tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+> fate batches requests made together. With tRPC, configure [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink) to send them in one network request.
 
 ## Requesting Objects by ID
 
@@ -48,7 +48,7 @@ const { posts } = useRequest({
 
 ## Other Types of Requests
 
-For any other queries, pass only the `type` and `view`:
+For queries such as the current user, use the root name and a view:
 
 ```tsx
 const { viewer } = useRequest({
@@ -69,7 +69,7 @@ const { posts } = useRequest({
 });
 ```
 
-Request arguments are part of the cache key. Two list requests for the same root with different filters or sorting arguments keep separate list state, and cursor arguments are merged into the same list when you load more pages. The selected view is part of the key as well: requesting `PostCardView` and `PostDetailView` can share normalized records, but fate still tracks whether the specific fields for each request are present.
+Lists with different filters or sorting arguments stay separate. Loading another page extends the same list. Views that select the same objects share their cached data, and fate fetches any missing fields.
 
 ## Request Modes
 
@@ -107,7 +107,7 @@ export function RefreshButton() {
 }
 ```
 
-Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler. For Vue, see [Refreshing Requests](/guide/vue#refreshing-requests).
+`refetch()` fetches fresh data while the current posts stay visible. Its promise resolves with the new result or rejects on failure. Replace `reportError` with your app's error handler. Vue has the same [refresh API](/guide/vue#refreshing-requests).
 
 ## Timeouts and Cancellation
 
@@ -134,19 +134,15 @@ try {
 }
 ```
 
-Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
+Cancellation rejects with `signal.reason`, usually an `AbortError`. If callers share a request, cancelling one does not cancel the others.
 
-Both options work with `useRefetch` and `useRequestState` in React and Vue, Vue `useRequest`, and `client.observeRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
-
-The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
+You can also use `timeout` and `signal` with `useRefetch`, `useRequestState`, and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
 
 ## Cache Lifetime
 
-fate stores records in a normalized cache keyed by `__typename` and `id`. Lists and root queries point at those records, and views read from the normalized cache. When a `useRequest` call is mounted, fate retains the request so the records and lists needed by that screen stay in memory. When the component unmounts, the request is released and fate schedules garbage collection.
+fate keeps a screen's data in memory while its `useRequest` is mounted. After you leave, it keeps the 10 most recently released requests so navigating back can reuse their data.
 
-Released requests are kept in a small release buffer before their data becomes collectible. This makes common route transitions cheap: navigating away from a screen and quickly coming back usually reuses the cached records instead of refetching them. The default release buffer stores the 10 most recently released requests.
-
-You can tune the buffer when creating the client:
+You can change that number when creating the client:
 
 ```tsx
 const fate = createClient({
@@ -157,11 +153,9 @@ const fate = createClient({
 });
 ```
 
-Set `gcReleaseBufferSize` to `0` in tests or very memory-sensitive environments when released screens should be collected immediately.
+Set `gcReleaseBufferSize` to `0` to release data as soon as a screen unmounts. If data has been collected, the next request fetches it again.
 
-`cache-first` request handles are stable while their request is cached. If garbage collection later removes the data for a fulfilled request, the next `cache-first` request automatically fetches it again rather than returning stale references.
-
-If you call `fate.request(...)` outside React and need the result to stay in memory across manual `gc()` calls, retain the same request for the lifetime of that work:
+Outside a component, use `retain` when you need to keep a request's data in memory:
 
 ```tsx
 const request = { posts: { list: PostView } };
@@ -175,11 +169,9 @@ try {
 }
 ```
 
-Garbage collection waits for active optimistic updates to settle before sweeping records. This keeps temporary optimistic records and their list positions stable while mutations are still pending.
-
 ## SSR and Hydration
 
-Create a request-scoped fate client on the server, preload the route data, and dehydrate its normalized cache:
+Create a separate fate client for each server request and load the route's data before rendering:
 
 ```tsx
 const fate = createFateClient();
@@ -190,9 +182,7 @@ return {
 };
 ```
 
-Transport the returned value through your framework's loader serialization, React Server Component props, or a safely escaped JSON bootstrap script. The snapshot contains plain serializable values, so serializers such as Seroval can carry it without fate-specific integration. Treat the snapshot as opaque: hydrate it through fate rather than reading or editing its internal data.
-
-On the browser, hydrate the new client before rendering components that call `useRequest`:
+Pass the snapshot through your framework's loader or server component props. In the browser, hydrate the client before rendering:
 
 ```tsx
 const fate = createFateClient();
@@ -206,9 +196,9 @@ hydrateRoot(
 );
 ```
 
-Hydrated `cache-first` requests resolve from the normalized cache without refetching. Hydration restores records, selected-field coverage, root queries, and list pagination state. It intentionally does not restore active requests, subscriptions, retainers, timers, or optimistic mutation state.
+`cache-first` requests can now use the server's data without refetching. Await preloading before calling `dehydrate`, and hydrate before starting browser requests.
 
-Snapshots carry a hydration scope and are rejected by clients with a different scope. Generated clients set a stable scope automatically. When constructing a client directly, pass `hydrationScope` and rotate it when deploying an incompatible cache schema or when separating cache namespaces:
+Generated clients set a hydration scope automatically. When creating a client manually, set `hydrationScope` and change it when deploying incompatible data models:
 
 ```tsx
 const fate = createClient({
@@ -217,64 +207,40 @@ const fate = createClient({
 });
 ```
 
-Use `hydrationLimits` when an application needs stricter bootstrap payload limits. fate applies conservative defaults for total encoded values, collection sizes, and string lengths.
-
-By default, hydration preserves values already present in the browser cache while adding missing server data. Pass `{ merge: 'replace' }` only when the snapshot should authoritatively reset the durable cache:
+By default, hydration adds missing data and preserves values already in the browser cache. To replace existing values with the snapshot instead, pass `merge: 'replace'`:
 
 ```tsx
 fate.hydrate(loaderData.fate, { merge: 'replace' });
 ```
 
-`preserve-existing` recursively combines plain scalar objects while keeping browser values on conflicts. Arrays, dates, entity references, and list windows are atomic: an existing browser value wins as a whole. Replaying a snapshot is safe and does not notify subscribers when durable cache state is unchanged.
-
-Do not reuse request-scoped snapshots across users. Dehydrate after awaited route preloading: snapshots are point-in-time values and do not stream cache patches for data that resolves later. Hydration and dehydration reject clients with in-flight requests, so hydrate the initial snapshot before rendering.
+Snapshots from different hydration scopes cannot be combined. Keep each user's server client and snapshot separate.
 
 ## Observing Request State
 
-React's `useRequestState(request, options)` observes a request without suspending.
-It returns `status`, `data`, `error`, and `isFetching`. Status is `pending`, `ready`,
-or `error` for an enabled network request. An initial failure exposes the original
-error rather than throwing during render. Request data contains the same refs as
-`useRequest`; resolve them with `useView`.
-Vue provides the same state as a ref; see [Request State in Vue](/guide/vue#request-state).
+For a search box or a screen that handles loading and errors itself, use `useRequestState` instead of Suspense:
 
-Use `{ enabled: false }` for an empty search or an inactive screen. The status is
-`disabled`, data is undefined, and no request starts. Changing `enabled` to true
-starts the request. Equivalent inline request objects do not cause repeat fetches.
-
-Use `{ mode: 'cache-only' }` to observe already-cached data. A complete selection
-has status `ready`; an incomplete selection has status `missing` and undefined
-data. A successful nullable root remains `ready` with a null value. Cache-only
-requests never fetch, and their view refs cannot fetch missing fields either.
-Mounted observers retain their request's records until unmount.
-
-Outside React, `client.observeRequest(request, options)` exposes `getSnapshot()`
-and `subscribe(listener)`. The first subscriber starts an enabled request;
-unsubscribing releases its retention. Reading a snapshot alone never starts work.
-
-Every request state includes a stable `refetch()` function. It forces a network
-request, returns a promise for the completed result, and rejects with the original
-error on failure. Concurrent calls share pending work. During refresh, complete
-cached data stays available with `status: 'ready'` and `isFetching: true`. A failed
-refresh keeps that data and exposes `error`; the next attempt clears the error.
-`stale-while-revalidate` observers track the entire background request the same
-way, including failures. Disabled and cache-only observers reject explicit
-refetches without fetching; enable the request or change its mode first.
-
-```ts
+```tsx
 const state = useRequestState(request, { mode: 'stale-while-revalidate' });
-// Render state.data, state.isFetching, and state.error independently.
-await state.refetch(); // Also usable from a refresh button or retry action.
+
+// In a button's event handler:
+const refresh = () => state.refetch().catch(reportError);
 ```
 
-Overlapping reads use their network start order when normalizing responses. An
-older response cannot overwrite a field already supplied by a newer response or
-a later confirmed write. It may still fill other fields. Root results and list
-replacements also retain the newer result. Optimistic layers remain visible over
-incoming confirmed data; rolling them back reveals that data, while committing a
-mutation protects its confirmed fields from older requests.
+The result contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`, so child components can read them with `useView`. During a refresh, cached data stays visible and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
 
-### Aliases
+Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` to read only cached data. The possible statuses are:
+
+| Status     | Meaning                                            |
+| ---------- | -------------------------------------------------- |
+| `disabled` | The request is not enabled.                        |
+| `missing`  | A cache-only request needs data that isn't cached. |
+| `pending`  | The initial request is loading.                    |
+| `ready`    | Data is available.                                 |
+| `error`    | The initial request failed.                        |
+
+`refetch()` returns a promise and requires an enabled request that isn't cache-only. For Vue, see [Request State](/guide/vue#request-state). Outside a component, `fate.observeRequest(request, options)` provides the same state through `getSnapshot()` and `subscribe(listener)`. Subscribing starts the request; unsubscribing releases it.
+
+## Aliases
 
 Use `alias(sourceField, selection)` to select one schema field under multiple
 result names, with independent arguments:
@@ -296,24 +262,6 @@ const GamesView = view<User>()({
 const request = { currentUser: alias('viewer', { view: GamesView }) };
 ```
 
-Source fields, nested selections, result types, and generated root argument
-contracts remain checked. Alias names affect the returned shape; normalized
-identity uses the source field and its arguments. An ordinary selection with the
-same arguments shares the cached data. Connection filters identify separate
-cache slots and pagination state. Conflicting response names or arguments in a
-composed view fail during planning. `id` and `__typename` are reserved result
-names because fate needs them for entity identity.
+The result uses the names you choose, while fate keeps data with the same source field and arguments shared in the cache. Different filters keep separate lists and pagination. `id` and `__typename` cannot be used as alias names.
 
-GraphQL emits native aliases, including inside mutation selections, so multiple
-variants execute in one operation. Native HTTP, tRPC, and custom transports
-receive compatible reads with ordinary schema field names; conflicting variants
-may require multiple reads or subscriptions. These fallback reads are independent
-server operations. A mutation that needs multiple variants requires native alias
-support and otherwise rejects before executing. A simple rename is lowered for
-native mutations without repeating the action.
-
-Custom transports can set `supportsAliases: true` to handle the full selection in
-one operation. Selection path segments and corresponding argument keys then use
-`resultName:schemaField`, and returned records must use those same encoded keys.
-GraphQL performs that conversion automatically. Applications consume the declared
-result names, never the encoded transport names.
+GraphQL can request these variants in one operation. Other transports may make separate reads. Selecting multiple argument variants in a single mutation currently requires a transport with native alias support, such as GraphQL.

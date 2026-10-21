@@ -114,8 +114,6 @@ export const PostView = view<Post>()({
 });
 ```
 
-Vue can import values across components, but single-file components have one default component export. Keeping reusable views in `.ts` files avoids coupling your data model to component files and makes view composition straightforward.
-
 ## Requests
 
 `useRequest` declares the data a route, page, or component tree needs. It returns a resource with `data`, `pending`, `error`, `ready`, `refresh`, and `dispose`:
@@ -245,7 +243,7 @@ await posts.ready();
 
 Pass a plain array, ref, or getter, as you would with `useView`. The result follows the input order and updates when the refs or their selected fields change. Deferred refs are supported, and `null` or `undefined` entries keep their values in the result.
 
-The resource has the same members as `useView`. Await `ready()` in async setup to use Vue Suspense, or render the pending and error states yourself. Before the first read finishes, `.value` is an empty array. Later reads keep the previous data while loading.
+Await `ready()` to use Vue Suspense, or render the resource's pending and error states yourself.
 
 ## Lists and Live Views
 
@@ -255,7 +253,7 @@ The resource has the same members as `useView`. Await `ready()` in async setup t
 const [comments, loadNextCommentPage] = useListView(CommentView, () => post.value?.comments);
 ```
 
-The items and pagination helpers are refs. If the connection is `null` or `undefined`, `comments.value` is `undefined` and both pagination helper values are `null`. A connection with `items: []` returns an empty array. Use `comments.value ?? []` when you want to treat missing comments as an empty list. `useLiveListView` follows the same rules.
+Items and pagination helpers are refs. A missing connection returns undefined items and null pagination helpers. Use `comments.value ?? []` to treat missing comments as an empty list.
 
 `useLiveView` and `useLiveListView` have the same resource shape as `useView` and `useListView`, but they also subscribe to server-pushed updates when the selected transport supports live views:
 
@@ -313,11 +311,4 @@ The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `ins
 
 ## API Differences from React
 
-The names intentionally mirror `react-fate` where Vue has an equivalent API. The main differences are Vue framework differences:
-
-- `useRequest`, `useView`, `useViews`, and list hooks return Vue resources instead of throwing promises from render.
-- Async setup and `<Suspense>` replace React's async component model.
-- Mutations use `fate.mutations` directly; React-only `fate.actions` and `useActionState` patterns do not apply.
-- Shared views are best kept in `.ts` modules instead of exporting named views from component files.
-
-The generated client, server integrations, cache behavior, masking, pagination, optimistic updates, and live transport behavior are shared across adapters.
+Views, requests, caching, and mutations work the same way in both adapters. Vue composables return reactive resources; await `ready()` to use Suspense, or read their pending and error state. For mutations, use `fate.mutations` and Vue refs for local state instead of React Actions.

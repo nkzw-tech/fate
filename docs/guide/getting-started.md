@@ -12,7 +12,7 @@ vp create fate
 
 Explore the [fate stack](https://fate.technology/#stack) to see the tools included in your new project.
 
-The template selector can create a React or Vue client for a Void app with Drizzle, a tRPC app with Drizzle or Prisma, a GraphQL app with Prisma, or a fate client for an existing GraphQL server. React is the default UI framework; pass `--framework vue` or choose Vue in the template selector to create a Vue app. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.
+Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default; choose Vue in the selector or pass `--framework vue`.
 
 ## Manual Installation
 

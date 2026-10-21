@@ -72,7 +72,7 @@ vp create fate
 
 Explore the [fate stack](https://fate.technology/#stack) to see the tools included in your new project.
 
-The template selector can create a React or Vue client for a Void app with Drizzle, a tRPC app with Drizzle or Prisma, a GraphQL app with Prisma, or a fate client for an existing GraphQL server. React is the default UI framework; pass `--framework vue` or choose Vue in the template selector to create a Vue app. The template sources live in the fate repo under [`packages/create-fate/templates/fate`](https://github.com/nkzw-tech/fate/tree/main/packages/create-fate/templates/fate). They feature modern tools to deliver an incredibly fast development experience.
+Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default; choose Vue in the selector or pass `--framework vue`.
 
 ### Manual Installation
 
@@ -160,13 +160,8 @@ With fate, you no longer worry about _when_ to fetch data, how to coordinate loa
 Let's start by defining a simple view for a blog's `Post` component. fate requires you to explicitly "select" each field that you plan to use in your components. Here is how you can define a view for a `Post` entity that has `title` and `content` fields:
 
 ```tsx
+import type { Post } from '@your-org/server/views';
 import { view } from 'react-fate';
-
-type Post = {
-  content: string;
-  id: string;
-  title: string;
-};
 
 export const PostView = view<Post>()({
   content: true,
@@ -176,9 +171,6 @@ export const PostView = view<Post>()({
 ```
 
 Fields are selected by setting them to `true` in the view definition. This tells **_fate_** that these fields should be fetched from the server and made available to components that use this view.
-
-> [!NOTE]
-> The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code.
 
 ### Resolving a View with `useView`
 
@@ -199,7 +191,7 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-A `ViewRef` is a reference to a concrete object of a specific type, for example a `Post` with id `7`. It contains the unique ID of the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
+A `ViewRef` refers to a specific object, for example a `Post` with ID `7`. fate creates these references for you so you can pass them to child components.
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
@@ -451,8 +443,6 @@ const PostDetail = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-ViewRefs carry a set of view names they can resolve. `useView` throws if a ref does not include the required view.
-
 ### Parameters and Conditional Selections
 
 A view can take parameters. Define the selection with a function, then bind its parameters where you request or compose the view:
@@ -484,7 +474,7 @@ function Profile({ userId, isViewer }: { userId: string; isViewer: boolean }) {
 }
 ```
 
-`alias(AccountView)` gives the selection a named ref to the **same User**. The name `account` belongs to your result; it does not need to exist in the server schema. Read the ref with `useView` to access the fragment's selected fields. The existing `alias('field', selection)` form still selects a schema field under another name.
+`alias(AccountView)` gives us an `account` ref to the same user. It doesn't require an `account` field on the server. Read it with `useView`, just like any other ref.
 
 `when(condition, selection)` works with named fragments and ordinary fields:
 
@@ -495,9 +485,7 @@ const ProfileView = view<User>()(({ isViewer }: { isViewer: boolean }) => ({
 }));
 ```
 
-A false condition returns `undefined` and excludes that branch from fetching and subscriptions, even if its data is already cached. A selected field whose server value is `null` still returns `null`. TypeScript preserves that distinction: a boolean condition adds `undefined` to the result type; literal `true` keeps the selected type; literal `false` produces `undefined`.
-
-Both `useView` and `useLiveView` accept `undefined` refs and return `undefined` without fetching or subscribing. Call the hooks unconditionally, as in the example above.
+When the condition is false, the field is `undefined` and isn't fetched. `useView` and `useLiveView` accept that undefined ref, so you can call them unconditionally, as above.
 
 #### Carrying Parameters with Refs
 
@@ -526,11 +514,9 @@ function Names({ user }: { user: ViewRef<'User'> }) {
 }
 ```
 
-This example assumes the server's `name` field accepts a `locale` argument. The two refs identify the same entity with independent bindings. Connections inside named views likewise keep their own arguments and pagination state.
+Here `name` accepts a `locale` argument on the server. Both refs point to the same user, but each keeps its own parameters.
 
-Declare view definitions at module scope. Binding an equivalent parameter object again preserves the logical request and ref identity; no `useMemo` is needed. Parameter objects use the same serializable values as field arguments, and fate snapshots them when binding. Keep selection functions pure, with all varying inputs passed as parameters.
-
-Bind a parameterized definition before using it in a request, nested selection, alias, or spread. If a single ref contains multiple bindings of one definition, use named aliases to give each binding its own ref. Conditional anonymous spreads are not supported; use `when(condition, alias(View))` instead.
+Define views outside components, then pass parameters when composing or requesting them. No `useMemo` is needed. Use named aliases when you need several versions of the same view, or `when(condition, alias(View))` to include one conditionally.
 
 #### Vue
 
@@ -541,7 +527,7 @@ const profile = useView(ProfileView, () => request.value?.user);
 const account = useView(AccountView, () => profile.value?.account);
 ```
 
-When the ref is `undefined`, the resource's value and `ready()` result are `undefined`, and the view has no active subscriptions.
+An undefined ref produces an undefined value without fetching.
 
 ## Requests
 
@@ -571,7 +557,7 @@ This component suspends or throws errors, which bubble up to the nearest error b
 
 > [!NOTE]
 >
-> `useRequest` may issue multiple operations in the same render pass. fate transports can batch those operations into fewer network requests: the native HTTP transport batches same-microtask operations into one `POST /fate` request, and the tRPC adapter can use tRPC's [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink).
+> fate batches requests made together. With tRPC, configure [HTTP Batch Link](https://trpc.io/docs/client/links/httpBatchLink) to send them in one network request.
 
 ### Requesting Objects by ID
 
@@ -593,7 +579,7 @@ const { posts } = useRequest({
 
 ### Other Types of Requests
 
-For any other queries, pass only the `type` and `view`:
+For queries such as the current user, use the root name and a view:
 
 ```tsx
 const { viewer } = useRequest({
@@ -614,7 +600,7 @@ const { posts } = useRequest({
 });
 ```
 
-Request arguments are part of the cache key. Two list requests for the same root with different filters or sorting arguments keep separate list state, and cursor arguments are merged into the same list when you load more pages. The selected view is part of the key as well: requesting `PostCardView` and `PostDetailView` can share normalized records, but fate still tracks whether the specific fields for each request are present.
+Lists with different filters or sorting arguments stay separate. Loading another page extends the same list. Views that select the same objects share their cached data, and fate fetches any missing fields.
 
 ### Request Modes
 
@@ -652,7 +638,7 @@ export function RefreshButton() {
 }
 ```
 
-Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler. For Vue, see [Refreshing Requests](/docs/guide/vue.md#refreshing-requests).
+`refetch()` fetches fresh data while the current posts stay visible. Its promise resolves with the new result or rejects on failure. Replace `reportError` with your app's error handler. Vue has the same [refresh API](/docs/guide/vue.md#refreshing-requests).
 
 ### Timeouts and Cancellation
 
@@ -679,19 +665,15 @@ try {
 }
 ```
 
-Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
+Cancellation rejects with `signal.reason`, usually an `AbortError`. If callers share a request, cancelling one does not cancel the others.
 
-Both options work with `useRefetch` and `useRequestState` in React and Vue, Vue `useRequest`, and `client.observeRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
-
-The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
+You can also use `timeout` and `signal` with `useRefetch`, `useRequestState`, and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
 
 ### Cache Lifetime
 
-fate stores records in a normalized cache keyed by `__typename` and `id`. Lists and root queries point at those records, and views read from the normalized cache. When a `useRequest` call is mounted, fate retains the request so the records and lists needed by that screen stay in memory. When the component unmounts, the request is released and fate schedules garbage collection.
+fate keeps a screen's data in memory while its `useRequest` is mounted. After you leave, it keeps the 10 most recently released requests so navigating back can reuse their data.
 
-Released requests are kept in a small release buffer before their data becomes collectible. This makes common route transitions cheap: navigating away from a screen and quickly coming back usually reuses the cached records instead of refetching them. The default release buffer stores the 10 most recently released requests.
-
-You can tune the buffer when creating the client:
+You can change that number when creating the client:
 
 ```tsx
 const fate = createClient({
@@ -702,11 +684,9 @@ const fate = createClient({
 });
 ```
 
-Set `gcReleaseBufferSize` to `0` in tests or very memory-sensitive environments when released screens should be collected immediately.
+Set `gcReleaseBufferSize` to `0` to release data as soon as a screen unmounts. If data has been collected, the next request fetches it again.
 
-`cache-first` request handles are stable while their request is cached. If garbage collection later removes the data for a fulfilled request, the next `cache-first` request automatically fetches it again rather than returning stale references.
-
-If you call `fate.request(...)` outside React and need the result to stay in memory across manual `gc()` calls, retain the same request for the lifetime of that work:
+Outside a component, use `retain` when you need to keep a request's data in memory:
 
 ```tsx
 const request = { posts: { list: PostView } };
@@ -720,11 +700,9 @@ try {
 }
 ```
 
-Garbage collection waits for active optimistic updates to settle before sweeping records. This keeps temporary optimistic records and their list positions stable while mutations are still pending.
-
 ### SSR and Hydration
 
-Create a request-scoped fate client on the server, preload the route data, and dehydrate its normalized cache:
+Create a separate fate client for each server request and load the route's data before rendering:
 
 ```tsx
 const fate = createFateClient();
@@ -735,9 +713,7 @@ return {
 };
 ```
 
-Transport the returned value through your framework's loader serialization, React Server Component props, or a safely escaped JSON bootstrap script. The snapshot contains plain serializable values, so serializers such as Seroval can carry it without fate-specific integration. Treat the snapshot as opaque: hydrate it through fate rather than reading or editing its internal data.
-
-On the browser, hydrate the new client before rendering components that call `useRequest`:
+Pass the snapshot through your framework's loader or server component props. In the browser, hydrate the client before rendering:
 
 ```tsx
 const fate = createFateClient();
@@ -751,9 +727,9 @@ hydrateRoot(
 );
 ```
 
-Hydrated `cache-first` requests resolve from the normalized cache without refetching. Hydration restores records, selected-field coverage, root queries, and list pagination state. It intentionally does not restore active requests, subscriptions, retainers, timers, or optimistic mutation state.
+`cache-first` requests can now use the server's data without refetching. Await preloading before calling `dehydrate`, and hydrate before starting browser requests.
 
-Snapshots carry a hydration scope and are rejected by clients with a different scope. Generated clients set a stable scope automatically. When constructing a client directly, pass `hydrationScope` and rotate it when deploying an incompatible cache schema or when separating cache namespaces:
+Generated clients set a hydration scope automatically. When creating a client manually, set `hydrationScope` and change it when deploying incompatible data models:
 
 ```tsx
 const fate = createClient({
@@ -762,64 +738,40 @@ const fate = createClient({
 });
 ```
 
-Use `hydrationLimits` when an application needs stricter bootstrap payload limits. fate applies conservative defaults for total encoded values, collection sizes, and string lengths.
-
-By default, hydration preserves values already present in the browser cache while adding missing server data. Pass `{ merge: 'replace' }` only when the snapshot should authoritatively reset the durable cache:
+By default, hydration adds missing data and preserves values already in the browser cache. To replace existing values with the snapshot instead, pass `merge: 'replace'`:
 
 ```tsx
 fate.hydrate(loaderData.fate, { merge: 'replace' });
 ```
 
-`preserve-existing` recursively combines plain scalar objects while keeping browser values on conflicts. Arrays, dates, entity references, and list windows are atomic: an existing browser value wins as a whole. Replaying a snapshot is safe and does not notify subscribers when durable cache state is unchanged.
-
-Do not reuse request-scoped snapshots across users. Dehydrate after awaited route preloading: snapshots are point-in-time values and do not stream cache patches for data that resolves later. Hydration and dehydration reject clients with in-flight requests, so hydrate the initial snapshot before rendering.
+Snapshots from different hydration scopes cannot be combined. Keep each user's server client and snapshot separate.
 
 ### Observing Request State
 
-React's `useRequestState(request, options)` observes a request without suspending.
-It returns `status`, `data`, `error`, and `isFetching`. Status is `pending`, `ready`,
-or `error` for an enabled network request. An initial failure exposes the original
-error rather than throwing during render. Request data contains the same refs as
-`useRequest`; resolve them with `useView`.
-Vue provides the same state as a ref; see [Request State in Vue](/docs/guide/vue.md#request-state).
+For a search box or a screen that handles loading and errors itself, use `useRequestState` instead of Suspense:
 
-Use `{ enabled: false }` for an empty search or an inactive screen. The status is
-`disabled`, data is undefined, and no request starts. Changing `enabled` to true
-starts the request. Equivalent inline request objects do not cause repeat fetches.
-
-Use `{ mode: 'cache-only' }` to observe already-cached data. A complete selection
-has status `ready`; an incomplete selection has status `missing` and undefined
-data. A successful nullable root remains `ready` with a null value. Cache-only
-requests never fetch, and their view refs cannot fetch missing fields either.
-Mounted observers retain their request's records until unmount.
-
-Outside React, `client.observeRequest(request, options)` exposes `getSnapshot()`
-and `subscribe(listener)`. The first subscriber starts an enabled request;
-unsubscribing releases its retention. Reading a snapshot alone never starts work.
-
-Every request state includes a stable `refetch()` function. It forces a network
-request, returns a promise for the completed result, and rejects with the original
-error on failure. Concurrent calls share pending work. During refresh, complete
-cached data stays available with `status: 'ready'` and `isFetching: true`. A failed
-refresh keeps that data and exposes `error`; the next attempt clears the error.
-`stale-while-revalidate` observers track the entire background request the same
-way, including failures. Disabled and cache-only observers reject explicit
-refetches without fetching; enable the request or change its mode first.
-
-```ts
+```tsx
 const state = useRequestState(request, { mode: 'stale-while-revalidate' });
-// Render state.data, state.isFetching, and state.error independently.
-await state.refetch(); // Also usable from a refresh button or retry action.
+
+// In a button's event handler:
+const refresh = () => state.refetch().catch(reportError);
 ```
 
-Overlapping reads use their network start order when normalizing responses. An
-older response cannot overwrite a field already supplied by a newer response or
-a later confirmed write. It may still fill other fields. Root results and list
-replacements also retain the newer result. Optimistic layers remain visible over
-incoming confirmed data; rolling them back reveals that data, while committing a
-mutation protects its confirmed fields from older requests.
+The result contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`, so child components can read them with `useView`. During a refresh, cached data stays visible and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
 
-#### Aliases
+Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` to read only cached data. The possible statuses are:
+
+| Status     | Meaning                                            |
+| ---------- | -------------------------------------------------- |
+| `disabled` | The request is not enabled.                        |
+| `missing`  | A cache-only request needs data that isn't cached. |
+| `pending`  | The initial request is loading.                    |
+| `ready`    | Data is available.                                 |
+| `error`    | The initial request failed.                        |
+
+`refetch()` returns a promise and requires an enabled request that isn't cache-only. For Vue, see [Request State](/docs/guide/vue.md#request-state). Outside a component, `fate.observeRequest(request, options)` provides the same state through `getSnapshot()` and `subscribe(listener)`. Subscribing starts the request; unsubscribing releases it.
+
+### Aliases
 
 Use `alias(sourceField, selection)` to select one schema field under multiple
 result names, with independent arguments:
@@ -841,31 +793,13 @@ const GamesView = view<User>()({
 const request = { currentUser: alias('viewer', { view: GamesView }) };
 ```
 
-Source fields, nested selections, result types, and generated root argument
-contracts remain checked. Alias names affect the returned shape; normalized
-identity uses the source field and its arguments. An ordinary selection with the
-same arguments shares the cached data. Connection filters identify separate
-cache slots and pagination state. Conflicting response names or arguments in a
-composed view fail during planning. `id` and `__typename` are reserved result
-names because fate needs them for entity identity.
+The result uses the names you choose, while fate keeps data with the same source field and arguments shared in the cache. Different filters keep separate lists and pagination. `id` and `__typename` cannot be used as alias names.
 
-GraphQL emits native aliases, including inside mutation selections, so multiple
-variants execute in one operation. Native HTTP, tRPC, and custom transports
-receive compatible reads with ordinary schema field names; conflicting variants
-may require multiple reads or subscriptions. These fallback reads are independent
-server operations. A mutation that needs multiple variants requires native alias
-support and otherwise rejects before executing. A simple rename is lowered for
-native mutations without repeating the action.
-
-Custom transports can set `supportsAliases: true` to handle the full selection in
-one operation. Selection path segments and corresponding argument keys then use
-`resultName:schemaField`, and returned records must use those same encoded keys.
-GraphQL performs that conversion automatically. Applications consume the declared
-result names, never the encoded transport names.
+GraphQL can request these variants in one operation. Other transports may make separate reads. Selecting multiple argument variants in a single mutation currently requires a transport with native alias support, such as GraphQL.
 
 ## Deferred Views
 
-Use `defer` when a field should not block the parent view. The parent view receives a deferred handle immediately after the eager fields are available, and the component that reads that handle with `useView`, `useListView`, or `useLiveListView` decides which `Suspense` boundary handles the loading state.
+Let's say a post's comments take longer to load than its title and content. Wrap `comments` in `defer` so the post can render first, and give the comments their own `Suspense` boundary:
 
 ```tsx
 import { Suspense } from 'react';
@@ -920,11 +854,9 @@ function PostComments({
 }
 ```
 
-Deferred fields are not optional data. They are explicit handles that existing view APIs can read. If the deferred selection is missing from the normalized cache, fate fetches only that missing selection and suspends the component that tried to resolve it.
+`title` and `content` are available when `useView(PostView, postRef)` returns. Reading the comments with `useListView` loads any missing data and suspends only `PostComments`.
 
-This keeps parent components simple: eager fields like `title` and `content` are available when `useView(PostView, postRef)` returns, while slower or secondary fields such as `comments` can load under their own boundary.
-
-GraphQL transports use the same client semantics today. The deferred field is omitted from the eager request and fetched when the deferred handle is resolved. GraphQL `@defer` is the natural transport representation for this feature, but consuming incremental multipart patches requires additional transport support before fate can safely normalize streamed patches from a single GraphQL response.
+`useView` and `useLiveListView` can read deferred values too. This works with every transport. GraphQL currently fetches deferred fields with separate queries, rather than streaming `@defer` responses.
 
 ## List Views
 
@@ -1029,7 +961,7 @@ When a mutation returns a complete list, fate replaces that list's items. For ex
 
 ## Live Views
 
-`useLiveView` resolves a `ViewRef` just like `useView`, but also keeps the selected object up to date through the native live SSE transport.
+Use `useLiveView` to keep a view up to date when its data changes on the server:
 
 ```tsx
 import { useLiveView, ViewRef } from 'react-fate';
@@ -1047,17 +979,13 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-The API mirrors `useView`: pass a view and a ref, and get back the same masked data shape. A `null` ref returns `null` and does not subscribe.
+It takes the same view and ref as `useView`. Only the selected fields are available, and components update when those fields change.
 
 ### How Live Updates Work
 
-The native HTTP transport opens one Server-Sent Events (SSE) connection per fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
+fate uses one live connection per client, shared by its mounted live views. When the server sends an update, fate writes it to the cache and updates components that select the changed fields.
 
-When the server sends an update, fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
-
-For example, if `PostView` selects `likes`, a live update that changes `likes` re-renders the `PostCard`. If another component only selected `title`, it does not re-render for a `likes` change.
-
-Live deletion events remove the record from the normalized cache in the same way as mutations, and any lists or object fields that reference it are pruned.
+For example, a change to `likes` updates `PostCard` without re-rendering a component that only selects `title`. Deleting an object also removes references to it from lists and other objects.
 
 ### Client Setup
 
@@ -1085,15 +1013,11 @@ export function App() {
 }
 ```
 
-> [!NOTE]
->
-> Live views use `GET /fate/live` for the single SSE stream and `POST /fate/live` for subscribe/unsubscribe control messages.
+This example uses native HTTP. For a GraphQL server, see [GraphQL Live Views](/docs/integrations/graphql.md#live-views).
 
 ### Server Setup
 
-Live views use an event bus. By default, the bus signals that an object changed and fate refetches the selected object through the same data view pipeline used by `byId` queries before sending it to the client. Update events can also include changed field paths so fate only resolves the intersection of those paths and each active subscription.
-
-Pass a live event bus to `createFateServer` and expose the native handler:
+Pass an event bus to `createFateServer` so your mutations can tell fate which objects changed:
 
 ```tsx
 import { createFateServer, createHonoFateHandler, createLiveEventBus } from '@nkzw/fate/server';
@@ -1112,7 +1036,7 @@ export const fate = createFateServer<AppContext>({
 app.all('/fate/*', createHonoFateHandler(fate));
 ```
 
-fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
+If a client falls behind, fate closes its connection after 1,000 queued events. You can change the limit with `maxQueueSize`:
 
 ```tsx
 export const fate = createFateServer<AppContext>({
@@ -1151,7 +1075,7 @@ export function PostCard({ post: postRef }: { post: ViewRef<'Post'> }) {
 
 The hook returns the same tuple as `useListView`: items, `loadNext`, and `loadPrevious`. Live events append, prepend, insert, or delete edges from one connection without deleting the underlying records.
 
-By default, live appends and prepends respect pagination boundaries. If the relevant edge still has more pages, fate keeps the incoming node attached to that edge instead of expanding the loaded window. For chat or activity streams where new items should keep appearing immediately, opt into visible live insertion on the connection view:
+By default, new items at an unloaded end of a list wait for pagination. For a chat or activity feed, use `append: 'visible'` to show new messages immediately:
 
 ```tsx
 const MessageConnectionView = {
@@ -1184,7 +1108,7 @@ If the changed list cannot be described precisely, invalidate the active connect
 live.connection('posts', { categoryId }).invalidate();
 ```
 
-Connection identity follows Relay's model: pagination args like `first`, `last`, `after`, and `before` are ignored for live connection matching, while filter args such as `categoryId` are part of the identity.
+Pass the list's filters, such as `categoryId`, when emitting events. Pagination arguments like `first` and `after` don't affect which list receives an event.
 
 ### Emitting Events
 
@@ -1262,13 +1186,11 @@ live.update('Post', input.id, {
 });
 ```
 
-The default `createLiveEventBus` is an in-memory fanout bus and does not replay events that were emitted while a client was disconnected. Use a durable custom live bus if your deployment needs reconnects to catch up from `lastEventId`; otherwise the client receives future live events after it reconnects.
+The default event bus doesn't replay missed events after a disconnect. For that, provide a custom live bus that resumes from `lastEventId`.
 
 ### Error Handling
 
-Live subscription errors are reported out of band. They do not replace the last cached data or throw through the component that called `useLiveView`.
-
-Pass `onLiveError` when creating the client to send those failures to your logger or monitoring system:
+Live errors leave the last cached data visible. Pass `onLiveError` to report them to your logger or monitoring system:
 
 ```tsx
 const fate = createFateClient({
@@ -1284,7 +1206,7 @@ const fate = createFateClient({
 });
 ```
 
-The handler runs in a microtask after the subscription reports the error. Components continue to read whatever data is currently available in the fate cache.
+These errors don't go to the component's error boundary.
 
 ## Actions
 
@@ -1293,11 +1215,7 @@ fate does not provide hooks for mutations like traditional data fetching librari
 - `fate.actions` for use with [`useActionState`](https://react.dev/reference/react/useActionState) and React Actions.
 - `fate.mutations` for traditional imperative mutation calls.
 
-Server mutations are exposed automatically as actions and mutations by fate's Vite plugin. The transport determines where those mutations are declared:
-
-- With the [native HTTP transport](/docs/integrations/server.md#native-fate-protocol), mutations come from the `mutations` object passed to `createFateServer`.
-- With the [tRPC adapter](/docs/integrations/server.md#trpc-fate-setup), mutations come from tRPC mutation procedures exposed through your fate-enabled router.
-- With [Void](/docs/integrations/void.md), mutations use the same native fate server shape and are exposed through the Void route helpers.
+fate's Vite plugin makes your server mutations available on the client. The API works the same way with native HTTP, tRPC, GraphQL, and Void.
 
 If you have a mutation named `post.like`, a `LikeButton` component using fate Actions and an async component library could look like this:
 
@@ -1342,11 +1260,9 @@ const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
 };
 ```
 
-By using `useActionState`, fate Actions integrate with Suspense and concurrent rendering.
-
 ### Optimistic Updates
 
-fate Actions support optimistic updates out of the box. For example, to update the post's like count optimistically, you can pass an `optimistic` object to the action call. This will immediately update the cache with the new like count and re-render all views that select the `likes` field:
+To update the like count before the server responds, pass an `optimistic` object:
 
 ```tsx
 like({
@@ -1355,13 +1271,11 @@ like({
 });
 ```
 
-When data changes through optimistic updates or otherwise, fate only re-renders the views that select the changed fields. In the above example, only views that select the `likes` field will re-render. If a view only selects the `title` field, it won't re-render when the `likes` field changes.
-
-If a mutation fails, the cache will be rolled back to its previous state and any views depending on the mutated data will be updated.
+Views that select `likes` update immediately. Views that only select other fields, such as `title`, do not re-render. If the mutation fails, fate rolls back the optimistic update.
 
 ### Inserting New Objects
 
-When a mutation inserts a new object, you can provide an optimistic object with a temporary ID to represent the new object in the cache until the server responds with the actual ID. For example, to add a new comment to a post optimistically, you can do the following:
+Let's add a comment to a post. Pass the comments list as `insert.into` and give the optimistic comment a temporary ID:
 
 ```tsx
 const content = 'New Comment text';
@@ -1377,23 +1291,9 @@ addComment({
 });
 ```
 
-By default, mutations update normalized records without adding them to lists. Specify a queried list or connection when a new record should appear in it. For a newest-first list:
+The comment appears immediately. When the server responds, fate replaces the temporary ID with the real one. If the mutation fails, the comment disappears and the count is restored.
 
-```tsx
-addComment({
-  input: { content, postId: post.id },
-  insert: { into: post.comments, position: 'before' },
-  optimistic: {
-    content,
-    id: `optimistic:${Date.now().toString(36)}`,
-    post: { id: post.id },
-  },
-});
-```
-
-Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
-
-Multiple pending optimistic inserts keep their visible order. For example, two scoped insertions with `position: 'before'` show the second optimistic item before the first. Failed mutations roll back the record and its insertions together; successful mutations replace temporary IDs without duplicating list entries.
+Use `position: 'before'` for a newest-first list. Without `insert`, fate updates existing records but does not add them to lists. See [Controlling List Insertion Behavior](#controlling-list-insertion-behavior) for deferred lists and inserting into more than one list.
 
 ### Selecting a View with Actions
 
@@ -1409,21 +1309,11 @@ addComment({
 });
 ```
 
-The server will return the selected fields and fate updates the cache and re-renders all views that depend on the changed data. The action result contains the newly added comment with the selected fields:
-
-```tsx
-const [result, addComment] = useActionState(fate.actions.comment.add, null);
-
-const newComment = result?.result;
-if (newComment) {
-  // All the fields selected in the view are available on `newComment`:
-  console.log(newComment.post.commentCount);
-}
-```
+The server returns the selected fields, and views that display the post's comment count update automatically.
 
 ### Mutations
 
-fate Actions are the recommended way to execute server mutations in React components. However, there are cases where you might want to call mutations imperatively, outside of React components, or without waiting for previous actions to finish like `useActionState` does. For such cases, you can use `fate.mutations` to call mutations imperatively:
+Use `fate.mutations` to call a mutation outside a React Action, or when calls should run without waiting for earlier actions to finish:
 
 ```tsx
 const result = await fate.mutations.comment.add({
@@ -1431,108 +1321,25 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-You can call mutations from anywhere, and without waiting for previous mutations to finish. The mutation API matches the API of fate Actions, including optimistic updates and view selection. With mutations, you'll need to handle loading states and errors manually, and the result is returned as a promise.
+The options are the same as for Actions, including `optimistic`, `insert`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
 
 ### Mutation Server Implementation
 
-fate Actions & Mutations are backed by regular server mutations. If you already know how your fate server is wired, the client-side API above is the same regardless of transport. If not, start with the server setup for your environment:
-
-- [Native HTTP custom mutations](/docs/integrations/server.md#custom-mutations) use `createFateServer({ mutations })`.
-- [tRPC fate setup](/docs/integrations/server.md#trpc-fate-setup) wires fate into your tRPC router; custom writes can use the same `fate.createPlan` and `fate.resolveById` helpers shown there.
-- [Void integration](/docs/integrations/void.md) exposes a native fate server from Void routes; define mutations with the native `createFateServer({ mutations })` API and serve them through `defineVoidFateRoute`.
-
-Here is a native HTTP mutation for `post.like`:
-
-```tsx
-export const fate = createFateServer({
-  mutations: {
-    'post.like': {
-      input: likeInput,
-      resolve: async ({ ctx, input, select }) => {
-        await ctx.prisma.post.update({
-          data: {
-            likes: {
-              increment: 1,
-            },
-          },
-          where: { id: input.id },
-        });
-
-        return sources.resolveById({
-          ctx,
-          id: input.id,
-          input: { select },
-          view: postDataView,
-        });
-      },
-      type: 'Post',
-    },
-  },
-  roots: Root,
-  sources,
-});
-```
-
-The equivalent tRPC mutation lives in your router and returns the selected shape that the client asked for:
-
-```tsx
-import { connectionArgs, createResolver } from '@nkzw/fate/server';
-import { z } from 'zod';
-import { procedure, router } from '../init.ts';
-import { postDataView, PostItem } from '../views.ts';
-
-export const postRouter = router({
-  like: procedure
-    .input(
-      z.object({
-        args: connectionArgs,
-        id: z.string().min(1, 'Post id is required.'),
-        select: z.array(z.string()),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const { resolve, select } = createResolver({
-        ...input,
-        ctx,
-        view: postDataView,
-      });
-
-      return resolve(
-        await ctx.prisma.post.update({
-          data: {
-            likes: {
-              increment: 1,
-            },
-          },
-          select,
-          where: { id: input.id },
-        } as PostUpdateArgs),
-      );
-    }),
-});
-```
-
-See [Server Integration](/docs/integrations/server.md) for complete native HTTP and tRPC setup examples, and [Void Integration](/docs/integrations/void.md) for route helpers when your app runs on Void.
+Define mutations in your backend and return the fields requested by the client. See [Server Integration](/docs/integrations/server.md#custom-mutations) for native HTTP and tRPC, [GraphQL Integration](/docs/integrations/graphql.md#mutations) for an existing GraphQL API, or [Void Integration](/docs/integrations/void.md) for a Void app.
 
 ### Action & Mutation Error Handling
 
-fate Actions & Mutations separate error handling into two scopes: "call site" and "boundary". Call site errors are expected to be handled at the location where the action or mutation is called. Boundary errors are unexpected errors that should be handled by a higher-level error boundary.
-
-If your server returns a `NOT_FOUND` error with code `404`, the result of an Action or Mutation will contain an error object that you can handle at the call site:
+Expected errors, such as a validation failure or a `404`, are returned in `result.error`. You can show a message next to the button or form:
 
 ```tsx
-const [result] = useActionState(fate.actions.post.delete, null);
+const [result, deletePost] = useActionState(fate.actions.post.delete, null);
 
 if (result?.error) {
-  if (result.error.code === 'NOT_FOUND') {
-    // Handle not found error at call site.
-  } else {
-    // Handle other *expected* errors.
-  }
+  return <p>Could not delete this post. Please try again.</p>;
 }
 ```
 
-However, if an `INTERNAL_SERVER_ERROR` error with code `500` occurs, it will be thrown and can be caught by the nearest React error boundary:
+Network failures, server errors, and authentication or authorization errors are thrown. React Actions send them to the nearest error boundary:
 
 ```tsx
 <ErrorBoundary FallbackComponent={ErrorComponent}>
@@ -1542,11 +1349,11 @@ However, if an `INTERNAL_SERVER_ERROR` error with code `500` occurs, it will be 
 </ErrorBoundary>
 ```
 
-You can find the error classification behavior in [`mutation.ts`](https://github.com/nkzw-tech/fate/blob/main/packages/fate/src/mutation.ts#L227-L254).
+When calling `fate.mutations` directly, use `try`/`catch` to handle thrown errors. Both kinds of failure roll back optimistic updates. GraphQL error codes are described in [Errors and Partial Results](/docs/integrations/graphql.md#errors-and-partial-results).
 
 ### Deleting Records
 
-When you want to delete a record using fate Actions, you can pass a `delete: true` flag to the action call. This flag removes the object from the cache and re-renders all views that depend on the deleted data:
+Pass `delete: true` to remove an object immediately. fate also removes it from lists that contain it and restores it if the mutation fails:
 
 ```tsx
 const [result, deleteAction] = useActionState(fate.actions.post.delete, null);
@@ -1559,25 +1366,19 @@ deleteAction({
 
 ### Resetting Action State
 
-When using `useActionState`, the result of the action is cached until the component using the action is unmounted. When a mutation fails with an error, you might want to clear the error state without invoking the action again. fate Actions take a `'reset'` token to reset the action state:
+To clear an action's result without sending another mutation, dispatch `'reset'` inside a transition:
 
 ```tsx
+import { startTransition, useActionState } from 'react';
+
 const [result, like] = useActionState(fate.actions.post.like, null);
 
-useEffect(() => {
-  if (result?.error) {
-    // Reset the action state after 3 seconds.
-    const timeout = setTimeout(() => startTransition(() => like('reset')), 3000);
-    return () => clearTimeout(timeout);
-  }
-}, [like, result]);
+const dismiss = () => startTransition(() => like('reset'));
 ```
 
 ### Controlling List Insertion Behavior
 
-Mutations default to `insert: 'none'`. Returned records and optimistic fields still update every existing reference, but fate does not infer membership in other lists. Updating a map's rating must not add it to unrelated map searches; creating a private post must not add it to a public feed.
-
-To insert a returned entity, pass an object containing `into` and `position`. The target is the list or connection from a normal request or view:
+Choose which list should receive a new object with `insert`. For example, comments can be deferred and still used directly as an insertion target:
 
 ```tsx
 const PostCommentsView = view<Post>()({
@@ -1603,9 +1404,7 @@ const addComment = () =>
   });
 ```
 
-The target carries its existing owner, field, and argument scope. Pass a deferred list reference directly, as above; insertion does not resolve it or fetch its contents. If the list is not loaded yet, fate holds the insertion pending until a normal read fetches the real page. It preserves pagination and reconciles entries without duplicates. A confirmed `null` relationship stays `null`.
-
-Resolved arrays and connections work too. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. Targets must belong to the same client; resolved lists must remain cached, and deferred references require their owner to remain cached. The API works with native Fate, tRPC, and GraphQL.
+Passing `post.comments` does not fetch the comments. If they haven't loaded yet, fate keeps the insertion until they do. You can also pass a resolved array or connection from a request or view. Use the original value from the same client, rather than a copied or filtered array.
 
 Use an array of insertion objects to update multiple lists, with an independent position for each:
 
@@ -1620,34 +1419,21 @@ await fate.mutations.comment.add({
 });
 ```
 
-Only those lists change. The caller decides whether the entity belongs in each target; fate cannot evaluate server-side filters or infer sorted positions. A record already present in a target is updated without duplication or repositioning. Conflicting positions for the same target are rejected before sending the mutation.
+Only the named lists receive the new comment. Filters and sorting are still your app's choice: use `before` or `after` to match how each list is ordered. An object already in a list is updated without being duplicated or moved.
 
-Scoped insertions share the mutation's optimistic transaction, rollback, ID reconciliation, and pagination behavior. Durable mutations serialize the target identities so they can restore and replay the same insertions after restart.
-
-Explicit string options retain the previous broad behavior:
-
-```tsx
-addComment({
-  input: { content, postId: post.id },
-  insert: 'before',
-});
-```
-
-`'before'` and `'after'` opt into insertion across eligible same-type root lists and inferred parent lists. Prefer scoped objects when list membership depends on filters or a particular query. `'none'` explicitly disables inferred insertion and is also the default.
+Insertions work with pagination, optimistic updates, and [offline mutations](/docs/guide/persistence.md). Appended comments stay after later pages as they load; prepended comments stay before earlier pages.
 
 #### Migrating from automatic insertion
 
-Previously, omitted `insert` behaved like `'after'`. Calls that relied on automatic insertion must now provide an explicit insertion option. Existing explicit `'before'`, `'after'`, and `'none'` calls keep their behavior. Ordinary updates need no option; applications can remove redundant `insert: 'none'` calls.
+Earlier versions appended mutation results automatically. Add an `insert` option to calls that relied on that behavior. The strings `'before'` and `'after'` still enable automatic list matching, but prefer an explicit target. `'none'` is now the default.
 
 ## Persistence
 
-fate can optionally keep data available across page reloads and save mutations while a user is offline. When the user comes back, their views can show previously loaded data and their pending changes continue where they left off.
-
-Persistence builds on fate's normalized cache, [Requests](/docs/guide/requests.md), and [Actions](/docs/guide/actions.md). You configure storage only once, without changing how you use fate.
+fate can keep data across page reloads and save mutations while a user is offline. When they come back, their views can show previously loaded data and their pending changes continue where they left off.
 
 ### Client Setup
 
-The persistence layer is part of `@nkzw/fate`, with storage adapters installed separately. For a browser app using IndexedDB, add the adapter:
+For a browser app, install the IndexedDB adapter:
 
 ```sh
 vp add @nkzw/fate-indexeddb
@@ -1669,26 +1455,26 @@ const fate = createFateClient({
 });
 ```
 
-By default, fate keeps loaded data for **one day**, with a storage budget of **25 MiB**. You can change both values:
+By default, fate saves loaded data for **one day**, with a storage budget of **25 MiB**. Use `maxAge` (milliseconds) and `maxBytes` to change those defaults:
 
 ```tsx
 persistence: createPersistence({
   key: `workspace:${workspaceId}:user:${userId}`,
-  maxAge: 24 * 60 * 60 * 1000,
-  maxBytes: 25 * 1024 * 1024,
+  maxAge: 3 * 24 * 60 * 60 * 1000,
+  maxBytes: 50 * 1024 * 1024,
   storage: createIndexedDBStorage(),
 }),
 ```
 
-Create the browser client after you know which user is signed in. The `key` separates saved data and mutations by account and workspace, and must match the authenticated scope in the [server setup](#server-deduplication). When switching accounts, dispose the previous persistence session and create a new client with the new account's key.
+Create the client after you know which user is signed in. Use a different `key` for each account and workspace, matching the authenticated scope in your [server setup](#server-deduplication). When switching accounts, dispose the old persistence session and create a new client.
 
 > [!NOTE]
 >
-> Persistence saves your app's data. To load the app itself while offline, you'll also need a service worker that makes its HTML, JavaScript, and other assets available. fate does not install a service worker or download pages the user hasn't visited.
+> Persistence saves data. To load the app itself while offline, you'll also need a service worker for its HTML, JavaScript, and other assets.
 
 ### Cache Lifetime
 
-You can keep the data for a specific screen longer by passing `persist` to `useRequest`. For example, to keep a list of posts for three days:
+You can keep a screen's data longer by passing `persist` to its request. For example, to save posts for three days:
 
 ```tsx
 const { posts } = useRequest(
@@ -1701,29 +1487,15 @@ const { posts } = useRequest(
 );
 ```
 
-The same option works with `fate.request(...)` and Vue's `useRequest`. If a screen uses several requests, set the option on each request whose data you want to keep longer.
+The same option works with `fate.request(...)` and Vue's `useRequest`. Objects shared by several requests are saved once, and remain available while a saved request needs them.
 
-fate stores objects by their type and ID, just like the in-memory cache. If a post appears in both your feed and a detail screen, both requests share the same saved post. Each request describes which fields and related objects it needs, including list membership and pagination state.
+`maxAge` starts when data is fetched successfully. Reading saved data does not extend it. Pass `persist: { maxAge: 0 }` to skip saving a request; other requests may still save data they share with it.
 
-For example, your feed might keep posts for one day, while the detail screen keeps them for three days. After one day, the fields needed by the detail screen remain available. Fields selected only by the feed can be removed. You don't need to coordinate separate copies of the same post or manually patch each request's cache.
-
-`maxAge` is measured in milliseconds from when the data was fetched successfully. Reading saved data or rendering the screen again does not restart that lifetime. If a request fetches one missing post, it only renews the data it fetched. Other posts already in the cache keep their original age. Changing a cached request's `maxAge` also uses the original fetch time.
-
-When callers share a pending request, the latest explicit `persist.maxAge` also applies to that request's eventual cache write.
-
-Pass `persist: { maxAge: 0 }` to skip saving data for a request. Shared objects may still be saved for other requests, so this option does not delete all copies of an object.
-
-The [in-memory garbage collector](/docs/guide/requests.md#cache-lifetime) continues to work independently. A post can be removed from memory while its saved copy remains available for a later visit. On startup, fate restores pending mutations, then loads saved data as requests need it. It does not load the entire saved cache into memory.
+Saved data can outlive the [in-memory cache](/docs/guide/requests.md#cache-lifetime). fate loads it when a request needs it, rather than restoring the whole cache at startup.
 
 ### Refreshing Data
 
-Keeping data for three days doesn't mean waiting three days for updates. You can use the existing [request modes](/docs/guide/requests.md#request-modes) to choose when to fetch fresh data:
-
-- `cache-first` (_default_): Uses available saved data and fetches missing data from the network.
-- `stale-while-revalidate`: Shows saved data and refreshes it in the background. If the refresh fails, the saved data stays visible.
-- `network-only`: Requires a network response, even if saved data is available.
-
-For example, to show the previous session's posts immediately and update them on reload:
+Keeping data for three days doesn't mean waiting three days for updates. Request modes still control when to fetch fresh data. For example, to show saved posts immediately and refresh them in the background:
 
 ```tsx
 const { posts } = useRequest(
@@ -1737,25 +1509,17 @@ const { posts } = useRequest(
 );
 ```
 
-Expiration controls how long data stays in storage. It does not remove data from a mounted view or change the in-memory fetch policy. For ongoing server updates, use [Live Views](/docs/guide/live-views.md).
+Use `cache-first` to fetch only missing data, or `network-only` to require a fresh response. Expiration affects saved data, not data already displayed by a mounted view. See [Request Modes](/docs/guide/requests.md#request-modes) and [Live Views](/docs/guide/live-views.md).
 
 ### Cache Size
 
-When saved data reaches `maxBytes`, fate removes expired data first, then releases the least recently used requests until the new data fits. Objects still needed by another saved request remain available, and shared objects count toward the budget only once. A response that is too large to save can still be used in memory without removing other saved requests to make room for it.
+When storage reaches `maxBytes`, fate removes expired data and the least recently used saved requests. Shared objects remain available while another saved request needs them.
 
-The budget includes encoded data, keys, cache metadata, and the saved mutation queue. Your storage backend may use additional space for its own bookkeeping. `maxBytes` controls saved data; the existing garbage collector controls the lifetime of data in memory.
-
-fate batches cache writes and yields during large traversals and writes so other work on the page can continue. The mutation journal stores each entry separately and writes only changed entries, so confirming a mutation does not rewrite the entire queue. Changes to scalar fields write the affected record, while changes to relationships also update the saved data that depends on them.
-
-Pending mutations are never removed to make room for cached data. If a new mutation cannot fit, it fails before fate applies its optimistic update or sends it to the server.
-
-> [!NOTE]
->
-> Already accepted mutations must still be able to finish. Their recovery data and saved results can exceed the budget if they grow or you lower `maxBytes`. In that case, fate releases the read cache and rejects new durable mutations until capacity is available. Local confirmation receipts count toward the budget until their cache changes have been saved. fate then removes them automatically, making room for new mutations.
+Pending mutations are never evicted to make room for cached data. If a new mutation cannot fit, it fails before being applied optimistically or sent to the server. Already accepted mutations can still finish, even if their saved results temporarily exceed the budget.
 
 ### Actions & Mutations
 
-With persistence configured, fate saves actions and mutations locally before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/docs/guide/actions.md):
+With persistence configured, fate saves mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/docs/guide/actions.md):
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
@@ -1766,15 +1530,15 @@ like({
 });
 ```
 
-If the user likes a post while offline, the like count updates immediately. Reloading the page restores the pending action and its optimistic update. When the connection returns and a client is running, fate sends the action to the server and updates the post with the confirmed result.
+If the user likes a post while offline, the count updates immediately. Reloading restores the pending action and its optimistic update. When the connection returns and the app is running, fate sends it to the server.
 
-Mutations from one client are saved in invocation order and sent in the order they were saved, one at a time for each persistence key. Tabs sharing that key coordinate delivery. Temporary network and server failures are retried with increasing delays, up to 30 seconds between attempts. Authentication failures stay pending so delivery can resume after the user signs in again. A terminal client error rolls back the optimistic update and follows fate's existing [error handling](/docs/guide/actions.md#action--mutation-error-handling).
+Mutations are delivered in the order they were saved, one at a time per persistence key. Tabs sharing a key coordinate delivery. Temporary failures are retried. Authentication failures wait for the user to sign in again. A terminal client error rolls back the optimistic update.
 
-The mutation promise resolves after remote confirmation has been saved locally. It can remain pending while offline. Closing the page loses the JavaScript promise, but the saved mutation and optimistic update remain. After a reload, use the [persistence state](#persistence-state) to show pending and failed changes.
+The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
 #### Skipping Persistence
 
-For a call that should run immediately without being saved or retried, pass `persist: false`:
+For a call that should not be saved or retried, pass `persist: false`:
 
 ```tsx
 await fate.mutations.analytics.record({
@@ -1783,23 +1547,23 @@ await fate.mutations.analytics.record({
 });
 ```
 
-The same option works with `fate.actions`. A successful result can still update the normal cache. Without persistence configured, actions and mutations keep their existing behavior.
+The same option works with `fate.actions`.
 
 #### Creating Objects Offline
 
-Use a stable, client-generated ID when creating an object offline. For example, a new comment and a later edit to that comment can use the same ID, allowing fate to send the creation before the edit when the user reconnects.
+Use client-generated IDs when creating objects that later offline mutations depend on. For example, creating a comment and then editing it can use the same ID for both calls.
 
-If your server assigns IDs, wait for the creation result before constructing a dependent mutation. fate does not rewrite arbitrary foreign keys inside saved inputs. A failed creation also does not automatically cancel later mutations; your server should validate them as usual.
+If the server assigns IDs, wait for the creation result before sending a dependent mutation. fate does not rewrite IDs inside mutation inputs or cancel later mutations when a creation fails.
 
-Mutation inputs and optimistic updates must be serializable with fate's hydration codec. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false` for the upload itself.
+Inputs and optimistic updates must be serializable. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false`.
 
 ### Server Deduplication
 
-A connection can fail after the server has already applied a mutation. For example, the server might increment a post's like count, but the response never reaches the browser. Retrying that mutation without server support would increment the count twice.
+A connection can fail after the server has applied a mutation. Retrying a lost response must not increment a like count twice.
 
-fate assigns an identity to each saved mutation and reuses it on every attempt. The server records the result alongside the mutation's database changes, in **the same transaction**. When the same mutation arrives again, the server returns the saved result.
+fate gives each saved mutation an identity and reuses it on retries. Your server must save the result and the database changes in **the same transaction**, then return that result if the mutation arrives again.
 
-For the native HTTP transport, configure `createMutationIdempotency` on your server. The following example uses application-provided helpers to lock a mutation identity and read or insert its receipt:
+For the native HTTP transport, use `createMutationIdempotency`:
 
 ```ts
 import { createMutationIdempotency } from '@nkzw/fate/persistence/server';
@@ -1824,26 +1588,17 @@ const server = createFateServer({
 });
 ```
 
-Your app supplies `database`, `lockMutationIdentity`, `readReceipt`, and `insertReceipt`. The lock must serialize attempts with the same `(scope, id)` across server processes, including the first attempt before a receipt exists. Mutation resolvers must use the transaction's `ctx.db`, so their changes and the receipt commit together. A unique index on the receipt table alone cannot protect changes made outside that transaction.
+Your app supplies the database and receipt helpers. Lock each `(scope, id)` across server processes, and use `ctx.db` for mutation writes so they share the receipt's transaction. See the [complete SQLite example](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts).
 
-See [`example/persistence/server.ts`](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts) for a complete SQLite implementation, including the receipt table and transaction handling.
-
-The helper checks the identity against the authenticated scope and rejects reuse with different mutation names, inputs, or selections. Server receipts do not expire: a user might reconnect much later with a mutation whose response was lost. Keep receipts for as long as an old mutation could still arrive.
-
-A database transaction cannot roll back an email, payment, or webhook sent to another service. For those effects, use a transactional outbox and the destination's idempotency support. The transaction integration guarantees one committed database effect; network requests and resolver attempts can still happen more than once.
-
-Native HTTP sends durable mutations and receipt-only recovery using protocol version 2, so older servers reject unsupported requests before executing them. Ordinary requests and live subscriptions continue to use version 1. A current server without the idempotency integration also rejects durable mutations before running their resolvers.
+Keep receipts for as long as an offline client might retry. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
 
 ### tRPC, GraphQL, and Custom Transports
 
-For tRPC, GraphQL, or a custom transport, provide a `mutateDurably(name, input, select, identity)` method that sends the identity to an endpoint with server deduplication. Regular calls continue to use `mutate(name, input, select)`. GraphQL passes selected field arguments as an optional fifth parameter to `mutateDurably` (fourth for `mutate`), separate from the mutation input. Forward that parameter if the durable response selects fields with arguments.
-
-Both `createTRPCTransport` and `createGraphQLTransport`, including their generated clients, accept `mutateDurably`. For example, you can use a native fate endpoint for durable mutations alongside your existing transport:
+For other transports, provide `mutateDurably(name, input, select, identity)` with the same server deduplication. One option is to use a native fate endpoint alongside your existing backend:
 
 ```tsx
 const durableHTTP = createHTTPTransport<MyAPI>({
   url: '/api/fate',
-  // Use the same authenticated headers as your other transport.
 });
 
 const fate = createFateClient({
@@ -1853,9 +1608,9 @@ const fate = createFateClient({
 });
 ```
 
-Both endpoints need to agree on mutation names, inputs, results, and entity IDs. A custom GraphQL adapter should unwrap its response and decode GraphQL global IDs before returning data to fate.
+Use the same authentication, mutation names, inputs, results, and IDs on both endpoints. A GraphQL adapter must decode global IDs and return the unwrapped result. It also receives selected field arguments as a fifth parameter; forward them when needed.
 
-You can also use the same idempotency helper inside an existing tRPC or GraphQL resolver. Validate the input and identity at the endpoint, then pass them to `execute`:
+You can use the idempotency helper inside an existing resolver too:
 
 ```ts
 return idempotency.execute({
@@ -1868,11 +1623,11 @@ return idempotency.execute({
 });
 ```
 
-The adapter must pass the entire identity on every attempt, including `replayOnly` when present. With `replayOnly: true`, the endpoint must return the existing receipt or a 404 if none exists, without executing the mutation. `createMutationIdempotency` handles both delivery and receipt-only recovery. Adding an identity to a header that the server ignores does not prevent duplicate effects.
+Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-If a client has registered mutations but no durable adapter, the persistence session reports a configuration error. Saved reads and `persist: false` calls still work. New durable calls fail before being queued, and existing queued mutations stay saved until a client with the adapter can deliver them.
+Without a durable adapter, saved reads and `persist: false` calls still work, but new durable mutations fail before being queued.
 
-For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` to identify a terminal client error. Execution errors without a recognized status remain retryable, so a custom error message or code alone does not reject a saved mutation permanently.
+For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.
 
 ### Persistence State
 
@@ -1888,27 +1643,25 @@ const unsubscribe = session.subscribe(() => {
 });
 ```
 
-`getSnapshot` returns a stable value between updates and can be used with React's `useSyncExternalStore`. The same subscription API works with Vue. Each mutation exposes its ID, name, input, status (`queued`, `sending`, or `failed`), and last error.
+Each mutation exposes its ID, name, input, status (`queued`, `sending`, or `failed`), and last error. `getSnapshot()` also works with React's `useSyncExternalStore`.
 
-A failed initial restoration rejects `ready`. Storage errors also appear in the snapshot. If reading the saved cache fails, fate can still fetch the data from the network. If saving a new mutation fails, the call rejects before it is sent.
+A failed initial restore rejects `ready`. Storage errors appear in the snapshot. A cache read failure can fall back to the network, but a mutation that cannot be saved is not sent.
 
-Cache writes are batched. To save the latest read cache before a reload you control, call `flush()`:
+Read-cache writes are batched. Before a reload you control, call `flush()` to save the latest data:
 
 ```tsx
-await fate.persistence!.flush();
+await session.flush();
 window.location.reload();
 ```
 
-A failed cache write keeps its pending data for a later `flush()` retry. Mutations are saved individually before delivery and do not depend on a delayed cache write or a page-unload event. On confirmation, fate saves the receipt, its confirmed cache changes, and the remaining mutations' recovery data together before resolving the call. Saving the read cache separately means a cache write failure cannot block an already confirmed mutation. The receipt and confirmed cache changes remain in the journal until the read cache checkpoint succeeds, then fate removes them. A tab that missed the confirmation recovers its result from the server receipt when it reconnects. This lookup cannot execute a discarded mutation. After a restart, fate repairs those changes before serving saved reads; if storage is still unavailable, reads fall back to the network instead of returning stale saved data.
-
-You can also retry delivery or discard a mutation:
+Mutations are saved automatically before delivery. You can retry delivery or discard an unsent or failed mutation:
 
 ```tsx
 session.retry();
 await session.discard(mutationId);
 ```
 
-`retry()` respects the saved retry deadline. `discard()` removes an unsent mutation or a terminal failure. A mutation that was already attempted cannot be discarded while its result is unknown: it may have committed remotely, and fate must recover that result first.
+`retry()` respects the retry delay. Once a mutation has been attempted, it cannot be discarded until its outcome is known: it may have committed on the server.
 
 When leaving an account, dispose its session and unsubscribe:
 
@@ -1917,7 +1670,7 @@ session.dispose();
 unsubscribe();
 ```
 
-Disposing stops that client's delivery, rejects its pending promises, and removes its optimistic updates from memory. Saved mutations remain available to the next client using the same key. Responses arriving after disposal cannot update the old client's cache.
+Disposal stops delivery and removes optimistic updates from memory. Saved mutations remain available to the next client using the same key.
 
 ### Clearing Saved Data
 
@@ -1927,15 +1680,13 @@ To remove the saved read cache, call `clearCache()`:
 await fate.persistence!.clearCache();
 ```
 
-This leaves current in-memory data, queued mutations, and their recovery data intact. Confirmation receipts waiting for a cache checkpoint also remain available; fate removes them after a successful checkpoint.
+This leaves in-memory data and queued mutations intact.
 
-For a complete local account reset, stop every client using the key before removing its journal header, individual mutation entries, and namespaced cache entries from storage. This also removes unsent changes. It cannot undo mutations that already ran on the server.
-
-Saved data carries the client's [hydration scope](/docs/guide/requests.md#ssr-and-hydration). An incompatible read cache is discarded, while incompatible queued mutations are kept as failures for inspection. Change `hydrationScope` when deploying incompatible cache schemas or changing the meaning of mutation inputs. An unknown or corrupt mutation journal blocks restoration and is left untouched so the saved work can be recovered.
+Change `hydrationScope` when deploying incompatible data models or mutation inputs. Incompatible saved reads are discarded; incompatible queued mutations remain visible as failures so the app can handle them.
 
 ### Other Storage Backends
 
-The core persistence layer has no IndexedDB dependency. You can use another backend by implementing `PersistenceStorage`:
+To use storage other than IndexedDB, implement `PersistenceStorage`:
 
 ```ts
 interface PersistenceStorage {
@@ -1951,17 +1702,13 @@ interface PersistenceStorage {
 }
 ```
 
-Values use fate's hydration codec and can be stored as JSON. The adapter handles storage and coordination:
+Values can be stored as JSON. `scan` returns keys in ascending order after the optional cursor, up to the limit (64 by default). `writeBatch` must commit all entries atomically; `undefined` deletes a key.
 
-- `read` returns the saved value for a key.
-- `scan` returns keys under a prefix in ascending order, strictly after the optional cursor, up to the limit (64 by default). Use your backend's ordered index to keep each scan small.
-- `writeBatch` commits all entries atomically and resolves after they have committed. An `undefined` value deletes the key. Use a one-entry batch for a single write.
-- `exclusive` coordinates every tab or process sharing the backend. Different lock names are independent: fate holds a delivery lock during network work and acquires a separate write lock when updating storage. Your adapter must allow that nesting.
-- `subscribe` notifies other clients after a change commits, including keys changed by `writeBatch`. Without notifications, clients check saved mutations during delivery attempts and explicit `retry()` calls.
+`exclusive` coordinates tabs or processes sharing storage. Different lock names must be independent and allow nesting. `subscribe` notifies other clients after a write commits; without it, clients check during delivery and explicit retries.
 
-The IndexedDB adapter implements this with `idb`, IndexedDB transactions, Web Locks, and BroadcastChannel. It requires a secure browser context with Web Locks. Browser storage can still be cleared or evicted; if your app needs stronger retention, request persistent browser storage or choose another backend.
+The IndexedDB adapter requires a secure browser context with Web Locks. Browser storage can be cleared or evicted, so choose another backend if your app needs stronger retention.
 
-Persistence coordinates mutation delivery across tabs, but it does not keep every tab's read cache synchronized or resolve application conflicts. Use refetching or [Live Views](/docs/guide/live-views.md) to receive fresh server data.
+Persistence coordinates delivery across tabs. Use refetching or [Live Views](/docs/guide/live-views.md) to receive fresh server data.
 
 ## Vue
 
@@ -2078,8 +1825,6 @@ export const PostView = view<Post>()({
   title: true,
 });
 ```
-
-Vue can import values across components, but single-file components have one default component export. Keeping reusable views in `.ts` files avoids coupling your data model to component files and makes view composition straightforward.
 
 ### Requests
 
@@ -2210,7 +1955,7 @@ await posts.ready();
 
 Pass a plain array, ref, or getter, as you would with `useView`. The result follows the input order and updates when the refs or their selected fields change. Deferred refs are supported, and `null` or `undefined` entries keep their values in the result.
 
-The resource has the same members as `useView`. Await `ready()` in async setup to use Vue Suspense, or render the pending and error states yourself. Before the first read finishes, `.value` is an empty array. Later reads keep the previous data while loading.
+Await `ready()` to use Vue Suspense, or render the resource's pending and error states yourself.
 
 ### Lists and Live Views
 
@@ -2220,7 +1965,7 @@ The resource has the same members as `useView`. Await `ready()` in async setup t
 const [comments, loadNextCommentPage] = useListView(CommentView, () => post.value?.comments);
 ```
 
-The items and pagination helpers are refs. If the connection is `null` or `undefined`, `comments.value` is `undefined` and both pagination helper values are `null`. A connection with `items: []` returns an empty array. Use `comments.value ?? []` when you want to treat missing comments as an empty list. `useLiveListView` follows the same rules.
+Items and pagination helpers are refs. A missing connection returns undefined items and null pagination helpers. Use `comments.value ?? []` to treat missing comments as an empty list.
 
 `useLiveView` and `useLiveListView` have the same resource shape as `useView` and `useListView`, but they also subscribe to server-pushed updates when the selected transport supports live views:
 
@@ -2278,20 +2023,11 @@ The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `ins
 
 ### API Differences from React
 
-The names intentionally mirror `react-fate` where Vue has an equivalent API. The main differences are Vue framework differences:
-
-- `useRequest`, `useView`, `useViews`, and list hooks return Vue resources instead of throwing promises from render.
-- Async setup and `<Suspense>` replace React's async component model.
-- Mutations use `fate.mutations` directly; React-only `fate.actions` and `useActionState` patterns do not apply.
-- Shared views are best kept in `.ts` modules instead of exporting named views from component files.
-
-The generated client, server integrations, cache behavior, masking, pagination, optimistic updates, and live transport behavior are shared across adapters.
+Views, requests, caching, and mutations work the same way in both adapters. Vue composables return reactive resources; await `ready()` to use Suspense, or read their pending and error state. For mutations, use `fate.mutations` and Vue refs for local state instead of React Actions.
 
 ## GraphQL Integration
 
-_fate_ can use an existing GraphQL API as its transport. This keeps the adapter APIs, view composition, normalized cache, masking, requests, list views, live views, and mutations the same while replacing the native or tRPC backend with GraphQL operations.
-
-Use the GraphQL transport when your backend already exposes GraphQL and you want fate's client model without adding fate's native server protocol.
+If your backend already exposes GraphQL, you can use it with fate. Define views and call requests and mutations as usual; fate builds the GraphQL operations for you.
 
 ### Template
 
@@ -2307,7 +2043,7 @@ Create a full GraphQL + Prisma example app with:
 vp create fate -- --template graphql
 ```
 
-The client-only template is the smallest reference for the integration. It contains a `src/fate/graphql.ts` file that maps your GraphQL schema to fate views and roots.
+Both templates include `src/fate/graphql.ts`, where you map your schema's queries and mutations to fate.
 
 ### GraphQL Schema Shape
 
@@ -2355,7 +2091,7 @@ The `schema` option accepts schema definition language (SDL) text or a `GraphQLS
 
 fate derives entity types, query arguments, and mutation inputs and results from the schema. Use `field` when a fate root name differs from its GraphQL query field, for example `viewer: { field: 'currentUser' }`. The schema is used during generation and is excluded from the browser bundle.
 
-You can also describe selectable fields with [data views](/docs/integrations/server.md#data-views) and export `Root` from the mapping module. Existing mappings without a schema remain supported.
+You can also define a mapping manually with [data views](/docs/integrations/server.md#data-views) and a `Root` export.
 
 ### Vite Plugin
 
@@ -2413,11 +2149,11 @@ const UserCardView = view<User>()({
 });
 ```
 
-These types describe fields available to select. A view only exposes the fields it selects. Connection fields in `GraphQLEntities` expose node arrays for view composition. The generated file also exports `GraphQLTypes` for schema output shapes and `GraphQLResponses` for transport results, where connections use `{ items, pagination }`.
+These types describe the fields you can select; the view exposes only the fields it selects. Connections appear as node arrays for composing views. Use `GraphQLTypes` for the original schema shapes or `GraphQLResponses` for response types with fate's `{ items, pagination }` connections.
 
 Custom scalars default to `unknown`. Set `fateGraphQL.scalars` to describe their TypeScript types, for example `{ DateTime: 'string' }`. Use `{ input: 'string', output: 'string' }` when specifying each side separately. These mappings change types; they do not convert returned values.
 
-After updating the schema, run `fate generate` again to refresh the client types. Use `import type` for generated types so the mapping module can load before those files exist.
+Use `import type` for generated types. After updating the schema, run `fate generate` to refresh them.
 
 ### Creating a Client
 
@@ -2477,9 +2213,9 @@ const fate = createFateClient({
 });
 ```
 
-GraphQL queries issued in the same microtask are batched into a single document. Mutations queued together run in order as separate requests, so one failure does not prevent the next mutation from running. The transport does not automatically retry mutations.
+Queries made together are batched into one GraphQL operation. Mutations run separately and are not retried unless you configure [Persistence](/docs/guide/persistence.md).
 
-Deferred view fields work with the GraphQL transport through the same normalized cache flow as native HTTP: the eager query omits `defer(...)` fields, and `useView`, `useListView`, or `useLiveListView` fetches the missing selection through `nodes(ids:)` when the deferred handle is read. GraphQL `@defer` is the natural wire format for this feature, but fate's GraphQL transport currently expects one JSON result per operation and does not consume incremental multipart patches yet.
+[Deferred fields](/docs/guide/deferred-views.md) load when a component reads them. This uses ordinary GraphQL queries; incremental `@defer` responses are not supported yet.
 
 ### Refetch Fields
 
@@ -2496,15 +2232,9 @@ export const fateGraphQL = {
 } as const;
 ```
 
-`idArg` defaults to `id`. Each mapped field must return one entity of the named type, optionally nullable. The adapter batches multiple IDs into aliased query fields in one request, preserves input order for returned records, and omits null results. Node ID encoding and decoding apply to mapped fetches too.
+`idArg` defaults to `id`. Each query must return one entity of the configured type and accept its ID. Other required arguments need defaults. With `nodes: false`, every type fetched by ID needs a mapping.
 
-Mappings take precedence over the default `nodes(ids:)` fallback. Set `nodes: false` to disable that fallback; fetching an unmapped type then reports a configuration error without issuing a request. Existing clients need no configuration changes. Direct users of `createGraphQLTransport` can pass the same `byId` and `nodes` options.
-
-When `schema` is supplied, codegen and transport construction validate the mapping: the field must exist, its ID argument must accept a single `ID`, `String`, or `Int`, its result must match the concrete entity type, and any other arguments must be optional or have defaults. Schema metadata also supplies the wire variable types. Without a schema, identifiers are validated and arguments use GraphQL literals.
-
-Nested pagination uses the owner ID only for the mapped query field. Pagination and filter arguments remain on the connection field. For example, fetching another page of a user's games produces `fetch__User(id: $owner) { games(first: $count, after: $cursor) { ... } }`.
-
-Choose fields with the appropriate authorization rules for the consuming views. The adapter does not switch between public and authenticated lookup fields automatically.
+Choose lookup fields with the authorization rules your app needs. These fields are also used to load deferred fields and additional pages of nested lists.
 
 #### Refetching Through Existing Queries
 
@@ -2526,9 +2256,9 @@ export const fateGraphQL = {
 } as const;
 ```
 
-Here `user` maps to `Query.user(username:)`. fate automatically selects and caches `username` whenever it fetches a user. Components only see the username if their view selects it. Later entity reads, deferred fields, and nested pagination use this query instead of `byId` or `nodes`.
+Here `user` maps to `Query.user(username:)`. fate selects `username` automatically and uses its confirmed value for later reads, deferred fields, and pagination. Components only see it if their view selects it.
 
-Refetch arguments use confirmed cached values, so optimistic username changes do not affect the lookup. The result must match the user's original ID. A missing user raises `FateRequestError('NOT_FOUND')` without deleting cached data. If the username changes elsewhere, refresh a parent or viewer query to get the new value. Requesting an ID before fate has cached its username fails because fate cannot construct the lookup.
+The user must have been fetched before fate can look it up by username. If the username changes elsewhere, refresh a parent or viewer query to get the new value.
 
 Use `{ field: 'username' }` to read a scalar field, `{ value: 'public' }` for a constant, or `{ object: { ... } }` for a nested input object:
 
@@ -2677,43 +2407,17 @@ const fate = createFateClient({
 });
 ```
 
-The live node subscription returns `{ data, delete, id, select }`. The live connection subscription returns events such as `appendNode`, `prependNode`, `deleteEdge`, and `invalidate`. These payloads match fate's live transport events, so the cache update behavior is the same as the native transport.
-
-If you do not need live views, disable them explicitly:
-
-```tsx
-const fate = createFateClient({
-  live: false,
-  url: '/graphql',
-});
-```
+Your server must implement these subscription fields. See the [GraphQL subscription example](https://github.com/nkzw-tech/fate/blob/main/example/server-graphql/src/graphql/live.tsx) for their event shapes and resolvers. For servers without these subscriptions, set `live: false`.
 
 ### Existing Servers
 
-The GraphQL transport is intentionally a mapping layer. It does not require `createFateServer`, the Prisma adapter, or the Drizzle adapter. Your GraphQL server remains responsible for authorization, validation, resolver behavior, cursor pagination, and mutation side effects.
-
-Keep authorization in your GraphQL server. Server data views can still resolve live updates and computed fields; client types come from the schema configured in `src/fate/graphql.ts`.
+Your GraphQL server continues to handle authorization, validation, pagination, and mutation side effects. You don't need fate's server or ORM adapters.
 
 ### Schema-Aware Arguments
 
-With a schema configured, fate sends arguments as typed GraphQL variables. For example, given `posts(category: PostCategory)`, `{ category: 'News' }` is sent as a variable of type `PostCategory`. Clients without a schema use literal arguments, which cannot represent enums correctly.
+With a schema configured, fate checks arguments and sends them as typed GraphQL variables, including enum values. Required arguments and server defaults follow the schema; omitting a value is different from passing `null`.
 
-Generated clients check query and mutation arguments against the schema. Non-null arguments are required unless they have a default. Omitting a value preserves its server default; passing `null` is distinct.
-
-SDL text must include definitions for every directive it uses. Some server-generated or Relay-oriented schema files contain annotations such as `@auth` or `@fetchable` without declaring them; strict SDL parsing rejects those files. Prefer adding the directive definitions to the exported SDL. If the omissions are intentional, pass a schema object instead:
-
-```tsx
-import { readFileSync } from 'node:fs';
-import { buildSchema } from 'graphql';
-
-const sdl = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8');
-export const fateGraphQL = {
-  schema: buildSchema(sdl, { assumeValidSDL: true }),
-  // ...roots and mutations...
-};
-```
-
-`assumeValidSDL` skips SDL validation, so use it only when the annotations are known and the schema is validated elsewhere.
+Use valid SDL, including definitions for any custom directives. You can also pass a `GraphQLSchema` object.
 
 Generation also exports `GraphQLInputs`, `GraphQLFieldArguments`, and `GraphQLSelectionArguments` from `.fate/client.generated.ts`. Use these types to check arguments inside reusable views:
 
@@ -2730,13 +2434,9 @@ const MapView = view<Map>()({
 });
 ```
 
-The transport also validates arguments before sending a request. Custom scalars still require server validation.
-
-For custom build tooling, use `createGraphQLSchemaSource` to generate schema types or `createGraphQLArgumentSchema` to extract transport metadata. Both helpers come from `@nkzw/fate/vite` and run outside the browser.
-
 ### Errors and Partial Results
 
-GraphQL query errors reject with `GraphQLRequestError`, exported by both `react-fate` and `vue-fate`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
+Query failures throw `GraphQLRequestError`, available from `react-fate` and `vue-fate`. You can inspect its `errors`, `path`, `extensions`, and HTTP `status`. Partial data is available as `error.data`, but isn't written to the cache.
 
 Actions and mutations follow the [action error policy](/docs/guide/actions.md#action--mutation-error-handling). Expected failures such as validation errors return `{ error, result: undefined }`, and optimistic changes roll back:
 
@@ -2750,19 +2450,19 @@ if (error instanceof GraphQLRequestError && error.extensions?.code === 'BAD_USER
 }
 ```
 
-fate recognizes standard `extensions.code` values such as `BAD_USER_INPUT`, `CONFLICT`, and `INTERNAL_SERVER_ERROR`, as well as numeric `extensions.http.status` values. Authentication, authorization, and server failures throw. Without durable delivery, execution errors without a recognized status are returned to the caller. Network failures throw the original fetch error. Malformed responses throw a `GraphQLRequestError` with `error.kind === 'protocol'`.
+Use standard `extensions.code` values such as `BAD_USER_INPUT` and `CONFLICT`, or numeric `extensions.http.status` values, to identify expected errors. Authentication, authorization, server, and network failures throw.
 
-The error's `status` is the original HTTP status, which may be `200` even when GraphQL reports an execution error. For retry behavior with saved mutations, see [Persistence](/docs/guide/persistence.md#trpc-graphql-and-custom-transports).
+The HTTP status may still be `200` when GraphQL reports an error. For retry behavior with saved mutations, see [Persistence](/docs/guide/persistence.md#trpc-graphql-and-custom-transports).
 
 ## Server Integration
 
-Until now, we have focused on the client-side API of fate. You'll need a backend that can be wired into fate's typed request model so the Vite plugin can connect the typed fate APIs to your app. _fate_ currently ships three integration paths:
+Now that we have defined our client views, let's connect them to a backend. fate supports three approaches:
 
-- The native fate protocol, which is transport-agnostic and can be hosted by any Fetch-compatible server.
-- The tRPC adapter, which keeps compatibility with existing tRPC backends.
-- The [GraphQL transport](/docs/integrations/graphql.md), which maps fate views and roots to an existing GraphQL schema.
+- Native HTTP with any Fetch-compatible server.
+- tRPC for an existing tRPC backend.
+- [GraphQL](/docs/integrations/graphql.md) for an existing GraphQL API.
 
-_fate_ currently provides database adapters for Prisma and Drizzle, but the framework itself is not coupled to a particular ORM. The adapters plug into the same source execution runtime and can be exposed through the native protocol or through tRPC.
+The Prisma and Drizzle adapters turn your server data views into database queries. Both work with native HTTP and tRPC.
 
 ### Conventions & Object Identity
 
@@ -2771,9 +2471,7 @@ fate expects that data is served by a backend that follows these conventions:
 - A `byId` query for each data type to fetch individual objects by their unique identifier (`id`).
 - A `list` query for fetching lists of objects with support for pagination.
 
-Objects are identified by their ID and type name (`__typename`, e.g. `Post`, `User`), and stored by `__typename:id` (e.g. "Post:123") in the client cache. fate keeps list orderings under stable keys derived from the backend procedure and args. Relations are stored as IDs and returned to components as ViewRef tokens.
-
-fate's type definitions might seem verbose at first glance. However, with fate's minimal API surface, AI tools can easily write this code for you, and the Vite plugin takes care of connecting it to your app.
+Each object needs an ID and a type name (`__typename`, such as `Post` or `User`). fate uses them to share the object between views in the client cache.
 
 > [!NOTE]
 > You can adopt _fate_ incrementally in an existing tRPC codebase without changing your existing schema by adding these queries alongside your existing procedures.
@@ -2871,7 +2569,7 @@ export const Root = {
 
 Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. If you omit `list(...)`, fate treats the entry as a standard query.
 
-You can pass default list options such as `orderBy` to `list(...)`. Ordering is scoped to that specific list wrapper: `Root.posts` can order posts by `createdAt desc`, while `categoryDataView.posts` or `postDataView.comments` can choose their own order. If no order is provided, fate orders by `id asc`. fate always appends `id asc` as a tie-breaker when no `id` order is present; include `id` yourself when you need a different tie-breaker direction such as `id desc`. Use the array form when ordering by multiple fields so the priority is unambiguous.
+Each `list(...)` can have its own ordering. For example, the feed can show newest posts first while comments use oldest first. Without `orderBy`, fate sorts by `id asc`. It also adds `id asc` as a tie-breaker when your ordering doesn't include `id`. Use an array when ordering by several fields.
 
 For the above `Root` definitions, you can make the following requests using `useRequest`:
 
@@ -2894,7 +2592,7 @@ const { posts, categories, viewer } = useRequest({
 
 ### Native fate protocol
 
-The native protocol keeps tRPC optional. Create a source adapter from your ORM integration, pass it to `createFateServer`, and expose the returned server through a Fetch-compatible handler.
+Create a source adapter for your ORM, pass it to `createFateServer`, and add a route for the HTTP handler:
 
 ```tsx
 import { createFateServer, createHonoFateHandler } from '@nkzw/fate/server';
@@ -2936,7 +2634,7 @@ const app = new Hono();
 const handler = createHonoFateHandler(fate);
 
 app.post('/fate', handler);
-app.post('/fate/live', handler);
+app.all('/fate/live', handler);
 ```
 
 Configure the Vite plugin with the native transport:
@@ -2997,30 +2695,11 @@ const client = createFateClient({
 
 :::
 
-The HTTP transport batches operations issued in the same microtask into one `POST /fate` request. Live views use one `GET /fate/live` SSE stream per fate client and `POST /fate/live` control messages when views subscribe or unsubscribe.
+Calls made together are batched into one HTTP request. The `/fate/live` route is used for [Live Views](/docs/guide/live-views.md).
 
 #### Custom Queries
 
-Root query entries such as `viewer` need an explicit resolver because fate cannot infer application-specific behavior like "current user" from a data view:
-
-```tsx
-export const fate = createFateServer({
-  context,
-  queries: {
-    viewer: {
-      resolve: ({ ctx, select }) =>
-        sources.resolveById({
-          ctx,
-          id: ctx.sessionUser.id,
-          input: { select },
-          view: userDataView,
-        }),
-    },
-  },
-  roots: Root,
-  sources,
-});
-```
+The `viewer` query above needs a resolver because only your app knows which user is signed in. Use `sources.resolveById` to return that user's selected fields.
 
 #### Custom Mutations
 
@@ -3054,45 +2733,19 @@ export const fate = createFateServer({
 
 #### Live Views
 
-Pass a live event bus to enable `useLiveView` over the native SSE endpoint:
+Follow the [Live Views server setup](/docs/guide/live-views.md#server-setup) to add an event bus. After a mutation changes a post, emit an update:
 
 ```tsx
-import { createLiveEventBus } from '@nkzw/fate/server';
-
-export const live = createLiveEventBus();
-
-export const fate = createFateServer({
-  live,
-  queries: {
-    viewer: {
-      resolve: ({ ctx, select }) =>
-        sources.resolveById({
-          ctx,
-          id: ctx.sessionUser.id,
-          input: { select },
-          view: userDataView,
-        }),
-    },
-  },
-  roots: Root,
-  sources,
-});
-
-live.update('Post', post.id, {
-  changed: ['likes'],
-  eventId: `post:${post.id}:${Date.now()}`,
-});
+live.update('Post', post.id, { changed: ['likes'] });
 ```
 
-`changed` is optional. When provided, fate resolves only the changed fields selected by each live subscription and skips subscriptions that do not select those fields. `createLiveEventBus` is an in-memory fanout bus. It forwards `eventId` to SSE clients, but it does not replay events after reconnects. If your app needs lossless reconnect behavior, provide a durable live bus implementation that uses the `lastEventId` passed to `listen`, `listenConnection`, `subscribe`, and `subscribeConnection`.
-
-Native SSE connections keep a bounded in-memory queue while events are waiting to be resolved and sent. The default is `1000` queued events per connection. If a client falls behind and exceeds that limit, fate closes the live connection instead of buffering indefinitely. Configure it with `live: { bus: live, maxQueueSize: 500 }`.
+The optional `changed` list limits the update to those fields.
 
 ### tRPC fate setup
 
 The Prisma and Drizzle tRPC integrations connect your data views to your database, bind fate's standard tRPC procedures, and expose helpers for custom queries and mutations.
 
-Pass the `Root` export from `views.ts` to fate in your tRPC `init.ts` file. fate walks that view graph to find the data views it needs. `id` defaults to `"id"`, and fate uses it as the fallback ordering for cursor pagination. Relations are inferred from the data view and ORM schema: a nested data view is loaded as a singular relation, `list(view)` is loaded as a list relation, and Drizzle join tables are discovered from relation metadata.
+Pass the `Root` export from `views.ts` to the ORM helper in your tRPC `init.ts` file:
 
 #### Prisma
 
@@ -3116,8 +2769,6 @@ export const fate = createPrismaFate<AppContext, typeof procedure>({
 ```
 
 If your Prisma client is not stored at `ctx.prisma`, pass `prisma: (ctx) => ctx.db`.
-
-The Prisma integration translates view requests into Prisma `select`, `where`, `cursor`, `skip`, and `take` options. It also hydrates computed `count(...)` dependencies using Prisma `groupBy` when needed.
 
 For custom Prisma queries and mutations, use `fate.createPlan` with `toPrismaSelect`:
 
@@ -3182,34 +2833,13 @@ export const fate = createDrizzleFate<AppContext, typeof procedure>({
 });
 ```
 
-The Drizzle adapter builds SQL queries from your registered data views. It selects only requested columns, hydrates singular, list, and many-to-many relations, supports nested cursor pagination, and hydrates computed `count(...)` dependencies with SQL grouped counts. Count filters may be plain equality objects or Drizzle SQL predicates written as `(columns) => eq(columns.status, 'GOING')`.
+The Drizzle adapter loads the selected fields and relations for you. Nested pagination runs up to 10 child queries at a time; set `nestedPaginationConcurrency` to adjust that limit for your database pool.
 
-Nested paginated relations are resolved with one child-page query per parent row. fate runs those child queries with a default concurrency limit of `10` so a single request cannot flood the database connection pool. Tune this with `nestedPaginationConcurrency` if your database pool or workload needs a different limit:
-
-```tsx
-export const fate = createDrizzleFate<AppContext, typeof procedure>({
-  db,
-  nestedPaginationConcurrency: 5,
-  procedure,
-  schema,
-  views: Root,
-});
-```
+Count filters can use equality objects or Drizzle predicates such as `(columns) => eq(columns.status, 'GOING')`.
 
 For request-specific sorting, prefer a custom root query that validates and translates explicit sort args.
 
-For many-to-many relations, define the join table relations in your Drizzle schema. fate discovers a join table that points at both the source table and the target table:
-
-```tsx
-export const fate = createDrizzleFate<AppContext, typeof procedure>({
-  db,
-  procedure,
-  schema,
-  views: Root,
-});
-```
-
-You can still provide explicit join metadata when the schema is ambiguous:
+Define many-to-many joins in your Drizzle schema so fate can discover them. If a join is ambiguous, provide its metadata explicitly:
 
 ```tsx
 {
@@ -3407,9 +3037,7 @@ export default defineConfig({
 
 _Note: fate uses the specified server module name to find the server types it needs. Make sure that the module is available to the client package's Vite config._
 
-During development, the plugin watches the server module and the files it imports. When one of those files changes, fate updates the internal client wiring and invalidates `@nkzw/fate/client` in Vite's module graph.
-
-For a barebones client without a framework adapter, import the plugin from `@nkzw/fate/vite` and the client APIs from `@nkzw/fate/client`. The plugin wires the same server types for the selected import path.
+The plugin updates the client when your server files change. For an app without React or Vue, use `@nkzw/fate/vite` and `@nkzw/fate/client` instead.
 
 The plugin writes project-local types under `.fate/`. If your TypeScript config does not already include dot-directories, extend the generated config:
 
@@ -3490,9 +3118,6 @@ _And you are all set. Happy building!_
 
 `void-fate` is the [Void](https://void.cloud) adapter for fate. Deploy your app directly to your own Cloudflare account or to the Void platform with the same integration.
 
-Use this integration when your app runs on Void and you want the example app's
-setup without copying its adapter glue.
-
 ### New Project
 
 For a new Void app, start from the Void template. It includes the client, Void routes, Drizzle setup, live transport, auth wiring, and generated fate client setup.
@@ -3567,9 +3192,7 @@ export default defineConfig({
 
 :::
 
-The Void transport uses `/fate` for RPC requests and `/fate-live` for live
-updates by default. In SSR, it calls the exported fate server directly. In the
-browser, it uses fetch and the SSE live endpoint.
+The default routes are `/fate` for requests and `/fate-live` for live updates. Server rendering calls your fate server directly.
 
 ### Server Setup
 
@@ -3611,7 +3234,7 @@ live.connection('Post.comments', { id: postId }).appendNode('Comment', commentId
 });
 ```
 
-`changed` is optional. Void still uses generic topic fanout, while fate uses the changed field paths to refetch or write only the selected fields affected by the event.
+Pass `changed` to refresh only those fields, or omit it to refresh the whole selected view.
 
 ### Routes
 
@@ -3649,9 +3272,6 @@ import { fateStream } from '../src/fate/live.ts';
 
 export const { GET, POST } = defineVoidFateLiveRoute(fateStream);
 ```
-
-The live route handles `GET /fate-live` SSE connections and `POST /fate-live`
-control messages. `void-fate` does not use WebSockets.
 
 ### Layout
 
@@ -3744,17 +3364,11 @@ const fate = computed(() =>
 
 :::
 
-The route helper does not own the route path. Make sure your Void route filename
-or router configuration matches the paths you pass to the client.
+Make sure your route filenames match the paths passed to the client.
 
 ### Live Transport
 
-`createVoidFateLive` publishes entity and connection events through the `void/live`
-stream associated with the current request. Void manages the Durable Object
-transport that distributes events to connected clients across requests.
-
-The live transport is best-effort and does not replay missed events after a
-client reconnects. This matches fate's default in-memory live event bus.
+Void distributes live updates across requests and connected clients. Missed events are not replayed after a reconnect.
 
 ### Cloudflare Deployment
 

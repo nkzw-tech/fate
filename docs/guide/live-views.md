@@ -1,6 +1,6 @@
 # Live Views
 
-`useLiveView` resolves a `ViewRef` just like `useView`, but also keeps the selected object up to date through the native live SSE transport.
+Use `useLiveView` to keep a view up to date when its data changes on the server:
 
 ```tsx
 import { useLiveView, ViewRef } from 'react-fate';
@@ -18,17 +18,13 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-The API mirrors `useView`: pass a view and a ref, and get back the same masked data shape. A `null` ref returns `null` and does not subscribe.
+It takes the same view and ref as `useView`. Only the selected fields are available, and components update when those fields change.
 
 ## How Live Updates Work
 
-The native HTTP transport opens one Server-Sent Events (SSE) connection per fate client. When components mount or unmount live views, the client sends subscribe and unsubscribe control messages to the server. The server keeps those selections on the connection and sends updates only for records that connection subscribed to.
+fate uses one live connection per client, shared by its mounted live views. When the server sends an update, fate writes it to the cache and updates components that select the changed fields.
 
-When the server sends an update, fate normalizes the selected record into the same cache used by requests, actions, and mutations. Components that read affected fields re-render automatically.
-
-For example, if `PostView` selects `likes`, a live update that changes `likes` re-renders the `PostCard`. If another component only selected `title`, it does not re-render for a `likes` change.
-
-Live deletion events remove the record from the normalized cache in the same way as mutations, and any lists or object fields that reference it are pruned.
+For example, a change to `likes` updates `PostCard` without re-rendering a component that only selects `title`. Deleting an object also removes references to it from lists and other objects.
 
 ## Client Setup
 
@@ -56,15 +52,11 @@ export function App() {
 }
 ```
 
-> [!NOTE]
->
-> Live views use `GET /fate/live` for the single SSE stream and `POST /fate/live` for subscribe/unsubscribe control messages.
+This example uses native HTTP. For a GraphQL server, see [GraphQL Live Views](/integrations/graphql#live-views).
 
 ## Server Setup
 
-Live views use an event bus. By default, the bus signals that an object changed and fate refetches the selected object through the same data view pipeline used by `byId` queries before sending it to the client. Update events can also include changed field paths so fate only resolves the intersection of those paths and each active subscription.
-
-Pass a live event bus to `createFateServer` and expose the native handler:
+Pass an event bus to `createFateServer` so your mutations can tell fate which objects changed:
 
 ```tsx
 import { createFateServer, createHonoFateHandler, createLiveEventBus } from '@nkzw/fate/server';
@@ -83,7 +75,7 @@ export const fate = createFateServer<AppContext>({
 app.all('/fate/*', createHonoFateHandler(fate));
 ```
 
-fate keeps a bounded in-memory queue for each native SSE connection while live events are waiting to be resolved and sent. The default limit is `1000` queued events per connection. If a client falls behind and exceeds the limit, fate closes that live connection so server memory cannot grow without bound. You can tune the limit by passing the object form:
+If a client falls behind, fate closes its connection after 1,000 queued events. You can change the limit with `maxQueueSize`:
 
 ```tsx
 export const fate = createFateServer<AppContext>({
@@ -122,7 +114,7 @@ export function PostCard({ post: postRef }: { post: ViewRef<'Post'> }) {
 
 The hook returns the same tuple as `useListView`: items, `loadNext`, and `loadPrevious`. Live events append, prepend, insert, or delete edges from one connection without deleting the underlying records.
 
-By default, live appends and prepends respect pagination boundaries. If the relevant edge still has more pages, fate keeps the incoming node attached to that edge instead of expanding the loaded window. For chat or activity streams where new items should keep appearing immediately, opt into visible live insertion on the connection view:
+By default, new items at an unloaded end of a list wait for pagination. For a chat or activity feed, use `append: 'visible'` to show new messages immediately:
 
 ```tsx
 const MessageConnectionView = {
@@ -155,7 +147,7 @@ If the changed list cannot be described precisely, invalidate the active connect
 live.connection('posts', { categoryId }).invalidate();
 ```
 
-Connection identity follows Relay's model: pagination args like `first`, `last`, `after`, and `before` are ignored for live connection matching, while filter args such as `categoryId` are part of the identity.
+Pass the list's filters, such as `categoryId`, when emitting events. Pagination arguments like `first` and `after` don't affect which list receives an event.
 
 ## Emitting Events
 
@@ -233,13 +225,11 @@ live.update('Post', input.id, {
 });
 ```
 
-The default `createLiveEventBus` is an in-memory fanout bus and does not replay events that were emitted while a client was disconnected. Use a durable custom live bus if your deployment needs reconnects to catch up from `lastEventId`; otherwise the client receives future live events after it reconnects.
+The default event bus doesn't replay missed events after a disconnect. For that, provide a custom live bus that resumes from `lastEventId`.
 
 ## Error Handling
 
-Live subscription errors are reported out of band. They do not replace the last cached data or throw through the component that called `useLiveView`.
-
-Pass `onLiveError` when creating the client to send those failures to your logger or monitoring system:
+Live errors leave the last cached data visible. Pass `onLiveError` to report them to your logger or monitoring system:
 
 ```tsx
 const fate = createFateClient({
@@ -255,4 +245,4 @@ const fate = createFateClient({
 });
 ```
 
-The handler runs in a microtask after the subscription reports the error. Components continue to read whatever data is currently available in the fate cache.
+These errors don't go to the component's error boundary.

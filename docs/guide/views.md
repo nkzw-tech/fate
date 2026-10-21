@@ -5,13 +5,8 @@
 Let's start by defining a simple view for a blog's `Post` component. fate requires you to explicitly "select" each field that you plan to use in your components. Here is how you can define a view for a `Post` entity that has `title` and `content` fields:
 
 ```tsx
+import type { Post } from '@your-org/server/views';
 import { view } from 'react-fate';
-
-type Post = {
-  content: string;
-  id: string;
-  title: string;
-};
 
 export const PostView = view<Post>()({
   content: true,
@@ -21,9 +16,6 @@ export const PostView = view<Post>()({
 ```
 
 Fields are selected by setting them to `true` in the view definition. This tells **_fate_** that these fields should be fetched from the server and made available to components that use this view.
-
-> [!NOTE]
-> The `Post` type above is an example. In a real application, this type is defined on the server and imported into your client code.
 
 ## Resolving a View with `useView`
 
@@ -44,7 +36,7 @@ export const PostCard = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-A `ViewRef` is a reference to a concrete object of a specific type, for example a `Post` with id `7`. It contains the unique ID of the object, the type name (as `__typename`) and some fate-specific metadata. fate creates and manages these references for you, and you can pass them around your components as needed.
+A `ViewRef` refers to a specific object, for example a `Post` with ID `7`. fate creates these references for you so you can pass them to child components.
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
@@ -296,8 +288,6 @@ const PostDetail = ({ post: postRef }: { post: ViewRef<'Post'> }) => {
 };
 ```
 
-ViewRefs carry a set of view names they can resolve. `useView` throws if a ref does not include the required view.
-
 ## Parameters and Conditional Selections
 
 A view can take parameters. Define the selection with a function, then bind its parameters where you request or compose the view:
@@ -329,7 +319,7 @@ function Profile({ userId, isViewer }: { userId: string; isViewer: boolean }) {
 }
 ```
 
-`alias(AccountView)` gives the selection a named ref to the **same User**. The name `account` belongs to your result; it does not need to exist in the server schema. Read the ref with `useView` to access the fragment's selected fields. The existing `alias('field', selection)` form still selects a schema field under another name.
+`alias(AccountView)` gives us an `account` ref to the same user. It doesn't require an `account` field on the server. Read it with `useView`, just like any other ref.
 
 `when(condition, selection)` works with named fragments and ordinary fields:
 
@@ -340,9 +330,7 @@ const ProfileView = view<User>()(({ isViewer }: { isViewer: boolean }) => ({
 }));
 ```
 
-A false condition returns `undefined` and excludes that branch from fetching and subscriptions, even if its data is already cached. A selected field whose server value is `null` still returns `null`. TypeScript preserves that distinction: a boolean condition adds `undefined` to the result type; literal `true` keeps the selected type; literal `false` produces `undefined`.
-
-Both `useView` and `useLiveView` accept `undefined` refs and return `undefined` without fetching or subscribing. Call the hooks unconditionally, as in the example above.
+When the condition is false, the field is `undefined` and isn't fetched. `useView` and `useLiveView` accept that undefined ref, so you can call them unconditionally, as above.
 
 ### Carrying Parameters with Refs
 
@@ -371,11 +359,9 @@ function Names({ user }: { user: ViewRef<'User'> }) {
 }
 ```
 
-This example assumes the server's `name` field accepts a `locale` argument. The two refs identify the same entity with independent bindings. Connections inside named views likewise keep their own arguments and pagination state.
+Here `name` accepts a `locale` argument on the server. Both refs point to the same user, but each keeps its own parameters.
 
-Declare view definitions at module scope. Binding an equivalent parameter object again preserves the logical request and ref identity; no `useMemo` is needed. Parameter objects use the same serializable values as field arguments, and fate snapshots them when binding. Keep selection functions pure, with all varying inputs passed as parameters.
-
-Bind a parameterized definition before using it in a request, nested selection, alias, or spread. If a single ref contains multiple bindings of one definition, use named aliases to give each binding its own ref. Conditional anonymous spreads are not supported; use `when(condition, alias(View))` instead.
+Define views outside components, then pass parameters when composing or requesting them. No `useMemo` is needed. Use named aliases when you need several versions of the same view, or `when(condition, alias(View))` to include one conditionally.
 
 ### Vue
 
@@ -386,4 +372,4 @@ const profile = useView(ProfileView, () => request.value?.user);
 const account = useView(AccountView, () => profile.value?.account);
 ```
 
-When the ref is `undefined`, the resource's value and `ready()` result are `undefined`, and the view has no active subscriptions.
+An undefined ref produces an undefined value without fetching.
