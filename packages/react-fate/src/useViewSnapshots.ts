@@ -287,6 +287,7 @@ type ReaderEntry = {
 
 const createReaders = () => {
   let entries: Array<ReaderEntry> = [];
+  let version = 0;
   return {
     get<V extends View<any, any>>(
       client: FateClient<any, any>,
@@ -308,10 +309,16 @@ const createReaders = () => {
         ? createArrayReader(client, view, refs)
         : cacheReadError(createReader(client, view, refs[0]));
       entries.push({ client, read, refs: [...refs], view });
+      version++;
       return read;
     },
     retain(read: ReadSnapshot) {
-      entries = entries.filter((entry) => entry.read === read);
+      if (entries.length > 1) {
+        entries = entries.filter((entry) => entry.read === read);
+      }
+    },
+    get version() {
+      return version;
     },
   };
 };
@@ -325,7 +332,10 @@ function useReader<V extends View<any, any>>(
   const [readers] = useState(createReaders);
   // Suspense retries must reuse the reader that observed a pending read or error.
   const getSnapshot = readers.get(client, view, refs, batch);
-  useEffect(() => readers.retain(getSnapshot), [getSnapshot, readers]);
+  const version = readers.version;
+  // A cancelled render can return to the same committed reader. Speculative
+  // additions must still be pruned when getSnapshot itself stays unchanged.
+  useEffect(() => readers.retain(getSnapshot), [getSnapshot, readers, version]);
   return useSnapshot(client, getSnapshot, batch);
 }
 
