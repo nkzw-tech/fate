@@ -134,7 +134,15 @@ type PendingOperation = {
   variables?: Record<string, { type: string; value: unknown }>;
 };
 
-type SelectionTree = Map<string, SelectionTree>;
+type SelectionTree = {
+  fields: Map<string, SelectionTree>;
+  responseFields: Map<string, string>;
+};
+
+const createSelectionTree = (): SelectionTree => ({
+  fields: new Map(),
+  responseFields: new Map(),
+});
 
 type GraphQLSSEExecutionResult<T> = {
   data?: T;
@@ -390,7 +398,7 @@ const rootArgsToGraphQL = ({
 };
 
 const buildSelectionTree = (select: Iterable<string>): SelectionTree => {
-  const root: SelectionTree = new Map();
+  const root = createSelectionTree();
 
   for (const path of select) {
     let current = root;
@@ -399,10 +407,14 @@ const buildSelectionTree = (select: Iterable<string>): SelectionTree => {
         continue;
       }
 
-      let next = current.get(segment);
+      let next = current.fields.get(segment);
       if (!next) {
-        next = new Map();
-        current.set(segment, next);
+        next = createSelectionTree();
+        current.fields.set(segment, next);
+        const responseKey = responseField(segment);
+        if (!current.responseFields.has(responseKey)) {
+          current.responseFields.set(responseKey, segment);
+        }
       }
       current = next;
     }
@@ -445,7 +457,7 @@ const buildRecordSelection = ({
   ): string => {
     const config = getTypeConfig(types, currentType);
     const fields = new Set([
-      ...currentTree.keys(),
+      ...currentTree.fields.keys(),
       ...(embedded ? [] : ['id', '__typename']),
       ...getRefetchFields(config.refetch),
     ]);
@@ -457,7 +469,7 @@ const buildRecordSelection = ({
         continue;
       }
 
-      const childTree = currentTree.get(field) ?? new Map();
+      const childTree = currentTree.fields.get(field) ?? createSelectionTree();
       const sourceField = schemaField(field);
       const descriptor = config.fields?.[sourceField];
       const fieldPath = currentPath ? `${currentPath}.${field}` : field;
@@ -515,7 +527,7 @@ const buildRecordSelection = ({
 
     for (const concrete of config.possibleTypes ?? []) {
       const fields = [...getRefetchFields(types.get(concrete)?.refetch)].filter(
-        (field) => !currentTree.has(field),
+        (field) => !currentTree.fields.has(field),
       );
       if (fields.length) {
         lines.push(
@@ -600,10 +612,8 @@ const normalizeGraphQLValue = ({
   const result: AnyRecord = {};
 
   for (const [responseKey, entry] of Object.entries(value)) {
-    const key =
-      [...(selection?.keys() ?? [])].find((field) => responseField(field) === responseKey) ??
-      responseKey;
-    const childSelection = selection?.get(key);
+    const key = selection?.responseFields.get(responseKey) ?? responseKey;
+    const childSelection = selection?.fields.get(key);
     if (
       schemaField(key) === 'id' &&
       typename &&

@@ -1035,3 +1035,64 @@ test('separates arguments at every nested selection level', async () => {
     }),
   ).resolves.toMatchObject({ related: { name: 'Desert', state: 'Grassland' } });
 });
+
+test('resolves response aliases independently at each level of a connection', async () => {
+  const transport = createGraphQLTransport({
+    fetch: async () =>
+      jsonResponse({
+        data: {
+          f1: {
+            __typename: 'User',
+            id: 'User-1',
+            name: 'Full name',
+            posts: {
+              edges: [
+                {
+                  cursor: 'first',
+                  node: {
+                    __typename: 'Post',
+                    headline: 'First post',
+                    id: 'Post-1',
+                    owner: { __typename: 'User', handle: 'Maxima', id: 'User-2' },
+                  },
+                },
+              ],
+              pageInfo: { hasNextPage: false },
+            },
+            short: 'Short name',
+            totals: { total: 42 },
+          },
+        },
+      }),
+    live: false,
+    roots: { viewer: { type: 'User' } },
+    types: [
+      { fields: { posts: { listOf: 'Post' }, stats: { embedded: 'Stats' } }, type: 'User' },
+      { fields: { owner: { type: 'User' } }, type: 'Post' },
+      { type: 'Stats' },
+    ],
+    url: '/graphql',
+  });
+  await expect(
+    transport.fetchQuery!('viewer', [
+      'name',
+      'short:name',
+      'posts.headline:title',
+      'posts.owner.handle:username',
+      'totals:stats.total:score',
+    ]),
+  ).resolves.toMatchObject({
+    id: '1',
+    name: 'Full name',
+    posts: {
+      items: [
+        {
+          cursor: 'first',
+          node: { 'headline:title': 'First post', id: '1', owner: { 'handle:username': 'Maxima' } },
+        },
+      ],
+    },
+    'short:name': 'Short name',
+    'totals:stats': { 'total:score': 42 },
+  });
+});
