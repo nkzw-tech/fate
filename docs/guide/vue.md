@@ -229,6 +229,8 @@ The resource has the same members as `useView`. Await `ready()` in async setup t
 const [comments, loadNextCommentPage] = useListView(CommentView, () => post.value?.comments);
 ```
 
+When a connection is `null` or `undefined`, its items ref contains `undefined` and both pagination helpers are `null`. A present connection with no items returns an empty array. The result types preserve absence for optional items and nullable deferred connections. `useLiveListView` follows the same rules.
+
 `useLiveView` and `useLiveListView` have the same resource shape as `useView` and `useListView`, but they also subscribe to server-pushed updates when the selected transport supports live views:
 
 ```ts

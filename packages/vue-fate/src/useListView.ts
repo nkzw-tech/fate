@@ -1,4 +1,4 @@
-import { type Deferred, type DeferredSnapshot, type Pagination, isDeferred } from '@nkzw/fate';
+import { type Deferred, type DeferredSnapshot, isDeferred } from '@nkzw/fate';
 import { getListEntries } from '@nkzw/fate/list';
 import {
   markRaw,
@@ -15,11 +15,10 @@ import {
   getNodeView,
   type ConnectionItems,
   type ConnectionSelection,
+  type ConnectionValue,
+  type ResolvedConnection,
   type LoadMoreFn,
 } from './listView.ts';
-
-type ConnectionValue = { items?: ReadonlyArray<any>; pagination?: Pagination };
-type ResolvedConnection<C> = C extends Deferred<infer Value> ? Value : NonNullable<C>;
 
 export type ListViewState<C> = [
   ShallowRef<ConnectionItems<ResolvedConnection<C>>>,
@@ -37,10 +36,15 @@ export type ListViewState<C> = [
  * Subscribes to a connection field, returning the current items and pagination helpers.
  */
 export function useListView<
-  C extends ConnectionValue | Deferred<ConnectionValue> | null | undefined,
+  C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
   const clientSource = getFateClientSource(useFateClient());
-  const items = shallowRef<ConnectionItems<ResolvedConnection<C>>>([] as never);
+  const initialConnection = toValue(connection);
+  const items = shallowRef<ConnectionItems<ResolvedConnection<C>>>(
+    (isDeferred(initialConnection) ? [] : initialConnection?.items) as ConnectionItems<
+      ResolvedConnection<C>
+    >,
+  );
   const loadNext = shallowRef<LoadMoreFn | null>(null);
   const loadPrevious = shallowRef<LoadMoreFn | null>(null);
   const errorState = shallowRef<unknown>(null);
@@ -128,9 +132,10 @@ export function useListView<
         })),
       ) as unknown as ConnectionItems<ResolvedConnection<C>>;
     } else {
-      items.value = markRaw(
-        (currentConnection?.items ?? []) as ConnectionItems<ResolvedConnection<C>>,
-      );
+      const currentItems = currentConnection?.items;
+      items.value = (currentItems ? markRaw(currentItems) : undefined) as ConnectionItems<
+        ResolvedConnection<C>
+      >;
     }
 
     setLoadMore();
@@ -150,8 +155,10 @@ export function useListView<
       return value as ConnectionValue | null | undefined;
     }
 
-    const snapshot = await activeClient.readDeferred(value as Deferred<ConnectionValue>);
-    return (snapshot as DeferredSnapshot<ConnectionValue>).data;
+    const snapshot = await activeClient.readDeferred(
+      value as Deferred<ConnectionValue | null | undefined>,
+    );
+    return (snapshot as DeferredSnapshot<ConnectionValue | null | undefined>).data;
   };
 
   const refresh = () => {

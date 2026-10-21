@@ -606,7 +606,7 @@ test('subscribes to list pagination and exposes load-more helpers', async () => 
       loadNextRef = loadNext;
 
       return () =>
-        h('span', projects.value.map(({ node }) => (node as ViewRef<'Project'>).id).join(','));
+        h('span', projects.value?.map(({ node }) => (node as ViewRef<'Project'>).id).join(','));
     },
   });
 

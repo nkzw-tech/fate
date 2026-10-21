@@ -1,14 +1,18 @@
 import {
   ConnectionTag,
+  type Deferred,
   isViewTag,
   type ConnectionMetadata,
   type Pagination,
   type View,
 } from '@nkzw/fate';
 
+export type ConnectionValue = { items?: ReadonlyArray<any>; pagination?: Pagination };
+export type ResolvedConnection<C> = C extends Deferred<infer Value> ? Value : C;
+
 export type ConnectionItems<C> = C extends { items?: ReadonlyArray<infer Item> }
-  ? ReadonlyArray<Item>
-  : ReadonlyArray<never>;
+  ? ReadonlyArray<Item> | Extract<C['items'], undefined>
+  : undefined;
 
 export type LoadMoreFn = () => Promise<void>;
 

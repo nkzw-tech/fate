@@ -1,23 +1,19 @@
-import { type Deferred, type DeferredSnapshot, type Pagination, isDeferred } from '@nkzw/fate';
+import { type Deferred, type DeferredSnapshot, isDeferred } from '@nkzw/fate';
 import { onScopeDispose, toValue, watch, type MaybeRefOrGetter } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
 import {
   getConnectionMetadata,
   getNodeView,
-  type ConnectionItems,
   type ConnectionSelection,
-  type LoadMoreFn,
+  type ConnectionValue,
 } from './listView.ts';
 import { useListView, type ListViewState } from './useListView.ts';
-
-type ConnectionValue = { items?: ReadonlyArray<any>; pagination?: Pagination };
-type ResolvedConnection<C> = C extends Deferred<infer Value> ? Value : NonNullable<C>;
 
 /**
  * Subscribes to a connection field, returning live-updating items and pagination helpers.
  */
 export function useLiveListView<
-  C extends ConnectionValue | Deferred<ConnectionValue> | null | undefined,
+  C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
   const clientSource = getFateClientSource(useFateClient());
   const listResource = useListView(selection, connection);
@@ -39,8 +35,8 @@ export function useLiveListView<
 
     return (
       (await clientSource.value.readDeferred(
-        value as Deferred<ConnectionValue>,
-      )) as DeferredSnapshot<ConnectionValue>
+        value as Deferred<ConnectionValue | null | undefined>,
+      )) as DeferredSnapshot<ConnectionValue | null | undefined>
     ).data;
   };
 
@@ -88,10 +84,5 @@ export function useLiveListView<
 
   onScopeDispose(dispose);
 
-  return Object.assign(listResource, { dispose }) as [
-    ConnectionItems<ResolvedConnection<C>>,
-    LoadMoreFn | null,
-    LoadMoreFn | null,
-  ] &
-    ListViewState<C>;
+  return Object.assign(listResource, { dispose });
 }
