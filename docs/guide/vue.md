@@ -198,11 +198,9 @@ await posts.ready();
 </template>
 ```
 
-`useViews` accepts a plain array, reactive ref, computed ref, or getter. Replacing, reordering, or mutating a reactive array updates the resource. The result preserves order, duplicates, `null` and `undefined` entries, readonly tuple positions, and each ref's parameter bindings. Deferred refs are supported too.
+Pass a plain array, ref, or getter, as you would with `useView`. The result follows the input order and updates when the refs or their selected fields change. Deferred refs are supported, and `null` or `undefined` entries keep their values in the result.
 
-The resource is a shallow ref with the same `pending`, `error`, `ready()`, `refresh()`, and `dispose()` members as `useView`. Await `ready()` in async setup to participate in Vue Suspense, or render the resource's pending and error states yourself. Its initial value is an empty array while the first read loads; later pending reads retain the previous data. `refresh()` rereads the current selection and fetches missing data.
-
-Selected fields and nested entities stay subscribed, so aggregate filtering reacts even when the outer array is unchanged. Unselected fields stay masked. Equivalent inputs and unchanged selected data preserve the result array's identity, and unrelated writes do not update it. Missing reads start together, duplicate refs share a read, and bursts of cache writes are coalesced. Scope disposal releases subscriptions and prevents late results from updating the resource.
+The resource has the same members as `useView`. Await `ready()` in async setup to use Vue Suspense, or render the pending and error states yourself. Before the first read finishes, `.value` is an empty array. Later reads keep the previous data while loading.
 
 ## Lists and Live Views
 

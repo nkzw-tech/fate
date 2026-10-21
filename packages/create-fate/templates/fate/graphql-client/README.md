@@ -34,24 +34,16 @@ VITE_GRAPHQL_URL="https://api.example.com/graphql" vp run build
 
 These `VITE_*` values are embedded in the client bundle. Do not put credentials in them. Production builds do not read `.env`.
 
-Replace `src/fate/schema.graphql` with the schema exported by your existing
-GraphQL server, then edit `src/fate/graphql.ts` to map application names:
+Replace `src/fate/schema.graphql` with your server's schema, then edit `src/fate/graphql.ts`:
 
-- `fateGraphQL.schema` supplies the SDL used during generation.
-- `fateGraphQL.roots` exposes query fields and optionally maps different names
-  through `field`. Entity and connection types are inferred from the schema.
+- `fateGraphQL.schema` supplies the schema used to generate client types.
+- `fateGraphQL.roots` exposes query fields. Use `field` to map a different name.
 - `fateGraphQL.mutations` maps application mutation names to schema fields.
-- `fateGraphQL.scalars` optionally describes custom scalar wire types. Unmapped
-  custom scalars are `unknown`.
+- `fateGraphQL.scalars` optionally describes custom scalar types, which default to `unknown`.
 
-The sample schema includes `viewer`, `posts(first:, after:)`, `postLike(input:)`,
-`node(id:)`, and `nodes(ids:)`, with Relay-style connections. Replace it with your
-server's actual contract, including nullability and arguments.
+The sample schema includes `viewer`, `posts(first:, after:)`, `postLike(input:)`, `node(id:)`, and `nodes(ids:)`, with Relay-style connections. Replace these with your server's fields and arguments.
 
-Run `vp run fate:generate` to generate `.fate/schema.generated.ts`. Client views
-use `GraphQLEntities` from that file; there are no handwritten entity or mutation
-input types to keep synchronized. The schema and generation imports are excluded
-from the browser client.
+After changing the schema or mapping, run `vp run fate:generate`. Client views use `GraphQLEntities` from the generated `.fate/schema.generated.ts`. The schema stays out of the browser bundle.
 
 ## Development
 

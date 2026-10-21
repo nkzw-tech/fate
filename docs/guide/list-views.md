@@ -50,13 +50,13 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 
 If `loadNext` is `null`, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be `null`.
 
-When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. The types preserve this absence for optional and nullable deferred connections. Default the items when the UI should render an empty list:
+When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. Default the items when the UI should render an empty list:
 
 ```tsx
 const [comments = [], loadNext] = useListView(CommentConnectionView, post?.comments);
 ```
 
-A present connection with an empty `items` array returns that empty array. `useLiveListView` follows the same rules.
+`useLiveListView` follows the same rules.
 
 ## Pagination Arguments
 
@@ -80,11 +80,7 @@ const CommentConnectionView = {
 
 When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
 
-Concurrent loads with the same connection, selection, arguments, and cursor share pending work. A failed load rejects its callers and can be retried. Late pages preserve newer confirmed fields and deletions, and cannot restore a page window replaced by a newer refresh. Forward and backward pages can still extend opposite ends of the same list concurrently.
-
-Refreshing a query without `after` or `before` replaces its connection window, including removed entries and empty results. This applies to nested connections as well as root lists. Cursor-based requests continue to append or prepend pages.
-
-Complete selected relationships returned by mutations likewise replace their membership. Partial mutation pages preserve previously loaded entries outside that page, and optimistic changes are replayed over the latest confirmed snapshot. Removing a relationship does not delete its shared entity records.
+Loading another page adds items to the list. Refreshing the query without `after` or `before` replaces the loaded list with the latest result, including removed items or an empty list. This applies to nested connections as well as root lists. A failed page load can be retried.
 
 Additional arguments on a root request are scoped to that root list:
 
@@ -98,3 +94,7 @@ const { posts } = useRequest({
 ```
 
 The `categoryId` list above has its own cache entry and pagination state. Loading another page for that list does not update a different `posts` request with another category or search query.
+
+## Updating Lists with Mutations
+
+When a mutation returns a complete list, fate replaces that list's items. For example, if a mutation returns all of a post's comments without a removed comment, that comment disappears from the list. If the mutation returns only one page, fate keeps previously loaded items outside that page. Removing a comment from a list does not delete its record from the cache.

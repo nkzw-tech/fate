@@ -231,6 +231,8 @@ The adapter must pass the entire identity on every attempt, including `replayOnl
 
 If a client has registered mutations but no durable adapter, the persistence session reports a configuration error. Saved reads and `persist: false` calls still work. New durable calls fail before being queued, and existing queued mutations stay saved until a client with the adapter can deliver them.
 
+For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` to identify a terminal client error. Execution errors without a recognized status remain retryable, so a custom error message or code alone does not reject a saved mutation permanently.
+
 ## Persistence State
 
 Use `fate.persistence` to observe pending changes and storage errors:

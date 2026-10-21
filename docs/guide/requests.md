@@ -92,42 +92,53 @@ const { posts } = useRequest(
 );
 ```
 
-## Timeouts and cancellation
+## Refreshing Requests
 
-Read requests accept an optional `timeout` in milliseconds and an `AbortSignal`:
+To refresh posts already displayed by `useRequest`, call `useRefetch` with the same request:
 
 ```tsx
-const result = useRequest(request, { timeout: 10_000 });
-const refetch = useRefetch(request, { timeout: 10_000 });
+import { useRefetch } from 'react-fate';
+import { PostView } from './PostCard.tsx';
 
-const controller = new AbortController();
-await client.request(request, { timeout: 10_000, signal: controller.signal });
-// From another event handler: controller.abort();
+export function RefreshButton() {
+  const refetch = useRefetch({ posts: { list: PostView } });
+
+  return <button onClick={() => refetch().catch(reportError)}>Refresh posts</button>;
+}
 ```
 
-The default has no deadline. A timeout rejects with an error named `TimeoutError`;
-external cancellation rejects with `signal.reason` (normally an `AbortError`).
-The deadline starts when the read starts, includes persistence initialization,
-and stays fixed across equivalent Suspense rerenders. Use a stable signal when
-passing one to a hook. An already-aborted signal prevents a new fetch.
+Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler.
 
-Each imperative caller has its own deadline. Identical pending reads can share
-work, but cancelling one caller keeps that work alive for the others. Batched HTTP
-and GraphQL requests abort their shared fetch only when every operation cancels.
-Cancelled operations cannot write late network results to the cache. Custom
-transports receive the signal in their optional read context and should forward
-it to their network implementation; fate still rejects and ignores their late
-results if they do not support cancellation. The tRPC adapter passes the signal
-in the resolver's second argument, matching tRPC query options.
+## Timeouts and Cancellation
 
-`useRequest` sends initial failures to your error boundary. Handle errors from
-`useRefetch` or `client.request` in the calling event handler; these failures
-preserve existing data. An explicit retry starts a new deadline. The same options
-work with `useRequestState`, `client.observeRequest`, and Vue `useRequest`.
-For `stale-while-revalidate`, cached data returns immediately while the deadline
-bounds the background refresh. These controls apply to the request's initial
-reads; later view reads, deferred fields, pagination, live streams, and mutations
-have separate lifetimes and do not inherit them.
+You can limit how long a request waits by passing a `timeout` in milliseconds:
+
+```tsx
+const { posts } = useRequest({ posts: { list: PostView } }, { timeout: 10_000 });
+```
+
+Requests have no timeout by default. A timeout raises a `TimeoutError`, which `useRequest` sends to your error boundary. Retrying starts a new timeout.
+
+To cancel a request, pass an `AbortSignal` and call `abort()` when the result is no longer needed:
+
+```tsx
+const controller = new AbortController();
+const request = client.request({ posts: { list: PostView } }, { signal: controller.signal });
+
+controller.abort();
+
+try {
+  await request;
+} catch (error) {
+  // Handle cancellation or a failed request.
+}
+```
+
+Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
+
+Both options work with `useRefetch`, `useRequestState`, `client.observeRequest`, and Vue `useRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
+
+The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
 
 ## Cache Lifetime
 
@@ -305,27 +316,3 @@ one operation. Selection path segments and corresponding argument keys then use
 `resultName:schemaField`, and returned records must use those same encoded keys.
 GraphQL performs that conversion automatically. Applications consume the declared
 result names, never the encoded transport names.
-
-## Imperative refresh with Suspense
-
-In React, use `useRefetch` alongside `useRequest` to refresh the same request from
-an event handler without changing the Suspense hook's return value:
-
-```tsx
-import { useRefetch, useRequest } from 'react-fate';
-
-const request = { viewer: { view: UserView } };
-const { viewer } = useRequest(request);
-const refetch = useRefetch(request);
-
-// In an event handler or React Action:
-await refetch();
-```
-
-Calling the hook does not fetch or subscribe. Its callback forces a network
-request and returns its typed result, rejecting on failure so the caller can
-handle the error. Existing cached data stays available while refreshing. Cache
-updates notify subscribed views and requests, including changed root results.
-Equivalent inline requests preserve the callback's identity. The optional second
-argument accepts `persist` options; the request mode is always `network-only`.
-Entity refreshes use the configured refetch query when one exists, across transports.

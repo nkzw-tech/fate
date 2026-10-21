@@ -203,29 +203,6 @@ A `ViewRef` is a reference to a concrete object of a specific type, for example 
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
-### Resolving Multiple Refs with `useViews`
-
-Use `useViews` when a component needs selected data from an array of refs, for example to filter or sort a list before rendering it:
-
-```tsx
-import { useViews, type ViewRef } from 'react-fate';
-
-function PostTitles({ posts: postRefs }: { posts: ReadonlyArray<ViewRef<'Post'>> }) {
-  const posts = useViews(PostView, postRefs);
-  const sorted = [...posts].sort((a, b) => a.title.localeCompare(b.title));
-
-  return sorted.map((post) => <h2 key={post.id}>{post.title}</h2>);
-}
-```
-
-Call the hook once with the whole array. The array can grow, shrink, or reorder between renders. Results preserve the input order, duplicates, and any `null` or `undefined` entries. Readonly tuples preserve their position types. Each ref carries its own parameter bindings, so refs for the same entity can select different arguments.
-
-Like `useView`, `useViews` masks unselected fields, subscribes to selected fields on each entity and its nested entities, suspends while required data is missing, and sends read errors to the nearest error boundary. It starts all missing reads together. Writes to unrelated fields do not rerender the component. The returned array stays identical while the refs and their selected snapshots stay unchanged, including when the input array is constructed inline.
-
-`useViews` also accepts deferred refs. It subscribes to their owning selections as well as the resolved entities. Removing refs or unmounting the component releases their subscriptions. It works with every fate transport; it is not specific to GraphQL.
-
-Vue provides the same `useViews(view, refs)` selection behavior as a reactive resource. Pass an array, ref, or getter, then read `.value` or await `.ready()`. See [Resolving Arrays of Refs in Vue](/docs/guide/vue.md#resolving-arrays-of-refs).
-
 ### Fetching Data with `useRequest`
 
 Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
@@ -391,6 +368,27 @@ export const PostView = view<Post>()({
 ```
 
 Views are opaque objects. Even if you select the same field multiple times through different views, the composed object won't have conflicting fields or result in TypeScript errors. fate automatically deduplicates fields during runtime and ensures that each field is only fetched once.
+
+### Resolving Multiple Refs with `useViews`
+
+Use `useViews` when a component needs selected data from an array of refs, for example to filter or sort a list before rendering it:
+
+```tsx
+import { useViews, type ViewRef } from 'react-fate';
+
+function PostTitles({ posts: postRefs }: { posts: ReadonlyArray<ViewRef<'Post'>> }) {
+  const posts = useViews(PostView, postRefs);
+  const sorted = [...posts].sort((a, b) => a.title.localeCompare(b.title));
+
+  return sorted.map((post) => <h2 key={post.id}>{post.title}</h2>);
+}
+```
+
+Call `useViews` once with the whole array instead of calling `useView` inside a loop. Results follow the input order and update when selected fields change. Like `useView`, the hook suspends while data is loading and sends read errors to the nearest error boundary.
+
+The array can change between renders. Deferred refs are supported, and `null` or `undefined` entries keep their values in the result.
+
+Vue provides the same API as a reactive resource. See [Resolving Arrays of Refs in Vue](/docs/guide/vue.md#resolving-arrays-of-refs).
 
 ### `useView` and Suspense
 
@@ -639,42 +637,53 @@ const { posts } = useRequest(
 );
 ```
 
-### Timeouts and cancellation
+### Refreshing Requests
 
-Read requests accept an optional `timeout` in milliseconds and an `AbortSignal`:
+To refresh posts already displayed by `useRequest`, call `useRefetch` with the same request:
 
 ```tsx
-const result = useRequest(request, { timeout: 10_000 });
-const refetch = useRefetch(request, { timeout: 10_000 });
+import { useRefetch } from 'react-fate';
+import { PostView } from './PostCard.tsx';
 
-const controller = new AbortController();
-await client.request(request, { timeout: 10_000, signal: controller.signal });
-// From another event handler: controller.abort();
+export function RefreshButton() {
+  const refetch = useRefetch({ posts: { list: PostView } });
+
+  return <button onClick={() => refetch().catch(reportError)}>Refresh posts</button>;
+}
 ```
 
-The default has no deadline. A timeout rejects with an error named `TimeoutError`;
-external cancellation rejects with `signal.reason` (normally an `AbortError`).
-The deadline starts when the read starts, includes persistence initialization,
-and stays fixed across equivalent Suspense rerenders. Use a stable signal when
-passing one to a hook. An already-aborted signal prevents a new fetch.
+Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler.
 
-Each imperative caller has its own deadline. Identical pending reads can share
-work, but cancelling one caller keeps that work alive for the others. Batched HTTP
-and GraphQL requests abort their shared fetch only when every operation cancels.
-Cancelled operations cannot write late network results to the cache. Custom
-transports receive the signal in their optional read context and should forward
-it to their network implementation; fate still rejects and ignores their late
-results if they do not support cancellation. The tRPC adapter passes the signal
-in the resolver's second argument, matching tRPC query options.
+### Timeouts and Cancellation
 
-`useRequest` sends initial failures to your error boundary. Handle errors from
-`useRefetch` or `client.request` in the calling event handler; these failures
-preserve existing data. An explicit retry starts a new deadline. The same options
-work with `useRequestState`, `client.observeRequest`, and Vue `useRequest`.
-For `stale-while-revalidate`, cached data returns immediately while the deadline
-bounds the background refresh. These controls apply to the request's initial
-reads; later view reads, deferred fields, pagination, live streams, and mutations
-have separate lifetimes and do not inherit them.
+You can limit how long a request waits by passing a `timeout` in milliseconds:
+
+```tsx
+const { posts } = useRequest({ posts: { list: PostView } }, { timeout: 10_000 });
+```
+
+Requests have no timeout by default. A timeout raises a `TimeoutError`, which `useRequest` sends to your error boundary. Retrying starts a new timeout.
+
+To cancel a request, pass an `AbortSignal` and call `abort()` when the result is no longer needed:
+
+```tsx
+const controller = new AbortController();
+const request = client.request({ posts: { list: PostView } }, { signal: controller.signal });
+
+controller.abort();
+
+try {
+  await request;
+} catch (error) {
+  // Handle cancellation or a failed request.
+}
+```
+
+Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
+
+Both options work with `useRefetch`, `useRequestState`, `client.observeRequest`, and Vue `useRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
+
+The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
 
 ### Cache Lifetime
 
@@ -853,30 +862,6 @@ one operation. Selection path segments and corresponding argument keys then use
 GraphQL performs that conversion automatically. Applications consume the declared
 result names, never the encoded transport names.
 
-### Imperative refresh with Suspense
-
-In React, use `useRefetch` alongside `useRequest` to refresh the same request from
-an event handler without changing the Suspense hook's return value:
-
-```tsx
-import { useRefetch, useRequest } from 'react-fate';
-
-const request = { viewer: { view: UserView } };
-const { viewer } = useRequest(request);
-const refetch = useRefetch(request);
-
-// In an event handler or React Action:
-await refetch();
-```
-
-Calling the hook does not fetch or subscribe. Its callback forces a network
-request and returns its typed result, rejecting on failure so the caller can
-handle the error. Existing cached data stays available while refreshing. Cache
-updates notify subscribed views and requests, including changed root results.
-Equivalent inline requests preserve the callback's identity. The optional second
-argument accepts `persist` options; the request mode is always `network-only`.
-Entity refreshes use the configured refetch query when one exists, across transports.
-
 ## Deferred Views
 
 Use `defer` when a field should not block the parent view. The parent view receives a deferred handle immediately after the eager fields are available, and the component that reads that handle with `useView`, `useListView`, or `useLiveListView` decides which `Suspense` boundary handles the loading state.
@@ -992,13 +977,13 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 
 If `loadNext` is `null`, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be `null`.
 
-When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. The types preserve this absence for optional and nullable deferred connections. Default the items when the UI should render an empty list:
+When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. Default the items when the UI should render an empty list:
 
 ```tsx
 const [comments = [], loadNext] = useListView(CommentConnectionView, post?.comments);
 ```
 
-A present connection with an empty `items` array returns that empty array. `useLiveListView` follows the same rules.
+`useLiveListView` follows the same rules.
 
 ### Pagination Arguments
 
@@ -1022,11 +1007,7 @@ const CommentConnectionView = {
 
 When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
 
-Concurrent loads with the same connection, selection, arguments, and cursor share pending work. A failed load rejects its callers and can be retried. Late pages preserve newer confirmed fields and deletions, and cannot restore a page window replaced by a newer refresh. Forward and backward pages can still extend opposite ends of the same list concurrently.
-
-Refreshing a query without `after` or `before` replaces its connection window, including removed entries and empty results. This applies to nested connections as well as root lists. Cursor-based requests continue to append or prepend pages.
-
-Complete selected relationships returned by mutations likewise replace their membership. Partial mutation pages preserve previously loaded entries outside that page, and optimistic changes are replayed over the latest confirmed snapshot. Removing a relationship does not delete its shared entity records.
+Loading another page adds items to the list. Refreshing the query without `after` or `before` replaces the loaded list with the latest result, including removed items or an empty list. This applies to nested connections as well as root lists. A failed page load can be retried.
 
 Additional arguments on a root request are scoped to that root list:
 
@@ -1040,6 +1021,10 @@ const { posts } = useRequest({
 ```
 
 The `categoryId` list above has its own cache entry and pagination state. Loading another page for that list does not update a different `posts` request with another category or search query.
+
+### Updating Lists with Mutations
+
+When a mutation returns a complete list, fate replaces that list's items. For example, if a mutation returns all of a post's comments without a removed comment, that comment disappears from the list. If the mutation returns only one page, fate keeps previously loaded items outside that page. Removing a comment from a list does not delete its record from the cache.
 
 ## Live Views
 
@@ -1884,6 +1869,8 @@ The adapter must pass the entire identity on every attempt, including `replayOnl
 
 If a client has registered mutations but no durable adapter, the persistence session reports a configuration error. Saved reads and `persist: false` calls still work. New durable calls fail before being queued, and existing queued mutations stay saved until a client with the adapter can deliver them.
 
+For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` to identify a terminal client error. Execution errors without a recognized status remain retryable, so a custom error message or code alone does not reject a saved mutation permanently.
+
 ### Persistence State
 
 Use `fate.persistence` to observe pending changes and storage errors:
@@ -2173,11 +2160,9 @@ await posts.ready();
 </template>
 ```
 
-`useViews` accepts a plain array, reactive ref, computed ref, or getter. Replacing, reordering, or mutating a reactive array updates the resource. The result preserves order, duplicates, `null` and `undefined` entries, readonly tuple positions, and each ref's parameter bindings. Deferred refs are supported too.
+Pass a plain array, ref, or getter, as you would with `useView`. The result follows the input order and updates when the refs or their selected fields change. Deferred refs are supported, and `null` or `undefined` entries keep their values in the result.
 
-The resource is a shallow ref with the same `pending`, `error`, `ready()`, `refresh()`, and `dispose()` members as `useView`. Await `ready()` in async setup to participate in Vue Suspense, or render the resource's pending and error states yourself. Its initial value is an empty array while the first read loads; later pending reads retain the previous data. `refresh()` rereads the current selection and fetches missing data.
-
-Selected fields and nested entities stay subscribed, so aggregate filtering reacts even when the outer array is unchanged. Unselected fields stay masked. Equivalent inputs and unchanged selected data preserve the result array's identity, and unrelated writes do not update it. Missing reads start together, duplicate refs share a read, and bursts of cache writes are coalesced. Scope disposal releases subscriptions and prevents late results from updating the resource.
+The resource has the same members as `useView`. Await `ready()` in async setup to use Vue Suspense, or render the pending and error states yourself. Before the first read finishes, `.value` is an empty array. Later reads keep the previous data while loading.
 
 ### Lists and Live Views
 
@@ -2308,59 +2293,25 @@ If your schema uses different root field names, keep the fate names you want on 
 
 ### Mapping Your Schema
 
-Create a module that exports data views, `Root`, and an optional `fateGraphQL` config. The Vite plugin reads this module during development and build time, generates the client wiring, and leaves your runtime GraphQL server unchanged.
+Create `src/fate/graphql.ts` with your server's schema and the queries and mutations you want to use:
 
 ```tsx
-import { graphqlMutation } from '@nkzw/fate';
-import { dataView, list, type Entity } from '@nkzw/fate/server';
-
-type GraphQLUser = {
-  id: string;
-  name?: string | null;
-  username?: string | null;
-};
-
-type GraphQLPost = {
-  author?: GraphQLUser | null;
-  id: string;
-  title: string;
-};
-
-export const userDataView = dataView<GraphQLUser>('User')({
-  id: true,
-  name: true,
-  username: true,
-});
-
-export const postDataView = dataView<GraphQLPost>('Post')({
-  author: userDataView,
-  id: true,
-  title: true,
-});
-
-export type User = Entity<typeof userDataView, 'User'>;
-export type Post = Entity<
-  typeof postDataView,
-  'Post',
-  {
-    author: User | null;
-  }
->;
-
-export const Root = {
-  posts: list(postDataView),
-  viewer: userDataView,
-};
+import { readFileSync } from 'node:fs';
 
 export const fateGraphQL = {
-  roots: {
-    posts: { field: 'posts' },
-    viewer: { field: 'viewer' },
+  schema: readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8'),
+  roots: { posts: {}, viewer: {} },
+  mutations: {
+    'post.like': { entity: 'Post', field: 'postLike' },
   },
 } as const;
 ```
 
-The data views describe the fields client components are allowed to select. `Root` describes the root operations available to `useRequest`. `fateGraphQL.roots` maps those root names to actual GraphQL fields. If the GraphQL field has the same name as the fate root, the `field` entry can be omitted.
+The `schema` option accepts schema definition language (SDL) text or a `GraphQLSchema` object. Install `graphql` in the package that generates the client when using SDL.
+
+fate derives entity types, query arguments, and mutation inputs and results from the schema. Use `field` when a fate root name differs from its GraphQL query field, for example `viewer: { field: 'currentUser' }`. The schema is used during generation and is excluded from the browser bundle.
+
+You can also describe selectable fields with [data views](/docs/integrations/server.md#data-views) and export `Root` from the mapping module. Existing mappings without a schema remain supported.
 
 ### Vite Plugin
 
@@ -2400,7 +2351,29 @@ export default defineConfig({
 
 :::
 
-The plugin generates a typed `createFateClient` helper from your views, roots, and GraphQL mapping. It also watches the mapping module and the files it imports during development.
+The plugin generates a typed `createFateClient` helper from your schema and GraphQL mapping. It also watches the mapping module and the files it imports during development.
+
+### Generated Types
+
+With a schema configured, fate generates `.fate/schema.generated.ts`. Use its `GraphQLEntities` types when defining client views:
+
+```tsx
+import { view } from 'react-fate';
+import type { GraphQLEntities } from '../../.fate/schema.generated.ts';
+
+type User = GraphQLEntities['User'];
+
+const UserCardView = view<User>()({
+  name: true,
+  username: true,
+});
+```
+
+These types describe fields available to select. A view only exposes the fields it selects. Connection fields in `GraphQLEntities` expose node arrays for view composition. The generated file also exports `GraphQLTypes` for schema output shapes and `GraphQLResponses` for transport results, where connections use `{ items, pagination }`.
+
+Custom scalars default to `unknown`. Set `fateGraphQL.scalars` to describe their TypeScript types, for example `{ DateTime: 'string' }`. Use `{ input: 'string', output: 'string' }` when specifying each side separately. These mappings change types; they do not convert returned values.
+
+After updating the schema, run `fate generate` again to refresh the client types. Use `import type` for generated types so the mapping module can load before those files exist.
 
 ### Creating a Client
 
@@ -2460,7 +2433,7 @@ const fate = createFateClient({
 });
 ```
 
-GraphQL queries issued in the same microtask are batched into a single document with aliased fields. Mutations use separate requests so a non-null failure cannot skip another mutation or discard its result. Mutations queued in the same microtask execute in invocation order, and a failed mutation does not prevent the next one from executing. The transport does not automatically retry mutations.
+GraphQL queries issued in the same microtask are batched into a single document. Mutations queued together run in order as separate requests, so one failure does not prevent the next mutation from running. The transport does not automatically retry mutations.
 
 Deferred view fields work with the GraphQL transport through the same normalized cache flow as native HTTP: the eager query omits `defer(...)` fields, and `useView`, `useListView`, or `useLiveListView` fetches the missing selection through `nodes(ids:)` when the deferred handle is read. GraphQL `@defer` is the natural wire format for this feature, but fate's GraphQL transport currently expects one JSON result per operation and does not consume incremental multipart patches yet.
 
@@ -2489,17 +2462,16 @@ Nested pagination uses the owner ID only for the mapped query field. Pagination 
 
 Choose fields with the appropriate authorization rules for the consuming views. The adapter does not switch between public and authenticated lookup fields automatically.
 
-#### Refetching through existing queries
+#### Refetching Through Existing Queries
 
-An entity's cache identity does not need to be its lookup argument. With a schema, configure ordinary entity query roots directly and assign a refetch recipe:
+If your API fetches users by username instead of ID, configure fate to use that query when refreshing a user:
 
 ```tsx
 export const fateGraphQL = {
   schema,
   nodes: false,
   roots: {
-    user: { type: 'User' },
-    viewer: { type: 'User' },
+    user: {},
   },
   refetch: {
     User: {
@@ -2507,16 +2479,14 @@ export const fateGraphQL = {
       args: { username: { field: 'username' } },
     },
   },
-};
+} as const;
 ```
 
-Here `user` maps to `Query.user(username:)`. Aliased root names can specify their GraphQL `field` as usual. Codegen checks the root's return type, required arguments, projected field types, nullability, and constants. A recipe references a single entity query, not a connection or embedded value root. Existing data-view root declarations remain supported.
+Here `user` maps to `Query.user(username:)`. fate automatically selects and caches `username` whenever it fetches a user. Components only see the username if their view selects it. Later entity reads, deferred fields, and nested pagination use this query instead of `byId` or `nodes`.
 
-Fate automatically selects `username` whenever this entity appears in a query, connection, or mutation response. The locator stays inside the normalized cache and does not appear in a component's masked view unless selected. Entity reads, deferred selections, explicit ID requests, and nested pagination use the recipe instead of `byId` or `nodes`. Matching pending refetches deduplicate, and GraphQL batches distinct lookups using aliases. Legacy `byId` mappings continue working for types without a recipe.
+Refetch arguments use confirmed cached values, so optimistic username changes do not affect the lookup. The result must match the user's original ID. A missing user raises `FateRequestError('NOT_FOUND')` without deleting cached data. If the username changes elsewhere, refresh a parent or viewer query to get the new value. Requesting an ID before fate has cached its username fails because fate cannot construct the lookup.
 
-References retain their stable `(typename, id)` identity. Fate constructs lookup arguments from **confirmed** cached values, so optimistic renames cannot redirect a lookup. The returned identity must match before any normalization occurs. Missing results report `FateRequestError('NOT_FOUND')` without deleting the cached record. A username changed elsewhere may require refreshing an authoritative parent or viewer query. A cold ID without its locator reports an actionable error instead of falling back to an ID lookup. Recipes with no field dependencies, such as a viewer query, can fetch cold identities but still check the result's identity.
-
-Arguments use `{ field: 'username' }` for scalar field projections, `{ value: ... }` for JSON constants, and `{ object: { ... } }` for nested input objects. The explicit object wrapper also supports input fields literally named `field`, `value`, or `object`. For example:
+Use `{ field: 'username' }` to read a scalar field, `{ value: 'public' }` for a constant, or `{ object: { ... } }` for a nested input object:
 
 ```tsx
 args: {
@@ -2529,11 +2499,7 @@ args: {
 }
 ```
 
-Use `RefetchArguments<User, GraphQLFieldArguments['Query']['user']>` from `@nkzw/fate` to type-check projections while authoring a recipe. Projected `id` fields use the GraphQL transport's node ID encoder during automatic refetches; ordinary root arguments retain their existing wire representation.
-
-Implicit locators are retained and persisted with their entities. Adding or changing a recipe does not change mutation-journal compatibility; restored cache records missing required locator coverage are refreshed through their requested root. Existing server refetch endpoints can remain available to older deployed clients.
-
-For other transports, put the same recipe in `TypeConfig.refetch`. Implement `fetchQuery`; Fate adds implicit scalar selections to entity reads and entity mutation calls. Query transports receive an optional fourth `{ refetch: typeName }` context on automatic entity lookups. GraphQL also adds locator selections inside embedded results and concrete interface results.
+You can check these arguments with `RefetchArguments<User, GraphQLFieldArguments['Query']['user']>` from `@nkzw/fate`. The query must return a single entity of the configured type.
 
 ### Object IDs
 
@@ -2587,14 +2553,13 @@ This produces a root `posts(first: 10)` field and a nested `comments(first: 3)` 
 
 ### Mutations
 
-Map fate mutation names to GraphQL mutation fields with `graphqlMutation`:
+Map fate mutation names to GraphQL mutation fields:
 
 ```tsx
 export const fateGraphQL = {
+  schema,
   mutations: {
-    'post.like': graphqlMutation<Post, { id: string }, Post>('Post', {
-      field: 'postLike',
-    }),
+    'post.like': { entity: 'Post', field: 'postLike' },
   },
   roots: {
     posts: { field: 'posts' },
@@ -2617,20 +2582,30 @@ Use `inputArg` when your schema uses a different argument name, or `inputArg: fa
 
 ```tsx
 export const fateGraphQL = {
+  schema,
   mutations: {
-    'post.like': graphqlMutation<Post, { id: string }, Post>('Post', {
-      field: 'likePost',
-      inputArg: 'payload',
-    }),
-    'user.follow': graphqlMutation<User, { id: string }, User>('User', {
-      field: 'followUser',
-      inputArg: false,
-    }),
+    'post.like': { entity: 'Post', field: 'likePost', inputArg: 'payload' },
+    'user.follow': { entity: 'User', field: 'followUser', inputArg: false },
   },
 } as const;
 ```
 
-Mutations use the same `mutation(...)` API described in the [Actions Guide](/docs/guide/actions.md). React clients can also expose those mutations as Actions for `useActionState`.
+Call mutations through `fate.mutations`, as described in the [Actions Guide](/docs/guide/actions.md). Pass a view to select fields from the result:
+
+```tsx
+const { result } = await fate.mutations.post.like({
+  input: { id: post.id },
+  view: PostView,
+});
+
+if (result) {
+  console.log(result.title);
+}
+```
+
+Without a selection, entity results expose only identity fields. React clients can also use `fate.actions` with `useActionState`; those action results expose identity fields, while selected fields update the cache for views to read.
+
+For mappings without a schema, use `graphqlMutation` from `@nkzw/fate` to declare mutation types manually.
 
 ### Live Views
 
@@ -2673,30 +2648,13 @@ const fate = createFateClient({
 
 The GraphQL transport is intentionally a mapping layer. It does not require `createFateServer`, the Prisma adapter, or the Drizzle adapter. Your GraphQL server remains responsible for authorization, validation, resolver behavior, cursor pagination, and mutation side effects.
 
-Use data views to expose only the fields the client should be able to select, keep GraphQL schema authorization in your server, and treat `src/fate/graphql.ts` as the contract between your GraphQL API and fate's client.
+Keep authorization in your GraphQL server. Server data views can still resolve live updates and computed fields; client types come from the schema configured in `src/fate/graphql.ts`.
 
 ### Schema-Aware Arguments
 
-Provide your server's schema in the mapping module to generate GraphQL argument contracts and send arguments as typed variables. The `schema` option accepts SDL text or a `GraphQLSchema` object and is evaluated during client generation:
+With a schema configured, fate sends arguments as typed GraphQL variables. For example, given `posts(category: PostCategory)`, `{ category: 'News' }` is sent as a variable of type `PostCategory`. Clients without a schema use literal arguments, which cannot represent enums correctly.
 
-```tsx
-import { readFileSync } from 'node:fs';
-
-export const fateGraphQL = {
-  schema: readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8'),
-  roots: {
-    maps: { field: 'maps' },
-  },
-  mutations: {
-    'map.update': graphqlMutation<Map, UpdateMapInput, Map>('Map', {
-      field: 'updateMap',
-      inputArg: false,
-    }),
-  },
-};
-```
-
-Install `graphql` in the package performing generation when passing SDL. Run `fate generate` again after updating the schema. Generated browser code contains argument metadata, not the SDL or GraphQL parser. Existing clients without a schema retain literal argument serialization; use schema-aware generation for enums.
+Generated clients check query and mutation arguments against the schema. Non-null arguments are required unless they have a default. Omitting a value preserves its server default; passing `null` is distinct.
 
 SDL text must include definitions for every directive it uses. Some server-generated or Relay-oriented schema files contain annotations such as `@auth` or `@fetchable` without declaring them; strict SDL parsing rejects those files. Prefer adding the directive definitions to the exported SDL. If the omissions are intentional, pass a schema object instead:
 
@@ -2711,47 +2669,9 @@ export const fateGraphQL = {
 };
 ```
 
-`assumeValidSDL` skips SDL validation, so use it only when the annotations are known and the schema is validated elsewhere. Fate still extracts argument metadata at generation time; the browser bundle does not include the schema object.
+`assumeValidSDL` skips SDL validation, so use it only when the annotations are known and the schema is validated elsewhere.
 
-For example, given `maps(biome: Biome)`, an argument `{ biome: 'Grassland' }` is sent as a variable declared with type `Biome`, rather than an invalid quoted enum literal. Variables also work for nested field arguments, input objects, lists, node IDs, and mutations. Batched operations use distinct variable names and separate query and mutation payloads. Mutation selection arguments are kept out of mutation inputs. A GraphQL mutation argument named `args` belongs in `input` like any other wire argument; use the mutation's `view` or its separate `args` option for selected field arguments. When calling `transport.mutate` directly, pass selected field arguments as its optional fourth parameter.
-
-The generated client enforces root arguments in `client.request` and the React/Vue `useRequest` adapters. Mutation inputs are derived from the schema using the configured `inputArg`, replacing the manually declared input type for generated clients. Non-null arguments are required unless the schema supplies a default. Omitting an optional/defaulted value preserves its server default; explicit `null` remains distinct.
-
-Schema-aware generation also writes `.fate/schema.generated.ts`. Import its types directly in the mapping module or application code; these imports are erased, so generation works before that file exists on a clean checkout:
-
-```tsx
-import type { GraphQLEntities } from '../.fate/schema.generated.ts';
-
-type User = GraphQLEntities['User'];
-
-const UserCardView = view<User>()({
-  displayName: true,
-  username: true,
-});
-```
-
-`GraphQLTypes` describes the GraphQL schema's output shapes, including discriminated interfaces and unions. `GraphQLEntities` describes selectable Fate shapes: connection fields expose their node arrays for view composition. `GraphQLResponses` describes transport normalization, where connections become `{ items, pagination }`. These are available schema fields, not promises that every response contains every field. Generating a union type does not add new runtime selection capabilities to the transport.
-
-Schema-backed mappings can expose entity queries and Relay-style connection roots
-without client `dataView` declarations. Types and mutation arguments come from the schema:
-
-```tsx
-export const fateGraphQL = {
-  schema,
-  roots: { posts: {}, viewer: {} },
-  mutations: { 'post.like': { entity: 'Post', field: 'postLike' } },
-} as const;
-```
-
-Use `field` when an application root name differs from the schema query field.
-Existing server data views may still implement resolvers and live updates; they
-are independent of these generated GraphQL contracts.
-
-With a schema, generated clients derive root and mutation output contracts from that schema rather than handwritten mapping generics. Direct mutation calls infer their unmasked results from the supplied `view` or `select`, including nested selections and nullable results. Without a selection, entity results promise only automatic identity fields. Mutation responses are not masked `ViewData` and do not carry view tags. React action state has one result contract across dispatches with different selections, so entity action results promise identity rather than dispatch-specific fields.
-
-Custom scalars default to `unknown`. Configure their TypeScript wire representations with `fateGraphQL.scalars`, for example `DateTime: 'string'`, or `{ input: 'string', output: 'string' }` when specifying both sides. A mapping changes types only; it does not decode values into JavaScript classes. For independent build tooling, `createGraphQLSchemaSource(schema, scalars)` from `@nkzw/fate/vite` generates the same contracts without loading a client mapping.
-
-Generation also exports `GraphQLInputs`, `GraphQLFieldArguments`, and `GraphQLSelectionArguments` from `.fate/client.generated.ts`. Use field contracts to check arguments inside reusable views:
+Generation also exports `GraphQLInputs`, `GraphQLFieldArguments`, and `GraphQLSelectionArguments` from `.fate/client.generated.ts`. Use these types to check arguments inside reusable views:
 
 ```tsx
 import type { GraphQLFieldArguments } from '../.fate/client.generated.ts';
@@ -2766,43 +2686,29 @@ const MapView = view<Map>()({
 });
 ```
 
-At runtime the transport checks selected field names, argument names, enum values, required inputs, built-in scalar types, and nested input objects before issuing an HTTP request. Custom scalar values have TypeScript type `unknown` and remain subject to server validation. These contracts cover arguments; they do not add support for GraphQL result shapes that the transport otherwise does not support.
+The transport also validates arguments before sending a request. Custom scalars still require server validation.
 
-For a manually constructed transport, extract metadata on the build/server side with `createGraphQLArgumentSchema` from `@nkzw/fate/vite`, then pass the serialized result as the transport's `schema` option. Keep that build-time helper out of browser modules.
+For custom build tooling, use `createGraphQLSchemaSource` to generate schema types or `createGraphQLArgumentSchema` to extract transport metadata. Both helpers come from `@nkzw/fate/vite` and run outside the browser.
 
 ### Errors and Partial Results
 
-A failed GraphQL operation rejects with `GraphQLRequestError`. It preserves all
-GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`
-when available. HTTP errors use the same error type; network failures retain the
-original fetch error.
+GraphQL query errors reject with `GraphQLRequestError`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
 
-Partial response data is available as `error.data` for explicit application
-handling. It is unnormalized diagnostic data, not a successful typed result, and
-fate does not write it to the cache. Successful sibling operations in the same
-batch still resolve normally, including legitimate `null` results. Mutation
-functions retain their `{ result, error }` result contract.
+Actions and mutations follow the [action error policy](/docs/guide/actions.md#action--mutation-error-handling). Expected failures such as validation errors return `{ error, result: undefined }`, and optimistic changes roll back:
 
-For actions and mutations without durable delivery, GraphQL execution errors are
-returned as `{ error, result: undefined }` so the caller can handle domain errors
-using `error.errors` and `error.extensions`. Optimistic changes roll back, and
-partial data never enters the cache. Query errors still reject normally.
+```tsx
+import { GraphQLRequestError } from 'react-fate';
 
-Fate recognizes standard `extensions.code` values such as `BAD_USER_INPUT`,
-`CONFLICT`, and `INTERNAL_SERVER_ERROR`, as well as numeric
-`extensions.http.status` values. HTTP failures and these extension statuses follow
-the existing action error policy: validation and conflict errors are handled at
-the call site; authentication, authorization, and server failures throw. If any
-error in a response requires a boundary, the entire mutation throws its original
-`GraphQLRequestError`. The error's `status` remains the original HTTP status,
-including `200` for execution errors.
+const { error } = await fate.mutations.post.like({ input: { id: post.id } });
 
-Malformed successful responses have `error.kind === 'protocol'` and throw, as do network
-failures. For durable delivery, an execution error without a recognized status
-remains retryable; fate does not infer terminal rejection from an error message or
-a custom code. Return a standard code or `extensions.http.status` to identify a
-terminal client rejection. This preserves pending writes when a server failure's
-outcome is unknown.
+if (error instanceof GraphQLRequestError && error.extensions?.code === 'BAD_USER_INPUT') {
+  // Show a validation message next to the form.
+}
+```
+
+fate recognizes standard `extensions.code` values such as `BAD_USER_INPUT`, `CONFLICT`, and `INTERNAL_SERVER_ERROR`, as well as numeric `extensions.http.status` values. Authentication, authorization, and server failures throw. Without durable delivery, execution errors without a recognized status are returned to the caller. Network failures throw the original fetch error. Malformed responses throw a `GraphQLRequestError` with `error.kind === 'protocol'`.
+
+The error's `status` is the original HTTP status, which may be `200` even when GraphQL reports an execution error. For retry behavior with saved mutations, see [Persistence](/docs/guide/persistence.md#trpc-graphql-and-custom-transports).
 
 ## Server Integration
 

@@ -18,15 +18,14 @@ Read the [Getting Started Guide](https://fate.technology/guide/core-concepts) to
 
 ## GraphQL Types
 
-`client/src/fate/graphql.ts` imports the SDL exported from the Pothos schema during `dev:setup` and maps application root
-and mutation names. Fate generates `client/.fate/schema.generated.ts` from that
-schema; its `GraphQLEntities` types are used by the client views. Mutation inputs,
-output nullability, and connection shapes also come from the schema.
+After changing your GraphQL schema, regenerate the schema file and client types:
 
-Run `vp run --filter '@app/server' generate-graphql` after changing schema fields,
-then `vp run fate:generate` to update the client contracts. The server's
-Prisma data views implement live-event resolution and authorization; they are
-independent of these generated client contracts.
+```bash
+vp run --filter '@app/server' generate-graphql
+vp run fate:generate
+```
+
+`client/src/fate/graphql.ts` maps query and mutation names. Client views use `GraphQLEntities` from `client/.fate/schema.generated.ts`, generated from your Pothos schema. Server data views handle live updates and authorization.
 
 ## Technologies
 
@@ -126,7 +125,7 @@ Common commands from the project root:
 - `vp run dev:client` starts only the client.
 - `vp run dev:server` starts only the server.
 - `vp run dev:setup` generates the Prisma client, Pothos schema import map, fbtee setup, and fate client support.
-- `vp run fate:generate` refreshes fate client support after changing server views, roots, or routers.
+- `vp run fate:generate` regenerates client types after changing the GraphQL schema or client mapping.
 - `vp run prisma` runs Prisma CLI commands in the server package.
 - `vp check --fix` formats, lints, and type-checks the workspace.
 - `vp test` runs the test suite.
