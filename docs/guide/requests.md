@@ -107,7 +107,7 @@ export function RefreshButton() {
 }
 ```
 
-Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler.
+Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler. For Vue, see [Refreshing Requests](/guide/vue#refreshing-requests).
 
 ## Timeouts and Cancellation
 
@@ -136,7 +136,7 @@ try {
 
 Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
 
-Both options work with `useRefetch`, `useRequestState`, `client.observeRequest`, and Vue `useRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
+Both options work with `useRefetch` and `useRequestState` in React and Vue, Vue `useRequest`, and `client.observeRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
 
 The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
 
@@ -236,6 +236,7 @@ It returns `status`, `data`, `error`, and `isFetching`. Status is `pending`, `re
 or `error` for an enabled network request. An initial failure exposes the original
 error rather than throwing during render. Request data contains the same refs as
 `useRequest`; resolve them with `useView`.
+Vue provides the same state as a ref; see [Request State in Vue](/guide/vue#request-state).
 
 Use `{ enabled: false }` for an empty search or an inactive screen. The status is
 `disabled`, data is undefined, and no request starts. Changing `enabled` to true

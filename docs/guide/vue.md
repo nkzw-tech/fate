@@ -1,8 +1,6 @@
 # Vue
 
-_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useRequestState`, `useRefetch`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
-
-Vue components use fate through Vue resources built from refs, computed values, watchers, and `<Suspense>`. The view model, generated client, normalized cache, masking, request shapes, list views, live views, and mutations are shared with the React adapter.
+_fate_ supports Vue through `vue-fate`, with the same views, requests, cache, and mutations as the React adapter. Request and view composables expose reactive Vue resources, with `<Suspense>` support for loading states.
 
 ## Installation
 
@@ -135,8 +133,8 @@ const request = useRequest({
   },
 });
 
-const { posts } = await request.ready();
-const [postItems, loadNext] = useListView(PostCardView, posts);
+await request.ready();
+const [postItems, loadNext] = useListView(PostCardView, () => request.data.value?.posts);
 </script>
 
 <template>
@@ -145,37 +143,54 @@ const [postItems, loadNext] = useListView(PostCardView, posts);
 </template>
 ```
 
-Awaiting `ready()` in `<script setup>` participates in Vue Suspense. If you do not await it, read `request.data.value`, `request.pending.value`, and `request.error.value` in script, or use the refs directly in templates.
+Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, use `useRequestState` instead.
 
 ## Request State
 
-Use `useRequestState` to observe a request without awaiting `ready()` or using Suspense. It returns a shallow ref whose `.value` contains `data`, `status`, `isFetching`, `error`, and `refetch()`, plus a `dispose()` method on the ref:
+Use `useRequestState` to render loading and error states without Suspense:
 
-```ts
-const enabled = ref(false);
-const state = useRequestState({ viewer: { view: UserView } }, () => ({ enabled: enabled.value }));
+```vue
+<script setup lang="ts">
+import { useRequestState } from 'vue-fate';
+import { UserView } from '../fateViews';
+import UserCard from '../ui/UserCard.vue';
 
-// Starts when enabled becomes true.
-enabled.value = true;
+const state = useRequestState({ viewer: { view: UserView } }, { mode: 'stale-while-revalidate' });
+</script>
+
+<template>
+  <p v-if="state.isFetching">Loading…</p>
+  <p v-if="state.error">Could not load your profile.</p>
+  <UserCard v-if="state.data?.viewer" :user="state.data.viewer" />
+</template>
 ```
 
-The request and options accept plain values, refs, or getters. Disabled requests do not fetch. With `{ mode: 'cache-only' }`, the resource observes cached data without fetching missing fields. `status` is `disabled`, `missing`, `pending`, `ready`, or `error`.
+The result is a ref: use `state.value` in script, while templates unwrap it automatically. Its data contains view refs, which components such as `UserCard` resolve with `useView`. Cached data stays visible during a refresh, and `isFetching` and `error` report its progress and failures.
 
-`refetch()` forces a network request and rejects on failure. Cached data stays available while refreshing, with `isFetching` and `error` reporting background work. Disabled and cache-only requests reject calls to `refetch()`. Scope disposal releases the observer automatically.
+The request and options accept plain values, refs, or getters. Pass `{ enabled: false }` to disable fetching, or `{ mode: 'cache-only' }` to observe cached data without fetching missing fields. The `status` is `disabled`, `missing`, `pending`, `ready`, or `error`, as described in [Observing Request State](/guide/requests#observing-request-state).
 
-## Refetching on Demand
+Call `state.value.refetch()` to fetch fresh data. Handle its rejected promise in the calling code. Disabled and cache-only requests reject refetches. Vue cleans up the observer when the component unmounts; call `state.dispose()` to stop it earlier.
 
-Use `useRefetch` when a button or event should refresh data without starting a request during setup:
+## Refreshing Requests
 
-```ts
-const refresh = useRefetch(() => ({
-  viewer: { view: UserView },
-}));
+Use `useRefetch` to refresh data from a button or event handler:
 
-await refresh();
+```vue
+<script setup lang="ts">
+import { useRefetch } from 'vue-fate';
+import { UserView } from '../fateViews';
+
+const refresh = useRefetch({ viewer: { view: UserView } });
+</script>
+
+<template>
+  <button @click="refresh().catch(reportError)">Refresh profile</button>
+</template>
 ```
 
-The callback always uses `network-only` mode. It reads the current request, options, and provided client when called, so refs and getters work without recreating the callback. The optional second argument accepts `persist`, `timeout`, and `signal`. Failures reject the returned promise. Existing request and view resources observe successful updates while keeping their current data during the refresh.
+The composable waits until you call `refresh()` to fetch from the network. Existing data stays visible, and request and view resources update when the result arrives. Handle failures in the event handler; `reportError` above represents your application's error handler.
+
+Requests and options can be refs or getters. Each call uses their current values. The optional second argument accepts `persist`, `timeout`, and `signal`; see [Timeouts and Cancellation](/guide/requests#timeouts-and-cancellation).
 
 ## Views in Components
 
@@ -240,7 +255,7 @@ The resource has the same members as `useView`. Await `ready()` in async setup t
 const [comments, loadNextCommentPage] = useListView(CommentView, () => post.value?.comments);
 ```
 
-When a connection is `null` or `undefined`, its items ref contains `undefined` and both pagination helpers are `null`. A present connection with no items returns an empty array. The result types preserve absence for optional items and nullable deferred connections. `useLiveListView` follows the same rules.
+The items and pagination helpers are refs. If the connection is `null` or `undefined`, `comments.value` is `undefined` and both pagination helper values are `null`. A connection with `items: []` returns an empty array. Use `comments.value ?? []` when you want to treat missing comments as an empty list. `useLiveListView` follows the same rules.
 
 `useLiveView` and `useLiveListView` have the same resource shape as `useView` and `useListView`, but they also subscribe to server-pushed updates when the selected transport supports live views:
 
@@ -249,17 +264,7 @@ const post = useLiveView(PostCardView, () => props.post);
 const [comments] = useLiveListView(CommentView, () => post.value?.comments);
 ```
 
-Manual cleanup works through `dispose()`:
-
-```ts
-const post = useLiveView(PostCardView, () => props.post);
-
-onBeforeUnmount(() => {
-  post.dispose();
-});
-```
-
-Vue scope disposal also cleans up resources automatically.
+Vue cleans up resources when the component unmounts. Call `dispose()` to stop a resource earlier.
 
 ## Mutations
 
@@ -283,10 +288,11 @@ const like = async () => {
   error.value = null;
 
   try {
-    await fate.mutations.post.like({
+    const result = await fate.mutations.post.like({
       input: { id: props.post.id },
       optimistic: { likes: props.post.likes + 1 },
     });
+    error.value = result.error ?? null;
   } catch (caughtError) {
     error.value = caughtError;
   } finally {
@@ -297,8 +303,11 @@ const like = async () => {
 
 <template>
   <button :disabled="pending" @click="like">Like</button>
+  <p v-if="error">Could not like this post.</p>
 </template>
 ```
+
+Expected mutation errors are returned in `result.error`; unexpected failures reject the promise. See [Action & Mutation Error Handling](/guide/actions#action--mutation-error-handling).
 
 The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `insert`, and `view` work the same way. Vue does not have React Actions or `useActionState`, so Vue components should model pending and error state with Vue refs or your application state library.
 

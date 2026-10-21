@@ -652,7 +652,7 @@ export function RefreshButton() {
 }
 ```
 
-Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler.
+Calling `refetch()` fetches fresh data from the network and returns a promise for the result. Existing data stays visible while the request runs, and views update when the new data arrives. If the refresh fails, the promise rejects and the previous data stays available. Handle the error in your event handler; `reportError` above represents your application's error handler. For Vue, see [Refreshing Requests](/docs/guide/vue.md#refreshing-requests).
 
 ### Timeouts and Cancellation
 
@@ -681,7 +681,7 @@ try {
 
 Cancellation rejects with `signal.reason`, normally an `AbortError`. If several callers share a request, cancelling one does not cancel the others. Cancelled requests cannot write late results to the cache.
 
-Both options work with `useRefetch`, `useRequestState`, `client.observeRequest`, and Vue `useRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
+Both options work with `useRefetch` and `useRequestState` in React and Vue, Vue `useRequest`, and `client.observeRequest` too. Keep the signal stable when passing it to a hook. Handle failures from `useRefetch` and `client.request` in the calling code.
 
 The timeout includes persistence initialization and, with `stale-while-revalidate`, the background refresh. These options apply to the initial request; later view reads, deferred fields, pagination, live streams, and mutations have separate lifetimes.
 
@@ -781,6 +781,7 @@ It returns `status`, `data`, `error`, and `isFetching`. Status is `pending`, `re
 or `error` for an enabled network request. An initial failure exposes the original
 error rather than throwing during render. Request data contains the same refs as
 `useRequest`; resolve them with `useView`.
+Vue provides the same state as a ref; see [Request State in Vue](/docs/guide/vue.md#request-state).
 
 Use `{ enabled: false }` for an empty search or an inactive screen. The status is
 `disabled`, data is undefined, and no request starts. Changing `enabled` to true
@@ -1962,9 +1963,7 @@ Persistence coordinates mutation delivery across tabs, but it does not keep ever
 
 ## Vue
 
-_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
-
-Vue components use fate through Vue resources built from refs, computed values, watchers, and `<Suspense>`. The view model, generated client, normalized cache, masking, request shapes, list views, live views, and mutations are shared with the React adapter.
+_fate_ supports Vue through `vue-fate`, with the same views, requests, cache, and mutations as the React adapter. Request and view composables expose reactive Vue resources, with `<Suspense>` support for loading states.
 
 ### Installation
 
@@ -2097,8 +2096,8 @@ const request = useRequest({
   },
 });
 
-const { posts } = await request.ready();
-const [postItems, loadNext] = useListView(PostCardView, posts);
+await request.ready();
+const [postItems, loadNext] = useListView(PostCardView, () => request.data.value?.posts);
 </script>
 
 <template>
@@ -2107,7 +2106,54 @@ const [postItems, loadNext] = useListView(PostCardView, posts);
 </template>
 ```
 
-Awaiting `ready()` in `<script setup>` participates in Vue Suspense. If you do not await it, read `request.data.value`, `request.pending.value`, and `request.error.value` in script, or use the refs directly in templates.
+Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, use `useRequestState` instead.
+
+### Request State
+
+Use `useRequestState` to render loading and error states without Suspense:
+
+```vue
+<script setup lang="ts">
+import { useRequestState } from 'vue-fate';
+import { UserView } from '../fateViews';
+import UserCard from '../ui/UserCard.vue';
+
+const state = useRequestState({ viewer: { view: UserView } }, { mode: 'stale-while-revalidate' });
+</script>
+
+<template>
+  <p v-if="state.isFetching">Loading…</p>
+  <p v-if="state.error">Could not load your profile.</p>
+  <UserCard v-if="state.data?.viewer" :user="state.data.viewer" />
+</template>
+```
+
+The result is a ref: use `state.value` in script, while templates unwrap it automatically. Its data contains view refs, which components such as `UserCard` resolve with `useView`. Cached data stays visible during a refresh, and `isFetching` and `error` report its progress and failures.
+
+The request and options accept plain values, refs, or getters. Pass `{ enabled: false }` to disable fetching, or `{ mode: 'cache-only' }` to observe cached data without fetching missing fields. The `status` is `disabled`, `missing`, `pending`, `ready`, or `error`, as described in [Observing Request State](/docs/guide/requests.md#observing-request-state).
+
+Call `state.value.refetch()` to fetch fresh data. Handle its rejected promise in the calling code. Disabled and cache-only requests reject refetches. Vue cleans up the observer when the component unmounts; call `state.dispose()` to stop it earlier.
+
+### Refreshing Requests
+
+Use `useRefetch` to refresh data from a button or event handler:
+
+```vue
+<script setup lang="ts">
+import { useRefetch } from 'vue-fate';
+import { UserView } from '../fateViews';
+
+const refresh = useRefetch({ viewer: { view: UserView } });
+</script>
+
+<template>
+  <button @click="refresh().catch(reportError)">Refresh profile</button>
+</template>
+```
+
+The composable waits until you call `refresh()` to fetch from the network. Existing data stays visible, and request and view resources update when the result arrives. Handle failures in the event handler; `reportError` above represents your application's error handler.
+
+Requests and options can be refs or getters. Each call uses their current values. The optional second argument accepts `persist`, `timeout`, and `signal`; see [Timeouts and Cancellation](/docs/guide/requests.md#timeouts-and-cancellation).
 
 ### Views in Components
 
@@ -2172,6 +2218,8 @@ The resource has the same members as `useView`. Await `ready()` in async setup t
 const [comments, loadNextCommentPage] = useListView(CommentView, () => post.value?.comments);
 ```
 
+The items and pagination helpers are refs. If the connection is `null` or `undefined`, `comments.value` is `undefined` and both pagination helper values are `null`. A connection with `items: []` returns an empty array. Use `comments.value ?? []` when you want to treat missing comments as an empty list. `useLiveListView` follows the same rules.
+
 `useLiveView` and `useLiveListView` have the same resource shape as `useView` and `useListView`, but they also subscribe to server-pushed updates when the selected transport supports live views:
 
 ```ts
@@ -2179,17 +2227,7 @@ const post = useLiveView(PostCardView, () => props.post);
 const [comments] = useLiveListView(CommentView, () => post.value?.comments);
 ```
 
-Manual cleanup works through `dispose()`:
-
-```ts
-const post = useLiveView(PostCardView, () => props.post);
-
-onBeforeUnmount(() => {
-  post.dispose();
-});
-```
-
-Vue scope disposal also cleans up resources automatically.
+Vue cleans up resources when the component unmounts. Call `dispose()` to stop a resource earlier.
 
 ### Mutations
 
@@ -2213,10 +2251,11 @@ const like = async () => {
   error.value = null;
 
   try {
-    await fate.mutations.post.like({
+    const result = await fate.mutations.post.like({
       input: { id: props.post.id },
       optimistic: { likes: props.post.likes + 1 },
     });
+    error.value = result.error ?? null;
   } catch (caughtError) {
     error.value = caughtError;
   } finally {
@@ -2227,8 +2266,11 @@ const like = async () => {
 
 <template>
   <button :disabled="pending" @click="like">Like</button>
+  <p v-if="error">Could not like this post.</p>
 </template>
 ```
+
+Expected mutation errors are returned in `result.error`; unexpected failures reject the promise. See [Action & Mutation Error Handling](/docs/guide/actions.md#action--mutation-error-handling).
 
 The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `insert`, and `view` work the same way. Vue does not have React Actions or `useActionState`, so Vue components should model pending and error state with Vue refs or your application state library.
 
@@ -2692,7 +2734,7 @@ For custom build tooling, use `createGraphQLSchemaSource` to generate schema typ
 
 ### Errors and Partial Results
 
-GraphQL query errors reject with `GraphQLRequestError`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
+GraphQL query errors reject with `GraphQLRequestError`, exported by both `react-fate` and `vue-fate`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
 
 Actions and mutations follow the [action error policy](/docs/guide/actions.md#action--mutation-error-handling). Expected failures such as validation errors return `{ error, result: undefined }`, and optimistic changes roll back:
 

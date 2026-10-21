@@ -447,7 +447,7 @@ For custom build tooling, use `createGraphQLSchemaSource` to generate schema typ
 
 ## Errors and Partial Results
 
-GraphQL query errors reject with `GraphQLRequestError`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
+GraphQL query errors reject with `GraphQLRequestError`, exported by both `react-fate` and `vue-fate`. It includes the GraphQL `errors`, the first error's `path` and `extensions`, and the HTTP `status`. Partial response data is available as `error.data` for diagnostics and is never written to the cache. Successful operations in the same batch still resolve normally.
 
 Actions and mutations follow the [action error policy](/guide/actions#action--mutation-error-handling). Expected failures such as validation errors return `{ error, result: undefined }`, and optimistic changes roll back:
 
