@@ -14,6 +14,7 @@ import { toEntityId } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import type {
   AnyRecord,
+  ConnectionMetadata,
   Entity,
   MutationDefinition,
   MutationEntity,
@@ -52,6 +53,66 @@ export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__va
 
 /** Where (or if) to insert the resulting record into relevant lists. */
 export type InsertPosition = 'after' | 'before' | 'none';
+
+/** A normalized list or connection returned by this client. */
+export type InsertionTarget<TName extends string = string> =
+  | ReadonlyArray<Readonly<{ __typename: TName }> | null>
+  | Readonly<{
+      items: ReadonlyArray<Readonly<{ node: Readonly<{ __typename: TName }> | null }>>;
+    }>;
+
+/** Insert the returned entity into one specific list, preserving its query scope. */
+export type ListInsertion<TName extends string = string> = Readonly<{
+  into: InsertionTarget<TName>;
+  position: Exclude<InsertPosition, 'none'>;
+}>;
+
+export type MutationInsertion<TName extends string = string> =
+  | InsertPosition
+  | ListInsertion<TName>
+  | ReadonlyArray<ListInsertion<TName>>;
+
+/** @internal Serializable insertion targets captured before executing a mutation. */
+export type ResolvedInsertion = Readonly<{
+  list: ConnectionMetadata;
+  position: Exclude<InsertPosition, 'none'>;
+}>;
+export type ResolvedMutationInsertion = InsertPosition | ReadonlyArray<ResolvedInsertion>;
+
+/** @internal Validate serialized insertion descriptors before journal replay. */
+export function isResolvedMutationInsertion(value: unknown): value is ResolvedMutationInsertion {
+  if (typeof value === 'string') {
+    return value === 'none' || value === 'before' || value === 'after';
+  }
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  const keys = new Set<string>();
+  return value.every((entry) => {
+    if (
+      !isRecord(entry) ||
+      (entry.position !== 'before' && entry.position !== 'after') ||
+      !isRecord(entry.list)
+    ) {
+      return false;
+    }
+    const list = entry.list;
+    if (
+      typeof list.key !== 'string' ||
+      !list.key ||
+      !['owner', 'field', 'procedure', 'type'].every(
+        (key) => typeof list[key] === 'string' && list[key].length > 0,
+      ) ||
+      (list.hash !== undefined && typeof list.hash !== 'string') ||
+      typeof list.root !== 'boolean' ||
+      keys.has(list.key)
+    ) {
+      return false;
+    }
+    keys.add(list.key);
+    return true;
+  });
+}
 /**
  * Options accepted by a mutation invocation, including optimistic updates and
  * optional selection for the returned payload.
@@ -63,7 +124,7 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   delete?: boolean;
   /** Input data for the mutation. */
   input: Omit<MutationInput<Identifier>, 'select'>;
-  insert?: InsertPosition;
+  insert?: MutationInsertion<MutationEntity<Identifier>['__typename']>;
   /** Optional optimistic update to apply immediately. */
   optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
   /** Skip durable delivery for this call, even when persistence is configured. */
@@ -192,7 +253,7 @@ export type MutationCommand = {
   delete?: boolean;
   entity: string;
   input: AnyRecord;
-  insert: InsertPosition;
+  insert: ResolvedMutationInsertion;
   key: string;
   optimistic?: AnyRecord;
   plan?: SelectionPlan;
@@ -206,6 +267,7 @@ export function prepareMutation(
   durable = false,
 ) {
   const { args, delete: deleteRecord, entity, input, insert, key, optimistic, plan } = command;
+  const position = typeof insert === 'string' ? insert : 'none';
   if (!config) {
     if (deleteRecord || optimistic) {
       throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
@@ -238,41 +300,65 @@ export function prepareMutation(
   if (deleteRecord && id == null) {
     throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
   }
-  const settle = client.store.optimisticUpdate(() => {
-    if (optimisticRecord && optimisticEntityId) {
-      client.write(entity, optimisticRecord, optimisticSelection ?? emptySet, plan, insert);
-    }
-    if (deleteRecord && id != null) {
-      client.deleteRecord(entity, id);
-    }
-  }, durable);
+  const release = client.retainMutationLists(insert);
+  let settle: ReturnType<typeof client.store.optimisticUpdate>;
+  try {
+    settle = client.store.optimisticUpdate(() => {
+      if (optimisticRecord && optimisticEntityId) {
+        client.write(entity, optimisticRecord, optimisticSelection ?? emptySet, plan, position);
+        if (!deleteRecord && typeof insert !== 'string') {
+          client.insertMutationTargets(optimisticEntityId, insert);
+        }
+      }
+      if (deleteRecord && id != null) {
+        client.deleteRecord(entity, id);
+      }
+    }, durable);
+  } catch (error) {
+    release();
+    throw error;
+  }
   return {
-    commit: (result: unknown) =>
-      settle(() => {
-        if (result && typeof result === 'object' && (!deleteRecord || plan)) {
-          client.writeMutationResult(
-            entity,
-            result as AnyRecord,
-            collectImplicitSelectedPaths(result as AnyRecord),
-            plan,
-            insert,
-          );
-          const resultId = maybeGetId(config.getId, result as AnyRecord);
-          if (optimisticEntityId && resultId != null) {
-            client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+    commit: (result: unknown) => {
+      try {
+        settle(() => {
+          if (result && typeof result === 'object' && (!deleteRecord || plan)) {
+            client.writeMutationResult(
+              entity,
+              result as AnyRecord,
+              collectImplicitSelectedPaths(result as AnyRecord),
+              plan,
+              position,
+            );
+            const resultId = maybeGetId(config.getId, result as AnyRecord);
+            if (!deleteRecord && resultId != null && typeof insert !== 'string') {
+              client.insertMutationTargets(toEntityId(entity, resultId), insert);
+            }
+            if (optimisticEntityId && resultId != null) {
+              client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+            }
+            if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
+              client.deleteRecord(entity, optimisticRecordId);
+            }
           }
-          if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
-            client.deleteRecord(entity, optimisticRecordId);
+          if (deleteRecord && id != null) {
+            client.deleteRecord(entity, id);
           }
-        }
-        if (deleteRecord && id != null) {
-          client.deleteRecord(entity, id);
-        }
-      }),
+        });
+      } finally {
+        release();
+      }
+    },
     entityId: optimisticEntityId,
     execute: (identity?: MutationIdentity) =>
       client.executeMutation(key, input, selection, { args, identity, plan }),
-    rollback: () => settle(),
+    rollback: () => {
+      try {
+        settle();
+      } finally {
+        release();
+      }
+    },
   };
 }
 
@@ -288,7 +374,7 @@ export function wrapMutation<
     args,
     delete: deleteRecord,
     input,
-    insert = 'after',
+    insert = 'none',
     optimistic,
     persist,
     select,
@@ -299,7 +385,7 @@ export function wrapMutation<
       delete: deleteRecord,
       entity: identifier.entity,
       input,
-      insert,
+      insert: client.resolveMutationInsertion(identifier.entity, insert),
       key: identifier.key,
       optimistic: optimistic as AnyRecord | undefined,
       plan: view
@@ -308,41 +394,48 @@ export function wrapMutation<
           ? getSelectionPlan(select as View<any, any>, null)
           : undefined,
     };
-    if (client.persistence && persist !== false) {
-      try {
-        const result = (await client.withPersistenceLifecycle(() =>
-          client.persistMutation(command),
-        )) as MutationResult<I>;
-        return { error: undefined, result };
-      } catch (error) {
-        return handleMutationError(identifier.key, error);
+    // Durable admission can await restoration and disk writes before preparation
+    // acquires its own pins. Keep the caller's targets alive throughout that gap.
+    const release = client.persistence ? client.retainMutationLists(command.insert) : undefined;
+    try {
+      if (client.persistence && persist !== false) {
+        try {
+          const result = (await client.withPersistenceLifecycle(() =>
+            client.persistMutation(command),
+          )) as MutationResult<I>;
+          return { error: undefined, result };
+        } catch (error) {
+          return handleMutationError(identifier.key, error);
+        }
       }
-    }
 
-    if (client.persistence) {
-      await client.withPersistenceLifecycle(() => client.persistence!.ready);
-    }
-    client.assertPersistenceActive();
-    // Preparation failures reject directly, as they did before persistence.
-    const operation = prepareMutation(client, command, config);
-    const performMutation = async () => {
-      try {
-        const result = (await operation.execute()) as MutationResult<I>;
-        client.assertPersistenceActive();
-        operation.commit(result);
-        return { error: undefined, result };
-      } catch (error) {
-        operation.rollback();
-        return handleMutationError(identifier.key, error);
+      if (client.persistence) {
+        await client.withPersistenceLifecycle(() => client.persistence!.ready);
       }
-    };
-    const mutationPromise = client.trackPendingRequest(performMutation);
+      client.assertPersistenceActive();
+      // Preparation failures reject directly, as they did before persistence.
+      const operation = prepareMutation(client, command, config);
+      const performMutation = async () => {
+        try {
+          const result = (await operation.execute()) as MutationResult<I>;
+          client.assertPersistenceActive();
+          operation.commit(result);
+          return { error: undefined, result };
+        } catch (error) {
+          operation.rollback();
+          return handleMutationError(identifier.key, error);
+        }
+      };
+      const mutationPromise = client.trackPendingRequest(performMutation);
 
-    if (operation.entityId) {
-      client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
+      if (operation.entityId) {
+        client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
+      }
+
+      return await mutationPromise;
+    } finally {
+      release?.();
     }
-
-    return mutationPromise;
   }) as MutationFunction<I>;
 }
 

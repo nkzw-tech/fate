@@ -537,6 +537,8 @@ test('keeps loadNext hidden when an already visible local append receives its li
         post: { __typename: 'Post', id: 'post-1' },
       },
       new Set(['__typename', 'content', 'id', 'post', 'post.__typename', 'post.id']),
+      undefined,
+      'after',
     );
   });
 

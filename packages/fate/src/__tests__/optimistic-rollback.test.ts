@@ -4,7 +4,7 @@ import { mutation } from '../mutation.ts';
 import { getNodeRefId, type NodeRef } from '../node-ref.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
-import type { FateRoots } from '../types.ts';
+import type { FateRoots, SelectionOf } from '../types.ts';
 import { view } from '../view.ts';
 
 type User = { __typename: 'User'; id: string; name: string; score: number };
@@ -170,12 +170,17 @@ test('rollback preserves a successful concurrent list insertion', async () => {
     types: [{ type: 'User' }],
   });
   const request = { users: { list: { items: { cursor: true, node: UserView } } } };
-  await client.request(request);
+  const into = (await client.request(request)).users;
   const a = client.mutations
-    .create({ input: { name: 'A' }, optimistic: { id: 'temp-a', name: 'A', score: 0 } })
+    .create({
+      input: { name: 'A' },
+      insert: { into, position: 'after' },
+      optimistic: { id: 'temp-a', name: 'A', score: 0 },
+    })
     .catch(() => undefined);
   const b = client.mutations.create({
     input: { name: 'B' },
+    insert: { into, position: 'after' },
     optimistic: { id: 'temp-b', name: 'B', score: 0 },
   });
   second.resolve({ __typename: 'User', id: 'saved-b', name: 'B', score: 0 });
@@ -323,10 +328,11 @@ test('rebasing a pending insertion preserves unchanged list identity and subscri
     types: [{ type: 'User' }],
   });
   const request = { users: { list: { items: { node: UserView } } } };
-  await client.request(request);
+  const into = (await client.request(request)).users;
   const pending = client.mutations
     .create({
       input: { name: 'Pending' },
+      insert: { into, position: 'after' },
       optimistic: { id: 'temp', name: 'Pending', score: 0 },
     })
     .catch(() => undefined);
@@ -414,9 +420,13 @@ test('rollback retains newly fetched list pages without retaining failed optimis
     types: [{ type: 'User' }],
   });
   const request = { users: { list: { items: { cursor: true, node: UserView } } } };
-  await client.request(request);
+  const into = (await client.request(request)).users;
   const pending = client.mutations
-    .create({ input: { name: 'Pending' }, optimistic: { id: 'temp', name: 'Pending', score: 0 } })
+    .create({
+      input: { name: 'Pending' },
+      insert: { into, position: 'after' },
+      optimistic: { id: 'temp', name: 'Pending', score: 0 },
+    })
     .catch(() => undefined);
   await client.request(request, { mode: 'network-only' });
   expect(client.getRequestResult(request).users.items.map(({ node }) => node.id)).toContain('temp');
@@ -430,6 +440,7 @@ test('rollback retains newly fetched list pages without retaining failed optimis
 
 test('settling a nested insertion does not resurrect its temporary reference', async () => {
   type GroupedUser = User & { group: { __typename: 'Group'; id: string } };
+  type Group = { __typename: 'Group'; id: string; users: Array<User> };
   const first = Promise.withResolvers<GroupedUser>();
   const second = Promise.withResolvers<GroupedUser>();
   const mutations = { create: mutation<GroupedUser, { name: string }, GroupedUser>('User') };
@@ -447,11 +458,22 @@ test('settling a nested insertion does not resurrect its temporary reference', a
   });
   const group = { __typename: 'Group' as const, id: 'g1' };
   client.write('Group', { ...group, users: [] }, new Set(['id', 'users.id']));
+  const GroupView = view<Group>()({ id: true, users: { items: { node: UserView } } });
+  const { data } = await client.readView<Group, SelectionOf<typeof GroupView>, typeof GroupView>(
+    GroupView,
+    client.ref('Group', 'g1', GroupView),
+  );
+  const insert = { into: data.users, position: 'after' } as const;
   const a = client.mutations
-    .create({ input: { name: 'A' }, optimistic: { ...initial, group, id: 'temp-a' } })
+    .create({
+      input: { name: 'A' },
+      insert,
+      optimistic: { ...initial, group, id: 'temp-a' },
+    })
     .catch(() => undefined);
   const b = client.mutations.create({
     input: { name: 'B' },
+    insert,
     optimistic: { ...initial, group, id: 'temp-b' },
   });
   second.resolve({ ...initial, group, id: 'saved-b' });

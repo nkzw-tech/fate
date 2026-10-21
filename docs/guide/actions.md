@@ -79,6 +79,7 @@ When a mutation inserts a new object, you can provide an optimistic object with 
 const content = 'New Comment text';
 addComment({
   input: { content, postId: post.id },
+  insert: { into: post.comments, position: 'after' },
   optimistic: {
     author: { id: user.id, name: user.name },
     content,
@@ -88,12 +89,12 @@ addComment({
 });
 ```
 
-By default, fate inserts new records after existing items in matching root lists and nested lists. For a newest-first list, pass `insert: 'before'` so optimistic records appear at the beginning:
+By default, mutations update normalized records without adding them to lists. Specify a queried list or connection when a new record should appear in it. For a newest-first list:
 
 ```tsx
 addComment({
   input: { content, postId: post.id },
-  insert: 'before',
+  insert: { into: post.comments, position: 'before' },
   optimistic: {
     content,
     id: `optimistic:${Date.now().toString(36)}`,
@@ -104,7 +105,7 @@ addComment({
 
 Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
 
-Multiple pending optimistic inserts keep their visible order. For example, two `insert: 'before'` calls on a newest-first feed show the second optimistic item before the first, matching what users expect from newly created content.
+Multiple pending optimistic inserts keep their visible order. For example, two scoped insertions with `position: 'before'` show the second optimistic item before the first. Failed mutations roll back the record and its insertions together; successful mutations replace temporary IDs without duplicating list entries.
 
 ## Selecting a View with Actions
 
@@ -286,20 +287,64 @@ useEffect(() => {
 
 ## Controlling List Insertion Behavior
 
-When inserting new objects into lists, the default behavior is to append the new object to the list. You can provide an `insert` option with `before`, `after` or `none` values to customize this behavior and specify where the new object should be inserted in the list:
+Mutations default to `insert: 'none'`. Returned records and optimistic fields still update every existing reference, but fate does not infer membership in other lists. Updating a map's rating must not add it to unrelated map searches; creating a private post must not add it to a public feed.
+
+To insert a returned entity, pass an object containing `into` and `position`. The target is the list or connection from a normal request or view:
 
 ```tsx
-addComment({
-  input: { content: 'New Comment text', postId: post.id },
-  insert: 'before', // Insert the new comment at the beginning of the list.
+const PostCommentsView = view<Post>()({
+  comments: {
+    args: { first: 20 },
+    items: { node: CommentView },
+  },
+  id: true,
+});
+
+// Inside a component that receives postRef:
+const post = useView(PostCommentsView, postRef);
+
+const addComment = () =>
+  fate.mutations.comment.add({
+    input: { content: 'New Comment text', postId: post.id },
+    insert: { into: post.comments, position: 'after' },
+    optimistic: {
+      content: 'New Comment text',
+      id: 'optimistic:new-comment',
+    },
+    view: CommentView,
+  });
+```
+
+The target carries its existing owner, field, and argument scope. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. For deferred lists, first resolve the value with `await fate.readDeferred(...)` and pass its `data` as the target. Targets must belong to the same client and remain cached. The API works with native Fate, tRPC, and GraphQL.
+
+Use an array of insertion objects to update multiple lists, with an independent position for each:
+
+```tsx
+await fate.mutations.comment.add({
+  input: { content, postId: post.id },
+  insert: [
+    { into: post.comments, position: 'after' },
+    { into: recentComments, position: 'before' },
+  ],
+  view: CommentView,
 });
 ```
 
-Or, use the `none` option if you want to ignore inserting the new object into any lists:
+Only those lists change. The caller decides whether the entity belongs in each target; fate cannot evaluate server-side filters or infer sorted positions. A record already present in a target is updated without duplication or repositioning. Conflicting positions for the same target are rejected before sending the mutation.
+
+Scoped insertions share the mutation's optimistic transaction, rollback, ID reconciliation, and pagination behavior. Durable mutations serialize the target identities so they can restore and replay the same insertions after restart.
+
+Explicit string options retain the previous broad behavior:
 
 ```tsx
 addComment({
-  input: { content: 'New Comment text', postId: post.id },
-  insert: 'none', // Do not insert the new comment into any lists.
+  input: { content, postId: post.id },
+  insert: 'before',
 });
 ```
+
+`'before'` and `'after'` opt into insertion across eligible same-type root lists and inferred parent lists. Prefer scoped objects when list membership depends on filters or a particular query. `'none'` explicitly disables inferred insertion and is also the default.
+
+### Migrating from automatic insertion
+
+Previously, omitted `insert` behaved like `'after'`. Calls that relied on automatic insertion must now provide an explicit insertion option. Existing explicit `'before'`, `'after'`, and `'none'` calls keep their behavior. Ordinary updates need no option; applications can remove redundant `insert: 'none'` calls.

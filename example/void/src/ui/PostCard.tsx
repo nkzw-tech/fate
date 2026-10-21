@@ -91,7 +91,11 @@ const CommentInput = ({
   post,
 }: {
   error?: unknown;
-  post: { commentCount: number; id: string };
+  post: {
+    commentCount: number;
+    comments: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'Comment'> }> }>;
+    id: string;
+  };
 }) => {
   const fate = useFateClient();
   const { auth } = useShared<SharedData>();
@@ -105,8 +109,10 @@ const CommentInput = ({
       return;
     }
 
+    const { data: comments } = await fate.readDeferred(post.comments);
     const result = await fate.mutations.comment.add({
       input: { content, postId: post.id },
+      insert: { into: comments, position: 'after' },
       optimistic: {
         author: user ? { id: user.id, name: user.name } : null,
         content,

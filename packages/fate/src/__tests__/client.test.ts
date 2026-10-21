@@ -2814,6 +2814,7 @@ test('mutations insert records into root lists optimistically', async () => {
 
   const mutationPromise = client.mutations.createPost({
     input: { title: 'Draft' },
+    insert: 'after',
     optimistic: { id: optimisticId, title: 'Draft' },
     view: PostView,
   });
@@ -2878,6 +2879,7 @@ test('mutations insert records into paginated root lists optimistically', async 
 
   const mutationPromise = client.mutations.createPost({
     input: { title: 'Draft' },
+    insert: 'after',
     optimistic: { id: optimisticId, title: 'Draft' },
     view: PostView,
   });
@@ -3135,6 +3137,7 @@ test('root list inserts stay attached to an unresolved trailing edge while more 
 
   const mutationPromise = client.mutations.createPost({
     input: { title: 'Draft' },
+    insert: { into: posts, position: 'after' },
     optimistic: { id: 'optimistic:post-11', title: 'Draft' },
     view: PostView,
   });
@@ -5263,9 +5266,13 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
   );
 
   const postRef = client.ref<Post>('Post', 'post-1', PostView);
+  const initialPost = unwrap(
+    client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
+  );
 
   const mutationPromise = client.mutations.addComment({
     input: { content: 'Draft', postId: 'post-1' },
+    insert: { into: initialPost.comments, position: 'after' },
     optimistic: {
       author: null,
       content: 'Draft',
@@ -5943,6 +5950,8 @@ test(`'linkParentLists' maintains list registrations for parent entities`, () =>
       post: { __typename: 'Post', id: 'post-1' },
     },
     new Set(['__typename', 'content', 'id', 'post', 'post.__typename', 'post.id']),
+    undefined,
+    'after',
   );
 
   const commentId = toEntityId('Comment', 'comment-1');
@@ -6004,6 +6013,8 @@ test(`'linkParentLists' keeps unresolved inserts pending across scoped lists`, (
       post: { __typename: 'Post', id: 'post-1' },
     },
     new Set(['__typename', 'content', 'id', 'post', 'post.__typename', 'post.id']),
+    undefined,
+    'after',
   );
 
   const newCommentId = toEntityId('Comment', 'comment-2');

@@ -8,6 +8,7 @@ import {
   getSelectionPlan,
   clientRoot,
   mutation,
+  type ViewSelection,
   view,
 } from '@nkzw/fate';
 import { act, Suspense, useEffect } from 'react';
@@ -657,6 +658,7 @@ test('root list optimistic pending edges roll back after failed mutations', asyn
   await act(async () => {
     mutationPromise = client.mutations.createProject({
       input: { name: 'Draft' },
+      insert: { into: client.getRequestResult(request).projects, position: 'after' },
       optimistic: {
         id: 'optimistic:project-2',
         name: 'Draft',
@@ -759,6 +761,11 @@ test('nested list optimistic pending edges roll back after failed mutations', as
   );
 
   const postRef = client.ref<PostWithComments>('Post', 'post-1', PostView);
+  const snapshot = await client.readView<
+    PostWithComments,
+    ViewSelection<typeof PostView>,
+    typeof PostView
+  >(PostView, postRef);
   const renders: Array<Array<string | null>> = [];
 
   const Component = () => {
@@ -792,6 +799,7 @@ test('nested list optimistic pending edges roll back after failed mutations', as
   await act(async () => {
     mutationPromise = client.mutations.addComment({
       input: { content: 'Draft', postId: 'post-1' },
+      insert: { into: snapshot.data.comments, position: 'after' },
       optimistic: {
         content: 'Draft',
         id: 'optimistic:comment-2',

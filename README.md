@@ -203,6 +203,29 @@ A `ViewRef` is a reference to a concrete object of a specific type, for example 
 
 Components using `useView` listen to changes for all selected fields. When data changes, fate re-renders all of the fields that depend on that data. For example, if the `title` of the `Post` changes, the `PostCard` component re-renders with new data. However, if a different field such as `likes` that isn't selected in `PostView` changes, the `PostCard` component will not re-render.
 
+### Resolving Multiple Refs with `useViews`
+
+Use `useViews` when a component needs selected data from an array of refs, for example to filter or sort a list before rendering it:
+
+```tsx
+import { useViews, type ViewRef } from 'react-fate';
+
+function PostTitles({ posts: postRefs }: { posts: ReadonlyArray<ViewRef<'Post'>> }) {
+  const posts = useViews(PostView, postRefs);
+  const sorted = [...posts].sort((a, b) => a.title.localeCompare(b.title));
+
+  return sorted.map((post) => <h2 key={post.id}>{post.title}</h2>);
+}
+```
+
+Call the hook once with the whole array. The array can grow, shrink, or reorder between renders. Results preserve the input order, duplicates, and any `null` or `undefined` entries. Readonly tuples preserve their position types. Each ref carries its own parameter bindings, so refs for the same entity can select different arguments.
+
+Like `useView`, `useViews` masks unselected fields, subscribes to selected fields on each entity and its nested entities, suspends while required data is missing, and sends read errors to the nearest error boundary. It starts all missing reads together. Writes to unrelated fields do not rerender the component. The returned array stays identical while the refs and their selected snapshots stay unchanged, including when the input array is constructed inline.
+
+`useViews` also accepts deferred refs. It subscribes to their owning selections as well as the resolved entities. Removing refs or unmounting the component releases their subscriptions. It works with every fate transport; it is not specific to GraphQL.
+
+Vue provides the same `useViews(view, refs)` selection behavior as a reactive resource. Pass an array, ref, or getter, then read `.value` or await `.ready()`. See [Resolving Arrays of Refs in Vue](/docs/guide/vue.md#resolving-arrays-of-refs).
+
 ### Fetching Data with `useRequest`
 
 Now that we defined our view and component, we fetch the data from the server using the `useRequest` hook from fate. This hook allows us to declare what data we need for a specific screen or component tree. At the root of our app, we can request a list of posts like this:
@@ -967,7 +990,15 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
 }
 ```
 
-If `loadNext` is undefined, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be undefined.
+If `loadNext` is `null`, it means there are no more comments to load. If you want to instead load previous comments, you can use the third argument returned by `useListView`, which is `loadPrevious`. Similarly, if there are no previous comments to load, `loadPrevious` will be `null`.
+
+When the connection is `null` or `undefined`, the returned items are `undefined` and both pagination functions are `null`. The types preserve this absence for optional and nullable deferred connections. Default the items when the UI should render an empty list:
+
+```tsx
+const [comments = [], loadNext] = useListView(CommentConnectionView, post?.comments);
+```
+
+A present connection with an empty `items` array returns that empty array. `useLiveListView` follows the same rules.
 
 ### Pagination Arguments
 
@@ -992,6 +1023,10 @@ const CommentConnectionView = {
 When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
 
 Concurrent loads with the same connection, selection, arguments, and cursor share pending work. A failed load rejects its callers and can be retried. Late pages preserve newer confirmed fields and deletions, and cannot restore a page window replaced by a newer refresh. Forward and backward pages can still extend opposite ends of the same list concurrently.
+
+Refreshing a query without `after` or `before` replaces its connection window, including removed entries and empty results. This applies to nested connections as well as root lists. Cursor-based requests continue to append or prepend pages.
+
+Complete selected relationships returned by mutations likewise replace their membership. Partial mutation pages preserve previously loaded entries outside that page, and optimistic changes are replayed over the latest confirmed snapshot. Removing a relationship does not delete its shared entity records.
 
 Additional arguments on a root request are scoped to that root list:
 
@@ -1346,6 +1381,7 @@ When a mutation inserts a new object, you can provide an optimistic object with 
 const content = 'New Comment text';
 addComment({
   input: { content, postId: post.id },
+  insert: { into: post.comments, position: 'after' },
   optimistic: {
     author: { id: user.id, name: user.name },
     content,
@@ -1355,12 +1391,12 @@ addComment({
 });
 ```
 
-By default, fate inserts new records after existing items in matching root lists and nested lists. For a newest-first list, pass `insert: 'before'` so optimistic records appear at the beginning:
+By default, mutations update normalized records without adding them to lists. Specify a queried list or connection when a new record should appear in it. For a newest-first list:
 
 ```tsx
 addComment({
   input: { content, postId: post.id },
-  insert: 'before',
+  insert: { into: post.comments, position: 'before' },
   optimistic: {
     content,
     id: `optimistic:${Date.now().toString(36)}`,
@@ -1371,7 +1407,7 @@ addComment({
 
 Insertion respects pagination boundaries. If you append to a list that still has a next page, fate keeps the new record attached to the unresolved trailing edge instead of mixing it into the loaded page. As you load more pages, the inserted record stays at the end until the server returns the canonical item or the list reaches the edge. The same behavior applies to prepends while `hasPrevious` is true.
 
-Multiple pending optimistic inserts keep their visible order. For example, two `insert: 'before'` calls on a newest-first feed show the second optimistic item before the first, matching what users expect from newly created content.
+Multiple pending optimistic inserts keep their visible order. For example, two scoped insertions with `position: 'before'` show the second optimistic item before the first. Failed mutations roll back the record and its insertions together; successful mutations replace temporary IDs without duplicating list entries.
 
 ### Selecting a View with Actions
 
@@ -1553,23 +1589,67 @@ useEffect(() => {
 
 ### Controlling List Insertion Behavior
 
-When inserting new objects into lists, the default behavior is to append the new object to the list. You can provide an `insert` option with `before`, `after` or `none` values to customize this behavior and specify where the new object should be inserted in the list:
+Mutations default to `insert: 'none'`. Returned records and optimistic fields still update every existing reference, but fate does not infer membership in other lists. Updating a map's rating must not add it to unrelated map searches; creating a private post must not add it to a public feed.
+
+To insert a returned entity, pass an object containing `into` and `position`. The target is the list or connection from a normal request or view:
 
 ```tsx
-addComment({
-  input: { content: 'New Comment text', postId: post.id },
-  insert: 'before', // Insert the new comment at the beginning of the list.
+const PostCommentsView = view<Post>()({
+  comments: {
+    args: { first: 20 },
+    items: { node: CommentView },
+  },
+  id: true,
+});
+
+// Inside a component that receives postRef:
+const post = useView(PostCommentsView, postRef);
+
+const addComment = () =>
+  fate.mutations.comment.add({
+    input: { content: 'New Comment text', postId: post.id },
+    insert: { into: post.comments, position: 'after' },
+    optimistic: {
+      content: 'New Comment text',
+      id: 'optimistic:new-comment',
+    },
+    view: CommentView,
+  });
+```
+
+The target carries its existing owner, field, and argument scope. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. For deferred lists, first resolve the value with `await fate.readDeferred(...)` and pass its `data` as the target. Targets must belong to the same client and remain cached. The API works with native Fate, tRPC, and GraphQL.
+
+Use an array of insertion objects to update multiple lists, with an independent position for each:
+
+```tsx
+await fate.mutations.comment.add({
+  input: { content, postId: post.id },
+  insert: [
+    { into: post.comments, position: 'after' },
+    { into: recentComments, position: 'before' },
+  ],
+  view: CommentView,
 });
 ```
 
-Or, use the `none` option if you want to ignore inserting the new object into any lists:
+Only those lists change. The caller decides whether the entity belongs in each target; fate cannot evaluate server-side filters or infer sorted positions. A record already present in a target is updated without duplication or repositioning. Conflicting positions for the same target are rejected before sending the mutation.
+
+Scoped insertions share the mutation's optimistic transaction, rollback, ID reconciliation, and pagination behavior. Durable mutations serialize the target identities so they can restore and replay the same insertions after restart.
+
+Explicit string options retain the previous broad behavior:
 
 ```tsx
 addComment({
-  input: { content: 'New Comment text', postId: post.id },
-  insert: 'none', // Do not insert the new comment into any lists.
+  input: { content, postId: post.id },
+  insert: 'before',
 });
 ```
+
+`'before'` and `'after'` opt into insertion across eligible same-type root lists and inferred parent lists. Prefer scoped objects when list membership depends on filters or a particular query. `'none'` explicitly disables inferred insertion and is also the default.
+
+#### Migrating from automatic insertion
+
+Previously, omitted `insert` behaved like `'after'`. Calls that relied on automatic insertion must now provide an explicit insertion option. Existing explicit `'before'`, `'after'`, and `'none'` calls keep their behavior. Ordinary updates need no option; applications can remove redundant `insert: 'none'` calls.
 
 ## Persistence
 
@@ -1895,7 +1975,7 @@ Persistence coordinates mutation delivery across tabs, but it does not keep ever
 
 ## Vue
 
-_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
+_fate_ also supports Vue through `vue-fate`. It exports the same core primitives as `react-fate` where Vue has a natural equivalent: `view`, `useRequest`, `useView`, `useViews`, `useListView`, `useLiveView`, `useLiveListView`, `useFateClient`, and the `FateClient` provider.
 
 Vue components use fate through Vue resources built from refs, computed values, watchers, and `<Suspense>`. The view model, generated client, normalized cache, masking, request shapes, list views, live views, and mutations are shared with the React adapter.
 
@@ -2071,6 +2151,34 @@ const author = useView(UserView, () => post.value?.author ?? null);
 
 Pass reactive props through a getter so fate tracks prop changes. In script, resources are refs and need `.value`. In templates, Vue unwraps them automatically.
 
+### Resolving Arrays of Refs
+
+Use `useViews` when one component needs selected data from an array of refs, for example to filter or sort before rendering:
+
+```vue
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useViews, type ViewRef } from 'vue-fate';
+import { PostCardView } from '../fateViews';
+
+const props = defineProps<{ posts: ReadonlyArray<ViewRef<'Post'>> }>();
+const posts = useViews(PostCardView, () => props.posts);
+const sorted = computed(() => [...posts.value].sort((a, b) => a.title.localeCompare(b.title)));
+
+await posts.ready();
+</script>
+
+<template>
+  <h2 v-for="post in sorted" :key="post.id">{{ post.title }}</h2>
+</template>
+```
+
+`useViews` accepts a plain array, reactive ref, computed ref, or getter. Replacing, reordering, or mutating a reactive array updates the resource. The result preserves order, duplicates, `null` and `undefined` entries, readonly tuple positions, and each ref's parameter bindings. Deferred refs are supported too.
+
+The resource is a shallow ref with the same `pending`, `error`, `ready()`, `refresh()`, and `dispose()` members as `useView`. Await `ready()` in async setup to participate in Vue Suspense, or render the resource's pending and error states yourself. Its initial value is an empty array while the first read loads; later pending reads retain the previous data. `refresh()` rereads the current selection and fetches missing data.
+
+Selected fields and nested entities stay subscribed, so aggregate filtering reacts even when the outer array is unchanged. Unselected fields stay masked. Equivalent inputs and unchanged selected data preserve the result array's identity, and unrelated writes do not update it. Missing reads start together, duplicate refs share a read, and bursts of cache writes are coalesced. Scope disposal releases subscriptions and prevents late results from updating the resource.
+
 ### Lists and Live Views
 
 `useListView` subscribes to a connection returned from `useRequest` or from a nested view field:
@@ -2143,7 +2251,7 @@ The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `ins
 
 The names intentionally mirror `react-fate` where Vue has an equivalent API. The main differences are Vue framework differences:
 
-- `useRequest`, `useView`, and list hooks return Vue resources instead of throwing promises from render.
+- `useRequest`, `useView`, `useViews`, and list hooks return Vue resources instead of throwing promises from render.
 - Async setup and `<Suspense>` replace React's async component model.
 - Mutations use `fate.mutations` directly; React-only `fate.actions` and `useActionState` patterns do not apply.
 - Shared views are best kept in `.ts` modules instead of exporting named views from component files.

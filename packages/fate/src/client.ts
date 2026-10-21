@@ -32,6 +32,9 @@ import {
   MutationFunction,
   MutationFunctionsFor,
   MutationOptions,
+  type MutationInsertion,
+  type ResolvedInsertion,
+  type ResolvedMutationInsertion,
   type MutationCommand,
   wrapMutation,
 } from './mutation.ts';
@@ -528,6 +531,8 @@ export class FateClient<
     Array<{ field: string; parentType: string; via?: string }>
   >();
   private readonly rootLists = new Map<string, Set<string>>();
+  private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
+  private readonly mutationLists = new Map<string, { count: number; list: ConnectionMetadata }>();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
   private readonly connectionRequests = new Map<string, Promise<List | undefined>>();
   private readonly pendingDeferred = new Map<string, PromiseLike<DeferredSnapshot<any>>>();
@@ -994,6 +999,112 @@ export class FateClient<
       }
 
       this.store.setList(key, next);
+    }
+  }
+
+  private exposeListTarget<T extends object>(target: T, metadata: ConnectionMetadata): T {
+    Object.defineProperty(target, ConnectionTag, { value: metadata });
+    this.listTargets.set(target, metadata);
+    return target;
+  }
+
+  private nestedListMetadata(owner: EntityId, field: string, plan: SelectionPlan, path: string) {
+    const { type } = parseEntityId(owner);
+    const descriptor = this.types.get(type)?.fields?.[field];
+    if (!descriptor || descriptor === 'scalar' || !('listOf' in descriptor)) {
+      return undefined;
+    }
+    const args = plan.args.get(path);
+    return {
+      args: args?.value,
+      field,
+      hash: args?.hash,
+      key: getListKey(owner, field, args?.hash),
+      live: plan.live.get(path),
+      owner,
+      procedure: `${type}.${field}`,
+      root: false,
+      type: descriptor.listOf,
+    } satisfies ConnectionMetadata;
+  }
+
+  /** @internal Capture a mutation's list identities without retaining its result snapshots. */
+  resolveMutationInsertion(type: string, insert: MutationInsertion): ResolvedMutationInsertion {
+    if (typeof insert === 'string') {
+      if (insert !== 'none' && insert !== 'before' && insert !== 'after') {
+        throw new Error('fate: Invalid mutation insertion position.');
+      }
+      return insert;
+    }
+    const targets: Array<ResolvedInsertion> = [];
+    const positions = new Map<string, string>();
+    for (const instruction of Array.isArray(insert) ? insert : [insert]) {
+      if (
+        !isRecord(instruction) ||
+        (instruction.position !== 'before' && instruction.position !== 'after') ||
+        !instruction.into ||
+        typeof instruction.into !== 'object'
+      ) {
+        throw new Error('fate: Invalid scoped list insertion.');
+      }
+      const metadata = this.listTargets.get(instruction.into);
+      if (!metadata || !this.store.getListState(metadata.key)) {
+        throw new Error('fate: Insertion requires a cached list returned by this client.');
+      }
+      if (metadata.type !== type && !this.types.get(metadata.type)?.possibleTypes?.includes(type)) {
+        throw new Error(`fate: Cannot insert '${type}' into a '${metadata.type}' list.`);
+      }
+      const previous = positions.get(metadata.key);
+      if (previous && previous !== instruction.position) {
+        throw new Error('fate: Conflicting insertion positions for the same list.');
+      }
+      if (!previous) {
+        const { field, hash, key, owner, procedure, root, type } = metadata;
+        targets.push({
+          list: { field, hash, key, owner, procedure, root, type },
+          position: instruction.position,
+        });
+        positions.set(metadata.key, instruction.position);
+      }
+    }
+    return targets;
+  }
+
+  /** @internal Keep targeted lists alive until an optimistic or durable operation settles. */
+  retainMutationLists(insert: ResolvedMutationInsertion): () => void {
+    if (typeof insert === 'string') {
+      return () => {};
+    }
+    for (const { list } of insert) {
+      const entry = this.mutationLists.get(list.key);
+      this.mutationLists.set(list.key, { count: (entry?.count ?? 0) + 1, list });
+    }
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        for (const { list } of insert) {
+          const entry = this.mutationLists.get(list.key);
+          if (entry && --entry.count === 0) {
+            this.mutationLists.delete(list.key);
+          }
+        }
+      }
+    };
+  }
+
+  /** @internal Apply explicit membership changes in the caller's optimistic transaction. */
+  insertMutationTargets(entityId: EntityId, targets: ReadonlyArray<ResolvedInsertion>) {
+    for (const { list, position } of targets) {
+      const previous = this.store.getListState(list.key);
+      if (!previous) {
+        throw new Error('fate: The mutation insertion list is no longer cached.');
+      }
+      const { list: next } = this.applyListInsert(previous, entityId, position);
+      if (next !== previous) {
+        this.store.setList(list.key, next);
+        this.syncNestedConnectionOwnerField(list, entityId, next, 'insert');
+      }
     }
   }
 
@@ -2822,6 +2933,12 @@ export class FateClient<
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
     optimisticRoots.records.forEach(markRecord);
     optimisticRoots.lists.forEach(markList);
+    for (const { list } of this.mutationLists.values()) {
+      markList(list.key);
+      if (!list.root) {
+        markRecord(list.owner);
+      }
+    }
 
     const retainedValueKeys = new Set<string>();
     for (const descriptor of this.operationLifetime.getDescriptors()) {
@@ -3409,15 +3526,17 @@ export class FateClient<
           root: true,
           type: item.type,
         };
-        Object.defineProperty(connection, ConnectionTag, {
-          configurable: false,
-          enumerable: false,
-          value: metadata,
-          writable: false,
-        });
-        value = connection;
+        value = this.exposeListTarget(connection, metadata);
       } else {
-        value = nodes;
+        value = this.exposeListTarget(nodes, {
+          args: item.argsPayload,
+          field: item.procedure,
+          key: item.listKey,
+          owner: item.name,
+          procedure: item.procedure,
+          root: true,
+          type: item.type,
+        });
       }
     }
     this.requestItemResults.set(item, { source, value });
@@ -3944,7 +4063,7 @@ export class FateClient<
 
       this.viewDataCache.invalidate(entityId);
       this.withWriteGeneration(generation, () => this.store.merge(entityId, result, selectedPaths));
-      this.linkParentLists(type, entityId, result, insert ?? 'after');
+      this.linkParentLists(type, entityId, result, insert ?? 'none');
       if (!pathPrefix && insert) {
         this.insertIntoRootLists(type, entityId, insert);
       }
@@ -4107,7 +4226,12 @@ export class FateClient<
 
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
-          target[key] = record[storageKey];
+          const value = record[storageKey];
+          const metadata = Array.isArray(value)
+            ? this.nestedListMetadata(parentId, field, plan, fieldPath)
+            : undefined;
+          target[key] =
+            metadata && Array.isArray(value) ? this.exposeListTarget([...value], metadata) : value;
         } else if (selectionKind && selectionType === 'object') {
           const selectionValue = selectionKind as AnyRecord;
           const { args: selectionArgs, ...selectionWithoutArgs } = selectionValue;
@@ -4117,7 +4241,14 @@ export class FateClient<
             Object.keys(selectionWithoutArgs).length === 0;
 
           if (hasArgsOnly) {
-            target[key] = record[storageKey];
+            const value = record[storageKey];
+            const metadata = Array.isArray(value)
+              ? this.nestedListMetadata(parentId, field, plan, fieldPath)
+              : undefined;
+            target[key] =
+              metadata && Array.isArray(value)
+                ? this.exposeListTarget([...value], metadata)
+                : value;
             continue;
           }
 
@@ -4206,30 +4337,10 @@ export class FateClient<
                   connection.pagination = undefined;
                 }
               }
-              const { type: parentType } = parseEntityId(parentId);
-              if (parentType) {
-                const childType = this.getListNodeType(parentType, field);
-                const metadata: ConnectionMetadata = {
-                  args: fieldArgs?.value ? { ...fieldArgs.value } : undefined,
-                  field,
-                  hash: fieldArgs?.hash,
-                  key: listKey,
-                  live: plan.live.get(fieldPath),
-                  owner: parentId,
-                  procedure: `${parentType}.${field}`,
-                  root: false,
-                  type: childType,
-                };
-                Object.defineProperty(connection, ConnectionTag, {
-                  configurable: false,
-                  enumerable: false,
-                  value: metadata,
-                  writable: false,
-                });
-              }
-              target[key] = connection;
+              const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
+              target[key] = metadata ? this.exposeListTarget(connection, metadata) : connection;
             } else {
-              target[key] = value.map((item) => {
+              const items = value.map((item) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
 
                 if (!entityId) {
@@ -4248,6 +4359,8 @@ export class FateClient<
 
                 return null;
               });
+              const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
+              target[key] = metadata ? this.exposeListTarget(items, metadata) : items;
             }
           } else if (isNodeRef(value)) {
             const entityId = getNodeRefId(value);

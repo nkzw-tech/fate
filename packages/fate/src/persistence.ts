@@ -4,7 +4,12 @@ import {
   decodeHydrationValue,
   encodeHydrationValue,
 } from './hydration.ts';
-import { getErrorStatusCode, prepareMutation, type MutationCommand } from './mutation.ts';
+import {
+  getErrorStatusCode,
+  isResolvedMutationInsertion,
+  prepareMutation,
+  type MutationCommand,
+} from './mutation.ts';
 import { PersistenceCache } from './persistence-cache.ts';
 import { deserializePlan, serializePlan } from './persistence-codec.ts';
 import {
@@ -97,7 +102,7 @@ const decodeCommand = (value: Encoded): MutationCommand => {
     !command ||
     typeof command.key !== 'string' ||
     typeof command.entity !== 'string' ||
-    !['after', 'before', 'none'].includes(command.insert)
+    !isResolvedMutationInsertion(command.insert)
   ) {
     throw new Error('fate: Invalid persisted mutation.');
   }

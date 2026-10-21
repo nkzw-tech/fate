@@ -102,8 +102,10 @@ const addComment = async () => {
   commentError.value = null;
 
   try {
+    const { data: comments } = await fate.readDeferred(post.value.comments);
     await fate.mutations.comment.add({
       input: { content, postId: post.value.id },
+      insert: { into: comments, position: 'after' },
       optimistic: {
         author: user ? { id: user.id, name: user.name } : null,
         content,

@@ -45,7 +45,13 @@ export type {
 } from './types.ts';
 export type { DeferredSnapshot, RequestMode, RequestOptions } from './client.ts';
 export type { FateDehydratedState, HydrationLimits, HydrateOptions } from './hydration.ts';
-export type { FateMutations } from './mutation.ts';
+export type {
+  FateMutations,
+  InsertionTarget,
+  InsertPosition,
+  ListInsertion,
+  MutationInsertion,
+} from './mutation.ts';
 export type { ReadContext, Transport } from './transport.ts';
 export type {
   GraphQLMutationDefinition,

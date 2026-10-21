@@ -325,9 +325,18 @@ export class PersistenceCache {
         }
       }
     }
+    const targets = typeof command.insert === 'string' ? [] : command.insert;
+    for (const { list } of targets) {
+      if (!list.root) {
+        ids.add(list.owner);
+      }
+    }
     const lists = new Set([
       ...previousLists.keys(),
-      ...(command.insert !== 'none' ? this.client.getPersistenceRootLists(command.entity) : []),
+      ...targets.map(({ list }) => list.key),
+      ...(typeof command.insert === 'string' && command.insert !== 'none'
+        ? this.client.getPersistenceRootLists(command.entity)
+        : []),
     ]);
     for (const id of ids) {
       const owners = this.client.store.getPersistenceOwners(id);
@@ -412,7 +421,14 @@ export class PersistenceCache {
     }
     return {
       data: encodeHydrationValue({
-        rootLists: [[command.entity, [...this.client.getPersistenceRootLists(command.entity)]]],
+        rootLists: [
+          [
+            command.entity,
+            [...this.client.getPersistenceRootLists(command.entity)].filter((key) =>
+              lists.has(key),
+            ),
+          ],
+        ],
         rootRequests: [],
         store: { coverage, lists: listValues, records },
       }),
