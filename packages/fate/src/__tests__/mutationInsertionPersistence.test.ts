@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
+import { defer } from '../defer.ts';
 import { mutation } from '../mutation.ts';
 import type { PersistenceSession } from '../persistence-types.ts';
 import { createPersistence } from '../persistence.ts';
@@ -185,4 +186,115 @@ test('durable insertion restores a nested owner and preserves its argument scope
   expect(
     (await read(after.client, 'published')).data.notes.items.map(({ node }) => node.id),
   ).toEqual(['published']);
+});
+
+test.each([true, false])(
+  'unloaded deferred targets survive offline restart and settle without fetching (success: %s)',
+  async (success) => {
+    const storage = memoryStorage();
+    let online = false;
+    const before = makeClient(storage, () => online);
+    const DeferredFolder = view<Folder>()({
+      id: true,
+      notes: defer({ args: { category: 'draft' }, items: { node: NoteView } }),
+    });
+    before.client.write('Folder', { id: 'folder' }, new Set(['id']));
+    const { data: folder } = await before.client.readView<
+      Folder,
+      SelectionOf<typeof DeferredFolder>,
+      typeof DeferredFolder
+    >(DeferredFolder, before.client.ref('Folder', 'folder', DeferredFolder));
+    const submission = before.client.mutations
+      .create({
+        input: { title: 'Pending' },
+        insert: { into: folder.notes, position: 'after' },
+        optimistic: { id: 'temporary', title: 'Pending' },
+        view: NoteView,
+      })
+      .catch(() => {});
+    await vi.waitFor(() => expect(before.session.getSnapshot().mutations).toHaveLength(1));
+    before.client.gc();
+    expect(before.client.store.read('Folder:folder')).toBeDefined();
+    expect(before.client.store.read('Folder:folder')?.notes).toBeUndefined();
+    const [key] = before.client.store.dehydrate().lists[0];
+    await before.session.flush();
+    before.session.dispose();
+    await submission;
+
+    const mutate = success
+      ? vi.fn().mockResolvedValue({ id: 'server', title: 'Confirmed' })
+      : vi.fn().mockRejectedValue(new FateRequestError('BAD_REQUEST', 'Refused'));
+    const after = makeClient(storage, () => online, mutate);
+    await after.session.ready;
+    expect(after.client.store.getListState(key)).toMatchObject({
+      ids: [],
+      pendingAfterIds: ['Note:temporary'],
+      unloaded: true,
+    });
+    online = true;
+    after.session.retry();
+    await vi.waitFor(() =>
+      success
+        ? expect(after.session.getSnapshot().mutations).toHaveLength(0)
+        : expect(after.session.getSnapshot().mutations[0]?.status).toBe('failed'),
+    );
+    if (success) {
+      expect(after.client.store.getListState(key)).toMatchObject({
+        ids: [],
+        pendingAfterIds: ['Note:server'],
+        unloaded: true,
+      });
+    } else {
+      expect(after.client.store.getListState(key)).toBeUndefined();
+    }
+    expect(after.client.store.read('Folder:folder')?.notes).toBeUndefined();
+    expect(after.client.store.read('Note:temporary')).toBeUndefined();
+    expect(mutate).toHaveBeenCalledOnce();
+  },
+);
+
+test('a later offline insertion preserves earlier confirmed pending records after restart', async () => {
+  const storage = memoryStorage();
+  let online = true;
+  const before = makeClient(storage, () => online);
+  const DeferredFolder = view<Folder>()({ id: true, notes: defer({ items: { node: NoteView } }) });
+  before.client.write('Folder', { id: 'folder' }, new Set(['id']));
+  const { data: folder } = await before.client.readView<
+    Folder,
+    SelectionOf<typeof DeferredFolder>,
+    typeof DeferredFolder
+  >(DeferredFolder, before.client.ref('Folder', 'folder', DeferredFolder));
+  await before.client.mutations.create({
+    input: { title: 'First' },
+    insert: { into: folder.notes, position: 'after' },
+    view: NoteView,
+  });
+  online = false;
+  const submission = before.client.mutations
+    .create({
+      input: { title: 'Second' },
+      insert: { into: folder.notes, position: 'after' },
+      optimistic: { id: 'temporary', title: 'Second' },
+      view: NoteView,
+    })
+    .catch(() => {});
+  await vi.waitFor(() => expect(before.session.getSnapshot().mutations).toHaveLength(1));
+  const [key] = before.client.store.dehydrate().lists[0];
+  await before.session.flush();
+  before.session.dispose();
+  await submission;
+  const after = makeClient(storage, () => online);
+  await after.session.ready;
+  expect(after.client.store.getListState(key)?.pendingAfterIds).toEqual([
+    'Note:server',
+    'Note:temporary',
+  ]);
+  expect(after.client.store.read('Note:server')).toMatchObject({
+    id: 'server',
+    title: 'Confirmed',
+  });
+  expect(after.client.store.read('Note:temporary')).toMatchObject({
+    id: 'temporary',
+    title: 'Second',
+  });
 });

@@ -293,10 +293,10 @@ To insert a returned entity, pass an object containing `into` and `position`. Th
 
 ```tsx
 const PostCommentsView = view<Post>()({
-  comments: {
+  comments: defer({
     args: { first: 20 },
     items: { node: CommentView },
-  },
+  }),
   id: true,
 });
 
@@ -315,7 +315,9 @@ const addComment = () =>
   });
 ```
 
-The target carries its existing owner, field, and argument scope. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. For deferred lists, first resolve the value with `await fate.readDeferred(...)` and pass its `data` as the target. Targets must belong to the same client and remain cached. The API works with native Fate, tRPC, and GraphQL.
+If the target list is not loaded yet, fate holds the insertion pending until a normal read fetches the real page. It preserves pagination and reconciles entries without duplicates.
+
+Resolved arrays and connections work too. An older snapshot still addresses the current cached list. Pass the original result, not a copied, filtered, or mapped array. Targets must belong to the same client; resolved lists must remain cached, and deferred references require their owner to remain cached.
 
 Use an array of insertion objects to update multiple lists, with an independent position for each:
 

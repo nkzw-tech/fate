@@ -112,10 +112,9 @@ const CommentInput = ({
       return;
     }
 
-    const { data: comments } = await fate.readDeferred(post.comments);
     const result = await fate.mutations.comment.add({
       input: { content, postId: post.id },
-      insert: { into: comments, position: 'after' },
+      insert: { into: post.comments, position: 'after' },
       optimistic: {
         author: user ? { id: user.id, name: user.name } : null,
         content,

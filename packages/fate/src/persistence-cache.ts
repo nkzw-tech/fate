@@ -9,6 +9,7 @@ import {
   type ClientHydrationState,
   type FateDehydratedState,
 } from './hydration.ts';
+import { getListEntries } from './list.ts';
 import type { MutationCommand } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import { decodeRequests, encodeRequests } from './persistence-codec.ts';
@@ -329,6 +330,14 @@ export class PersistenceCache {
     for (const { list } of targets) {
       if (!list.root) {
         ids.add(list.owner);
+      }
+      // Pending members of an unloaded list have no owner-field references yet.
+      // Save their confirmed records as dependencies of this insertion too.
+      const state = this.client.store.readConfirmedList(list.key);
+      if (state?.unloaded) {
+        for (const { id } of getListEntries(state)) {
+          ids.add(id);
+        }
       }
     }
     const lists = new Set([

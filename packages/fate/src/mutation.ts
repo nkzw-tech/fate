@@ -15,6 +15,7 @@ import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import type {
   AnyRecord,
   ConnectionMetadata,
+  Deferred,
   Entity,
   MutationDefinition,
   MutationEntity,
@@ -54,12 +55,16 @@ export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__va
 /** Where (or if) to insert the resulting record into relevant lists. */
 export type InsertPosition = 'after' | 'before' | 'none';
 
-/** A normalized list or connection returned by this client. */
-export type InsertionTarget<TName extends string = string> =
+type ResolvedInsertionTarget<TName extends string> =
   | ReadonlyArray<Readonly<{ __typename: TName }> | null>
   | Readonly<{
       items: ReadonlyArray<Readonly<{ node: Readonly<{ __typename: TName }> | null }>>;
     }>;
+
+/** A list, connection, or deferred list reference returned by this client. */
+export type InsertionTarget<TName extends string = string> =
+  | ResolvedInsertionTarget<TName>
+  | Deferred<ResolvedInsertionTarget<TName> | null | undefined>;
 
 /** Insert the returned entity into one specific list, preserving its query scope. */
 export type ListInsertion<TName extends string = string> = Readonly<{

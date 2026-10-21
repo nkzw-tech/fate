@@ -409,6 +409,7 @@ const listKeys = new Set([
   'pagination',
   'pendingAfterIds',
   'pendingBeforeIds',
+  'unloaded',
 ]);
 const paginationKeys = new Set(['hasNext', 'hasPrevious', 'nextCursor', 'previousCursor']);
 const clientStateKeys = new Set(['rootLists', 'rootRequests', 'rootValues', 'store']);
@@ -451,7 +452,8 @@ const isList = (value: unknown): value is List => {
     isOptionalLimit(value.forwardPageLimit) &&
     isPagination(value.pagination) &&
     (value.pendingAfterIds === undefined || isUniqueStringArray(value.pendingAfterIds)) &&
-    (value.pendingBeforeIds === undefined || isUniqueStringArray(value.pendingBeforeIds))
+    (value.pendingBeforeIds === undefined || isUniqueStringArray(value.pendingBeforeIds)) &&
+    (value.unloaded === undefined || value.unloaded === true)
   );
 };
 

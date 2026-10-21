@@ -12,6 +12,7 @@ import {
   createDeferred,
   getDeferredMetadata,
   getDeferredSelection,
+  isDeferred,
   isDeferredSelection,
 } from './defer.ts';
 import { argumentFieldKey, getFieldKey, getStoragePath } from './field-key.ts';
@@ -257,6 +258,7 @@ const areListStatesEqual = (left: List | undefined, right: List) =>
   areArraysEqual(left?.pendingBeforeIds, right.pendingBeforeIds) &&
   left?.backwardPageLimit === right.backwardPageLimit &&
   left?.forwardPageLimit === right.forwardPageLimit &&
+  left?.unloaded === right.unloaded &&
   arePaginationStatesEqual(left?.pagination, right.pagination);
 
 const createNodeRefsForIds = (
@@ -314,6 +316,9 @@ const hasConnectionPageCoverage = (
   args: AnyRecord | undefined,
   direction: 'forward' | 'backward',
 ) => {
+  if (listState.unloaded) {
+    return false;
+  }
   const limit = getConnectionPageLimit(args, direction);
   const pagination = listState.pagination;
 
@@ -532,6 +537,7 @@ export class FateClient<
   >();
   private readonly rootLists = new Map<string, Set<string>>();
   private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
+  private readonly deferredTargets = new WeakSet<object>();
   private readonly mutationLists = new Map<string, { count: number; list: ConnectionMetadata }>();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
   private readonly connectionRequests = new Map<string, Promise<List | undefined>>();
@@ -940,9 +946,10 @@ export class FateClient<
     }
 
     const shouldStayPending =
-      insert === 'before'
+      listState.unloaded ||
+      (insert === 'before'
         ? Boolean(listState.pagination?.hasPrevious)
-        : Boolean(listState.pagination?.hasNext);
+        : Boolean(listState.pagination?.hasNext));
 
     if (shouldStayPending) {
       return {
@@ -1047,12 +1054,36 @@ export class FateClient<
       ) {
         throw new Error('fate: Invalid scoped list insertion.');
       }
-      const metadata = this.listTargets.get(instruction.into);
-      if (!metadata || !this.store.getListState(metadata.key)) {
-        throw new Error('fate: Insertion requires a cached list returned by this client.');
+      const into = instruction.into;
+      let metadata = this.listTargets.get(into);
+      const deferred = isDeferred(into) && this.deferredTargets.has(into);
+      if (deferred) {
+        const reference = getDeferredMetadata(into);
+        const owner = this.optimisticEntityResolutions.get(reference.owner) ?? reference.owner;
+        if (!this.store.read(owner)) {
+          throw new Error('fate: The insertion list owner is no longer cached.');
+        }
+        const descriptor = this.types.get(parseEntityId(owner).type)?.fields?.[reference.field];
+        if (descriptor && descriptor !== 'scalar' && 'listOf' in descriptor) {
+          metadata = this.nestedListMetadata(
+            owner,
+            reference.field,
+            getDeferredSelectionPlan(reference.field, reference.selection),
+            reference.field,
+          );
+        }
+      }
+      if (!metadata || (!deferred && !this.store.getListState(metadata.key))) {
+        throw new Error('fate: Insertion requires a list returned by this client.');
       }
       if (metadata.type !== type && !this.types.get(metadata.type)?.possibleTypes?.includes(type)) {
         throw new Error(`fate: Cannot insert '${type}' into a '${metadata.type}' list.`);
+      }
+      if (
+        !metadata.root &&
+        this.store.read(metadata.owner)?.[argumentFieldKey(metadata.field, metadata.hash)] === null
+      ) {
+        continue;
       }
       const previous = positions.get(metadata.key);
       if (previous && previous !== instruction.position) {
@@ -1096,14 +1127,19 @@ export class FateClient<
   /** @internal Apply explicit membership changes in the caller's optimistic transaction. */
   insertMutationTargets(entityId: EntityId, targets: ReadonlyArray<ResolvedInsertion>) {
     for (const { list, position } of targets) {
-      const previous = this.store.getListState(list.key);
-      if (!previous) {
-        throw new Error('fate: The mutation insertion list is no longer cached.');
+      if (
+        !list.root &&
+        this.store.read(list.owner)?.[argumentFieldKey(list.field, list.hash)] === null
+      ) {
+        continue;
       }
+      const previous = this.store.getListState(list.key) ?? { ids: [], unloaded: true };
       const { list: next } = this.applyListInsert(previous, entityId, position);
       if (next !== previous) {
         this.store.setList(list.key, next);
-        this.syncNestedConnectionOwnerField(list, entityId, next, 'insert');
+        if (!next.unloaded) {
+          this.syncNestedConnectionOwnerField(list, entityId, next, 'insert');
+        }
       }
     }
   }
@@ -4019,7 +4055,9 @@ export class FateClient<
 
               const listChanged = !areListStatesEqual(previousList, nextListState);
               result[storageKey] = createNodeRefsForIds(
-                nextListState.ids,
+                nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
+                  ? getListEntries(nextListState).map(({ id }) => id)
+                  : nextListState.ids,
                 this.store.read(entityId)?.[storageKey],
                 {
                   reuseCurrentArray: !listChanged,
@@ -4212,13 +4250,15 @@ export class FateClient<
         if (isDeferredSelection(selectionKind)) {
           const { id, type } = parseEntityId(parentId);
           coverageById.set(parentId, (coverageById.get(parentId) ?? new Set()).add(storageKey));
-          target[key] = createDeferred({
+          const deferred = createDeferred({
             field,
             id,
             owner: parentId,
             selection: getDeferredSelection(selectionKind),
             type,
           });
+          this.deferredTargets.add(deferred);
+          target[key] = deferred;
           continue;
         }
 
