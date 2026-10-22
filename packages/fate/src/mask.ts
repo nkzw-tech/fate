@@ -17,14 +17,14 @@ export function cloneMask(m: FieldMask): FieldMask {
 
 export function addPath(mask: FieldMask, path: string) {
   if (mask.all) {
-    return;
+    return false;
   }
 
   let current = mask;
   let start = 0;
   while (true) {
     if (current.all) {
-      return;
+      return false;
     }
     const separator = path.indexOf('.', start);
     const seg = separator === -1 ? path.slice(start) : path.slice(start, separator);
@@ -40,8 +40,12 @@ export function addPath(mask: FieldMask, path: string) {
     start = separator + 1;
   }
 
+  if (current.all) {
+    return false;
+  }
   current.all = true;
   current.children.clear();
+  return true;
 }
 
 export function union(into: FieldMask, b: FieldMask) {
@@ -142,4 +146,26 @@ export function intersects(a: FieldMask, b: FieldMask): boolean {
   }
 
   return false;
+}
+
+/** Removes coverage below a replaced value before applying its new selection. */
+export function removePath(mask: FieldMask, path: string) {
+  const parts = path.split('.');
+  let current = mask;
+  for (const [index, part] of parts.entries()) {
+    if (current.all) {
+      current.all = false;
+      current.children.clear();
+      return;
+    }
+    const child = current.children.get(part);
+    if (!child) {
+      return;
+    }
+    if (index === parts.length - 1) {
+      current.children.delete(part);
+      return;
+    }
+    current = child;
+  }
 }

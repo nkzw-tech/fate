@@ -9,6 +9,7 @@ import {
   fromPaths,
   intersects,
   isCovered,
+  removePath,
   toPaths,
   union,
 } from './mask.ts';
@@ -30,7 +31,7 @@ export type List = Readonly<{
 }>;
 
 type Snapshot = { mask?: FieldMask; record?: AnyRecord };
-type OptimisticWrite = { partial: AnyRecord; paths: Set<string> };
+type OptimisticWrite = { partial: AnyRecord; paths: Set<string>; replacedPaths?: Set<string> };
 
 type OptimisticLayer = {
   apply: () => void;
@@ -356,8 +357,11 @@ export class Store {
         if (overlays.size > 0) {
           layer.settled = true;
           layer.apply = () => {
-            for (const [id, { partial, paths }] of this.getPendingOverlap(layer, overlays)) {
-              this.merge(id, partial, paths);
+            for (const [id, { partial, paths, replacedPaths }] of this.getPendingOverlap(
+              layer,
+              overlays,
+            )) {
+              this.merge(id, partial, paths, replacedPaths);
             }
           };
         } else {
@@ -414,6 +418,11 @@ export class Store {
           paths: new Set(
             [...write.paths].filter((path) => Object.hasOwn(partial, path.split('.')[0])),
           ),
+          replacedPaths:
+            write.replacedPaths &&
+            new Set(
+              [...write.replacedPaths].filter((path) => Object.hasOwn(partial, path.split('.')[0])),
+            ),
         });
       }
     }
@@ -638,9 +647,14 @@ export class Store {
     return this.records.get(id);
   }
 
-  merge(id: EntityId, partial: AnyRecord, paths: Iterable<string>) {
+  merge(
+    id: EntityId,
+    partial: AnyRecord,
+    paths: Iterable<string>,
+    replacedPaths: Iterable<string> = [],
+  ) {
     return this.update(() => {
-      const change = this.mergeInternal(id, partial, paths);
+      const change = this.mergeInternal(id, partial, paths, replacedPaths);
       if (change) {
         this.notify(id, change.paths, true, change.referencesChanged);
       }
@@ -651,6 +665,7 @@ export class Store {
     id: EntityId,
     partial: AnyRecord,
     paths: Iterable<string>,
+    replacedPaths: Iterable<string> = [],
   ): { paths: ReadonlySet<string>; referencesChanged: boolean } | null {
     this.captureRecord(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
@@ -659,6 +674,9 @@ export class Store {
       Object.assign(write.partial, partial);
       for (const path of selectedPaths) {
         write.paths.add(path);
+      }
+      for (const path of replacedPaths) {
+        (write.replacedPaths ??= new Set()).add(path);
       }
       this.recordingLayer.writes.set(id, write);
     }
@@ -672,12 +690,26 @@ export class Store {
     }
 
     const coveragePaths = [...selectedPaths];
+    const replacements = [...replacedPaths];
+    const previousMask = replacements.length ? cloneMask(mask) : undefined;
+    for (const path of replacements) {
+      removePath(mask, path);
+    }
     for (const path of coveragePaths) {
-      addPath(mask, path);
+      if (addPath(mask, path)) {
+        changedPaths.add(path);
+      }
+    }
+    if (previousMask && !areMasksEqual(previousMask, mask)) {
+      for (const path of replacements) {
+        changedPaths.add(path);
+      }
+    } else if (previousMask) {
+      changedPaths.clear();
     }
 
     if (previous) {
-      let hasChanges = false;
+      let hasChanges = changedPaths.size > 0;
       for (const [key, value] of Object.entries(partial)) {
         if (previous[key] !== value) {
           hasChanges = true;

@@ -3862,24 +3862,54 @@ export class FateClient<
 
   private normalizeEmbedded(
     value: unknown,
+    previous: unknown,
+    paths: ReadonlySet<string>,
     plan: SelectionPlan | undefined,
     prefix: string,
+    storagePrefix: string,
+    replacedPaths: Set<string>,
   ): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) => this.normalizeEmbedded(item, plan, prefix));
-    }
-    if (
-      !isRecord(value) ||
-      ![...(plan?.paths ?? [])].some((path) => path.startsWith(`${prefix}.`))
-    ) {
+    if (paths.size === 0) {
+      if (isRecord(previous) || Array.isArray(previous)) {
+        replacedPaths.add(storagePrefix);
+      }
       return value;
     }
-    return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => {
-        const path = `${prefix}.${key}`;
-        return [getFieldKey(path, plan), this.normalizeEmbedded(child, plan, path)];
-      }),
-    );
+    if (Array.isArray(value)) {
+      replacedPaths.add(storagePrefix);
+      return value.map((item) =>
+        this.normalizeEmbedded(item, undefined, paths, plan, prefix, storagePrefix, replacedPaths),
+      );
+    }
+    if (!isRecord(value)) {
+      if (isRecord(previous) || Array.isArray(previous)) {
+        replacedPaths.add(storagePrefix);
+      }
+      return value;
+    }
+    const existing = isRecord(previous) ? previous : undefined;
+    if (!existing) {
+      replacedPaths.add(storagePrefix);
+    }
+    const children = groupSelectionByPrefix(paths);
+    const result = { ...existing };
+    for (const key of new Set([
+      ...Object.keys(value),
+      ...[...paths].map((path) => path.split('.')[0]),
+    ])) {
+      const path = `${prefix}.${key}`;
+      const storageKey = getFieldKey(path, plan);
+      result[storageKey] = this.normalizeEmbedded(
+        value[key],
+        existing?.[storageKey],
+        children.get(key) ?? emptySet,
+        plan,
+        path,
+        `${storagePrefix}.${storageKey}`,
+        replacedPaths,
+      );
+    }
+    return result;
   }
 
   private writeEntity(
@@ -3908,6 +3938,7 @@ export class FateClient<
         return entityId;
       }
       const result: AnyRecord = {};
+      const replacedPaths = new Set<string>();
       let normalized = selections.get(select)?.get(type);
       if (!normalized) {
         const expanded = expandRefetchSelection(this.types, type, select);
@@ -4151,7 +4182,15 @@ export class FateClient<
             }
           } else {
             if (acceptField) {
-              result[storageKey] = this.normalizeEmbedded(value, plan, fieldPath);
+              result[storageKey] = this.normalizeEmbedded(
+                value,
+                this.store.read(entityId)?.[storageKey],
+                selectionTree.get(key) ?? emptySet,
+                plan,
+                fieldPath,
+                storageKey,
+                replacedPaths,
+              );
             }
           }
         }
@@ -4198,7 +4237,9 @@ export class FateClient<
       }
 
       this.viewDataCache.invalidate(entityId);
-      this.withWriteGeneration(generation, () => this.store.merge(entityId, result, selectedPaths));
+      this.withWriteGeneration(generation, () =>
+        this.store.merge(entityId, result, selectedPaths, replacedPaths),
+      );
       this.linkParentLists(type, entityId, result, insert ?? 'none');
       if (!pathPrefix && insert) {
         this.insertIntoRootLists(type, entityId, insert);
