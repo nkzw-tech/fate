@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
-import { FateMutations } from '../mutation.ts';
+import { FateMutations, mutation } from '../mutation.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
 import { AnyRecord, ConnectionMetadata, ConnectionTag, FateRoots, Request } from '../types.ts';
@@ -603,3 +603,65 @@ test('released request handles do not retain collected list state', () => {
     { timeout: 10_000 },
   );
 });
+
+test('ordinary mutations do not accumulate identity redirects after garbage collection', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  const mutations = { edit: mutation<User, { id: string }, { id: string; name: string }>('User') };
+  const roots = {};
+  const client = createClient<[typeof roots, typeof mutations]>({
+    mutations,
+    roots,
+    transport: {
+      fetchById: async () => [],
+      mutate: vi.fn().mockImplementation(async (_key: string, input: { id: string }) => ({
+        ...input,
+        name: 'Saved',
+      })),
+    },
+    types: [{ type: 'User' }],
+  });
+  for (let index = 0; index < 1000; index++) {
+    await client.mutations.edit({ input: { id: String(index) } });
+  }
+  client.gc();
+  expect(client.store.dehydrate().records).toHaveLength(0);
+  expect(
+    (client as unknown as { optimisticEntityResolutions: Map<string, unknown> })
+      .optimisticEntityResolutions.size,
+  ).toBe(0);
+});
+
+for (const kind of ['view', 'fragment', 'cache-only', 'deferred']) {
+  test(`optimistic redirects survive live ${kind} refs and are collected after their release`, () => {
+    execFileSync(
+      process.execPath,
+      [
+        '--expose-gc',
+        '--no-warnings',
+        '--import',
+        '@oxc-node/core/register',
+        fileURLToPath(new URL('./fixtures/optimistic-redirect-retention.ts', import.meta.url)),
+        kind,
+      ],
+      { timeout: 10_000 },
+    );
+  });
+}
+
+for (const reuseId of [false, true]) {
+  test(`live optimistic refs follow chained redirects after GC (reuse ID: ${reuseId})`, async () => {
+    type User = { __typename: 'User'; id: string; name: string };
+    const Name = view<User>()({ name: true });
+    const finalId = reuseId ? 'temporary' : 'final';
+    const fetchById = vi.fn(async () => [{ id: finalId, name: 'Saved' }]);
+    const client = createClient({ roots: {}, transport: { fetchById }, types: [{ type: 'User' }] });
+    const ref = client.ref('User', 'temporary', Name);
+    client.resolveOptimisticEntity('User:temporary', 'User:intermediate');
+    client.resolveOptimisticEntity('User:intermediate', `User:${finalId}`);
+    client.gc();
+    expect((await client.readView<User, { name: true }, typeof Name>(Name, ref)).data.name).toBe(
+      'Saved',
+    );
+    expect(fetchById).toHaveBeenCalledWith('User', [finalId], new Set(['name']), undefined);
+  });
+}

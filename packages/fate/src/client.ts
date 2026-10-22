@@ -139,6 +139,7 @@ export type DeferredSnapshot<T> = Readonly<{
 }>;
 
 type EntityFetchResult = Readonly<{ generation: number; record: unknown }>;
+type EntityResolution = { id: EntityId; next?: EntityResolution };
 
 type FateClientOptions<
   Roots extends FateRoots,
@@ -607,7 +608,10 @@ export class FateClient<
   private readonly connectionRequests = new Map<string, Promise<List | undefined>>();
   private readonly pendingDeferred = new Map<string, PromiseLike<DeferredSnapshot<any>>>();
   private readonly pendingOptimisticMutations = new Map<EntityId, Set<Promise<unknown>>>();
-  private readonly optimisticEntityResolutions = new Map<EntityId, EntityId>();
+  // Live refs own redirect cells. The ID index must not keep those cells alive.
+  private readonly optimisticEntityResolutions = new Map<EntityId, WeakRef<EntityResolution>>();
+  private readonly optimisticRefResolutions = new WeakMap<object, EntityResolution>();
+  private readonly optimisticRefOwners = new WeakMap<object, object>();
   private readonly onLiveError: ((error: unknown) => void) | undefined;
   private readonly liveSubscriptions = new Map<
     string,
@@ -1127,7 +1131,7 @@ export class FateClient<
       const deferred = isDeferred(into) && this.deferredTargets.has(into);
       if (deferred) {
         const reference = getDeferredMetadata(into);
-        const owner = this.optimisticEntityResolutions.get(reference.owner) ?? reference.owner;
+        const owner = this.resolveEntityId(reference.owner, into);
         if (!this.store.read(owner)) {
           throw new Error('fate: The insertion list owner is no longer cached.');
         }
@@ -1395,6 +1399,10 @@ export class FateClient<
     }
 
     const ref = createRefWithViewNames(type, id, viewNames);
+    const resolution = this.optimisticEntityResolutions.get(entityId)?.deref();
+    if (resolution) {
+      this.optimisticRefResolutions.set(ref, resolution);
+    }
     refs.set(key, ref);
     return ref;
   }
@@ -1470,8 +1478,8 @@ export class FateClient<
     }
 
     const entityId = toEntityId(type, id);
-    const resolvedEntityId = this.optimisticEntityResolutions.get(entityId) ?? null;
-    if (resolvedEntityId && resolvedEntityId !== entityId) {
+    const resolvedEntityId = this.resolveEntityId(entityId, ref);
+    if (resolvedEntityId !== entityId) {
       const { id: resolvedId, type: resolvedType } = parseEntityId(resolvedEntityId);
       return this.readViewInternal<T, S, V>(
         view,
@@ -1638,7 +1646,7 @@ export class FateClient<
     renderScope: object | null | undefined,
   ): PromiseLike<DeferredSnapshot<T>> {
     const metadata = getDeferredMetadata(deferred);
-    const resolvedOwner = this.optimisticEntityResolutions.get(metadata.owner) ?? metadata.owner;
+    const resolvedOwner = this.resolveEntityId(metadata.owner, deferred);
     const parsedOwner = parseEntityId(resolvedOwner);
     const ownerRecord = this.store.read(resolvedOwner);
     const rawOwnerId =
@@ -2396,8 +2404,44 @@ export class FateClient<
   }
 
   resolveOptimisticEntity(optimisticEntityId: EntityId, resolvedEntityId: EntityId) {
-    this.optimisticEntityResolutions.set(optimisticEntityId, resolvedEntityId);
+    if (optimisticEntityId === resolvedEntityId) {
+      return;
+    }
+    const resolution = this.entityResolution(optimisticEntityId);
+    const target = this.entityResolution(resolvedEntityId);
+    // Reusing an earlier ID must not introduce a redirect cycle.
+    let previous = target;
+    while (previous.next && previous.next !== resolution) {
+      previous = previous.next;
+    }
+    if (previous.next === resolution) {
+      previous.next = undefined;
+    }
+    resolution.next = target;
+    for (const ref of this.stableRefs.get(optimisticEntityId)?.values() ?? []) {
+      this.optimisticRefResolutions.set(ref, resolution);
+    }
     this.store.replaceListEntityId(optimisticEntityId, resolvedEntityId);
+  }
+
+  private entityResolution(id: EntityId): EntityResolution {
+    let resolution = this.optimisticEntityResolutions.get(id)?.deref();
+    if (!resolution) {
+      resolution = { id };
+      this.optimisticEntityResolutions.set(id, new WeakRef(resolution));
+    }
+    return resolution;
+  }
+
+  private resolveEntityId(entityId: EntityId, reference: object): EntityId {
+    const owner = this.optimisticRefOwners.get(reference) ?? reference;
+    let resolution =
+      this.optimisticRefResolutions.get(owner) ??
+      this.optimisticEntityResolutions.get(entityId)?.deref();
+    while (resolution?.next) {
+      resolution = resolution.next;
+    }
+    return resolution?.id ?? entityId;
   }
 
   private getPendingOptimisticMutations(
@@ -2755,6 +2799,7 @@ export class FateClient<
       );
       this.cacheOnlyCopies.set(value, copy);
       this.cacheOnlyRefs.add(copy);
+      this.optimisticRefOwners.set(copy, this.optimisticRefOwners.get(value) ?? value);
       return copy as T;
     }
     if (Array.isArray(value)) {
@@ -3191,6 +3236,17 @@ export class FateClient<
       },
     });
     this.requestRevision++;
+
+    for (const id of this.stableRefs.keys()) {
+      if (!markedRecords.has(id)) {
+        this.stableRefs.delete(id);
+      }
+    }
+    for (const [id, resolution] of this.optimisticEntityResolutions) {
+      if (!resolution.deref()) {
+        this.optimisticEntityResolutions.delete(id);
+      }
+    }
 
     for (const key of this.rootRequests.keys()) {
       if (!markedQueries.has(key)) {
@@ -4650,6 +4706,13 @@ export class FateClient<
         if (isViewTag(key)) {
           if (!target[ViewsTag]) {
             assignViewTag(target, new Set());
+            const { id, type } = parseEntityId(parentId);
+            const ownerRef =
+              parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
+            this.optimisticRefOwners.set(
+              target,
+              this.optimisticRefOwners.get(ownerRef) ?? ownerRef,
+            );
           }
 
           addViewName(target[ViewsTag]!, key, rawSelection as ViewPayload<any, any>);
@@ -4669,6 +4732,12 @@ export class FateClient<
             type,
           });
           this.deferredTargets.add(deferred);
+          const ownerRef =
+            parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
+          this.optimisticRefOwners.set(
+            deferred,
+            this.optimisticRefOwners.get(ownerRef) ?? ownerRef,
+          );
           setRecordValue(target, key, deferred);
           continue;
         }
