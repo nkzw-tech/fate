@@ -27,7 +27,7 @@ const addSnapshot = (
     status: 'fulfilled' as const,
     value: snapshot,
   });
-  cache.set(id, selected, ref, thenable, new Set(coverage.map(([id]) => id)));
+  cache.set(id, selected, ref, thenable);
   return new WeakRef(snapshot);
 };
 

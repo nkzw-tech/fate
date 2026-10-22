@@ -1525,13 +1525,7 @@ export class FateClient<
         value: resolvedView,
       } as const;
 
-      this.viewDataCache.set(
-        entityId,
-        view,
-        ref,
-        thenable,
-        new Set(resolvedView.coverage.map(([id]) => id)),
-      );
+      this.viewDataCache.set(entityId, view, ref, thenable);
       return thenable;
     };
 

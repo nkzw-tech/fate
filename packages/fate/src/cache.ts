@@ -86,7 +86,6 @@ export default class ViewDataCache {
     view: V,
     ref: ViewRef<T['__typename']>,
     thenable: FateThenable<ViewSnapshot<T, S>>,
-    dependencies: ReadonlySet<EntityId>,
   ) {
     if (!this.isEnabled()) {
       return;
@@ -98,10 +97,8 @@ export default class ViewDataCache {
       entityMap.set(view, viewMap);
     }
     const coverage = new Map<EntityId, ReadonlySet<string> | null>(thenable.value?.coverage);
-    for (const id of [entityId, ...dependencies]) {
-      if (!coverage.has(id)) {
-        coverage.set(id, null);
-      }
+    if (!coverage.has(entityId)) {
+      coverage.set(entityId, null);
     }
     // Coverage already includes every nested entity. Keep dependencies only on
     // this weakly held snapshot instead of accumulating a reverse entity graph.

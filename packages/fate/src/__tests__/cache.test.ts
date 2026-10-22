@@ -52,14 +52,8 @@ test('evicts dependents and the dependency when invalidating an entity', () => {
   };
   const dependentThenable = createThenable(dependentSnapshot);
 
-  cache.set(dependencyId, dependencyView, dependencyRef, dependencyThenable, new Set());
-  cache.set(
-    dependentId,
-    dependentView,
-    dependentRef,
-    dependentThenable,
-    new Set<EntityId>([dependencyId]),
-  );
+  cache.set(dependencyId, dependencyView, dependencyRef, dependencyThenable);
+  cache.set(dependentId, dependentView, dependentRef, dependentThenable);
 
   expect(cache.get(dependencyId, dependencyView, dependencyRef)).toBe(dependencyThenable);
   expect(cache.get(dependentId, dependentView, dependentRef)).toBe(dependentThenable);
@@ -107,9 +101,9 @@ test('invalidates snapshots through their complete nested coverage', () => {
   };
   const leafThenable = createThenable(leafSnapshot);
 
-  cache.set(rootId, rootView, rootRef, rootThenable, new Set());
-  cache.set(middleId, middleView, middleRef, middleThenable, new Set<EntityId>([rootId]));
-  cache.set(leafId, leafView, leafRef, leafThenable, new Set<EntityId>([middleId, rootId]));
+  cache.set(rootId, rootView, rootRef, rootThenable);
+  cache.set(middleId, middleView, middleRef, middleThenable);
+  cache.set(leafId, leafView, leafRef, leafThenable);
 
   expect(cache.get(rootId, rootView, rootRef)).toBe(rootThenable);
   expect(cache.get(middleId, middleView, middleRef)).toBe(middleThenable);
@@ -133,7 +127,7 @@ test('preserves snapshots whose selected dependency fields have not changed', ()
     ],
     data: { [ViewsTag]: new Set() },
   });
-  cache.set('Parent:1', parentView, parentRef, snapshot, new Set(['Child:2']));
+  cache.set('Parent:1', parentView, parentRef, snapshot);
   cache.invalidate('Child:2', ['extra']);
   expect(cache.get('Parent:1', parentView, parentRef)).toBe(snapshot);
   cache.invalidate('Parent:1', ['extra']);
@@ -150,7 +144,7 @@ test('full invalidation still evicts snapshots after unrelated field changes', (
     coverage: [['User:1', new Set(['name'])]],
     data: { [ViewsTag]: new Set() },
   });
-  cache.set('User:1', selected, ref, snapshot, new Set());
+  cache.set('User:1', selected, ref, snapshot);
   cache.invalidate('User:1', ['extra']);
   expect(cache.get('User:1', selected, ref)).toBe(snapshot);
   cache.invalidate('User:1');
@@ -172,10 +166,10 @@ test('replacing one snapshot drops obsolete dependencies without affecting other
       data: { [ViewsTag]: new Set() },
     });
   const first = snapshot('Child:1');
-  cache.set('Parent:1', parentView, ref, first, new Set(['Child:1']));
-  cache.set('Parent:1', otherView, ref, first, new Set(['Child:1']));
+  cache.set('Parent:1', parentView, ref, first);
+  cache.set('Parent:1', otherView, ref, first);
   const next = snapshot('Child:2');
-  cache.set('Parent:1', parentView, ref, next, new Set(['Child:2']));
+  cache.set('Parent:1', parentView, ref, next);
   cache.invalidate('Child:1');
   expect(cache.get('Parent:1', parentView, ref)).toBe(next);
   expect(cache.get('Parent:1', otherView, ref)).toBeNull();
