@@ -8,13 +8,33 @@ import {
   type ViewRef,
 } from './types.ts';
 
+type CachedSnapshot = FateThenable<ViewSnapshot<any, any>>;
+type CacheEntry = {
+  checkedRevision: number;
+  dependencies: ReadonlyArray<{ cache: EntityCache; fields: ReadonlySet<string> | null }>;
+  revision: number;
+  thenable: CachedSnapshot;
+};
+type EntityCache = {
+  fields: Map<string, number>;
+  invalidated: number;
+  views: WeakMap<View<any, any>, WeakMap<ViewRef<string>, CacheEntry>>;
+};
+
 export default class ViewDataCache {
   constructor(private readonly isEnabled: () => boolean = () => true) {}
 
-  private cache = new Map<
-    string,
-    WeakMap<View<any, any>, WeakMap<ViewRef<string>, FateThenable<ViewSnapshot<any, any>>>>
-  >();
+  private cache = new Map<EntityId, EntityCache>();
+  private revision = 0;
+
+  private entityCache(entityId: EntityId): EntityCache {
+    let cache = this.cache.get(entityId);
+    if (!cache) {
+      cache = { fields: new Map(), invalidated: 0, views: new WeakMap() };
+      this.cache.set(entityId, cache);
+    }
+    return cache;
+  }
 
   private rootDependencies = new Map<EntityId, Set<EntityId>>();
   private dependencyIndex = new Map<EntityId, Set<EntityId>>();
@@ -33,7 +53,32 @@ export default class ViewDataCache {
     if (!this.isEnabled()) {
       return null;
     }
-    return this.cache.get(entityId)?.get(view)?.get(ref) ?? null;
+    const entry = this.cache.get(entityId)?.views.get(view)?.get(ref);
+    if (!entry) {
+      return null;
+    }
+    if (entry.checkedRevision !== this.revision) {
+      for (const { cache, fields } of entry.dependencies) {
+        if (cache.invalidated > entry.revision) {
+          return null;
+        }
+        if (fields) {
+          for (const field of fields) {
+            if ((cache.fields.get(field) ?? 0) > entry.revision) {
+              return null;
+            }
+          }
+        } else {
+          for (const revision of cache.fields.values()) {
+            if (revision > entry.revision) {
+              return null;
+            }
+          }
+        }
+      }
+      entry.checkedRevision = this.revision;
+    }
+    return entry.thenable;
   }
 
   set<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
@@ -46,19 +91,24 @@ export default class ViewDataCache {
     if (!this.isEnabled()) {
       return;
     }
-    let entityMap = this.cache.get(entityId);
-    if (!entityMap) {
-      entityMap = new WeakMap();
-      this.cache.set(entityId, entityMap);
-    }
-
+    const entityMap = this.entityCache(entityId).views;
     let viewMap = entityMap.get(view);
     if (!viewMap) {
       viewMap = new WeakMap();
       entityMap.set(view, viewMap);
     }
-
-    viewMap.set(ref, thenable);
+    const coverage = new Map<EntityId, ReadonlySet<string> | null>(thenable.value?.coverage);
+    for (const id of [entityId, ...dependencies]) {
+      if (!coverage.has(id)) {
+        coverage.set(id, null);
+      }
+    }
+    viewMap.set(ref, {
+      checkedRevision: this.revision,
+      dependencies: [...coverage].map(([id, fields]) => ({ cache: this.entityCache(id), fields })),
+      revision: this.revision,
+      thenable,
+    });
 
     let roots = this.rootDependencies.get(entityId);
     if (!roots) {
@@ -79,11 +129,21 @@ export default class ViewDataCache {
     }
   }
 
-  invalidate(entityId: EntityId) {
+  invalidate(entityId: EntityId, paths?: Iterable<string>) {
     if (!this.isEnabled()) {
       return;
     }
-    this.invalidateDependents(entityId, new Set());
+    if (paths) {
+      const cache = this.cache.get(entityId);
+      if (cache) {
+        const revision = ++this.revision;
+        for (const path of paths) {
+          cache.fields.set(path.split('.')[0], revision);
+        }
+      }
+    } else {
+      this.invalidateDependents(entityId, new Set());
+    }
   }
 
   private invalidateDependents(entityId: EntityId, visited: Set<EntityId>) {
@@ -104,6 +164,11 @@ export default class ViewDataCache {
   }
 
   private delete(entityId: EntityId) {
+    const cache = this.cache.get(entityId);
+    if (cache) {
+      cache.invalidated = ++this.revision;
+      cache.fields.clear();
+    }
     const roots = this.rootDependencies.get(entityId);
     if (roots) {
       for (const dependency of roots) {

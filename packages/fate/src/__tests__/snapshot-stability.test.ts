@@ -88,3 +88,10 @@ test('scalar objects retain their own identity and are never compared by their p
   expect(read).not.toHaveBeenCalled();
   dispose();
 });
+test('writing fields outside a view preserves that view snapshot', async () => {
+  const { client } = setup();
+  const { viewer } = await client.request({ viewer: { view: UserView } });
+  const first = await client.readView(UserView, viewer);
+  client.write('User', { id: '1', lastLogin: 'today' }, new Set(['lastLogin']));
+  expect(await client.readView(UserView, viewer)).toBe(first);
+});

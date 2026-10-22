@@ -622,11 +622,11 @@ export class FateClient<
         }
       }
       if (change.kind === 'record') {
-        this.viewDataCache.invalidate(change.key);
+        this.viewDataCache.invalidate(change.key, change.paths);
       } else {
         const owner = parseListKey(change.key);
         if (owner) {
-          this.viewDataCache.invalidate(owner.ownerId);
+          this.viewDataCache.invalidate(owner.ownerId, [argumentFieldKey(owner.field, owner.hash)]);
         }
       }
       this.persistenceRuntime?.changed(change);

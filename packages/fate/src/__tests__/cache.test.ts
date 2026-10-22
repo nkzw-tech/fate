@@ -118,3 +118,38 @@ test('recursively invalidates transitive dependency chains', () => {
   expect(cache.get(middleId, middleView, middleRef)).toBeNull();
   expect(cache.get(leafId, leafView, leafRef)).toBeNull();
 });
+
+test('preserves snapshots whose selected dependency fields have not changed', () => {
+  const cache = new ViewDataCache();
+  const parentView = createView();
+  const parentRef = createViewRef('Parent', '1');
+  const snapshot = createThenable<ViewSnapshot<any, any>>({
+    coverage: [
+      ['Parent:1', new Set(['child'])],
+      ['Child:2', new Set(['name'])],
+    ],
+    data: { [ViewsTag]: new Set() },
+  });
+  cache.set('Parent:1', parentView, parentRef, snapshot, new Set(['Child:2']));
+  cache.invalidate('Child:2', ['extra']);
+  expect(cache.get('Parent:1', parentView, parentRef)).toBe(snapshot);
+  cache.invalidate('Parent:1', ['extra']);
+  expect(cache.get('Parent:1', parentView, parentRef)).toBe(snapshot);
+  cache.invalidate('Child:2', ['name']);
+  expect(cache.get('Parent:1', parentView, parentRef)).toBeNull();
+});
+
+test('full invalidation still evicts snapshots after unrelated field changes', () => {
+  const cache = new ViewDataCache();
+  const selected = createView();
+  const ref = createViewRef('User', '1');
+  const snapshot = createThenable<ViewSnapshot<any, any>>({
+    coverage: [['User:1', new Set(['name'])]],
+    data: { [ViewsTag]: new Set() },
+  });
+  cache.set('User:1', selected, ref, snapshot, new Set());
+  cache.invalidate('User:1', ['extra']);
+  expect(cache.get('User:1', selected, ref)).toBe(snapshot);
+  cache.invalidate('User:1');
+  expect(cache.get('User:1', selected, ref)).toBeNull();
+});
