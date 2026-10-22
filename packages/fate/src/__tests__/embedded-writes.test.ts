@@ -311,3 +311,54 @@ test.each(
     }
   },
 );
+
+test('view results preserve own prototype-named fields without changing their prototype', async () => {
+  type PrototypeUser = {
+    __proto__: { color: number };
+    __typename: 'User';
+    constructor: string;
+    id: string;
+    toString: string;
+  };
+  const Selected = view<PrototypeUser>()({
+    ['__proto__']: { color: true },
+    constructor: true,
+    toString: true,
+  });
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [] },
+    types: [{ fields: { ['__proto__']: { embedded: 'Character' } }, type: 'User' }],
+  });
+  const plan = getSelectionPlan(Selected, null);
+  client.write(
+    'User',
+    JSON.parse('{"id":"1","__proto__":{"color":3},"constructor":"data","toString":"text"}'),
+    plan.paths,
+    plan,
+  );
+  const { data } = await client.readView<
+    PrototypeUser,
+    SelectionOf<typeof Selected>,
+    typeof Selected
+  >(Selected, client.ref('User', '1', Selected));
+  expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+  for (const key of ['__proto__', 'constructor', 'toString']) {
+    expect(Object.hasOwn(data, key)).toBe(true);
+  }
+  expect(data.__proto__).toEqual({ color: 3 });
+  expect(data.constructor).toBe('data');
+  expect(data.toString).toBe('text');
+
+  client.write('User', { id: '2' }, plan.paths, plan);
+  const missing = (
+    await client.readView<PrototypeUser, SelectionOf<typeof Selected>, typeof Selected>(
+      Selected,
+      client.ref('User', '2', Selected),
+    )
+  ).data;
+  expect(Object.getPrototypeOf(missing)).toBe(Object.prototype);
+  expect(missing.__proto__).toBeNull();
+  expect(missing.constructor).toBeUndefined();
+  expect(missing.toString).toBeUndefined();
+});

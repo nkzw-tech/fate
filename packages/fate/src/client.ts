@@ -4624,7 +4624,7 @@ export class FateClient<
       for (const [key, conditionalSelection] of Object.entries(viewPayload)) {
         const rawSelection = resolveConditionalSelection(conditionalSelection);
         if (rawSelection === undefined) {
-          target[key] = undefined;
+          setRecordValue(target, key, undefined);
           continue;
         }
         if (isAliasedView(rawSelection)) {
@@ -4635,7 +4635,11 @@ export class FateClient<
             parentId === entityId ? ref.id : id,
             getViewNames(rawSelection.view),
           );
-          target[key] = this.cacheOnlyRefs.has(ref) ? this.cacheOnlyResult(namedRef) : namedRef;
+          setRecordValue(
+            target,
+            key,
+            this.cacheOnlyRefs.has(ref) ? this.cacheOnlyResult(namedRef) : namedRef,
+          );
           continue;
         }
         const selectionKind = isAliasedSelection(rawSelection)
@@ -4665,7 +4669,7 @@ export class FateClient<
             type,
           });
           this.deferredTargets.add(deferred);
-          target[key] = deferred;
+          setRecordValue(target, key, deferred);
           continue;
         }
 
@@ -4673,12 +4677,15 @@ export class FateClient<
 
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
-          const value = record[storageKey];
+          const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
           const metadata = Array.isArray(value)
             ? this.nestedListMetadata(parentId, field, plan, fieldPath)
             : undefined;
-          target[key] =
-            metadata && Array.isArray(value) ? this.exposeListTarget([...value], metadata) : value;
+          setRecordValue(
+            target,
+            key,
+            metadata && Array.isArray(value) ? this.exposeListTarget([...value], metadata) : value,
+          );
         } else if (selectionKind && selectionType === 'object') {
           const selectionValue = selectionKind as AnyRecord;
           const { args: selectionArgs, ...selectionWithoutArgs } = selectionValue;
@@ -4688,29 +4695,32 @@ export class FateClient<
             Object.keys(selectionWithoutArgs).length === 0;
 
           if (hasArgsOnly) {
-            const value = record[storageKey];
+            const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
             const metadata = Array.isArray(value)
               ? this.nestedListMetadata(parentId, field, plan, fieldPath)
               : undefined;
-            target[key] =
+            setRecordValue(
+              target,
+              key,
               metadata && Array.isArray(value)
                 ? this.exposeListTarget([...value], metadata)
-                : value;
+                : value,
+            );
             continue;
           }
 
-          if (!(key in target)) {
-            target[key] = {};
+          if (!Object.hasOwn(target, key)) {
+            setRecordValue(target, key, {});
           }
 
           const nextSelection = Object.keys(selectionWithoutArgs).length
             ? selectionWithoutArgs
             : selectionValue;
 
-          const value = record[storageKey];
+          const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
 
           if (value == null) {
-            target[key] = null;
+            setRecordValue(target, key, null);
             continue;
           }
 
@@ -4784,7 +4794,11 @@ export class FateClient<
                 }
               }
               const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
-              target[key] = metadata ? this.exposeListTarget(connection, metadata) : connection;
+              setRecordValue(
+                target,
+                key,
+                metadata ? this.exposeListTarget(connection, metadata) : connection,
+              );
             } else {
               const items = value.map((item) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
@@ -4805,7 +4819,11 @@ export class FateClient<
                 return null;
               });
               const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
-              target[key] = metadata ? this.exposeListTarget(items, metadata) : items;
+              setRecordValue(
+                target,
+                key,
+                metadata ? this.exposeListTarget(items, metadata) : items,
+              );
             }
           } else if (isNodeRef(value)) {
             const entityId = getNodeRefId(value);

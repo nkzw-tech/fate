@@ -659,3 +659,34 @@ test.each(
     expect(data.itemsOnly?.items.map(({ node }) => node.id)).toEqual(['1', '2']);
   },
 );
+
+test('prototype-named aliases create own result containers without mutating built-ins', async () => {
+  type ProfileUser = {
+    __typename: 'User';
+    id: string;
+    profile: { prototype: { fateViewPrototypeMarker: string } };
+  };
+  const Selected = view<ProfileUser>()({
+    constructor: alias('profile', { prototype: { fateViewPrototypeMarker: true } }),
+  });
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [] },
+    types: [{ fields: { profile: { embedded: 'Profile' } }, type: 'User' }],
+  });
+  const plan = getSelectionPlan(Selected, null);
+  try {
+    client.write(
+      'User',
+      { 'constructor:profile': { prototype: { fateViewPrototypeMarker: 'data' } }, id: '1' },
+      plan.paths,
+      plan,
+    );
+    const { data } = await client.readView(Selected, client.ref('User', '1', Selected));
+    expect(Object.hasOwn(Object.prototype, 'fateViewPrototypeMarker')).toBe(false);
+    expect(Object.hasOwn(data, 'constructor')).toBe(true);
+    expect(data.constructor).toEqual({ prototype: { fateViewPrototypeMarker: 'data' } });
+  } finally {
+    Reflect.deleteProperty(Object.prototype, 'fateViewPrototypeMarker');
+  }
+});
