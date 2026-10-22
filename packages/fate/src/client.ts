@@ -3909,6 +3909,7 @@ export class FateClient<
     prefix: string,
     storagePrefix: string,
     replacedPaths: Set<string>,
+    preserveSiblings = true,
   ): unknown {
     if (selection.size === 0) {
       if (isRecord(previous) || Array.isArray(previous)) {
@@ -3918,17 +3919,21 @@ export class FateClient<
     }
     if (Array.isArray(value)) {
       replacedPaths.add(storagePrefix);
-      return value.map((item) =>
+      const existing = Array.isArray(previous) ? previous : undefined;
+      // An array position is not an identity: replace each element's returned shape.
+      const items = value.map((item, index) =>
         this.normalizeEmbedded(
           item,
-          undefined,
+          existing?.[index],
           selection,
           plan,
           prefix,
           storagePrefix,
           replacedPaths,
+          false,
         ),
       );
+      return reuseNormalizedField(items, existing);
     }
     if (!isRecord(value)) {
       if (isRecord(previous) || Array.isArray(previous)) {
@@ -3940,7 +3945,7 @@ export class FateClient<
     if (!existing) {
       replacedPaths.add(storagePrefix);
     }
-    const result = { ...existing };
+    const result: AnyRecord = preserveSiblings ? { ...existing } : {};
     const keys = Object.keys(value);
     for (const key of selection.keys()) {
       if (!Object.hasOwn(value, key)) {
@@ -3958,6 +3963,7 @@ export class FateClient<
         path,
         `${storagePrefix}.${storageKey}`,
         replacedPaths,
+        preserveSiblings,
       );
     }
     return existing &&

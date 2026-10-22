@@ -95,3 +95,28 @@ test('writing fields outside a view preserves that view snapshot', async () => {
   client.write('User', { id: '1', lastLogin: 'today' }, new Set(['lastLogin']));
   expect(await client.readView(UserView, viewer)).toBe(first);
 });
+
+test('identical embedded array responses reuse elements without merging partial elements by position', () => {
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [] },
+    types: [{ fields: { characters: { embedded: 'Character' } }, type: 'User' }],
+  });
+  const select = new Set(['characters.color', 'characters.unitId']);
+  const initial = { characters: [{ color: 1, unitId: 42 }, null], id: '1' };
+  client.write('User', structuredClone(initial), select);
+  const first = client.store.read('User:1')?.characters;
+  const notify = vi.fn();
+  const dispose = client.store.subscribe('User:1', new Set(['characters']), notify);
+  client.write('User', structuredClone(initial), select);
+  expect(client.store.read('User:1')?.characters).toBe(first);
+  expect(notify).not.toHaveBeenCalled();
+  client.write(
+    'User',
+    { characters: [{ color: 1 }, null], id: '1' },
+    new Set(['characters.color']),
+  );
+  expect(client.store.read('User:1')?.characters).toEqual([{ color: 1 }, null]);
+  expect(notify).toHaveBeenCalledTimes(1);
+  dispose();
+});
