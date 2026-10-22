@@ -784,7 +784,10 @@ export class PersistenceCache {
           queue.push({ id: toEntityId(item.type, id), paths, plan: item.plan, prefix: '' });
         }
       } else if (item.kind === 'query') {
-        const id = await readNode(queryKey(item.queryKey));
+        let id = await readNode(queryKey(item.queryKey));
+        if (id === undefined && item.legacyQueryKey) {
+          id = await readNode(queryKey(item.legacyQueryKey));
+        }
         if (id === undefined) {
           complete = false;
           continue;

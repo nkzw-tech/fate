@@ -8,7 +8,9 @@ import {
   type ClientHydrationState,
 } from '../hydration.ts';
 import { mutation } from '../mutation.ts';
+import { PersistenceCache } from '../persistence-cache.ts';
 import { createPersistence } from '../persistence.ts';
+import { createRequestDescriptor } from '../request-descriptor.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
 import { getListKey } from '../store.ts';
@@ -509,3 +511,60 @@ test('legacy persisted query keys remain readable and retain their entities', as
   expect(observer.getSnapshot()).toMatchObject({ data: { map: null }, status: 'ready' });
   dispose();
 });
+
+test.each([false, true])(
+  'restores legacy query keys from disk while offline (null: %s)',
+  async (nullable) => {
+    const storage = memoryStorage();
+    const roots = { map: clientRoot<MapData | null, 'Map'>('Map') };
+    const fetchQuery = vi.fn<NonNullable<Transport['fetchQuery']>>(async () =>
+      nullable ? null : { id: 'one', state: 'editor' },
+    );
+    const options = {
+      roots,
+      transport: { fetchById: async () => [], fetchQuery },
+      types: [{ type: 'Map' }],
+    };
+    const first = createClient(options);
+    const request = { map: { args: { slug: 'one' }, view: EditorMap } };
+    await first.request(request);
+    const descriptor = createRequestDescriptor(request, () => 'Map');
+    const item = descriptor.items[0];
+    if (item.kind !== 'query' || !item.legacyQueryKey) {
+      throw new Error('Expected a query with a legacy key');
+    }
+    const legacy = {
+      ...descriptor,
+      items: [{ ...item, legacyQueryKey: undefined, queryKey: item.legacyQueryKey }],
+    };
+    const state = first.dehydrate();
+    first.hydrate({
+      ...state,
+      data: encodeHydrationValue({
+        ...(decodeHydrationValue(state.data) as ClientHydrationState),
+        rootRequests: [[item.legacyQueryKey, nullable ? null : 'Map:one']],
+      }),
+    });
+    const cache = new PersistenceCache(first, storage, 'legacy-query', 60_000, 1024 * 1024);
+    try {
+      await cache.initialize();
+      cache.fetched(legacy);
+      await cache.flush(0);
+    } finally {
+      cache.dispose();
+    }
+    fetchQuery.mockClear();
+    fetchQuery.mockRejectedValue(new Error('Offline'));
+    const restored = createClient({
+      ...options,
+      persistence: createPersistence({ key: 'legacy-query', online: () => false, storage }),
+    });
+    try {
+      const result = await restored.request(request);
+      expect(result.map).toEqual(nullable ? null : expect.objectContaining({ id: 'one' }));
+      expect(fetchQuery).not.toHaveBeenCalled();
+    } finally {
+      restored.persistence!.dispose();
+    }
+  },
+);
