@@ -720,3 +720,43 @@ test('switching offline while a request is pending keeps local state and skips i
   expect(container.textContent).toBe('7:Sam');
   await act(async () => root.unmount());
 });
+
+test('a Suspense query with child arguments satisfies a cache-only summary of the same root', async () => {
+  const roots = { user: clientRoot<User, 'User'>('User') };
+  const fetchQuery = vi.fn(async () => ({ id: '1', name: 'Sam' }));
+  const client = createClient({
+    roots,
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'User' }],
+  });
+  const summary = { user: { args: { username: 'Sam' }, view: view<User>()({ id: true }) } };
+  const detail = {
+    user: {
+      args: { username: 'Sam' },
+      view: view<User>()({ id: true, name: { args: { locale: 'en' } } }),
+    },
+  };
+  function Screen() {
+    const cached = useRequest<typeof summary, typeof roots>(summary, { mode: 'cache-only' });
+    const loaded = useRequest<typeof detail, typeof roots>(detail, { mode: 'network-only' });
+    return (
+      <span>
+        {cached?.user ? 'cached' : 'missing'}:{loaded.user.id}
+      </span>
+    );
+  }
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback="loading">
+          <Screen />
+        </Suspense>
+      </FateClient>,
+    ),
+  );
+  expect(container.textContent).toBe('cached:1');
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+  await act(async () => root.unmount());
+});

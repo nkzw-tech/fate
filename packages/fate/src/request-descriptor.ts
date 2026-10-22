@@ -95,6 +95,7 @@ export type NodeRequestDescriptor = Readonly<{
 export type QueryRequestDescriptor = Readonly<{
   argsPayload: ResolvedArgsPayload | undefined;
   kind: 'query';
+  legacyQueryKey?: string;
   name: string;
   plan: SelectionPlan;
   procedure: string;
@@ -249,13 +250,17 @@ export const createRequestDescriptor = (
 
     if (isQueryItem(item)) {
       const { argsPayload, plan } = resolveSelectionPlan(item.view, item.args);
+      const rootArgs = combineArgsPayload(item.args, plan.args.get('')?.value);
+      const queryKey = getRootDescriptorKey(procedure, rootArgs, plan);
+      const legacyQueryKey = getRootDescriptorKey(procedure, argsPayload, plan);
       items.push({
         argsPayload,
         kind: 'query',
+        ...(legacyQueryKey !== queryKey ? { legacyQueryKey } : {}),
         name,
         plan,
         procedure,
-        queryKey: getRootDescriptorKey(procedure, argsPayload, plan),
+        queryKey,
         refViewNames: getRootViewNames(item.view),
         type,
         viewSignature: getViewSignature(item.view),

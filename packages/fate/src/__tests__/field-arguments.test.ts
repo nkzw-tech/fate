@@ -1,10 +1,17 @@
 import { expect, test, vi } from 'vite-plus/test';
+import { hashArgs } from '../args.ts';
 import { createClient } from '../client.ts';
 import { defer } from '../defer.ts';
+import {
+  decodeHydrationValue,
+  encodeHydrationValue,
+  type ClientHydrationState,
+} from '../hydration.ts';
 import { mutation } from '../mutation.ts';
 import { createPersistence } from '../persistence.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
+import { getListKey } from '../store.ts';
 import type { Transport } from '../transport.ts';
 import type { SelectionOf } from '../types.ts';
 import { view } from '../view.ts';
@@ -435,4 +442,70 @@ test('keys node request handles by arguments when a view factory is reused', asy
   expect(fetchById).toHaveBeenCalledTimes(4);
   expect(fetchById.mock.calls[2][1]).toEqual(['2']);
   expect(fetchById.mock.calls[3][1]).toEqual(['2']);
+});
+
+test('normalized query identity shares child selections while keeping actual root arguments separate', async () => {
+  const fetchQuery = vi.fn<NonNullable<Transport['fetchQuery']>>(async (_root, _select, args) => ({
+    id: String(args?.slug),
+    state: 'editor',
+  }));
+  const client = createClient({
+    roots: { map: clientRoot<MapData, 'Map'>('Map') },
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'Map' }],
+  });
+  await client.request({ map: { args: { slug: 'one' }, view: EditorMap } });
+  const summary = { map: { args: { slug: 'one' }, view: view<MapData>()({ id: true }) } };
+  expect(client.observeRequest(summary, { mode: 'cache-only' }).getSnapshot()).toMatchObject({
+    data: { map: { id: 'one' } },
+    status: 'ready',
+  });
+  expect(
+    client
+      .observeRequest({ map: { ...summary.map, args: { slug: 'two' } } }, { mode: 'cache-only' })
+      .getSnapshot().status,
+  ).toBe('missing');
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+});
+
+test('legacy persisted query keys remain readable and retain their entities', async () => {
+  const fetchQuery = vi.fn<NonNullable<Transport['fetchQuery']>>(async () => ({
+    id: 'one',
+    state: 'editor',
+  }));
+  const roots = { map: clientRoot<MapData, 'Map'>('Map') };
+  const client = createClient({
+    roots,
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'Map' }],
+  });
+  const request = { map: { args: { slug: 'one' }, view: EditorMap } };
+  await client.request(request);
+  const state = client.dehydrate();
+  const decoded = decodeHydrationValue(state.data) as ClientHydrationState;
+  const legacyKey = getListKey(
+    '__root__',
+    'map',
+    hashArgs({ slug: 'one', state: { editor: true } }),
+  );
+  const restored = createClient({
+    gcReleaseBufferSize: 0,
+    roots,
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'Map' }],
+  });
+  restored.hydrate({
+    ...state,
+    data: encodeHydrationValue({ ...decoded, rootRequests: [[legacyKey, 'Map:one']] }),
+  });
+  const observer = restored.observeRequest(request, { mode: 'cache-only' });
+  const dispose = observer.subscribe(() => {});
+  restored.gc();
+  expect(observer.getSnapshot()).toMatchObject({ data: { map: { id: 'one' } }, status: 'ready' });
+  expect(restored.store.read('Map:one')).toBeDefined();
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+  fetchQuery.mockResolvedValueOnce(null);
+  await restored.request(request, { mode: 'network-only' });
+  expect(observer.getSnapshot()).toMatchObject({ data: { map: null }, status: 'ready' });
+  dispose();
 });

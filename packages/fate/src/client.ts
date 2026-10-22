@@ -2607,6 +2607,12 @@ export class FateClient<
     return this.store.getListState(connection.key);
   }
 
+  private queryResultKey(item: QueryRequestDescriptor): string {
+    return item.legacyQueryKey && !this.rootRequests.has(item.queryKey)
+      ? item.legacyQueryKey
+      : item.queryKey;
+  }
+
   private requestDependencies(request: RequestDescriptor): Set<string> {
     const dependencies = new Set<string>();
     for (const item of request.items) {
@@ -2616,7 +2622,11 @@ export class FateClient<
         }
       } else if (item.kind === 'query') {
         dependencies.add(`root:${item.queryKey}`);
-        const entityId = this.rootRequests.get(item.queryKey);
+        const key = this.queryResultKey(item);
+        if (key !== item.queryKey) {
+          dependencies.add(`root:${key}`);
+        }
+        const entityId = this.rootRequests.get(key);
         if (entityId) {
           dependencies.add(`entity:${entityId}`);
         }
@@ -3075,7 +3085,7 @@ export class FateClient<
         }
 
         if (item.kind === 'query') {
-          markRecord(this.rootRequests.get(item.queryKey));
+          markRecord(this.rootRequests.get(this.queryResultKey(item)));
           continue;
         }
 
@@ -3462,8 +3472,8 @@ export class FateClient<
         }
 
         if (item.kind === 'query') {
-          const hasResult = this.rootRequests.has(item.queryKey);
-          const entityId = this.rootRequests.get(item.queryKey);
+          const hasResult = this.rootRequests.has(this.queryResultKey(item));
+          const entityId = this.rootRequests.get(this.queryResultKey(item));
           const missing =
             hasResult && entityId
               ? this.missingForSelection(entityId, item.plan.paths, item.plan)
@@ -3547,8 +3557,8 @@ export class FateClient<
       }
 
       if (item.kind === 'query') {
-        const hasResult = this.rootRequests.has(item.queryKey);
-        const entityId = this.rootRequests.get(item.queryKey);
+        const hasResult = this.rootRequests.has(this.queryResultKey(item));
+        const entityId = this.rootRequests.get(this.queryResultKey(item));
         const missing =
           hasResult && entityId
             ? this.missingForSelection(entityId, item.plan.paths, item.plan)
@@ -3608,7 +3618,7 @@ export class FateClient<
       return this.stableRefWithViewNames(item.type, item.ids[0], item.refViewNames);
     }
     if (item.kind === 'query') {
-      const entityId = this.rootRequests.get(item.queryKey);
+      const entityId = this.rootRequests.get(this.queryResultKey(item));
       return entityId
         ? this.stableRefWithViewNames(item.type, parseEntityId(entityId).id, item.refViewNames)
         : null;
