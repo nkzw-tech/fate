@@ -1001,3 +1001,66 @@ test('exposes a manifest for code generation', () => {
     types: { Post: true, User: true },
   });
 });
+
+test('registers self-referential data views and resolves finite recursive selections', async () => {
+  type Category = { id: string; parent?: Category | null };
+  const categoryView: DataView<Category> = dataView<Category>('Category')({
+    id: true,
+    get parent() {
+      return categoryView;
+    },
+  });
+  const categorySource: SourceDefinition<Category> = { id: 'id', view: categoryView };
+  categorySource.relations = {
+    parent: { foreignKey: 'id', kind: 'one', localKey: 'parentId', source: categorySource },
+  };
+  const fate = createFateServer({
+    roots: { categories: list(categoryView) },
+    sources: {
+      getSource: <Item extends AnyRecord>(_target: DataView<Item> | SourceDefinition<Item>) =>
+        categorySource as unknown as SourceDefinition<Item>,
+      registry: createSourceRegistry([
+        [
+          categorySource,
+          { byIds: async () => [{ id: 'child', parent: { id: 'parent', parent: null } }] },
+        ],
+      ]),
+    },
+  });
+  const response = await fate.handleRequest(
+    postJSON('http://local/fate', {
+      operations: [
+        { id: 'q', ids: ['child'], kind: 'byId', select: ['parent.parent.id'], type: 'Category' },
+      ],
+      version: 1,
+    }),
+  );
+  expect(await response.json()).toMatchObject({
+    results: [{ data: [{ id: 'child', parent: { id: 'parent', parent: null } }], ok: true }],
+  });
+});
+
+test('registers mutually recursive data views through shared roots', async () => {
+  const author: DataView<AnyRecord> = dataView<AnyRecord>('Author')({
+    id: true,
+    get posts() {
+      return post;
+    },
+  });
+  const post: DataView<AnyRecord> = dataView<AnyRecord>('Post')({ author, id: true });
+  const authorSource: SourceDefinition = { id: 'id', view: author };
+  const postSource: SourceDefinition = { id: 'id', view: post };
+  const sources = new Map([
+    [author.fields, authorSource],
+    [post.fields, postSource],
+  ]);
+  const fate = createFateServer({
+    roots: { authors: list(author), posts: list(post) },
+    sources: {
+      getSource: <Item extends AnyRecord>(target: DataView<Item> | SourceDefinition<Item>) =>
+        ('view' in target ? target : sources.get(target.fields)!) as SourceDefinition<Item>,
+      registry: createSourceRegistry([]),
+    },
+  });
+  expect(fate.manifest.types).toEqual({ Author: true, Post: true });
+});

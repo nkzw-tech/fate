@@ -665,7 +665,12 @@ export function createFateServer<
     }
   };
 
+  const visitedViews = new Set<DataView<AnyRecord>>();
   const visit = (view: DataView<AnyRecord>) => {
+    if (visitedViews.has(view)) {
+      return;
+    }
+    visitedViews.add(view);
     const source = sources.getSource(view);
     registerSourceByType(source);
 
