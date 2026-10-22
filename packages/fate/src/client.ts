@@ -524,7 +524,7 @@ export class FateClient<
   private readonly writeVersions = new Map<string, number>();
 
   private acceptWrite(key: string, generation: number): boolean {
-    if (this.store.isRecordingOptimistic) {
+    if (this.store.isRecordingOptimistic || !this.pendingNetworkRequests) {
       return true;
     }
     if ((this.writeVersions.get(key) ?? 0) > generation) {
