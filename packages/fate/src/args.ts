@@ -16,7 +16,7 @@ const cloneValue = (entry: unknown, currentPath: string): unknown => {
   }
 
   if (isRecord(entry)) {
-    const result: AnyRecord = {};
+    const result: AnyRecord = Object.create(null);
     for (const [key, child] of Object.entries(entry)) {
       result[key] = cloneValue(child, `${currentPath}.${key}`);
     }
@@ -73,7 +73,7 @@ export const hashArgs = (
     ignoreKeys?: ReadonlySet<string>;
   } = {},
 ): string => {
-  const keys: AnyRecord = {};
+  const keys: AnyRecord = Object.create(null);
   for (const [key, value] of Object.entries(argsValue)) {
     if (options.ignoreKeys && options.ignoreKeys.has(key)) {
       continue;
@@ -90,7 +90,7 @@ export const filterConnectionArgs = (
     return undefined;
   }
 
-  const result: AnyRecord = {};
+  const result: AnyRecord = Object.create(null);
   for (const [key, value] of Object.entries(argsValue)) {
     if (!paginationArgKeys.has(key)) {
       result[key] = value;
@@ -103,16 +103,16 @@ export const filterConnectionArgs = (
 const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
   for (const [key, value] of Object.entries(source)) {
     if (isRecord(value)) {
-      const existing = target[key];
+      const existing = Object.hasOwn(target, key) ? target[key] : undefined;
       if (isRecord(existing)) {
         mergeArgs(existing, value);
       } else {
-        target[key] = { ...value };
+        target[key] = cloneArgs(value, key);
       }
       continue;
     }
 
-    target[key] = value;
+    target[key] = cloneValue(value, key);
   }
 };
 
@@ -121,7 +121,7 @@ export const resolvedArgsFromPlan = (plan?: SelectionPlan): ResolvedArgsPayload 
     return undefined;
   }
 
-  const result: AnyRecord = {};
+  const result: AnyRecord = Object.create(null);
 
   for (const [path, entry] of plan.args.entries()) {
     if (path === '') {
@@ -140,7 +140,7 @@ export const resolvedArgsFromPlan = (plan?: SelectionPlan): ResolvedArgsPayload 
         if (isRecord(existing)) {
           mergeArgs(existing, entry.value);
         } else {
-          current[segment] = { ...entry.value };
+          current[segment] = cloneArgs(entry.value, path);
         }
         return;
       }
@@ -151,7 +151,7 @@ export const resolvedArgsFromPlan = (plan?: SelectionPlan): ResolvedArgsPayload 
         return;
       }
 
-      const next: AnyRecord = {};
+      const next: AnyRecord = Object.create(null);
       current[segment] = next;
       current = next;
     });
@@ -171,7 +171,7 @@ export const combineArgsPayload = (
     return undefined;
   }
 
-  const result: AnyRecord = hasEntries(base) ? { ...base } : {};
+  const result: AnyRecord = hasEntries(base) ? cloneArgs(base, 'args') : Object.create(null);
 
   if (hasEntries(scoped)) {
     mergeArgs(result, scoped);
@@ -196,7 +196,7 @@ export const getArgsAtPath = (
   let current: unknown = payload;
 
   for (const segment of segments) {
-    if (!isRecord(current)) {
+    if (!isRecord(current) || !Object.hasOwn(current, segment)) {
       return undefined;
     }
     current = current[segment];
@@ -234,7 +234,7 @@ export const scopeArgsPayload = (
   scope: string,
 ): ResolvedArgsPayload | undefined => {
   const segments = scope.split('.');
-  const result: AnyRecord = {};
+  const result: AnyRecord = Object.create(null);
   let current = result;
 
   segments.forEach((segment, index) => {
@@ -243,7 +243,7 @@ export const scopeArgsPayload = (
       return;
     }
 
-    const next: AnyRecord = {};
+    const next: AnyRecord = Object.create(null);
     current[segment] = next;
     current = next;
   });
