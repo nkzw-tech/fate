@@ -4606,8 +4606,6 @@ export class FateClient<
     pathPrefix: string | null = null,
   ): ViewSnapshot<T, S> {
     const record = this.store.read(entityId) || { id: entityId };
-    const ids = new Set<EntityId>();
-    ids.add(entityId);
 
     const coverageById = new Map<EntityId, Set<string>>();
 
@@ -4734,7 +4732,6 @@ export class FateClient<
                   return itemResult;
                 }
 
-                ids.add(entityId);
                 const record = this.store.read(entityId);
                 const { id, type } = parseEntityId(entityId);
                 const node = { __typename: type, id };
@@ -4791,7 +4788,6 @@ export class FateClient<
                   return item;
                 }
 
-                ids.add(entityId);
                 const record = this.store.read(entityId);
                 const { id, type } = parseEntityId(entityId);
 
@@ -4808,7 +4804,6 @@ export class FateClient<
             }
           } else if (isNodeRef(value)) {
             const entityId = getNodeRefId(value);
-            ids.add(entityId);
             const relatedRecord = this.store.read(entityId);
             const { id, type } = parseEntityId(entityId);
             const targetRecord = target[key] as AnyRecord;
