@@ -121,20 +121,10 @@ export const mergePreservingExisting = (incoming: unknown, existing: unknown): u
 
   const result: AnyRecord = Object.create(null);
   for (const [key, value] of Object.entries(incoming)) {
-    Object.defineProperty(result, key, {
-      configurable: true,
-      enumerable: true,
-      value,
-      writable: true,
-    });
+    result[key] = value;
   }
   for (const [key, value] of Object.entries(existing)) {
-    Object.defineProperty(result, key, {
-      configurable: true,
-      enumerable: true,
-      value: Object.hasOwn(result, key) ? mergePreservingExisting(result[key], value) : value,
-      writable: true,
-    });
+    result[key] = Object.hasOwn(result, key) ? mergePreservingExisting(result[key], value) : value;
   }
   return result;
 };
