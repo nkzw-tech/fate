@@ -1,6 +1,8 @@
 import { expect, test, vi } from 'vite-plus/test';
+import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { clientRoot } from '../root.ts';
+import { getSelectionPlan } from '../selection.ts';
 import type { SelectionOf } from '../types.ts';
 import { view } from '../view.ts';
 
@@ -128,4 +130,47 @@ test('partial embedded writes do not inspect or merge opaque scalar fields', () 
   client.write('User', { id: '1', payload: second }, new Set(['payload']));
   expect(client.store.read('User:1')?.payload).toBe(second);
   expect(read).not.toHaveBeenCalled();
+});
+
+test('partial embedded writes preserve aliased argument variants', async () => {
+  const { client } = setup();
+  const English = view<User>()({
+    character: { shade: alias('color', { args: { locale: 'en' } }), unitId: true },
+  });
+  const Japanese = view<User>()({
+    character: { shade: alias('color', { args: { locale: 'ja' } }) },
+  });
+  const englishPlan = getSelectionPlan(English, null);
+  const japanesePlan = getSelectionPlan(Japanese, null);
+  client.write(
+    'User',
+    { character: { 'shade:color': 1, unitId: 42 }, id: '1' },
+    englishPlan.paths,
+    englishPlan,
+  );
+  client.write(
+    'User',
+    { character: { 'shade:color': 2 }, id: '1' },
+    japanesePlan.paths,
+    japanesePlan,
+  );
+  expect((await client.readView(English, client.ref('User', '1', English))).data).toMatchObject({
+    character: { shade: 1, unitId: 42 },
+  });
+  expect((await client.readView(Japanese, client.ref('User', '1', Japanese))).data).toMatchObject({
+    character: { shade: 2 },
+  });
+});
+
+test('a stale embedded response cannot overwrite a newer partial write', async () => {
+  const { client, fetchQuery } = setup();
+  await client.request({ viewer: { view: Full } });
+  const pending = Promise.withResolvers<object>();
+  fetchQuery.mockReturnValueOnce(pending.promise);
+  const refresh = client.request({ viewer: { view: Full } }, { mode: 'network-only' });
+  await vi.waitFor(() => expect(fetchQuery).toHaveBeenCalledTimes(2));
+  client.write('User', { character: { color: 5 }, id: '1' }, new Set(['character.color']));
+  pending.resolve({ character: { color: 0, unitId: 0 }, id: '1' });
+  await refresh;
+  expect(client.store.read('User:1')?.character).toEqual({ ...initial.character, color: 5 });
 });

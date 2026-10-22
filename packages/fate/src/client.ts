@@ -463,8 +463,27 @@ const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string
   return result;
 };
 
+type EmbeddedSelection = Map<string, EmbeddedSelection>;
+const emptyEmbeddedSelection: EmbeddedSelection = new Map();
+const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection => {
+  const selection: EmbeddedSelection = new Map();
+  for (const path of paths) {
+    let current = selection;
+    for (const key of path.split('.')) {
+      let child = current.get(key);
+      if (!child) {
+        child = new Map();
+        current.set(key, child);
+      }
+      current = child;
+    }
+  }
+  return selection;
+};
+
 type NormalizationSelection = {
   children: ReadonlyMap<string, Set<string>>;
+  embedded: Map<string, EmbeddedSelection>;
   paths: ReadonlySet<string>;
   storagePaths: Map<
     string,
@@ -3885,13 +3904,13 @@ export class FateClient<
   private normalizeEmbedded(
     value: unknown,
     previous: unknown,
-    paths: ReadonlySet<string>,
+    selection: EmbeddedSelection,
     plan: SelectionPlan | undefined,
     prefix: string,
     storagePrefix: string,
     replacedPaths: Set<string>,
   ): unknown {
-    if (paths.size === 0) {
+    if (selection.size === 0) {
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
       }
@@ -3900,7 +3919,15 @@ export class FateClient<
     if (Array.isArray(value)) {
       replacedPaths.add(storagePrefix);
       return value.map((item) =>
-        this.normalizeEmbedded(item, undefined, paths, plan, prefix, storagePrefix, replacedPaths),
+        this.normalizeEmbedded(
+          item,
+          undefined,
+          selection,
+          plan,
+          prefix,
+          storagePrefix,
+          replacedPaths,
+        ),
       );
     }
     if (!isRecord(value)) {
@@ -3913,18 +3940,20 @@ export class FateClient<
     if (!existing) {
       replacedPaths.add(storagePrefix);
     }
-    const children = groupSelectionByPrefix(paths);
     const result = { ...existing };
-    for (const key of new Set([
-      ...Object.keys(value),
-      ...[...paths].map((path) => path.split('.')[0]),
-    ])) {
+    const keys = Object.keys(value);
+    for (const key of selection.keys()) {
+      if (!Object.hasOwn(value, key)) {
+        keys.push(key);
+      }
+    }
+    for (const key of keys) {
       const path = `${prefix}.${key}`;
       const storageKey = getFieldKey(path, plan);
       result[storageKey] = this.normalizeEmbedded(
         value[key],
         existing?.[storageKey],
-        children.get(key) ?? emptySet,
+        selection.get(key) ?? emptyEmbeddedSelection,
         plan,
         path,
         `${storagePrefix}.${storageKey}`,
@@ -3969,7 +3998,12 @@ export class FateClient<
       if (!normalized) {
         const expanded = expandRefetchSelection(this.types, type, select);
         const paths = expanded === select ? select : new Set(expanded);
-        normalized = { children: groupSelectionByPrefix(paths), paths, storagePaths: new Map() };
+        normalized = {
+          children: groupSelectionByPrefix(paths),
+          embedded: new Map(),
+          paths,
+          storagePaths: new Map(),
+        };
         let byType = selections.get(select);
         if (!byType) {
           byType = new Map();
@@ -4214,10 +4248,15 @@ export class FateClient<
             }
           } else {
             if (acceptField) {
+              let embedded = normalized.embedded.get(key);
+              if (!embedded) {
+                embedded = compileEmbeddedSelection(selectionTree.get(key) ?? emptySet);
+                normalized.embedded.set(key, embedded);
+              }
               result[storageKey] = this.normalizeEmbedded(
                 value,
                 this.store.read(entityId)?.[storageKey],
-                selectionTree.get(key) ?? emptySet,
+                embedded,
                 plan,
                 fieldPath,
                 storageKey,

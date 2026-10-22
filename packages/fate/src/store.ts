@@ -690,13 +690,13 @@ export class Store {
     }
 
     const coveragePaths = [...selectedPaths];
-    const replacements = [...replacedPaths];
+    const replacements = previous ? [...replacedPaths] : [];
     const previousMask = replacements.length ? cloneMask(mask) : undefined;
     for (const path of replacements) {
       removePath(mask, path);
     }
     for (const path of coveragePaths) {
-      if (addPath(mask, path)) {
+      if (addPath(mask, path) && previous) {
         changedPaths.add(path);
       }
     }
