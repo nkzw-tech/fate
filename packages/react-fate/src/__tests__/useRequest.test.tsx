@@ -642,6 +642,67 @@ test('renders cache-first requests from hydrated SSR state without refetching', 
   expect(fetchById).not.toHaveBeenCalled();
 });
 
+test.each([undefined, 5000])(
+  'keeps a replacement reader prepared after the old cleanup (timeout=%s)',
+  async (timeout) => {
+    const fetchById = vi
+      .fn()
+      .mockResolvedValue([{ __typename: 'Post', content: 'Apple', id: 'post-1' }]);
+    const client = createClient({
+      roots: { post: clientRoot('Post') },
+      transport: { fetchById },
+      types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+    });
+    const PostView = view<Post>()({ content: true, id: true });
+    const request = { post: { id: 'post-1', view: PostView } };
+    const options = { mode: 'network-only', timeout } as const;
+    const Component = ({ count }: { count: number }) => {
+      const { post } = useRequest({ post: { id: 'post-1', view: PostView } }, options);
+      return (
+        <span>
+          {useView(PostView, post).content}:{count}
+        </span>
+      );
+    };
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const render = (key: number, count = 0) => (
+      <FateClient client={client}>
+        <Suspense fallback="Loading">
+          <Component count={count} key={key} />
+        </Suspense>
+      </FateClient>
+    );
+
+    try {
+      await act(async () => {
+        root.render(render(0));
+        await flushAsync();
+      });
+      expect(container.textContent).toBe('Apple:0');
+      expect(fetchById).toHaveBeenCalledTimes(1);
+
+      fetchById.mockResolvedValue([{ __typename: 'Post', content: 'Banana', id: 'post-1' }]);
+      await act(async () => {
+        await client.request(request, options);
+        root.render(render(1));
+        await flushAsync();
+      });
+      expect(container.textContent).toBe('Banana:0');
+      expect(fetchById).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        root.render(render(1, 1));
+        await flushAsync();
+      });
+      expect(container.textContent).toBe('Banana:1');
+      expect(fetchById).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  },
+);
+
 test('does not refetch network-only inline requests during rerenders with the same key', async () => {
   const fetchById = vi.fn().mockResolvedValue([
     {

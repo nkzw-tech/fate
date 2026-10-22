@@ -44,9 +44,19 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   const client = useFateClient();
   const mode = options?.mode ?? 'cache-first';
   const cacheOnly = mode === 'cache-only';
-  const { promise, requestKey } = cacheOnly
-    ? { promise: cacheOnlyGate, requestKey: client.getRequestKey(request) }
-    : client.prepareRequestForRender(request, options as RequestOptions);
+  const key = client.getRequestKey(request);
+  const timeout = options?.timeout;
+  const signal = options?.signal;
+  const maxAge = options?.persist?.maxAge;
+  const { promise, requestKey } = useMemo(
+    () =>
+      cacheOnly
+        ? { promise: cacheOnlyGate, requestKey: key }
+        : client.prepareRequestForRender(request, options as RequestOptions),
+    // A mounted consumer keeps its preparation even if another consumer releases it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cacheOnly, client, key, mode, timeout, signal, maxAge],
+  );
 
   const observed = useMemo(
     () => {
