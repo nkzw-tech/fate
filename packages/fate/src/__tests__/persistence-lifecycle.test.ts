@@ -208,7 +208,9 @@ test.each(['node', 'list'] as const)(
     const request = client.request(kind === 'node' ? { post: { id: '1', view: PostView } } : page, {
       mode: 'network-only',
     });
-    const rejected = expect(request).rejects.toThrow('disposed');
+    const rejected = (async () => {
+      await expect(request).rejects.toThrow('disposed');
+    })();
     await vi.waitFor(() => expect(fetchById).toHaveBeenCalled());
     session.dispose();
     await rejected;
@@ -265,7 +267,9 @@ test.each([false, true])(
       optimistic: { title: 'New' },
       persist,
     });
-    const rejected = expect(pending).rejects.toThrow('disposed');
+    const rejected = (async () => {
+      await expect(pending).rejects.toThrow('disposed');
+    })();
     await vi.waitFor(() => expect(current.mutate).toHaveBeenCalled());
     expect(current.client.store.read('Post:1')?.title).toBe('New');
     current.session.dispose();
@@ -387,7 +391,9 @@ test('disposal rejects a request waiting for disk restoration', async () => {
     return read(key);
   };
   const request = next.client.request(page);
-  const rejected = expect(request).rejects.toThrow('disposed');
+  const rejected = (async () => {
+    await expect(request).rejects.toThrow('disposed');
+  })();
   await started.promise;
   next.session.dispose();
   await rejected;

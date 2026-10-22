@@ -521,7 +521,9 @@ test('disposing during a disk read cannot restore data or start a network reques
     return value;
   });
   const pending = next.client.request(request('1'));
-  const rejected = expect(pending).rejects.toThrow('disposed');
+  const rejected = (async () => {
+    await expect(pending).rejects.toThrow('disposed');
+  })();
   await entered.promise;
   next.session.dispose();
   resume.resolve();

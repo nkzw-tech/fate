@@ -1069,11 +1069,13 @@ test('startup rechecks recovery receipts after another tab checkpoints newer dat
 
 test('a rejected admission does not block later mutations', async () => {
   const current = setup({ maxBytes: 6000, online: () => true });
-  const rejected = expect(
-    current.client.mutations.edit({
-      input: { id: '1', title: 'x'.repeat(10_000) },
-    }),
-  ).rejects.toThrow('size limit');
+  const rejected = (async () => {
+    await expect(
+      current.client.mutations.edit({
+        input: { id: '1', title: 'x'.repeat(10_000) },
+      }),
+    ).rejects.toThrow('size limit');
+  })();
   const accepted = current.client.mutations.edit({ input: { id: '2', title: 'Saved' } });
   await rejected;
   expect((await accepted).result?.title).toBe('Saved');

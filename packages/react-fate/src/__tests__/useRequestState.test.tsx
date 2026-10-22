@@ -158,7 +158,9 @@ test('awaits refresh completion, keeps usable data, exposes failures, and retrie
       }),
   );
   const refresh = observer.getSnapshot().refetch();
-  const failure = expect(refresh).rejects.toThrow('Offline');
+  const failure = (async () => {
+    await expect(refresh).rejects.toThrow('Offline');
+  })();
   await vi.waitFor(() => expect(fetchQuery).toHaveBeenCalledTimes(2));
   expect(observer.getSnapshot()).toMatchObject({
     data: { viewer: { id: '1' } },

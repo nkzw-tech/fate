@@ -350,7 +350,9 @@ test('exposes read errors through the resource and allows a clean retry', async 
   const { app, resource } = mount(client, () => useViews(UserView, refs));
   try {
     const error = new Error('Request failed');
-    const rejected = expect(resource.ready()).rejects.toBe(error);
+    const rejected = (async () => {
+      await expect(resource.ready()).rejects.toBe(error);
+    })();
     pending.reject(error);
     await rejected;
     expect(resource.error.value).toBe(error);

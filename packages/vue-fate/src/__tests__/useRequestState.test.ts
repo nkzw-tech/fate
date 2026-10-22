@@ -110,7 +110,9 @@ test('retains data during refetch, exposes errors, retries, and switches provide
     const pending = Promise.withResolvers<User | null>();
     fetchQuery.mockReturnValueOnce(pending.promise);
     const refresh = state.value.refetch();
-    const failure = expect(refresh).rejects.toThrow('Offline');
+    const failure = (async () => {
+      await expect(refresh).rejects.toThrow('Offline');
+    })();
     await vi.waitFor(() => expect(fetchQuery).toHaveBeenCalledTimes(2));
     expect(state.value).toMatchObject({
       data: { viewer: { id: '1' } },

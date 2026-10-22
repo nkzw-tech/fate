@@ -127,7 +127,11 @@ test.each([true, false])(
       optimistic: { content: 'New', id: 'temporary' },
       view: CommentView,
     });
-    const failure = success ? undefined : expect(submission).rejects.toThrow('Refused');
+    const failure = (async () => {
+      if (!success) {
+        await expect(submission).rejects.toThrow('Refused');
+      }
+    })();
     expect(fetchById).not.toHaveBeenCalled();
     const snapshot = await client.readDeferred(post.comments);
     expect(snapshot.data?.items.map(({ node }) => node.id)).toEqual(['temporary', 'old']);
