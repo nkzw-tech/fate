@@ -764,6 +764,11 @@ export class Store {
     return diffPaths(requested, mask);
   }
 
+  hasCoverage(id: EntityId, path: string): boolean {
+    const mask = this.coverage.get(id);
+    return this.records.has(id) && !!mask && isCovered(mask, path);
+  }
+
   subscribe(id: EntityId, selection: ReadonlySet<string> | null, fn: () => void): () => void;
 
   subscribe(id: EntityId, fn: () => void): () => void;

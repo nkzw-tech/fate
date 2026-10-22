@@ -581,6 +581,11 @@ export class FateClient<
   private readonly requestListenersByDependency = new Map<string, Set<() => void>>();
   private readonly pendingRequestListeners = new Set<() => void>();
   private requestNotificationScheduled = false;
+  private requestRevision = 0;
+  private readonly requestCoverage = new WeakMap<
+    RequestDescriptor,
+    { complete: boolean; revision: number }
+  >();
   private readonly cacheOnlyRefs = new WeakSet<object>();
   private readonly cacheOnlyCopies = new WeakMap<object, object>();
   private readonly requestResults = new WeakMap<RequestDescriptor, AnyRecord>();
@@ -884,6 +889,7 @@ export class FateClient<
 
     this.stalledRequests.clear();
     this.viewDataCache.clear();
+    this.requestRevision++;
     notify();
   }
 
@@ -963,6 +969,7 @@ export class FateClient<
         }
       }
     });
+    this.requestRevision++;
   }
 
   /** @internal */
@@ -2629,12 +2636,16 @@ export class FateClient<
       : item.queryKey;
   }
 
-  private requestDependencies(request: RequestDescriptor): Set<string> {
+  private requestDependencies(request: RequestDescriptor, includeChildren = false): Set<string> {
     const dependencies = new Set<string>();
     for (const item of request.items) {
       if (item.kind === 'node' || item.kind === 'nodes') {
         for (const id of item.ids) {
-          dependencies.add(`entity:${toEntityId(item.type, id)}`);
+          const entityId = toEntityId(item.type, id);
+          dependencies.add(`entity:${entityId}`);
+          if (includeChildren) {
+            this.missingForSelection(entityId, item.plan.paths, item.plan, dependencies);
+          }
         }
       } else if (item.kind === 'query') {
         dependencies.add(`root:${item.queryKey}`);
@@ -2645,11 +2656,19 @@ export class FateClient<
         const entityId = this.rootRequests.get(key);
         if (entityId) {
           dependencies.add(`entity:${entityId}`);
+          if (includeChildren) {
+            this.missingForSelection(entityId, item.plan.paths, item.plan, dependencies);
+          }
         }
       } else if (item.kind === 'value') {
         dependencies.add(`root:${item.queryKey}`);
       } else if (item.kind === 'list') {
         dependencies.add(`list:${item.listKey}`);
+        if (includeChildren) {
+          for (const { id } of getListEntries(this.store.getListState(item.listKey))) {
+            this.missingForSelection(id, item.plan.paths, item.plan, dependencies);
+          }
+        }
       }
     }
     return dependencies;
@@ -2660,7 +2679,7 @@ export class FateClient<
     if (!entry) {
       return;
     }
-    const next = this.requestDependencies(entry.descriptor);
+    const next = this.requestDependencies(entry.descriptor, true);
     for (const dependency of entry.dependencies) {
       if (!next.has(dependency)) {
         const listeners = this.requestListenersByDependency.get(dependency);
@@ -2684,6 +2703,7 @@ export class FateClient<
   }
 
   private notifyRequests(dependencies: Iterable<string>) {
+    this.requestRevision++;
     for (const dependency of dependencies) {
       for (const listener of this.requestListenersByDependency.get(dependency) ?? []) {
         this.pendingRequestListeners.add(listener);
@@ -3154,6 +3174,7 @@ export class FateClient<
         this.clearStalledRequestsForEntity(id);
       },
     });
+    this.requestRevision++;
 
     if (swept.records.size > 0) {
       for (const [key, entityId] of this.rootRequests.entries()) {
@@ -3381,14 +3402,69 @@ export class FateClient<
     entityId: EntityId,
     paths: Iterable<string>,
     plan: SelectionPlan,
+    dependencies?: Set<string>,
   ): Set<string> {
     const selection = expandRefetchSelection(this.types, parseEntityId(entityId).type, paths);
-    const storagePaths = new Map([...selection].map((path) => [getStoragePath(path, plan), path]));
-    return new Set(
-      [...this.store.missingForSelection(entityId, storagePaths.keys())].map((path) =>
-        storagePaths.get(path)!,
-      ),
-    );
+    dependencies?.add(`entity:${entityId}`);
+    if (!this.store.read(entityId)) {
+      return new Set(selection);
+    }
+    const missing = new Set<string>();
+    const covered = (id: EntityId, parts: ReadonlyArray<string>, prefix: string): boolean => {
+      dependencies?.add(`entity:${id}`);
+      const record = this.store.read(id);
+      if (!record) {
+        return false;
+      }
+      const field = parts[0];
+      const path = prefix ? `${prefix}.${field}` : field;
+      const storageKey = getFieldKey(path, plan);
+      const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
+      const relation = this.types.get(parseEntityId(id).type)?.fields?.[schemaField(field)];
+      if (
+        relation &&
+        typeof relation === 'object' &&
+        ('type' in relation || 'listOf' in relation)
+      ) {
+        if (value === null) {
+          return true;
+        }
+        if (isNodeRef(value)) {
+          return parts.length === 1 || covered(getNodeRefId(value), parts.slice(1), path);
+        }
+        if (Array.isArray(value) && 'listOf' in relation) {
+          const args = plan.args.get(path);
+          const key = getListKey(id, schemaField(field), args?.hash);
+          dependencies?.add(`list:${key}`);
+          const list = this.store.getListState(key);
+          if (parts.length === 1) {
+            return true;
+          }
+          const children = list
+            ? getListEntries(list).map(({ id }) => id)
+            : value.filter(isNodeRef).map(getNodeRefId);
+          const childPaths = parts.slice(1);
+          let childrenCovered = true;
+          for (const child of children) {
+            // Keep collecting dependencies even if an earlier child is missing.
+            if (!covered(child, childPaths, path)) {
+              if (!dependencies) {
+                return false;
+              }
+              childrenCovered = false;
+            }
+          }
+          return childrenCovered;
+        }
+      }
+      return this.store.hasCoverage(id, getStoragePath(parts.join('.'), plan, prefix));
+    };
+    for (const path of selection) {
+      if (!covered(entityId, path.split('.'), '')) {
+        missing.add(path);
+      }
+    }
+    return missing;
   }
 
   private hasRootListData(item: ListRequestDescriptor): boolean {
@@ -3466,8 +3542,7 @@ export class FateClient<
         const fetchedIds: Array<string | number> = [];
         for (const raw of item.ids) {
           const entityId = toEntityId(item.type, raw);
-          const missing = this.missingForSelection(entityId, fields, item.plan);
-          if (fetchAll || missing.size > 0) {
+          if (fetchAll || this.missingForSelection(entityId, fields, item.plan).size > 0) {
             group.ids.push(raw);
             fetchedIds.push(raw);
           }
@@ -3491,7 +3566,7 @@ export class FateClient<
           const hasResult = this.rootRequests.has(this.queryResultKey(item));
           const entityId = this.rootRequests.get(this.queryResultKey(item));
           const missing =
-            hasResult && entityId
+            !fetchAll && hasResult && entityId
               ? this.missingForSelection(entityId, item.plan.paths, item.plan)
               : item.plan.paths;
 
@@ -3559,6 +3634,18 @@ export class FateClient<
   }
 
   private hasRequestData(request: RequestDescriptor): boolean {
+    const cached = this.requestCoverage.get(request);
+    if (!this.store.isRebasing && cached?.revision === this.requestRevision) {
+      return cached.complete;
+    }
+    const complete = this.checkRequestData(request);
+    if (!this.store.isRebasing) {
+      this.requestCoverage.set(request, { complete, revision: this.requestRevision });
+    }
+    return complete;
+  }
+
+  private checkRequestData(request: RequestDescriptor): boolean {
     for (const item of request.items) {
       if (item.kind === 'node' || item.kind === 'nodes') {
         const fields = item.plan.paths;
