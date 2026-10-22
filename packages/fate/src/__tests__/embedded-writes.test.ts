@@ -174,3 +174,13 @@ test('a stale embedded response cannot overwrite a newer partial write', async (
   await refresh;
   expect(client.store.read('User:1')?.character).toEqual({ ...initial.character, color: 5 });
 });
+
+test('embedded normalization preserves prototype-named own fields as data', () => {
+  const { client } = setup();
+  const character = JSON.parse('{"__proto__":{"color":99},"color":1}');
+  client.write('User', { character, id: '1' }, new Set(['character.color']));
+  const stored = client.store.read('User:1')?.character;
+  expect(Object.getPrototypeOf(stored)).toBe(Object.prototype);
+  expect(Object.getOwnPropertyDescriptor(stored, '__proto__')?.value).toEqual({ color: 99 });
+  expect(stored).toMatchObject({ color: 1 });
+});

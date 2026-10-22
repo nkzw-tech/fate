@@ -3955,7 +3955,7 @@ export class FateClient<
     for (const key of keys) {
       const path = `${prefix}.${key}`;
       const storageKey = getFieldKey(path, plan);
-      result[storageKey] = this.normalizeEmbedded(
+      const normalized = this.normalizeEmbedded(
         value[key],
         existing?.[storageKey],
         selection.get(key) ?? emptyEmbeddedSelection,
@@ -3965,6 +3965,16 @@ export class FateClient<
         replacedPaths,
         preserveSiblings,
       );
+      if (storageKey === '__proto__') {
+        Object.defineProperty(result, storageKey, {
+          configurable: true,
+          enumerable: true,
+          value: normalized,
+          writable: true,
+        });
+      } else {
+        result[storageKey] = normalized;
+      }
     }
     return existing &&
       Object.keys(result).length === Object.keys(existing).length &&
