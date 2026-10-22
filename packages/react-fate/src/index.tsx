@@ -59,7 +59,7 @@ export { useLiveView } from './useLiveView.tsx';
 export { useLiveListView } from './useLiveListView.tsx';
 export { useView } from './useView.tsx';
 export { useViews } from './useViews.tsx';
-export { useRequest } from './useRequest.tsx';
+export { useRequest, type UseRequestOptions } from './useRequest.tsx';
 export { useRefetch } from './useRefetch.tsx';
 export { useListView } from './useListView.tsx';
 

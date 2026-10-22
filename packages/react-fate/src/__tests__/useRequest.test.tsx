@@ -626,10 +626,97 @@ test('makes regular queries nullable or not depending on the root types', async 
       viewer: { view: UserView },
     });
 
+    const cached = useRequest<typeof request, typeof roots>(request, { mode: 'cache-only' });
+    expectTypeOf(cached?.user).toEqualTypeOf<ViewRef<'User'> | undefined>();
+    expectTypeOf(cached?.viewer).toEqualTypeOf<ViewRef<'User'> | null | undefined>();
     expectTypeOf(user).toEqualTypeOf<ViewRef<'User'>>();
     expectTypeOf(viewer).toEqualTypeOf<ViewRef<'User'> | null>();
   };
 
   // eslint-disable-next-line no-unused-expressions, @typescript-eslint/no-unused-expressions
   Component;
+});
+
+test('cache-only requests observe misses and later writes without fetching or suspending', async () => {
+  const fetchById = vi.fn(async () => [{ id: '1', name: 'Sam' }]);
+  const roots = { user: clientRoot<User, 'User'>('User') };
+  const client = createClient({
+    roots,
+    transport: { fetchById },
+    types: [{ type: 'User' }],
+  });
+  const selected = view<User>()({ name: true });
+  const request = { user: { id: '1', view: selected } };
+  function Cached() {
+    const result = useRequest<typeof request, typeof roots>(request, { mode: 'cache-only' });
+    const user = useView(selected, result?.user);
+    return <span>{user?.name ?? 'missing'}</span>;
+  }
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(
+      <FateClient client={client}>
+        <Suspense fallback="loading">
+          <Cached />
+        </Suspense>
+      </FateClient>,
+    ),
+  );
+  expect(container.textContent).toBe('missing');
+  expect(fetchById).not.toHaveBeenCalled();
+  await act(async () => client.write('User', { id: '1', name: 'Maxima' }, new Set(['name'])));
+  expect(container.textContent).toBe('Maxima');
+  expect(fetchById).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test('switching offline while a request is pending keeps local state and skips its Suspense gate', async () => {
+  const pending = Promise.withResolvers<Array<{ id: string; name: string }>>();
+  const fetchById = vi.fn(() => pending.promise);
+  const roots = { user: clientRoot<User, 'User'>('User') };
+  const client = createClient({
+    roots,
+    transport: { fetchById },
+    types: [{ type: 'User' }],
+  });
+  const selected = view<User>()({ name: true });
+  const request = { user: { id: '1', view: selected } };
+  let setCount: ((count: number) => void) | undefined;
+  function Screen({ online }: { online: boolean }) {
+    const [count, update] = useState(0);
+    setCount = update;
+    const result = useRequest<typeof request, typeof roots>(request, {
+      mode: online ? 'network-only' : 'cache-only',
+    });
+    const user = useView(selected, result?.user);
+    return (
+      <span>
+        {count}:{user?.name ?? 'missing'}
+      </span>
+    );
+  }
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const render = (online: boolean) =>
+    act(async () =>
+      root.render(
+        <FateClient client={client}>
+          <Suspense fallback="loading">
+            <Screen online={online} />
+          </Suspense>
+        </FateClient>,
+      ),
+    );
+  await render(false);
+  await act(async () => setCount?.(7));
+  await render(true);
+  await render(false);
+  expect(container.textContent).toBe('7:missing');
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve([{ id: '1', name: 'Sam' }]));
+  expect(container.textContent).toBe('7:Sam');
+  await render(true);
+  expect(container.textContent).toBe('7:Sam');
+  await act(async () => root.unmount());
 });

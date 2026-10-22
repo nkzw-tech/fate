@@ -78,6 +78,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 - `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network.
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
+- `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.
 
 You can pass the request mode as an option to `useRequest`:
 
@@ -91,6 +92,18 @@ const { posts } = useRequest(
   },
 );
 ```
+
+For screens that also work offline, switch the same hook to `cache-only`:
+
+```tsx
+const result = useRequest(
+  { viewer: { view: ViewerView } },
+  { mode: isOnline ? 'network-only' : 'cache-only' },
+);
+const viewer = useView(ViewerView, result?.viewer);
+```
+
+Cache-only results stay subscribed to cache changes. Their references never fetch missing view fields. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
 
 ## Refreshing Requests
 
