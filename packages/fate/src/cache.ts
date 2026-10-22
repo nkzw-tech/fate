@@ -18,7 +18,7 @@ type EntityCache = {
   fields?: Map<string, number>;
   invalidated: number;
   revision: number;
-  views: WeakMap<View<any, any>, WeakMap<ViewRef<string>, CacheEntry>>;
+  views?: WeakMap<View<any, any>, WeakMap<ViewRef<string>, CacheEntry>>;
 };
 
 export default class ViewDataCache {
@@ -30,7 +30,7 @@ export default class ViewDataCache {
   private entityCache(entityId: EntityId): EntityCache {
     let cache = this.cache.get(entityId);
     if (!cache) {
-      cache = { invalidated: 0, revision: 0, views: new WeakMap() };
+      cache = { invalidated: 0, revision: 0 };
       this.cache.set(entityId, cache);
     }
     return cache;
@@ -48,23 +48,30 @@ export default class ViewDataCache {
     if (!this.isEnabled()) {
       return null;
     }
-    const entry = this.cache.get(entityId)?.views.get(view)?.get(ref);
+    const viewMap = this.cache.get(entityId)?.views?.get(view);
+    if (!viewMap) {
+      return null;
+    }
+    const entry = viewMap.get(ref);
     if (!entry) {
       return null;
     }
     if (entry.revision !== this.revision) {
       for (const { cache, fields } of entry.dependencies) {
         if (cache.invalidated > entry.revision) {
+          viewMap.delete(ref);
           return null;
         }
         if (cache.revision <= entry.revision) {
           continue;
         }
         if (!fields) {
+          viewMap.delete(ref);
           return null;
         }
         for (const field of fields) {
           if ((cache.fields?.get(field) ?? 0) > entry.revision) {
+            viewMap.delete(ref);
             return null;
           }
         }
@@ -84,7 +91,7 @@ export default class ViewDataCache {
     if (!this.isEnabled()) {
       return;
     }
-    const entityMap = this.entityCache(entityId).views;
+    const entityMap = (this.entityCache(entityId).views ??= new WeakMap());
     let viewMap = entityMap.get(view);
     if (!viewMap) {
       viewMap = new WeakMap();
@@ -124,7 +131,10 @@ export default class ViewDataCache {
       cache.revision = revision;
     } else {
       cache.invalidated = ++this.revision;
-      cache.fields?.clear();
+      // Unread parents can retain this revision metadata after the entity is
+      // removed. Drop its view storage without allocating a replacement map.
+      cache.fields = undefined;
+      cache.views = undefined;
       this.cache.delete(entityId);
     }
   }

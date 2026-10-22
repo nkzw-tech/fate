@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
 import {
@@ -180,3 +182,21 @@ test('replacing one snapshot drops obsolete dependencies without affecting other
   cache.invalidate('Child:2');
   expect(cache.get('Parent:1', parentView, ref)).toBeNull();
 });
+
+test.each(['selected-field', 'unknown-fields', 'deleted-dependency', 'invalidated-views'])(
+  'releases cached snapshots after %s invalidation',
+  (scenario) => {
+    execFileSync(
+      process.execPath,
+      [
+        '--expose-gc',
+        '--no-warnings',
+        '--import',
+        '@oxc-node/core/register',
+        fileURLToPath(new URL('./fixtures/cache-retention.ts', import.meta.url)),
+        scenario,
+      ],
+      { timeout: 10_000 },
+    );
+  },
+);
