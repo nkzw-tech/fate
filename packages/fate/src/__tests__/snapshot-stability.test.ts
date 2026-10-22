@@ -120,3 +120,16 @@ test('identical embedded array responses reuse elements without merging partial 
   expect(notify).toHaveBeenCalledTimes(1);
   dispose();
 });
+
+test('creating a previously missing record replaces its stalled snapshot', async () => {
+  const Name = view<User>()({ name: true });
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [] },
+    types: [{ type: 'User' }],
+  });
+  const ref = client.ref('User', '1', Name);
+  expect((await client.readView(Name, ref)).data).toMatchObject({ name: undefined });
+  client.write('User', { id: '1', name: 'Sam' }, new Set(['name']));
+  expect((await client.readView(Name, ref)).data).toMatchObject({ name: 'Sam' });
+});

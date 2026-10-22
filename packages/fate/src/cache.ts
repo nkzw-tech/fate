@@ -10,14 +10,14 @@ import {
 
 type CachedSnapshot = FateThenable<ViewSnapshot<any, any>>;
 type CacheEntry = {
-  checkedRevision: number;
   dependencies: ReadonlyArray<{ cache: EntityCache; fields: ReadonlySet<string> | null }>;
   revision: number;
   thenable: CachedSnapshot;
 };
 type EntityCache = {
-  fields: Map<string, number>;
+  fields?: Map<string, number>;
   invalidated: number;
+  revision: number;
   views: WeakMap<View<any, any>, WeakMap<ViewRef<string>, CacheEntry>>;
 };
 
@@ -30,7 +30,7 @@ export default class ViewDataCache {
   private entityCache(entityId: EntityId): EntityCache {
     let cache = this.cache.get(entityId);
     if (!cache) {
-      cache = { fields: new Map(), invalidated: 0, views: new WeakMap() };
+      cache = { invalidated: 0, revision: 0, views: new WeakMap() };
       this.cache.set(entityId, cache);
     }
     return cache;
@@ -57,26 +57,24 @@ export default class ViewDataCache {
     if (!entry) {
       return null;
     }
-    if (entry.checkedRevision !== this.revision) {
+    if (entry.revision !== this.revision) {
       for (const { cache, fields } of entry.dependencies) {
         if (cache.invalidated > entry.revision) {
           return null;
         }
-        if (fields) {
-          for (const field of fields) {
-            if ((cache.fields.get(field) ?? 0) > entry.revision) {
-              return null;
-            }
-          }
-        } else {
-          for (const revision of cache.fields.values()) {
-            if (revision > entry.revision) {
-              return null;
-            }
+        if (cache.revision <= entry.revision) {
+          continue;
+        }
+        if (!fields) {
+          return null;
+        }
+        for (const field of fields) {
+          if ((cache.fields?.get(field) ?? 0) > entry.revision) {
+            return null;
           }
         }
       }
-      entry.checkedRevision = this.revision;
+      entry.revision = this.revision;
     }
     return entry.thenable;
   }
@@ -104,7 +102,6 @@ export default class ViewDataCache {
       }
     }
     viewMap.set(ref, {
-      checkedRevision: this.revision,
       dependencies: [...coverage].map(([id, fields]) => ({ cache: this.entityCache(id), fields })),
       revision: this.revision,
       thenable,
@@ -136,9 +133,15 @@ export default class ViewDataCache {
     if (paths) {
       const cache = this.cache.get(entityId);
       if (cache) {
-        const revision = ++this.revision;
+        let revision = 0;
         for (const path of paths) {
-          cache.fields.set(path.split('.')[0], revision);
+          revision ||= ++this.revision;
+          (cache.fields ??= new Map()).set(path.split('.')[0], revision);
+        }
+        if (revision) {
+          cache.revision = revision;
+        } else {
+          this.invalidateDependents(entityId, new Set());
         }
       }
     } else {
@@ -167,7 +170,7 @@ export default class ViewDataCache {
     const cache = this.cache.get(entityId);
     if (cache) {
       cache.invalidated = ++this.revision;
-      cache.fields.clear();
+      cache.fields?.clear();
     }
     const roots = this.rootDependencies.get(entityId);
     if (roots) {
