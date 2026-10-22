@@ -516,3 +516,90 @@ test(`'gc' tracks root query args as distinct retained roots`, async () => {
   expect(client.store.read(toEntityId('User', 'user-B'))).toBeUndefined();
   expect(client.getRequestResult(requestA).viewer).toMatchObject({ id: 'user-A' });
 });
+
+test('gc releases completed request handles while retaining buffered operations', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  const Name = view<User>()({ name: true });
+  const client = createClient({
+    gcReleaseBufferSize: 1,
+    roots: { user: clientRoot<User, 'User'>('User') },
+    transport: { fetchById: async (_type, ids) => ids.map((id) => ({ id, name: 'Ada' })) },
+    types: [{ type: 'User' }],
+  });
+  const a = { user: { id: '1', view: Name } };
+  const b = { user: { id: '2', view: Name } };
+  const retainedA = client.retain(a);
+  const handleA = client.prepareRequestForRender(a, undefined).promise;
+  await handleA;
+  retainedA.dispose();
+  client.gc();
+  expect(client.prepareRequestForRender(a, undefined).promise).toBe(handleA);
+  const retainedB = client.retain(b);
+  await client.request(b);
+  retainedB.dispose();
+  client.gc();
+  const next = client.prepareRequestForRender(a, undefined).promise;
+  expect(next).not.toBe(handleA);
+  await next;
+});
+
+test('gc preserves pending Suspense handles before a retainer commits', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  const Name = view<User>()({ name: true });
+  const pending = Promise.withResolvers<Array<{ id: string; name: string }>>();
+  const fetchById = vi.fn(() => pending.promise);
+  const client = createClient({
+    gcReleaseBufferSize: 0,
+    roots: { user: clientRoot<User, 'User'>('User') },
+    transport: { fetchById },
+    types: [{ type: 'User' }],
+  });
+  const request = { user: { id: '1', view: Name } };
+  const first = client.prepareRequestForRender(request, undefined).promise;
+  client.gc();
+  expect(client.prepareRequestForRender(request, undefined).promise).toBe(first);
+  pending.resolve([{ id: '1', name: 'Ada' }]);
+  await first;
+  expect(fetchById).toHaveBeenCalledTimes(1);
+});
+
+test('gc evicts unretained negative query results and preserves retained ones', async () => {
+  type User = { __typename: 'User'; id: string; name: string };
+  const Name = view<User>()({ name: true });
+  const fetchQuery = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ id: '1', name: 'Ada' });
+  const client = createClient({
+    gcReleaseBufferSize: 0,
+    roots: { user: clientRoot<User | null, 'User'>('User') },
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'User' }],
+  });
+  const request = { user: { args: { slug: 'one' }, view: Name } };
+  const retained = client.retain(request);
+  expect((await client.request(request)).user).toBeNull();
+  client.gc();
+  expect((await client.request(request)).user).toBeNull();
+  expect(fetchQuery).toHaveBeenCalledTimes(1);
+  retained.dispose();
+  client.gc();
+  expect((await client.request(request)).user).toMatchObject({ id: '1' });
+  expect(fetchQuery).toHaveBeenCalledTimes(2);
+});
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+test('released request handles do not retain collected list state', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--expose-gc',
+      '--no-warnings',
+      '--import',
+      '@oxc-node/core/register',
+      fileURLToPath(new URL('./fixtures/request-retention.ts', import.meta.url)),
+    ],
+    { timeout: 10_000 },
+  );
+});

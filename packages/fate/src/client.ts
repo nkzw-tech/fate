@@ -3066,8 +3066,22 @@ export class FateClient<
 
     this.gcPending = false;
 
+    const retainedRequests = new Map(
+      this.operationLifetime.getDescriptors().map((descriptor) => [descriptor.key, descriptor]),
+    );
+    for (const [key, modes] of this.requests) {
+      for (const [mode, handle] of modes) {
+        if (handle.status === 'pending') {
+          // Suspended readers have not committed a retainer yet.
+          retainedRequests.set(handle.descriptor.key, handle.descriptor);
+        } else if (!retainedRequests.has(handle.descriptor.key)) {
+          this.releaseRequestKey(key, mode);
+        }
+      }
+    }
     const markedLists = new Set<string>();
     const markedRecords = new Set<EntityId>();
+    const markedQueries = new Set<string>();
     const queue: Array<EntityId> = [];
 
     const markRecord = (entityId: EntityId | null | undefined) => {
@@ -3111,7 +3125,7 @@ export class FateClient<
     }
 
     const retainedValueKeys = new Set<string>();
-    for (const descriptor of this.operationLifetime.getDescriptors()) {
+    for (const descriptor of retainedRequests.values()) {
       for (const item of descriptor.items) {
         if (item.kind === 'node' || item.kind === 'nodes') {
           for (const raw of item.ids) {
@@ -3121,7 +3135,9 @@ export class FateClient<
         }
 
         if (item.kind === 'query') {
-          markRecord(this.rootRequests.get(this.queryResultKey(item)));
+          const key = this.queryResultKey(item);
+          markedQueries.add(key);
+          markRecord(this.rootRequests.get(key));
           continue;
         }
 
@@ -3176,11 +3192,9 @@ export class FateClient<
     });
     this.requestRevision++;
 
-    if (swept.records.size > 0) {
-      for (const [key, entityId] of this.rootRequests.entries()) {
-        if (entityId && swept.records.has(entityId)) {
-          this.rootRequests.delete(key);
-        }
+    for (const key of this.rootRequests.keys()) {
+      if (!markedQueries.has(key)) {
+        this.rootRequests.delete(key);
       }
     }
 
