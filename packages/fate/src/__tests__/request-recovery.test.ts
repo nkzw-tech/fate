@@ -14,6 +14,38 @@ const setup = () => {
   return { client, fetchQuery };
 };
 
+test.each([undefined, 5000])(
+  'releasing an older preparation preserves its replacement (timeout=%s)',
+  async (timeout) => {
+    const { client, fetchQuery } = setup();
+    const options = { mode: 'network-only', timeout } as const;
+    const first = client.prepareRequestForRender(request, options);
+    await first.promise;
+    client.releaseRequestKey(first.requestKey, 'network-only');
+
+    const pending = Promise.withResolvers<{ id: string; name: string }>();
+    fetchQuery.mockReturnValueOnce(pending.promise);
+    const replacement = client.prepareRequestForRender(request, options);
+
+    try {
+      expect(replacement.promise).not.toBe(first.promise);
+      client.releaseRequestKey(first.requestKey, 'network-only', first.promise);
+      expect(client.prepareRequestForRender(request, options).promise).toBe(replacement.promise);
+      expect(fetchQuery).toHaveBeenCalledTimes(2);
+      pending.resolve({ id: '1', name: 'Grace' });
+      await expect(replacement.promise).resolves.toHaveProperty('viewer.id', '1');
+
+      client.releaseRequestKey(replacement.requestKey, 'network-only', replacement.promise);
+      const next = client.prepareRequestForRender(request, options);
+      expect(next.promise).not.toBe(replacement.promise);
+      await next.promise;
+    } finally {
+      pending.resolve({ id: '1', name: 'Grace' });
+      await replacement.promise;
+    }
+  },
+);
+
 test.each(['cache-first', 'stale-while-revalidate'] as const)(
   'a successful explicit refetch recovers a rejected %s render request',
   async (mode) => {

@@ -3028,9 +3028,9 @@ export class FateClient<
     }
   }
 
-  releaseRequestKey(requestKey: string, mode: RequestMode): void {
+  releaseRequestKey(requestKey: string, mode: RequestMode, expected?: PromiseLike<unknown>): void {
     const requests = this.requests.get(requestKey);
-    if (!requests) {
+    if (!requests || (expected && requests.get(mode) !== expected)) {
       return;
     }
 

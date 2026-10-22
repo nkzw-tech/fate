@@ -60,6 +60,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
           : client.observeRequestResult(request)),
         client,
         mode,
+        requestPromise: promise,
         // A later imperative refresh must not reset the initial Suspense gate.
         promise: isFulfilledThenable(promise)
           ? fulfilledThenable(promise.value)
@@ -85,7 +86,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
       retained.dispose();
 
       if (active.mode === 'network-only' || active.mode === 'stale-while-revalidate') {
-        active.client.releaseRequestKey(active.requestKey, active.mode);
+        active.client.releaseRequestKey(active.requestKey, active.mode, active.requestPromise);
       }
     };
   }, [active]);

@@ -235,13 +235,14 @@ test('releases network-only requests on unmount', async () => {
 
   expect(fetchById).toHaveBeenCalledTimes(1);
   expect(releaseSpy).not.toHaveBeenCalled();
+  const { promise } = client.prepareRequestForRender(request, { mode: 'network-only' });
 
   await act(async () => {
     reactRoot.unmount();
     await flushAsync();
   });
 
-  expect(releaseSpy).toHaveBeenCalledWith(requestKey, 'network-only');
+  expect(releaseSpy).toHaveBeenCalledWith(requestKey, 'network-only', promise);
 });
 
 test('retains cache-first requests while mounted and disposes them on unmount', async () => {
