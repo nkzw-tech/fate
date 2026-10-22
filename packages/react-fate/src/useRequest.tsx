@@ -61,6 +61,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
         client,
         mode,
         requestPromise: promise,
+        retain: () => client.retain(request),
         // A later imperative refresh must not reset the initial Suspense gate.
         promise: isFulfilledThenable(promise)
           ? fulfilledThenable(promise.value)
@@ -80,7 +81,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     if (active.mode === 'cache-only') {
       return;
     }
-    const retained = active.client.retainRequestKey(active.requestKey, active.mode);
+    const retained = active.retain();
 
     return () => {
       retained.dispose();

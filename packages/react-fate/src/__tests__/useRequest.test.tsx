@@ -11,7 +11,7 @@ import {
   type Deferred,
   type ViewRef,
 } from '@nkzw/fate';
-import { act, Suspense, use, useLayoutEffect, useState } from 'react';
+import { act, StrictMode, Suspense, use, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
@@ -300,6 +300,60 @@ test('retains cache-first requests while mounted and disposes them on unmount', 
 
   expect(client.store.read(postId)).toBeUndefined();
 });
+
+test.each(['network-only', 'stale-while-revalidate'] as const)(
+  'retains mounted %s data through Strict Mode effect replay',
+  async (mode) => {
+    const fetchById = vi
+      .fn()
+      .mockResolvedValue([{ __typename: 'Post', content: 'Apple', id: 'post-1' }]);
+    const client = createClient({
+      gcReleaseBufferSize: 0,
+      roots: { post: clientRoot('Post') },
+      transport: { fetchById },
+      types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+    });
+    const PostView = view<Post>()({ content: true, id: true });
+    const postId = toEntityId('Post', 'post-1');
+    const Component = () => {
+      const { post } = useRequest(
+        { post: { id: 'post-1', view: PostView } },
+        { mode, timeout: 5000 },
+      );
+      return <span>{useView(PostView, post).content}</span>;
+    };
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <FateClient client={client}>
+            <StrictMode>
+              <Suspense fallback="Loading">
+                <Component />
+              </Suspense>
+            </StrictMode>
+          </FateClient>,
+        );
+        await flushAsync();
+      });
+      await act(async () => {
+        client.gc();
+        await flushAsync();
+      });
+      expect(client.store.read(postId)).toMatchObject({ content: 'Apple' });
+      expect(container.textContent).toBe('Apple');
+      expect(fetchById).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+        await flushAsync();
+      });
+    }
+    expect(client.store.read(postId)).toBeUndefined();
+  },
+);
 
 test('supports requesting a single node through `byId` calls', async () => {
   const fetchById = vi.fn().mockResolvedValue([
