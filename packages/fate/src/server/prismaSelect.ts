@@ -1,62 +1,11 @@
 import type { ViewPlan, ViewPlanNode } from './dataView.ts';
-import { getScopedArgs, toPrismaArgs } from './queryArgs.ts';
+import { toPrismaArgs } from './queryArgs.ts';
 import { stableStringify } from './stableStringify.ts';
 
 type AnyRecord = Record<string, unknown>;
 
 const toPrismaOrderBy = (orderBy: Array<{ direction: 'asc' | 'desc'; field: string }>) =>
   orderBy.map((entry) => ({ [entry.field]: entry.direction }));
-
-/**
- * Builds a Prisma `select` object from flattened selection paths and optional
- * scoped args, always including the `id` field.
- */
-export function prismaSelect(
-  paths: Array<string>,
-  args?: Record<string, unknown>,
-): Record<string, unknown> {
-  const allPaths = [...new Set([...paths, 'id'])];
-  const select: Record<string, unknown> = {};
-
-  for (const path of allPaths) {
-    const segments = path.split('.');
-    let current = select;
-    let currentPath = '';
-
-    segments.forEach((segment, index) => {
-      currentPath = currentPath ? `${currentPath}.${segment}` : segment;
-
-      if (index === segments.length - 1) {
-        if (segment === 'cursor') {
-          return;
-        }
-
-        current[segment] = true;
-        return;
-      }
-
-      const existing = current[segment];
-      const relation =
-        existing && typeof existing === 'object' && existing !== null && 'select' in existing
-          ? (existing as Record<string, unknown> & {
-              select: Record<string, unknown>;
-            })
-          : ({ select: {} } as Record<string, unknown> & {
-              select: Record<string, unknown>;
-            });
-
-      const scopedArgs = getScopedArgs(args, currentPath);
-      if (scopedArgs) {
-        Object.assign(relation, toPrismaArgs(scopedArgs));
-      }
-
-      current[segment] = relation;
-      current = relation.select;
-    });
-  }
-
-  return select;
-}
 
 const mergeObject = (target: AnyRecord, source: AnyRecord) => {
   for (const [key, value] of Object.entries(source)) {
