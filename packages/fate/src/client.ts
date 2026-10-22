@@ -3786,7 +3786,7 @@ export class FateClient<
     }
     if (item.kind === 'query') {
       const entityId = this.rootRequests.get(this.queryResultKey(item));
-      return entityId
+      return entityId && this.store.read(entityId)
         ? this.stableRefWithViewNames(item.type, parseEntityId(entityId).id, item.refViewNames)
         : null;
     }
@@ -4660,7 +4660,14 @@ export class FateClient<
     plan: SelectionPlan,
     pathPrefix: string | null = null,
   ): ViewSnapshot<T, S> {
-    const record = this.store.read(entityId) || { id: entityId };
+    const cached = this.store.read(entityId);
+    if (!cached && plan.paths.size > 0) {
+      throw new FateRequestError(
+        'NOT_FOUND',
+        `fate: Could not find '${entityId}'. Refresh its parent query.`,
+      );
+    }
+    const record = cached ?? { id: ref.id };
 
     const coverageById = new Map<EntityId, Set<string>>();
 

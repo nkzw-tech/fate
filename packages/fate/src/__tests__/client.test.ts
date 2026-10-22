@@ -3320,10 +3320,14 @@ test('stops re-requesting unsatisfied selections', async () => {
 
   const ref = client.ref<User>('User', 'user-1', UserView);
 
-  await client.readView(UserView, ref);
+  await expect(Promise.resolve().then(() => client.readView(UserView, ref))).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
   expect(fetchById).toHaveBeenCalledTimes(1);
 
-  await client.readView(UserView, ref);
+  await expect(Promise.resolve().then(() => client.readView(UserView, ref))).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
   expect(fetchById).toHaveBeenCalledTimes(1);
 });
 
