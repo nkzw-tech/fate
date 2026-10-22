@@ -601,3 +601,61 @@ test.each(
     });
   },
 );
+
+test.each(
+  [false, true].flatMap((reverse) => [false, true].map((backwards) => ({ backwards, reverse }))),
+)(
+  'equal connection aliases combine selected cursors and pagination (reverse: $reverse, backwards: $backwards)',
+  async ({ backwards, reverse }) => {
+    const items = {
+      args: backwards ? { last: 3 } : { first: 3 },
+      items: { node: { id: true as const } },
+    };
+    const Both = view<User>()({
+      cursors: alias('games', {
+        ...items,
+        items: { ...items.items, cursor: true },
+        pagination: { nextCursor: true, previousCursor: true },
+      }),
+      flags: alias('games', { ...items, pagination: { hasNext: true, hasPrevious: true } }),
+      itemsOnly: alias('games', items),
+    });
+    const client = createClient({
+      roots: {},
+      transport: { fetchById: vi.fn() },
+      types: [{ fields: { games: { listOf: 'Game' } }, type: 'User' }, { type: 'Game' }],
+    });
+    const nodes = [{ node: { id: '1' } }, { node: { id: '2' } }];
+    const entries = [
+      ['itemsOnly:games', { items: nodes }],
+      [
+        'flags:games',
+        { items: nodes, pagination: { hasNext: !backwards, hasPrevious: backwards } },
+      ],
+      [
+        'cursors:games',
+        {
+          items: nodes.map((item, index) => ({ ...item, cursor: String(index) })),
+          pagination: { nextCursor: 'next', previousCursor: 'previous' },
+        },
+      ],
+    ];
+    const plan = getSelectionPlan(Both, null);
+    client.write(
+      'User',
+      { id: '1', ...Object.fromEntries(reverse ? entries.reverse() : entries) },
+      plan.paths,
+      plan,
+    );
+    const data = (
+      await client.readView<User, SelectionOf<typeof Both>, typeof Both>(
+        Both,
+        client.ref('User', '1', Both),
+      )
+    ).data;
+    expect(data.flags?.pagination).toEqual({ hasNext: !backwards, hasPrevious: backwards });
+    expect(data.cursors?.pagination).toEqual({ nextCursor: 'next', previousCursor: 'previous' });
+    expect(data.cursors?.items.map(({ cursor }) => cursor)).toEqual(['0', '1']);
+    expect(data.itemsOnly?.items.map(({ node }) => node.id)).toEqual(['1', '2']);
+  },
+);

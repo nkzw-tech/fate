@@ -4302,12 +4302,18 @@ export class FateClient<
                         : responseWindow.ids.length - ids.length + index
                     ],
                 );
+              // Equal windows can contribute complementary cursors and pagination.
+              const mergeWindowMetadata =
+                preserveWindow &&
+                previousList &&
+                ids.length === previousList.ids.length &&
+                (pagination !== undefined || cursors.some((cursor) => cursor !== undefined));
               const nextListState =
-                preserveWindow && previousList
+                preserveWindow && previousList && !mergeWindowMetadata
                   ? previousList
                   : this.mergeListState(previousList, ids, cursors, pagination, {
                       ...mergeInfo,
-                      replace,
+                      replace: mergeWindowMetadata ? false : replace,
                     });
               if (replace && !mergeInfo.hasCursorArg && !preserveWindow) {
                 windows.set(listKey, {
