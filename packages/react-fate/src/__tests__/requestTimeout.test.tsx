@@ -3,7 +3,7 @@ import { clientValueRoot, createClient } from '@nkzw/fate';
 import { act, Component, Suspense, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, test, vi } from 'vite-plus/test';
-import { FateClient, useRefetch, useRequest, useRequestState } from '../index.tsx';
+import { FateClient, useRefetch, useRequest } from '../index.tsx';
 
 // @ts-expect-error React test environment.
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -116,26 +116,4 @@ test('useRefetch forwards timeout and signal while refresh errors preserve rende
   expect(container.textContent).toBe('Cached');
   await act(async () => root.unmount());
   expect(vi.getTimerCount()).toBe(0);
-});
-
-test('useRequestState exposes timeouts as state without suspending', async () => {
-  vi.useFakeTimers();
-  const { client, container, request, root } = setup();
-  function Screen() {
-    const state = useRequestState(request, { timeout: 10 });
-    return state.error instanceof Error ? state.error.name : state.status;
-  }
-  await act(async () =>
-    root.render(
-      <FateClient client={client}>
-        <Screen />
-      </FateClient>,
-    ),
-  );
-  expect(container.textContent).toBe('pending');
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
-  });
-  expect(container.textContent).toBe('TimeoutError');
-  await act(async () => root.unmount());
 });

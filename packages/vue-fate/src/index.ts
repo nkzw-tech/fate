@@ -67,6 +67,5 @@ export { useLiveListView } from './useLiveListView.ts';
 export { useLiveView } from './useLiveView.ts';
 export { useRequest, type RequestResource } from './useRequest.ts';
 export { useRefetch } from './useRefetch.ts';
-export { useRequestState, type RequestStateResource } from './useRequestState.ts';
 export { useView, type ViewResource } from './useView.ts';
 export { useViews } from './useViews.ts';

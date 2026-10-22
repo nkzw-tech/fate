@@ -141,33 +141,7 @@ const [postItems, loadNext] = useListView(PostCardView, () => request.data.value
 </template>
 ```
 
-Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, use `useRequestState` instead.
-
-## Request State
-
-Use `useRequestState` to render loading and error states without Suspense:
-
-```vue
-<script setup lang="ts">
-import { useRequestState } from 'vue-fate';
-import { UserView } from '../fateViews';
-import UserCard from '../ui/UserCard.vue';
-
-const state = useRequestState({ viewer: { view: UserView } }, { mode: 'stale-while-revalidate' });
-</script>
-
-<template>
-  <p v-if="state.isFetching">Loading…</p>
-  <p v-if="state.error">Could not load your profile.</p>
-  <UserCard v-if="state.data?.viewer" :user="state.data.viewer" />
-</template>
-```
-
-The result is a ref: use `state.value` in script, while templates unwrap it automatically. Its data contains view refs, which components such as `UserCard` resolve with `useView`. Cached data stays visible during a refresh, and `isFetching` and `error` report its progress and failures.
-
-The request and options accept plain values, refs, or getters. Pass `{ enabled: false }` to disable fetching, or `{ mode: 'cache-only' }` to observe cached data without fetching missing fields. The `status` is `disabled`, `missing`, `pending`, `ready`, or `error`, as described in [Observing Request State](/guide/requests#observing-request-state).
-
-Call `state.value.refetch()` to fetch fresh data. Handle its rejected promise in the calling code. Disabled and cache-only requests reject refetches. Vue cleans up the observer when the component unmounts; call `state.dispose()` to stop it earlier.
+Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, read the resource’s `pending` and `error` refs without awaiting `ready()`.
 
 ## Refreshing Requests
 

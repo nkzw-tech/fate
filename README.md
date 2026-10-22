@@ -609,6 +609,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 - `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network.
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
+- `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.
 
 You can pass the request mode as an option to `useRequest`:
 
@@ -622,6 +623,18 @@ const { posts } = useRequest(
   },
 );
 ```
+
+For screens that also work offline, switch the same hook to `cache-only`:
+
+```tsx
+const result = useRequest(
+  { viewer: { view: ViewerView } },
+  { mode: isOnline ? 'network-only' : 'cache-only' },
+);
+const viewer = useView(ViewerView, result?.viewer);
+```
+
+Cache-only results stay subscribed to cache changes. Their references never fetch missing view fields. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
 
 ### Refreshing Requests
 
@@ -667,7 +680,7 @@ try {
 
 Cancellation rejects with `signal.reason`, usually an `AbortError`. If callers share a request, cancelling one does not cancel the others.
 
-You can also use `timeout` and `signal` with `useRefetch`, `useRequestState`, and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
+You can also use `timeout` and `signal` with `useRefetch` and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
 
 ### Cache Lifetime
 
@@ -748,18 +761,21 @@ Snapshots from different hydration scopes cannot be combined. Keep each user's s
 
 ### Observing Request State
 
-For a search box or a screen that handles loading and errors itself, use `useRequestState` instead of Suspense:
+Outside React or Vue components, `fate.observeRequest(request, options)` provides request state through `getSnapshot()` and `subscribe(listener)`:
 
-```tsx
-const state = useRequestState(request, { mode: 'stale-while-revalidate' });
+```ts
+const observer = fate.observeRequest(request, { mode: 'stale-while-revalidate' });
+const unsubscribe = observer.subscribe(() => {
+  console.log(observer.getSnapshot());
+});
 
-// In a button's event handler:
-const refresh = () => state.refetch().catch(reportError);
+// Stop observing when the consumer is disposed.
+unsubscribe();
 ```
 
-The result contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`, so child components can read them with `useView`. During a refresh, cached data stays visible and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
+The snapshot contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`. During a refresh, cached data stays available and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
 
-Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` to read only cached data. The possible statuses are:
+Reading a snapshot does not start a request. The first subscription starts an enabled request and retains its data; the last unsubscribe releases it. Use `enabled: false` to disable fetching, or `mode: 'cache-only'` to observe cached data without fetching missing fields. The possible statuses are:
 
 | Status     | Meaning                                            |
 | ---------- | -------------------------------------------------- |
@@ -769,7 +785,7 @@ Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` 
 | `ready`    | Data is available.                                 |
 | `error`    | The initial request failed.                        |
 
-`refetch()` returns a promise and requires an enabled request that isn't cache-only. For Vue, see [Request State](/docs/guide/vue.md#request-state). Outside a component, `fate.observeRequest(request, options)` provides the same state through `getSnapshot()` and `subscribe(listener)`. Subscribing starts the request; unsubscribing releases it.
+`observer.getSnapshot().refetch()` returns a promise and requires an enabled request that isn't cache-only. Handle its rejected promise in the calling code.
 
 ### Aliases
 
@@ -1861,33 +1877,7 @@ const [postItems, loadNext] = useListView(PostCardView, () => request.data.value
 </template>
 ```
 
-Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, use `useRequestState` instead.
-
-### Request State
-
-Use `useRequestState` to render loading and error states without Suspense:
-
-```vue
-<script setup lang="ts">
-import { useRequestState } from 'vue-fate';
-import { UserView } from '../fateViews';
-import UserCard from '../ui/UserCard.vue';
-
-const state = useRequestState({ viewer: { view: UserView } }, { mode: 'stale-while-revalidate' });
-</script>
-
-<template>
-  <p v-if="state.isFetching">Loading…</p>
-  <p v-if="state.error">Could not load your profile.</p>
-  <UserCard v-if="state.data?.viewer" :user="state.data.viewer" />
-</template>
-```
-
-The result is a ref: use `state.value` in script, while templates unwrap it automatically. Its data contains view refs, which components such as `UserCard` resolve with `useView`. Cached data stays visible during a refresh, and `isFetching` and `error` report its progress and failures.
-
-The request and options accept plain values, refs, or getters. Pass `{ enabled: false }` to disable fetching, or `{ mode: 'cache-only' }` to observe cached data without fetching missing fields. The `status` is `disabled`, `missing`, `pending`, `ready`, or `error`, as described in [Observing Request State](/docs/guide/requests.md#observing-request-state).
-
-Call `state.value.refetch()` to fetch fresh data. Handle its rejected promise in the calling code. Disabled and cache-only requests reject refetches. Vue cleans up the observer when the component unmounts; call `state.dispose()` to stop it earlier.
+Awaiting `ready()` in `<script setup>` participates in Vue Suspense. The getter passed to `useListView` keeps the list in sync when the request result changes. To render loading and error states yourself, read the resource’s `pending` and `error` refs without awaiting `ready()`.
 
 ### Refreshing Requests
 

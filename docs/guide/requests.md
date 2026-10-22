@@ -149,7 +149,7 @@ try {
 
 Cancellation rejects with `signal.reason`, usually an `AbortError`. If callers share a request, cancelling one does not cancel the others.
 
-You can also use `timeout` and `signal` with `useRefetch`, `useRequestState`, and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
+You can also use `timeout` and `signal` with `useRefetch` and Vue requests. Keep the signal stable when passing it to a hook. These options apply to the request, including its background refresh, rather than later pagination or mutation calls.
 
 ## Cache Lifetime
 
@@ -230,18 +230,21 @@ Snapshots from different hydration scopes cannot be combined. Keep each user's s
 
 ## Observing Request State
 
-For a search box or a screen that handles loading and errors itself, use `useRequestState` instead of Suspense:
+Outside React or Vue components, `fate.observeRequest(request, options)` provides request state through `getSnapshot()` and `subscribe(listener)`:
 
-```tsx
-const state = useRequestState(request, { mode: 'stale-while-revalidate' });
+```ts
+const observer = fate.observeRequest(request, { mode: 'stale-while-revalidate' });
+const unsubscribe = observer.subscribe(() => {
+  console.log(observer.getSnapshot());
+});
 
-// In a button's event handler:
-const refresh = () => state.refetch().catch(reportError);
+// Stop observing when the consumer is disposed.
+unsubscribe();
 ```
 
-The result contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`, so child components can read them with `useView`. During a refresh, cached data stays visible and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
+The snapshot contains `data`, `error`, `isFetching`, `status`, and `refetch`. Data contains the same refs as `useRequest`. During a refresh, cached data stays available and `isFetching` is true. A failed refresh sets `error` and keeps the previous data.
 
-Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` to read only cached data. The possible statuses are:
+Reading a snapshot does not start a request. The first subscription starts an enabled request and retains its data; the last unsubscribe releases it. Use `enabled: false` to disable fetching, or `mode: 'cache-only'` to observe cached data without fetching missing fields. The possible statuses are:
 
 | Status     | Meaning                                            |
 | ---------- | -------------------------------------------------- |
@@ -251,7 +254,7 @@ Use `enabled: false` to wait for input before fetching, or `mode: 'cache-only'` 
 | `ready`    | Data is available.                                 |
 | `error`    | The initial request failed.                        |
 
-`refetch()` returns a promise and requires an enabled request that isn't cache-only. For Vue, see [Request State](/guide/vue#request-state). Outside a component, `fate.observeRequest(request, options)` provides the same state through `getSnapshot()` and `subscribe(listener)`. Subscribing starts the request; unsubscribing releases it.
+`observer.getSnapshot().refetch()` returns a promise and requires an enabled request that isn't cache-only. Handle its rejected promise in the calling code.
 
 ## Aliases
 

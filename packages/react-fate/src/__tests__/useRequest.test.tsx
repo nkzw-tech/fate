@@ -988,3 +988,47 @@ test('a Suspense query with child arguments satisfies a cache-only summary of th
   expect(fetchQuery).toHaveBeenCalledTimes(1);
   await act(async () => root.unmount());
 });
+
+test('renders a viewer after its empty connection implicitly fetches a slug locator', async () => {
+  type Map = { __typename: 'Map'; id: string; slug: string };
+  type Viewer = { __typename: 'User'; id: string; maps: Array<Map>; username: string };
+  const ViewerView = view<Viewer>()({
+    maps: { args: { first: 1 }, items: { node: { id: true } } },
+  });
+  const fetchQuery = vi.fn(async () => ({
+    __typename: 'User',
+    id: '1',
+    maps: { items: [], pagination: { hasNext: false, hasPrevious: false } },
+    username: 'Sam',
+  }));
+  const client = createClient({
+    roots: { viewer: clientRoot<Viewer, 'User'>('User') },
+    transport: { fetchById: vi.fn(async () => []), fetchQuery },
+    types: [
+      { fields: { maps: { listOf: 'Map' } }, type: 'User' },
+      { refetch: { args: { slug: { field: 'slug' } }, root: 'map' }, type: 'Map' },
+    ],
+  });
+  function Viewer() {
+    const { viewer } = useRequest({ viewer: { view: ViewerView } }, { mode: 'network-only' });
+    const data = useView(ViewerView, viewer);
+    return <span>{data?.maps.items.length}</span>;
+  }
+  const element = document.createElement('div');
+  const root = createRoot(element);
+  try {
+    await act(async () =>
+      root.render(
+        <FateClient client={client}>
+          <Suspense fallback="Loading">
+            <Viewer />
+          </Suspense>
+        </FateClient>,
+      ),
+    );
+    expect(element.textContent).toBe('0');
+    expect(fetchQuery).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
