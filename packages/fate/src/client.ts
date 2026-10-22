@@ -491,6 +491,22 @@ type NormalizationSelection = {
   >;
 };
 type NormalizationSelections = Map<ReadonlySet<string>, Map<string, NormalizationSelection>>;
+type NormalizationContext = {
+  selections: NormalizationSelections;
+  windows: Map<
+    string,
+    {
+      direction: 'forward' | 'backward';
+      generation: number;
+      ids: ReadonlyArray<EntityId>;
+      pageLimit?: number | null;
+    }
+  >;
+};
+const createNormalizationContext = (): NormalizationContext => ({
+  selections: new Map(),
+  windows: new Map(),
+});
 
 /**
  * Core client that normalizes records, manages the view cache, and coordinates
@@ -3779,9 +3795,18 @@ export class FateClient<
       const records = await this.fetchEntities(type, ids, select, generation, resolvedArgs, signal);
       signal?.throwIfAborted();
       this.assertPersistenceActive();
+      const normalization = createNormalizationContext();
       for (const { generation, record } of records) {
         this.withWriteGeneration(generation, () =>
-          this.writeEntity(type, record as AnyRecord, select, plan, prefix),
+          this.writeEntity(
+            type,
+            record as AnyRecord,
+            select,
+            plan,
+            prefix,
+            undefined,
+            normalization,
+          ),
         );
       }
     });
@@ -3879,6 +3904,7 @@ export class FateClient<
       const { items, pagination } = connection;
       this.withWriteGeneration(generation, () =>
         this.store.update(() => {
+          const normalization = createNormalizationContext();
           const ids: Array<EntityId> = [];
           const cursors: Array<string | undefined> = [];
           for (const entry of items) {
@@ -3887,6 +3913,9 @@ export class FateClient<
               entry.node as AnyRecord,
               item.plan.paths,
               item.plan,
+              null,
+              undefined,
+              normalization,
             );
             ids.push(id);
             cursors.push(entry.cursor);
@@ -4000,8 +4029,9 @@ export class FateClient<
     plan?: SelectionPlan,
     pathPrefix: string | null = null,
     insert?: InsertPosition,
-    selections: NormalizationSelections = new Map(),
+    normalization: NormalizationContext = createNormalizationContext(),
   ): EntityId {
+    const { selections, windows } = normalization;
     return this.store.update(() => {
       type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
       const config = this.types.get(type);
@@ -4110,7 +4140,7 @@ export class FateClient<
                 plan,
                 fieldPath,
                 undefined,
-                selections,
+                normalization,
               );
             }
           } else if (
@@ -4222,7 +4252,7 @@ export class FateClient<
                     plan,
                     fieldPath,
                     undefined,
-                    selections,
+                    normalization,
                   );
 
                   ids.push(childId);
@@ -4254,10 +4284,39 @@ export class FateClient<
                 !this.mutationWrite ||
                 ((!this.mutationWrite.fields || this.mutationWrite.fields.has(fieldPath)) &&
                   complete);
-              const nextListState = this.mergeListState(previousList, ids, cursors, pagination, {
-                ...mergeInfo,
-                replace,
-              });
+              // A preview must not truncate a compatible full page returned by another alias.
+              // These windows belong to one response; a later snapshot still replaces them.
+              const responseWindow = windows.get(listKey);
+              const preserveWindow =
+                responseWindow?.generation === generation &&
+                !mergeInfo.hasCursorArg &&
+                responseWindow.direction === mergeInfo.direction &&
+                (responseWindow.pageLimit ?? Infinity) >= (mergeInfo.pageLimit ?? Infinity) &&
+                ids.length <= responseWindow.ids.length &&
+                ids.every(
+                  (id, index) =>
+                    id ===
+                    responseWindow.ids[
+                      mergeInfo.direction === 'forward'
+                        ? index
+                        : responseWindow.ids.length - ids.length + index
+                    ],
+                );
+              const nextListState =
+                preserveWindow && previousList
+                  ? previousList
+                  : this.mergeListState(previousList, ids, cursors, pagination, {
+                      ...mergeInfo,
+                      replace,
+                    });
+              if (replace && !mergeInfo.hasCursorArg && !preserveWindow) {
+                windows.set(listKey, {
+                  direction: mergeInfo.direction,
+                  generation,
+                  ids,
+                  pageLimit: mergeInfo.pageLimit,
+                });
+              }
 
               const listChanged = !areListStatesEqual(previousList, nextListState);
               result[storageKey] = createNodeRefsForIds(

@@ -543,3 +543,61 @@ test('restores parameterized named fragments from persistence without fetching i
     restored.client.persistence!.dispose();
   }
 });
+
+test.each(
+  [false, true].flatMap((previewFirst) =>
+    [false, true].map((backwards) => ({ backwards, previewFirst })),
+  ),
+)(
+  'connection previews do not truncate a larger window from the same response (preview first: $previewFirst, backwards: $backwards)',
+  async ({ backwards, previewFirst }) => {
+    const all = {
+      args: { ...(backwards ? { last: 3 } : { first: 3 }), status: 'Active' },
+      items: { node: { id: true as const, name: true as const } },
+      pagination: { hasNext: true as const, hasPrevious: true as const },
+    };
+    const preview = {
+      ...all,
+      args: { ...(backwards ? { last: 1 } : { first: 1 }), status: 'Active' },
+    };
+    const Both = view<User>()({ detail: alias('games', all), preview: alias('games', preview) });
+    const client = createClient({
+      roots: {},
+      transport: { fetchById: vi.fn() },
+      types: [{ fields: { games: { listOf: 'Game' } }, type: 'User' }, { type: 'Game' }],
+    });
+    const page = (count: number) => ({
+      items: Array.from({ length: count }, (_, index) => ({
+        cursor: String((backwards ? 3 - count : 0) + index),
+        node: { id: String((backwards ? 3 - count : 0) + index), name: String(index) },
+      })),
+      pagination: { hasNext: !backwards && count === 1, hasPrevious: backwards && count === 1 },
+    });
+    const entries = [
+      ['detail:games', page(3)],
+      ['preview:games', page(1)],
+    ] as const;
+    const plan = getSelectionPlan(Both, null);
+    client.write(
+      'User',
+      { id: '1', ...Object.fromEntries(previewFirst ? [...entries].reverse() : entries) },
+      plan.paths,
+      plan,
+    );
+    expect((await client.readView(Both, client.ref('User', '1', Both))).data).toMatchObject({
+      detail: {
+        items: [{ node: { id: '0' } }, { node: { id: '1' } }, { node: { id: '2' } }],
+        pagination: { hasNext: false, hasPrevious: false },
+      },
+    });
+    const Preview = view<User>()({ preview: alias('games', preview) });
+    const refreshPlan = getSelectionPlan(Preview, null);
+    client.write('User', { id: '1', 'preview:games': page(1) }, refreshPlan.paths, refreshPlan);
+    expect((await client.readView(Both, client.ref('User', '1', Both))).data).toMatchObject({
+      detail: {
+        items: [{ node: { id: backwards ? '2' : '0' } }],
+        pagination: { hasNext: !backwards, hasPrevious: backwards },
+      },
+    });
+  },
+);
