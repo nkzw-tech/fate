@@ -68,7 +68,7 @@ test('evicts dependents and the dependency when invalidating an entity', () => {
   expect(cache.get(dependentId, dependentView, dependentRef)).toBeNull();
 });
 
-test('recursively invalidates transitive dependency chains', () => {
+test('invalidates snapshots through their complete nested coverage', () => {
   const cache = new ViewDataCache();
   const rootId: EntityId = 'root';
   const middleId: EntityId = 'middle';
@@ -99,6 +99,7 @@ test('recursively invalidates transitive dependency chains', () => {
     coverage: [
       [leafId, new Set()],
       [middleId, new Set()],
+      [rootId, new Set()],
     ],
     data: { [ViewsTag]: new Set() },
   };
@@ -106,7 +107,7 @@ test('recursively invalidates transitive dependency chains', () => {
 
   cache.set(rootId, rootView, rootRef, rootThenable, new Set());
   cache.set(middleId, middleView, middleRef, middleThenable, new Set<EntityId>([rootId]));
-  cache.set(leafId, leafView, leafRef, leafThenable, new Set<EntityId>([middleId]));
+  cache.set(leafId, leafView, leafRef, leafThenable, new Set<EntityId>([middleId, rootId]));
 
   expect(cache.get(rootId, rootView, rootRef)).toBe(rootThenable);
   expect(cache.get(middleId, middleView, middleRef)).toBe(middleThenable);
@@ -152,4 +153,30 @@ test('full invalidation still evicts snapshots after unrelated field changes', (
   expect(cache.get('User:1', selected, ref)).toBe(snapshot);
   cache.invalidate('User:1');
   expect(cache.get('User:1', selected, ref)).toBeNull();
+});
+
+test('replacing one snapshot drops obsolete dependencies without affecting other views', () => {
+  const cache = new ViewDataCache();
+  const parentId = 'Parent:1';
+  const parentView = createView();
+  const otherView = createView();
+  const ref = createViewRef('Parent', '1');
+  const snapshot = (child: string) =>
+    createThenable<ViewSnapshot<any, any>>({
+      coverage: [
+        [parentId, new Set(['child'])],
+        [child, new Set(['name'])],
+      ],
+      data: { [ViewsTag]: new Set() },
+    });
+  const first = snapshot('Child:1');
+  cache.set('Parent:1', parentView, ref, first, new Set(['Child:1']));
+  cache.set('Parent:1', otherView, ref, first, new Set(['Child:1']));
+  const next = snapshot('Child:2');
+  cache.set('Parent:1', parentView, ref, next, new Set(['Child:2']));
+  cache.invalidate('Child:1');
+  expect(cache.get('Parent:1', parentView, ref)).toBe(next);
+  expect(cache.get('Parent:1', otherView, ref)).toBeNull();
+  cache.invalidate('Child:2');
+  expect(cache.get('Parent:1', parentView, ref)).toBeNull();
 });

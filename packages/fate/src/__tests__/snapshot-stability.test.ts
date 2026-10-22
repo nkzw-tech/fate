@@ -133,3 +133,38 @@ test('creating a previously missing record replaces its stalled snapshot', async
   client.write('User', { id: '1', name: 'Sam' }, new Set(['name']));
   expect((await client.readView(Name, ref)).data).toMatchObject({ name: 'Sam' });
 });
+
+test('relation churn does not retain dependencies on detached children', async () => {
+  type Person = { __typename: 'User'; friend: Person; id: string; name: string };
+  const Parent = view<Person>()({ friend: { friend: { name: true }, id: true, name: true } });
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [] },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  const ref = client.ref('User', 'parent', Parent);
+  for (let index = 0; index < 100; index++) {
+    client.write(
+      'User',
+      {
+        friend: { friend: { id: `leaf-${index}`, name: 'Sam' }, id: String(index), name: 'Sam' },
+        id: 'parent',
+      },
+      new Set(['friend.friend.name', 'friend.id', 'friend.name']),
+    );
+    await client.readView(Parent, ref);
+  }
+  const current = await client.readView(Parent, ref);
+  for (let index = 0; index < 99; index++) {
+    client.deleteRecord('User', String(index));
+    expect(await client.readView(Parent, ref)).toBe(current);
+  }
+  client.write('User', { id: 'leaf-99', name: 'Leaf' }, new Set(['name']));
+  const nested = await client.readView(Parent, ref);
+  expect(nested).not.toBe(current);
+  expect(nested.data).toMatchObject({ friend: { friend: { name: 'Leaf' } } });
+  client.write('User', { id: '99', name: 'Maxima' }, new Set(['name']));
+  const next = await client.readView(Parent, ref);
+  expect(next).not.toBe(nested);
+  expect(next.data).toMatchObject({ friend: { id: '99', name: 'Maxima' } });
+});

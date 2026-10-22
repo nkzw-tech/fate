@@ -36,13 +36,8 @@ export default class ViewDataCache {
     return cache;
   }
 
-  private rootDependencies = new Map<EntityId, Set<EntityId>>();
-  private dependencyIndex = new Map<EntityId, Set<EntityId>>();
-
   clear() {
     this.cache.clear();
-    this.rootDependencies.clear();
-    this.dependencyIndex.clear();
   }
 
   get<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
@@ -101,93 +96,36 @@ export default class ViewDataCache {
         coverage.set(id, null);
       }
     }
+    // Coverage already includes every nested entity. Keep dependencies only on
+    // this weakly held snapshot instead of accumulating a reverse entity graph.
     viewMap.set(ref, {
       dependencies: [...coverage].map(([id, fields]) => ({ cache: this.entityCache(id), fields })),
       revision: this.revision,
       thenable,
     });
-
-    let roots = this.rootDependencies.get(entityId);
-    if (!roots) {
-      roots = new Set();
-      this.rootDependencies.set(entityId, roots);
-    }
-
-    for (const dependency of dependencies) {
-      if (!roots.has(dependency)) {
-        roots.add(dependency);
-        let dependents = this.dependencyIndex.get(dependency);
-        if (!dependents) {
-          dependents = new Set();
-          this.dependencyIndex.set(dependency, dependents);
-        }
-        dependents.add(entityId);
-      }
-    }
   }
 
   invalidate(entityId: EntityId, paths?: Iterable<string>) {
     if (!this.isEnabled()) {
       return;
     }
-    if (paths) {
-      const cache = this.cache.get(entityId);
-      if (cache) {
-        let revision = 0;
-        for (const path of paths) {
-          revision ||= ++this.revision;
-          (cache.fields ??= new Map()).set(path.split('.')[0], revision);
-        }
-        if (revision) {
-          cache.revision = revision;
-        } else {
-          this.invalidateDependents(entityId, new Set());
-        }
-      }
-    } else {
-      this.invalidateDependents(entityId, new Set());
-    }
-  }
-
-  private invalidateDependents(entityId: EntityId, visited: Set<EntityId>) {
-    if (visited.has(entityId)) {
+    const cache = this.cache.get(entityId);
+    if (!cache) {
       return;
     }
-
-    visited.add(entityId);
-
-    const dependents = this.dependencyIndex.get(entityId);
-    if (dependents) {
-      for (const dependent of dependents) {
-        this.invalidateDependents(dependent, visited);
+    let revision = 0;
+    if (paths) {
+      for (const path of paths) {
+        revision ||= ++this.revision;
+        (cache.fields ??= new Map()).set(path.split('.')[0], revision);
       }
     }
-
-    this.delete(entityId);
-  }
-
-  private delete(entityId: EntityId) {
-    const cache = this.cache.get(entityId);
-    if (cache) {
+    if (revision) {
+      cache.revision = revision;
+    } else {
       cache.invalidated = ++this.revision;
       cache.fields?.clear();
+      this.cache.delete(entityId);
     }
-    const roots = this.rootDependencies.get(entityId);
-    if (roots) {
-      for (const dependency of roots) {
-        const dependents = this.dependencyIndex.get(dependency);
-        if (!dependents) {
-          continue;
-        }
-
-        dependents.delete(entityId);
-        if (dependents.size === 0) {
-          this.dependencyIndex.delete(dependency);
-        }
-      }
-      this.rootDependencies.delete(entityId);
-    }
-
-    this.cache.delete(entityId);
   }
 }
