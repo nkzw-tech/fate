@@ -77,7 +77,7 @@ import {
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
 import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
-import { getListKey, List, mergePreservingExisting, Store } from './store.ts';
+import { getListKey, List, mergePreservingExisting, parseListKey, Store } from './store.ts';
 import { Transport } from './transport.ts';
 import {
   ConnectionMetadata,
@@ -421,6 +421,20 @@ const omitUndefinedValues = (record: AnyRecord): AnyRecord => {
   return result;
 };
 
+const reuseNormalizedField = (value: unknown, previous: unknown): unknown => {
+  if (
+    Object.is(value, previous) ||
+    (isNodeRef(value) && isNodeRef(previous) && getNodeRefId(value) === getNodeRefId(previous)) ||
+    (Array.isArray(value) &&
+      Array.isArray(previous) &&
+      value.length === previous.length &&
+      value.every((item, index) => Object.is(item, previous[index])))
+  ) {
+    return previous;
+  }
+  return value;
+};
+
 const groupSelectionByPrefix = (select: ReadonlySet<string>): ReadonlyMap<string, Set<string>> => {
   if (select.size === 0) {
     return new Map();
@@ -605,6 +619,14 @@ export class FateClient<
           }
         } else {
           this.acceptWrite(`list:${change.key}`, generation);
+        }
+      }
+      if (change.kind === 'record') {
+        this.viewDataCache.invalidate(change.key);
+      } else {
+        const owner = parseListKey(change.key);
+        if (owner) {
+          this.viewDataCache.invalidate(owner.ownerId);
         }
       }
       this.persistenceRuntime?.changed(change);
@@ -3873,7 +3895,7 @@ export class FateClient<
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
       }
-      return value;
+      return reuseNormalizedField(value, previous);
     }
     if (Array.isArray(value)) {
       replacedPaths.add(storagePrefix);
@@ -3885,7 +3907,7 @@ export class FateClient<
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
       }
-      return value;
+      return reuseNormalizedField(value, previous);
     }
     const existing = isRecord(previous) ? previous : undefined;
     if (!existing) {
@@ -3909,7 +3931,11 @@ export class FateClient<
         replacedPaths,
       );
     }
-    return result;
+    return existing &&
+      Object.keys(result).length === Object.keys(existing).length &&
+      Object.keys(result).every((key) => Object.is(result[key], existing[key]))
+      ? existing
+      : result;
   }
 
   private writeEntity(
@@ -3981,7 +4007,10 @@ export class FateClient<
             if (!acceptField) {
               continue;
             }
-            result[storageKey] = value;
+            result[storageKey] = reuseNormalizedField(
+              value,
+              this.store.read(entityId)?.[storageKey],
+            );
           } else if (
             relationDescriptor &&
             typeof relationDescriptor === 'object' &&
@@ -4008,7 +4037,10 @@ export class FateClient<
               }
               const childId = toEntityId(childType, childConfig.getId(value));
               if (acceptField) {
-                result[storageKey] = createNodeRef(childId);
+                result[storageKey] = reuseNormalizedField(
+                  createNodeRef(childId),
+                  this.store.read(entityId)?.[storageKey],
+                );
               }
 
               this.writeEntity(
@@ -4201,7 +4233,10 @@ export class FateClient<
           const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
           const storageKey = getFieldKey(fieldPath, plan);
           if (this.acceptWrite(JSON.stringify([entityId, storageKey]), generation)) {
-            result[storageKey] = value;
+            result[storageKey] = reuseNormalizedField(
+              value,
+              this.store.read(entityId)?.[storageKey],
+            );
           }
         }
       }
@@ -4236,7 +4271,6 @@ export class FateClient<
         }
       }
 
-      this.viewDataCache.invalidate(entityId);
       this.withWriteGeneration(generation, () =>
         this.store.merge(entityId, result, selectedPaths, replacedPaths),
       );

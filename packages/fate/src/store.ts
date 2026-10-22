@@ -84,7 +84,7 @@ export const getListKey = (ownerId: EntityId, field: string, hash = 'default'): 
 const getOwnerFieldKey = (ownerId: EntityId, field: string): string =>
   JSON.stringify([ownerId, field]);
 
-const parseListKey = (key: string): ListKeyParts | null => {
+export const parseListKey = (key: string): ListKeyParts | null => {
   const parts = key.split(listKeySeparator);
   if (parts.length !== 3) {
     return null;
