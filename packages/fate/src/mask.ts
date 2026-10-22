@@ -151,21 +151,25 @@ export function intersects(a: FieldMask, b: FieldMask): boolean {
 /** Removes coverage below a replaced value before applying its new selection. */
 export function removePath(mask: FieldMask, path: string) {
   const parts = path.split('.');
-  let current = mask;
-  for (const [index, part] of parts.entries()) {
+  const remove = (current: FieldMask, index: number) => {
     if (current.all) {
       current.all = false;
       current.children.clear();
       return;
     }
-    const child = current.children.get(part);
+    const key = parts[index];
+    const child = current.children.get(key);
     if (!child) {
       return;
     }
     if (index === parts.length - 1) {
-      current.children.delete(part);
-      return;
+      current.children.delete(key);
+    } else {
+      remove(child, index + 1);
+      if (!child.all && child.children.size === 0) {
+        current.children.delete(key);
+      }
     }
-    current = child;
-  }
+  };
+  remove(mask, 0);
 }

@@ -1,5 +1,5 @@
 import { expect, test } from 'vite-plus/test';
-import { addPath, fromPaths, isCovered, toPaths } from '../mask.ts';
+import { addPath, fromPaths, isCovered, removePath, toPaths } from '../mask.ts';
 
 test('does not grow descendants beneath an already covered parent', () => {
   const mask = fromPaths(['profile']);
@@ -23,3 +23,12 @@ test.each(['name', 'profile.name', '', '.name', 'profile.', 'profile..name'])(
     expect(current.children.size).toBe(0);
   },
 );
+
+test('removing the last nested path does not mark its empty ancestors as covered', () => {
+  const mask = fromPaths(['profile.image.color', 'name']);
+  removePath(mask, 'profile.image.color');
+  expect(isCovered(mask, 'profile')).toBe(false);
+  expect(isCovered(mask, 'profile.image')).toBe(false);
+  expect(isCovered(mask, 'name')).toBe(true);
+  expect(toPaths(mask)).toEqual(['name']);
+});
