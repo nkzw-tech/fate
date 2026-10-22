@@ -11,7 +11,7 @@ import {
   type Deferred,
   type ViewRef,
 } from '@nkzw/fate';
-import { act, Suspense, useState } from 'react';
+import { act, Suspense, use, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
@@ -76,6 +76,118 @@ const jsonRoundTrip = <T,>(value: T): T => {
   // eslint-disable-next-line unicorn/prefer-structured-clone -- Verify JSON transport compatibility.
   return JSON.parse(JSON.stringify(value)) as T;
 };
+
+// Known regression: the old component still owns the fulfilled handle when its
+// replacement renders. Remove `.fails` once freshness and retry sharing both pass.
+test.fails.each([
+  { mode: 'network-only', timeout: undefined },
+  { mode: 'network-only', timeout: 5000 },
+  { mode: 'stale-while-revalidate', timeout: undefined },
+  { mode: 'stale-while-revalidate', timeout: 5000 },
+] as const)(
+  'refreshes $mode ($timeout) when a keyed component replaces its owner',
+  async (options) => {
+    let content = 'Before';
+    const committed: Array<string> = [];
+    const fetchById = vi.fn(async () => [{ __typename: 'Post', content, id: 'post-1' }]);
+    const client = createClient({
+      roots: { post: clientRoot('Post') },
+      transport: { fetchById },
+      types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+    });
+    const PostView = view<Post>()({ content: true, id: true });
+    const Component = () => {
+      const { post } = useRequest({ post: { id: 'post-1', view: PostView } }, options);
+      const { content } = useView(PostView, post);
+      useLayoutEffect(() => {
+        committed.push(content);
+      }, [content]);
+      return <span>{content}</span>;
+    };
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const render = (key: number) => (
+      <FateClient client={client}>
+        <Suspense fallback={<span>Loading</span>}>
+          <Component key={key} />
+        </Suspense>
+      </FateClient>
+    );
+
+    try {
+      await act(async () => {
+        root.render(render(0));
+        await flushAsync();
+      });
+      expect(container.textContent).toBe('Before');
+      expect(fetchById).toHaveBeenCalledTimes(1);
+
+      content = 'After';
+      await act(async () => {
+        root.render(render(1));
+        await flushAsync();
+      });
+      expect(fetchById).toHaveBeenCalledTimes(2);
+      expect(container.textContent).toBe('After');
+      if (options.mode === 'network-only') {
+        // A refresh after committing the old value is not a network-only fix.
+        expect(committed).toEqual(['Before', 'After']);
+      }
+    } finally {
+      await act(async () => root.unmount());
+    }
+  },
+);
+
+test('shares a network-only request with a consumer that commits after another boundary', async () => {
+  const blocker = Promise.withResolvers<void>();
+  const fetchById = vi.fn(async () => [{ __typename: 'Post', content: 'Shared', id: 'post-1' }]);
+  const client = createClient({
+    roots: { post: clientRoot('Post') },
+    transport: { fetchById },
+    types: [{ fields: { content: 'scalar' }, type: 'Post' }],
+  });
+  const PostView = view<Post>()({ content: true, id: true });
+  const Component = ({ delayed = false }: { delayed?: boolean }) => {
+    const { post } = useRequest(
+      { post: { id: 'post-1', view: PostView } },
+      { mode: 'network-only' },
+    );
+    if (delayed) {
+      use(blocker.promise);
+    }
+    return <span>{useView(PostView, post).content}</span>;
+  };
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <FateClient client={client}>
+          <Suspense fallback={<span>First loading</span>}>
+            <Component />
+          </Suspense>
+          <Suspense fallback={<span>Second loading</span>}>
+            <Component delayed />
+          </Suspense>
+        </FateClient>,
+      );
+      await flushAsync();
+    });
+    expect(container.textContent).toBe('SharedSecond loading');
+    expect(fetchById).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      blocker.resolve();
+      await flushAsync();
+    });
+    expect(container.textContent).toBe('SharedShared');
+    expect(fetchById).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
 
 test('releases network-only requests on unmount', async () => {
   const fetchById = vi.fn().mockResolvedValue([
