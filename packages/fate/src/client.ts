@@ -50,7 +50,7 @@ import type {
 } from './persistence-types.ts';
 import { FateRequestError, type FateLiveConnectionEvent } from './protocol.ts';
 import { abortable, readControl, SharedReads, validateTimeout } from './read-control.ts';
-import { isRecord } from './record.ts';
+import { isRecord, setRecordValue } from './record.ts';
 import {
   assignViewTag,
   createRefWithViewNames,
@@ -412,7 +412,7 @@ const setNestedValue = (target: AnyRecord, key: string, value: unknown) => {
 };
 
 const omitUndefinedValues = (record: AnyRecord): AnyRecord => {
-  const result: AnyRecord = {};
+  const result: AnyRecord = Object.create(null);
   for (const [key, value] of Object.entries(record)) {
     if (value !== undefined) {
       result[key] = value;
@@ -4096,8 +4096,8 @@ export class FateClient<
       const path = `${prefix}.${key}`;
       const storageKey = getFieldKey(path, plan);
       const normalized = this.normalizeEmbedded(
-        value[key],
-        existing?.[storageKey],
+        Object.hasOwn(value, key) ? value[key] : undefined,
+        existing && Object.hasOwn(existing, storageKey) ? existing[storageKey] : undefined,
         selection.get(key) ?? emptyEmbeddedSelection,
         plan,
         path,
@@ -4105,16 +4105,7 @@ export class FateClient<
         replacedPaths,
         preserveSiblings,
       );
-      if (storageKey === '__proto__') {
-        Object.defineProperty(result, storageKey, {
-          configurable: true,
-          enumerable: true,
-          value: normalized,
-          writable: true,
-        });
-      } else {
-        result[storageKey] = normalized;
-      }
+      setRecordValue(result, storageKey, normalized);
     }
     return existing &&
       Object.keys(result).length === Object.keys(existing).length &&
@@ -4198,9 +4189,10 @@ export class FateClient<
             if (!acceptField) {
               continue;
             }
-            result[storageKey] = reuseNormalizedField(
-              value,
-              this.store.read(entityId)?.[storageKey],
+            setRecordValue(
+              result,
+              storageKey,
+              reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
             );
           } else if (
             relationDescriptor &&
@@ -4210,7 +4202,7 @@ export class FateClient<
             const childPaths = selectionTree.get(key) ?? emptySet;
             if (value === null) {
               if (acceptField) {
-                result[storageKey] = null;
+                setRecordValue(result, storageKey, null);
               }
               continue;
             }
@@ -4228,9 +4220,13 @@ export class FateClient<
               }
               const childId = toEntityId(childType, childConfig.getId(value));
               if (acceptField) {
-                result[storageKey] = reuseNormalizedField(
-                  createNodeRef(childId),
-                  this.store.read(entityId)?.[storageKey],
+                setRecordValue(
+                  result,
+                  storageKey,
+                  reuseNormalizedField(
+                    createNodeRef(childId),
+                    this.store.read(entityId)?.[storageKey],
+                  ),
                 );
               }
 
@@ -4252,7 +4248,7 @@ export class FateClient<
             const childPaths = selectionTree.get(key) ?? emptySet;
             if (value === null) {
               if (acceptField) {
-                result[storageKey] = null;
+                setRecordValue(result, storageKey, null);
               }
               continue;
             }
@@ -4426,14 +4422,18 @@ export class FateClient<
               }
 
               const listChanged = !areListStatesEqual(previousList, nextListState);
-              result[storageKey] = createNodeRefsForIds(
-                nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
-                  ? getListEntries(nextListState).map(({ id }) => id)
-                  : nextListState.ids,
-                this.store.read(entityId)?.[storageKey],
-                {
-                  reuseCurrentArray: !listChanged,
-                },
+              setRecordValue(
+                result,
+                storageKey,
+                createNodeRefsForIds(
+                  nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
+                    ? getListEntries(nextListState).map(({ id }) => id)
+                    : nextListState.ids,
+                  this.store.read(entityId)?.[storageKey],
+                  {
+                    reuseCurrentArray: !listChanged,
+                  },
+                ),
               );
 
               this.store.setList(listKey, nextListState);
@@ -4445,14 +4445,18 @@ export class FateClient<
                 embedded = compileEmbeddedSelection(selectionTree.get(key) ?? emptySet);
                 normalized.embedded.set(key, embedded);
               }
-              result[storageKey] = this.normalizeEmbedded(
-                value,
-                this.store.read(entityId)?.[storageKey],
-                embedded,
-                plan,
-                fieldPath,
+              setRecordValue(
+                result,
                 storageKey,
-                replacedPaths,
+                this.normalizeEmbedded(
+                  value,
+                  this.store.read(entityId)?.[storageKey],
+                  embedded,
+                  plan,
+                  fieldPath,
+                  storageKey,
+                  replacedPaths,
+                ),
               );
             }
           }
@@ -4464,9 +4468,10 @@ export class FateClient<
           const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
           const storageKey = getFieldKey(fieldPath, plan);
           if (this.acceptWrite(JSON.stringify([entityId, storageKey]), generation)) {
-            result[storageKey] = reuseNormalizedField(
-              value,
-              this.store.read(entityId)?.[storageKey],
+            setRecordValue(
+              result,
+              storageKey,
+              reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
             );
           }
         }

@@ -670,7 +670,10 @@ export class Store {
     this.captureRecord(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
     if (this.recordingLayer) {
-      const write = this.recordingLayer.writes.get(id) ?? { partial: {}, paths: new Set<string>() };
+      const write = this.recordingLayer.writes.get(id) ?? {
+        partial: Object.create(null) as AnyRecord,
+        paths: new Set<string>(),
+      };
       Object.assign(write.partial, partial);
       for (const path of selectedPaths) {
         write.paths.add(path);
@@ -1129,7 +1132,7 @@ export class Store {
         }
 
         let updated = false;
-        const next: AnyRecord = {};
+        const next: AnyRecord = Object.create(null);
         const paths = new Set<string>();
 
         for (const key of fields) {

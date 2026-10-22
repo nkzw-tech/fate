@@ -187,6 +187,42 @@ test('embedded normalization preserves prototype-named own fields as data', () =
   expect(stored).toMatchObject({ color: 1 });
 });
 
+test('normalized records keep prototype-named fields through optimistic writes', () => {
+  const { client } = setup();
+  const initial = JSON.parse('{"__proto__":{"color":1},"constructor":"initial","id":"1"}');
+  const paths = new Set(['__proto__', 'constructor', 'id']);
+  client.write('User', initial, paths);
+  expect(Object.getPrototypeOf(client.store.read('User:1'))).toBe(Object.prototype);
+  const settle = client.store.optimisticUpdate(() =>
+    client.write(
+      'User',
+      JSON.parse('{"__proto__":{"color":2},"constructor":"optimistic","id":"1"}'),
+      paths,
+    ),
+  );
+  expect(client.store.read('User:1')).toEqual(
+    JSON.parse('{"__proto__":{"color":2},"constructor":"optimistic","id":"1"}'),
+  );
+  settle();
+  expect(client.store.read('User:1')).toEqual(initial);
+  expect(Object.getPrototypeOf(client.store.read('User:1'))).toBe(Object.prototype);
+});
+
+test('omitted prototype-named embedded fields become undefined without inheriting values', () => {
+  const { client } = setup();
+  client.write(
+    'User',
+    { character: {}, id: '1' },
+    new Set(['character.__proto__', 'character.constructor', 'character.toString']),
+  );
+  const character = client.store.read('User:1')?.character as Record<string, unknown>;
+  expect(Object.getPrototypeOf(character)).toBe(Object.prototype);
+  for (const key of ['__proto__', 'constructor', 'toString']) {
+    expect(Object.hasOwn(character, key)).toBe(true);
+    expect(character[key]).toBeUndefined();
+  }
+});
+
 test.each(
   [false, true].flatMap((refresh) =>
     [false, true].map((referencesChanged) => ({ referencesChanged, refresh })),

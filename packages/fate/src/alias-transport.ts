@@ -59,7 +59,7 @@ const project = (value: unknown, tree: Tree): unknown => {
       ),
     };
   }
-  const result = { ...value };
+  const result: AnyRecord = { __proto__: null, ...value };
   for (const field of tree.keys()) {
     if (field.includes(':')) {
       delete result[schemaField(field)];
@@ -105,7 +105,7 @@ const merge = (left: unknown, right: unknown): unknown => {
     });
   }
   if (isRecord(left) && isRecord(right)) {
-    const result = { ...left };
+    const result: AnyRecord = { __proto__: null, ...left };
     for (const [key, value] of Object.entries(right)) {
       result[key] = Object.hasOwn(left, key) ? merge(left[key], value) : value;
     }
