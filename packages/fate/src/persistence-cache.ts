@@ -128,7 +128,7 @@ const applyRecordUpdate = (
 ): RecordValue => ({
   paths: [
     ...new Set([
-      ...before.paths,
+      ...before.paths.filter((path) => fields && !fields.has(path.split('.')[0])),
       ...after.paths.filter((path) => !fields || fields.has(path.split('.')[0])),
     ]),
   ],
@@ -1072,7 +1072,11 @@ export class PersistenceCache {
         }
         let value = next?.value;
         if (previous && key.startsWith('r:')) {
-          const before = decodeHydrationValue(previous.value) as RecordValue;
+          const stored = decodeHydrationValue(previous.value) as RecordValue;
+          const incoming = this.flushingNodes.values.get(key) as RecordValue | undefined;
+          const before = incoming
+            ? applyRecordUpdate(stored, incoming, this.flushingNodes.recordFields.get(key))
+            : stored;
           const after = next?.value as RecordValue | undefined;
           value = projectRecord(
             {
@@ -1248,10 +1252,7 @@ export class PersistenceCache {
           );
           const value = encodeHydrationValue(
             projectRecord(
-              {
-                paths: [...new Set([...before.paths, ...after.paths])],
-                record: { ...before.record, ...after.record },
-              },
+              after,
               Object.values(node.claims).flatMap((claim) => claim.paths),
             ),
           );

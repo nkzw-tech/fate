@@ -1,10 +1,12 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
+import { createPersistence } from '../persistence.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
 import type { SelectionOf } from '../types.ts';
 import { view } from '../view.ts';
+import { memoryStorage } from './persistenceStorage.ts';
 
 type User = {
   __typename: 'User';
@@ -184,3 +186,92 @@ test('embedded normalization preserves prototype-named own fields as data', () =
   expect(Object.getOwnPropertyDescriptor(stored, '__proto__')?.value).toEqual({ color: 99 });
   expect(stored).toMatchObject({ color: 1 });
 });
+
+test.each(
+  [false, true].flatMap((refresh) =>
+    [false, true].map((referencesChanged) => ({ referencesChanged, refresh })),
+  ),
+)(
+  'embedded replacement coverage stays removed after persistence restarts (refresh: $refresh, references: $referencesChanged)',
+  async ({ referencesChanged, refresh }) => {
+    type Profile = {
+      __typename: 'User';
+      characters: Array<{ __typename: 'Character'; color: number; unitId: number }>;
+      friend: Profile;
+      id: string;
+      name: string;
+    };
+    const Full = view<Profile>()({
+      characters: { color: true, unitId: true },
+      friend: { id: true },
+      id: true,
+      name: true,
+    });
+    const Partial = view<Profile>()({
+      characters: { color: true },
+      friend: { id: true },
+      id: true,
+    });
+    const Name = view<Profile>()({ name: true });
+    const storage = memoryStorage();
+    const fetchQuery = vi.fn(
+      async () =>
+        ({
+          characters: [{ color: 1, unitId: 42 }],
+          friend: { id: '2' },
+          id: '1',
+          name: 'Sam',
+        }) as object,
+    );
+    const setup = () =>
+      createClient({
+        persistence: createPersistence({ key: 'embedded-coverage', online: () => false, storage }),
+        roots: { user: clientRoot<Profile, 'User'>('User') },
+        transport: { fetchById: async () => [], fetchQuery },
+        types: [
+          {
+            fields: { characters: { embedded: 'Character' }, friend: { type: 'User' } },
+            type: 'User',
+          },
+        ],
+      });
+    const first = setup();
+    try {
+      await first.request({ user: { view: Full } });
+      await first.persistence!.flush();
+      const replacement = {
+        characters: [{ color: 2 }],
+        friend: { id: referencesChanged ? '3' : '2' },
+        id: '1',
+      };
+      if (refresh) {
+        fetchQuery.mockResolvedValueOnce(replacement);
+        await first.request({ user: { view: Partial } }, { mode: 'network-only' });
+      } else {
+        first.write('User', replacement, new Set(['characters.color', 'friend.id']));
+      }
+      expect(first.store.missingForSelection('User:1', ['characters.unitId'])).toEqual(
+        new Set(['characters.unitId']),
+      );
+      await first.persistence!.flush();
+    } finally {
+      first.persistence!.dispose();
+    }
+    fetchQuery.mockClear();
+    fetchQuery.mockRejectedValue(new Error('Offline'));
+    const restored = setup();
+    try {
+      await restored.request({ user: { view: Partial } });
+      expect(restored.store.read('User:1')?.characters).toEqual([{ color: 2 }]);
+      expect(restored.store.missingForSelection('User:1', ['characters.unitId'])).toEqual(
+        new Set(['characters.unitId']),
+      );
+      await restored.request({ user: { view: Name } });
+      expect(restored.store.read('User:1')?.name).toBe('Sam');
+      expect(fetchQuery).not.toHaveBeenCalled();
+      await expect(restored.request({ user: { view: Full } })).rejects.toThrow('Offline');
+    } finally {
+      restored.persistence!.dispose();
+    }
+  },
+);
