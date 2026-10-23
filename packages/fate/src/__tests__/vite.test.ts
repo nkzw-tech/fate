@@ -124,44 +124,53 @@ test('serves the Void generated client with a root-resolved server runtime impor
   }
 });
 
-test('bootstraps GraphQL schema types imported by the mapping module on a clean checkout', async () => {
-  const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-schema-'));
-  let server: Awaited<ReturnType<typeof createServer>> | undefined;
-  try {
-    await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
-    await writeFile(
-      path.join(root, 'graphql.ts'),
-      `
-      import type { GraphQLEntities } from './.fate/schema.generated.ts';
+test.each(['.fate/client.generated.ts', 'types/nested/client.ts'])(
+  'bootstraps shared GraphQL schema types beside %s on a clean checkout',
+  async (generatedFile) => {
+    const schemaFile = path.join(path.dirname(generatedFile), 'schema.generated.ts');
+    const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-schema-'));
+    let server: Awaited<ReturnType<typeof createServer>> | undefined;
+    try {
+      await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
+      await writeFile(
+        path.join(root, 'graphql.ts'),
+        `
+      import type { GraphQLEntities } from './${schemaFile}';
       export type User = GraphQLEntities['User'];
       export const userDataView = { typeName: 'User', fields: { id: true, username: true } };
       export const Root = { viewer: userDataView };
       export const fateGraphQL = { schema: 'type Query { viewer: User! } type User { id: ID!, username: String! }' };
     `,
-    );
-    server = await createServer({
-      configFile: false,
-      logLevel: 'silent',
-      plugins: [fate({ module: './graphql.ts', transport: 'graphql' })],
-      root,
-      server: { middlewareMode: true },
-    });
-    const resolved = await server.pluginContainer.resolveId('@nkzw/fate/client');
-    const loaded = await server.pluginContainer.load(resolved!.id);
-    const code = typeof loaded === 'string' ? loaded : loaded?.code;
-    expect(await readFile(path.join(root, '.fate/schema.generated.ts'), 'utf8')).toContain(
-      'export type GraphQLEntities',
-    );
-    expect(await readFile(path.join(root, '.fate/client.generated.ts'), 'utf8')).toContain(
-      'type User = GraphQLEntities["User"]',
-    );
-    expect(code).not.toContain('GraphQLEntities');
-    expect(code).not.toContain('buildSchema');
-  } finally {
-    await server?.close();
-    await rm(root, { force: true, recursive: true });
-  }
-});
+      );
+      server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [fate({ generatedFile, module: './graphql.ts', transport: 'graphql' })],
+        root,
+        server: { middlewareMode: true },
+      });
+      const resolved = await server.pluginContainer.resolveId('@nkzw/fate/client');
+      const loaded = await server.pluginContainer.load(resolved!.id);
+      const code = typeof loaded === 'string' ? loaded : loaded?.code;
+      expect(await readFile(path.join(root, schemaFile), 'utf8')).toContain(
+        'export type GraphQLEntities',
+      );
+      const clientSource = await readFile(path.join(root, generatedFile), 'utf8');
+      expect(clientSource).toContain('type User = GraphQLEntities["User"]');
+      expect(clientSource).toContain('from "./schema.generated.ts"');
+      expect(clientSource).not.toContain('export type GraphQLInputs =');
+      expect(clientSource).not.toContain('export type GraphQLFieldArguments =');
+      expect(clientSource).not.toContain('export type GraphQLTypes =');
+      expect(clientSource).not.toContain('export type GraphQLEntities =');
+      expect(clientSource).not.toContain('export type GraphQLResponses =');
+      expect(code).not.toContain('GraphQLEntities');
+      expect(code).not.toContain('buildSchema');
+    } finally {
+      await server?.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  },
+);
 
 test('generated GraphQL clients refetch by username through configured query roots', async () => {
   const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-refetch-'));

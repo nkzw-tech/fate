@@ -142,6 +142,7 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
           moduleName: options.module,
           root: config.root,
         }),
+        schemaModule: './schema.generated.ts',
         transport: options.transport ?? 'trpc',
       }),
     );

@@ -137,11 +137,16 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         clientModule,
         moduleExports,
         moduleName: './contract.ts',
+        schemaModule: clientModule === 'react-fate' ? './schema.generated.ts' : undefined,
         transport: 'graphql',
       });
       expect(source).toContain('schema: graphQL.schema');
       expect(source).not.toContain('buildSchema');
       await writeFile(path.join(directory, 'client.ts'), source);
+      await writeFile(
+        path.join(directory, 'schema.generated.ts'),
+        createGraphQLSchemaSource(schema),
+      );
       await writeFile(path.join(directory, 'package.json'), '{"type":"module"}');
       await writeFile(
         path.join(directory, 'contract.ts'),
@@ -159,7 +164,11 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         `
       import '${clientModule}/client';
       import { alias, when, view, type ViewData, type RefetchArguments } from '@nkzw/fate';
-      import type { GraphQLEntities, GraphQLTypes } from './client.ts';
+      import type { GraphQLEntities, GraphQLInputs, GraphQLResponses, GraphQLTypes } from './client.ts';
+      const biome: GraphQLInputs['Biome'] = 'Grassland';
+      const response: GraphQLResponses['Price'] = { __typename: 'Price', amount: 1 };
+      void biome;
+      void response;
       type Map = GraphQLEntities['Map'];
       import { createFateClient, type GraphQLFieldArguments } from './client.ts';
       const client = createFateClient({ url: '/graphql' });
