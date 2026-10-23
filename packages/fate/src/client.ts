@@ -748,7 +748,7 @@ export class FateClient<
       } else {
         const owner = change.owner;
         if (owner) {
-          this.viewDataCache.invalidate(owner.ownerId, [argumentFieldKey(owner.field, owner.hash)]);
+          this.viewDataCache.invalidateField(owner.ownerId, owner.field, owner.hash);
         }
       }
       this.persistenceRuntime?.changed(change);

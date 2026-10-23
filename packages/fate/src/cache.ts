@@ -1,3 +1,4 @@
+import { argumentFieldKey } from './field-key.ts';
 import {
   FateThenable,
   ViewSnapshot,
@@ -107,6 +108,12 @@ export default class ViewDataCache {
       revision: this.revision,
       thenable,
     });
+  }
+
+  invalidateField(entityId: EntityId, field: string, hash?: string) {
+    if (this.cache.has(entityId)) {
+      this.invalidate(entityId, [argumentFieldKey(field, hash)]);
+    }
   }
 
   invalidate(entityId: EntityId, paths?: Iterable<string>) {
