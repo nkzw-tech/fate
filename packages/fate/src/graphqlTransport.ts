@@ -556,7 +556,9 @@ const normalizeGraphQLValue = ({
 }): unknown => {
   if (Array.isArray(value)) {
     return value.map((entry) =>
-      normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: entry }),
+      entry && typeof entry === 'object'
+        ? normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: entry })
+        : entry,
     );
   }
 
@@ -590,40 +592,31 @@ const normalizeGraphQLValue = ({
   const config = typename ? types.get(typename) : undefined;
   const result: AnyRecord = {};
 
-  for (const [responseKey, entry] of Object.entries(value)) {
+  for (const responseKey of Object.keys(value)) {
+    const entry = value[responseKey];
     const key = selection?.responseFields.get(responseKey) ?? responseKey;
-    const childSelection = selection?.fields.get(key);
-    if (
-      schemaField(key) === 'id' &&
-      typename &&
-      (typeof entry === 'string' || typeof entry === 'number')
-    ) {
+    const field = schemaField(key);
+    if (field === 'id' && typename && (typeof entry === 'string' || typeof entry === 'number')) {
       result[key] = decodeNodeId(typename, entry);
-      continue;
-    }
-
-    const descriptor = config?.fields?.[schemaField(key)];
-    if (
-      descriptor &&
-      typeof descriptor === 'object' &&
-      ('type' in descriptor || 'embedded' in descriptor)
-    ) {
+    } else if (entry && typeof entry === 'object') {
+      const descriptor = config?.fields?.[field];
       result[key] = normalizeGraphQLValue({
         decodeNodeId,
-        selection: childSelection,
-        type: 'type' in descriptor ? descriptor.type : descriptor.embedded,
+        selection: selection?.fields.get(key),
+        type:
+          descriptor && typeof descriptor === 'object'
+            ? 'type' in descriptor
+              ? descriptor.type
+              : 'embedded' in descriptor
+                ? descriptor.embedded
+                : undefined
+            : undefined,
         types,
         value: entry,
       });
-      continue;
+    } else {
+      result[key] = entry;
     }
-
-    result[key] = normalizeGraphQLValue({
-      decodeNodeId,
-      selection: childSelection,
-      types,
-      value: entry,
-    });
   }
 
   return result;

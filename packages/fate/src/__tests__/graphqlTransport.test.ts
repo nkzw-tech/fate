@@ -27,6 +27,43 @@ const getRequestBody = (fetch: ReturnType<typeof vi.fn>) => {
   return JSON.parse(String(init?.body ?? '{}')) as { query: string };
 };
 
+test('normalizes frozen responses without sharing mutable records or scalar arrays', async () => {
+  const friend = Object.freeze({ __typename: 'User', id: 'User:2', name: 'Lin' });
+  const tags = Object.freeze(['one']);
+  const record = Object.freeze({ __typename: 'User', friend, id: 'User:1', label: 'Ada', tags });
+  const transport = createGraphQLTransport({
+    decodeNodeId: (_, id) => String(id).split(':')[1],
+    fetch: async () =>
+      Object.assign(new Response(), {
+        json: async () => ({ data: { f1: record } }),
+      }),
+    live: false,
+    roots: { viewer: { type: 'User' } },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+    url: '/graphql',
+  });
+  const result = (await transport.fetchQuery!(
+    'viewer',
+    new Set(['id', 'label:name', 'tags', 'friend.id', 'friend.name']),
+  )) as {
+    friend: { id: string; name: string };
+    id: string;
+    'label:name': string;
+    tags: Array<string>;
+  };
+  expect(result).toMatchObject({
+    friend: { id: '2', name: 'Lin' },
+    id: '1',
+    'label:name': 'Ada',
+    tags: ['one'],
+  });
+  result.friend.name = 'Changed';
+  result.tags.push('two');
+  expect(friend.name).toBe('Lin');
+  expect(tags).toEqual(['one']);
+  expect(record.label).toBe('Ada');
+});
+
 beforeEach(() => {
   graphQLSSE.createClient.mockReset();
   graphQLSSE.subscribe.mockReset();
