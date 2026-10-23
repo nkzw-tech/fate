@@ -921,12 +921,11 @@ export class Store {
     return entries;
   }
 
-  setList(key: string, state: List): void {
+  setList(key: string, state: List, owner = parseListKey(key)): void {
     if (!this.rebase && this.optimisticLayers.size) {
-      return this.update(() => this.setList(key, state));
+      return this.update(() => this.setList(key, state, owner));
     }
     this.captureList(key);
-    const owner = parseListKey(key);
     const previous = this.lists.get(key);
     const sameReferences =
       previous &&

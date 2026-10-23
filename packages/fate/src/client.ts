@@ -487,6 +487,7 @@ const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection
 type NormalizationField = {
   args: ReturnType<SelectionPlan['args']['get']>;
   descriptor: RelationDescriptor | undefined;
+  name: string;
   nodeSelection?: Set<string>;
   path: string;
   storageKey: string;
@@ -501,9 +502,11 @@ const normalizationField = (
   let field = fields[key];
   if (!field) {
     const path = prefix ? `${prefix}.${key}` : key;
+    const name = schemaField(key);
     field = fields[key] = {
       args: plan?.args.get(path),
-      descriptor: config.fields?.[schemaField(key)],
+      descriptor: config.fields?.[name],
+      name,
       path,
       storageKey: getFieldKey(path, plan),
     };
@@ -4482,7 +4485,7 @@ export class FateClient<
             continue;
           }
 
-          const listKey = getListKey(entityId, schemaField(key), fieldArgs?.hash);
+          const listKey = getListKey(entityId, field.name, fieldArgs?.hash);
           const previousList = this.store.getListState(listKey);
           const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
@@ -4556,7 +4559,11 @@ export class FateClient<
             ),
           );
 
-          this.store.setList(listKey, nextListState);
+          this.store.setList(listKey, nextListState, {
+            field: field.name,
+            hash: fieldArgs?.hash === 'default' ? undefined : fieldArgs?.hash,
+            ownerId: entityId,
+          });
         }
       } else {
         if (acceptField) {
