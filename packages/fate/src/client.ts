@@ -4278,7 +4278,7 @@ export class FateClient<
       return entityId;
     }
     const result: AnyRecord = {};
-    const replacedPaths = new Set<string>();
+    let replacedPaths: Set<string> | undefined;
     let normalized = selections.get(select)?.get(type);
     if (!normalized) {
       const expanded = expandRefetchSelection(this.types, type, select);
@@ -4575,7 +4575,7 @@ export class FateClient<
               plan,
               fieldPath,
               storageKey,
-              replacedPaths,
+              (replacedPaths ??= new Set()),
             ),
           );
         }
