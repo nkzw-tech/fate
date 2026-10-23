@@ -1,16 +1,25 @@
 export type FieldMask = {
   all: boolean;
-  children: Map<string, FieldMask>;
+  children: ReadonlyMap<string, FieldMask>;
+};
+
+const emptyChildren: ReadonlyMap<string, FieldMask> = new Map();
+
+const writableChildren = (mask: FieldMask): Map<string, FieldMask> => {
+  if (mask.children === emptyChildren) {
+    mask.children = new Map();
+  }
+  return mask.children as Map<string, FieldMask>;
 };
 
 export function emptyMask(): FieldMask {
-  return { all: false, children: new Map() };
+  return { all: false, children: emptyChildren };
 }
 
 export function cloneMask(m: FieldMask): FieldMask {
-  const clone = { all: m.all, children: new Map<string, FieldMask>() };
+  const clone = { all: m.all, children: emptyChildren };
   for (const [key, value] of m.children) {
-    clone.children.set(key, cloneMask(value));
+    writableChildren(clone).set(key, cloneMask(value));
   }
   return clone;
 }
@@ -31,7 +40,7 @@ export function addPath(mask: FieldMask, path: string) {
     let child = current.children.get(seg);
     if (!child) {
       child = emptyMask();
-      current.children.set(seg, child);
+      writableChildren(current).set(seg, child);
     }
     current = child;
     if (separator === -1) {
@@ -44,21 +53,21 @@ export function addPath(mask: FieldMask, path: string) {
     return false;
   }
   current.all = true;
-  current.children.clear();
+  current.children = emptyChildren;
   return true;
 }
 
 export function union(into: FieldMask, b: FieldMask) {
   if (into.all || b.all) {
     into.all = true;
-    into.children.clear();
+    into.children = emptyChildren;
     return;
   }
 
   for (const [key, child] of b.children) {
     const exist = into.children.get(key);
     if (!exist) {
-      into.children.set(key, cloneMask(child));
+      writableChildren(into).set(key, cloneMask(child));
     } else {
       union(exist, child);
     }
@@ -154,7 +163,7 @@ export function removePath(mask: FieldMask, path: string) {
   const remove = (current: FieldMask, index: number) => {
     if (current.all) {
       current.all = false;
-      current.children.clear();
+      current.children = emptyChildren;
       return;
     }
     const key = parts[index];
@@ -163,11 +172,11 @@ export function removePath(mask: FieldMask, path: string) {
       return;
     }
     if (index === parts.length - 1) {
-      current.children.delete(key);
+      writableChildren(current).delete(key);
     } else {
       remove(child, index + 1);
       if (!child.all && child.children.size === 0) {
-        current.children.delete(key);
+        writableChildren(current).delete(key);
       }
     }
   };

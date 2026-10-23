@@ -1,5 +1,31 @@
 import { expect, test } from 'vite-plus/test';
-import { addPath, fromPaths, isCovered, removePath, toPaths } from '../mask.ts';
+import {
+  addPath,
+  cloneMask,
+  emptyMask,
+  fromPaths,
+  isCovered,
+  removePath,
+  toPaths,
+  union,
+} from '../mask.ts';
+
+test('keeps empty masks, clones, and unions independent when coverage changes', () => {
+  const first = emptyMask();
+  const second = emptyMask();
+  addPath(first, 'profile.name');
+  expect(toPaths(second)).toEqual([]);
+  const clone = cloneMask(first);
+  union(second, first);
+  removePath(first, 'profile.name');
+  addPath(first, 'profile.bio');
+  addPath(clone, 'name');
+  union(second, fromPaths(['profile']));
+  removePath(second, 'profile.name');
+  expect(toPaths(first)).toEqual(['profile.bio']);
+  expect(toPaths(clone)).toEqual(['profile.name', 'name']);
+  expect(toPaths(second)).toEqual([]);
+});
 
 test('does not grow descendants beneath an already covered parent', () => {
   const mask = fromPaths(['profile']);
