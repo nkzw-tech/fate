@@ -1,6 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { GraphQLSchema } from 'graphql';
 import {
   runnerImport,
   transformWithOxc,
@@ -10,7 +9,6 @@ import {
   type ViteDevServer,
 } from 'vite';
 import { createClientSource } from './codegen/client.ts';
-import { createGraphQLSchemaSource, type GraphQLScalarTypes } from './codegen/graphql.ts';
 import type { FateViteTransport } from './viteTypes.ts';
 
 type ClientRuntime = '@nkzw/fate' | 'react-fate' | 'vue-fate';
@@ -119,19 +117,6 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
       return;
     }
 
-    if (options.transport === 'graphql' && moduleExports.fateGraphQL) {
-      const graphQL = moduleExports.fateGraphQL as {
-        scalars?: GraphQLScalarTypes;
-        schema?: string | GraphQLSchema;
-      };
-      if (graphQL.schema) {
-        await writeIfChanged(
-          path.join(path.dirname(generatedFile), 'schema.generated.ts'),
-          createGraphQLSchemaSource(graphQL.schema, graphQL.scalars),
-        );
-      }
-    }
-
     await writeIfChanged(
       generatedFile,
       createClientSource({
@@ -142,7 +127,6 @@ export const fate = (options: FateVitePluginOptions): Plugin => {
           moduleName: options.module,
           root: config.root,
         }),
-        schemaModule: './schema.generated.ts',
         transport: options.transport ?? 'trpc',
       }),
     );

@@ -25,7 +25,7 @@ vp run --filter '@app/server' generate-graphql
 vp run fate:generate
 ```
 
-`client/src/fate/graphql.ts` maps query and mutation names. Client views use `GraphQLEntities` from `client/.fate/schema.generated.ts`, generated from your Pothos schema. Server data views handle live updates and authorization.
+`client/src/fate/graphql.ts` maps query and mutation names. Client views use `GraphQLEntities` from `client/.fate/client.generated.ts`, generated from your Pothos schema. Server data views handle live updates and authorization.
 
 ## Technologies
 

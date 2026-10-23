@@ -23,7 +23,7 @@ This guidance is for agents working in projects bootstrapped from the fate templ
 - **Use ViewRefs:** Pass references instead of raw data. Keep components focused on views and `ViewRef`s to let fate manage data masking and updates.
 - **Co-locate data needs:** Keep view definitions near their components and compose them upward to the request root for predictable fetching.
 - **Use Suspense:** Wrap pages in `Suspense`/`ErrorBoundary` instead of ad-hoc loading/error flags; fate aligns with Async React by design.
-- **Do not duplicate types:** Use `GraphQLEntities` from `client/.fate/schema.generated.ts` for GraphQL view types. The client mapping exports convenient aliases; avoid redefining entity shapes on the client. This ensures view selections stay type-safe end-to-end.
+- **Do not duplicate types:** Use `GraphQLEntities` from `client/.fate/client.generated.ts` for GraphQL view types. The client mapping exports convenient aliases; avoid redefining entity shapes on the client. This ensures view selections stay type-safe end-to-end.
 - **`useRequest` only at the root:** When adding routes or layouts, create a dedicated `useRequest` call per screen root that pulls together all child views; do not scatter `useRequest` across leaf components unless it's necessary to issue requests due to user input.
 - **React Actions:** Prefer React Action-friendly UI primitives (buttons/forms that accept an `action` prop). If unavailable, wrap action calls with `startTransition` in `onClick` handlers.
 - **fate client support** fate's local client support files are maintained by the Vite/fate tooling. Do not manually edit `.fate` files; make the proper schema changes on the server and run `pnpm fate:generate` when working outside Vite dev.

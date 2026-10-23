@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildSchema, graphql } from 'graphql';
 import { createServer } from 'vite';
@@ -125,9 +125,8 @@ test('serves the Void generated client with a root-resolved server runtime impor
 });
 
 test.each(['.fate/client.generated.ts', 'types/nested/client.ts'])(
-  'bootstraps shared GraphQL schema types beside %s on a clean checkout',
+  'bootstraps GraphQL schema types from %s on a clean checkout',
   async (generatedFile) => {
-    const schemaFile = path.join(path.dirname(generatedFile), 'schema.generated.ts');
     const root = await mkdtemp(path.join(process.cwd(), 'node_modules/.fate-schema-'));
     let server: Awaited<ReturnType<typeof createServer>> | undefined;
     try {
@@ -135,7 +134,7 @@ test.each(['.fate/client.generated.ts', 'types/nested/client.ts'])(
       await writeFile(
         path.join(root, 'graphql.ts'),
         `
-      import type { GraphQLEntities } from './${schemaFile}';
+      import type { GraphQLEntities } from './${generatedFile}';
       export type User = GraphQLEntities['User'];
       export const userDataView = { typeName: 'User', fields: { id: true, username: true } };
       export const Root = { viewer: userDataView };
@@ -152,17 +151,22 @@ test.each(['.fate/client.generated.ts', 'types/nested/client.ts'])(
       const resolved = await server.pluginContainer.resolveId('@nkzw/fate/client');
       const loaded = await server.pluginContainer.load(resolved!.id);
       const code = typeof loaded === 'string' ? loaded : loaded?.code;
-      expect(await readFile(path.join(root, schemaFile), 'utf8')).toContain(
-        'export type GraphQLEntities',
-      );
       const clientSource = await readFile(path.join(root, generatedFile), 'utf8');
       expect(clientSource).toContain('type User = GraphQLEntities["User"]');
-      expect(clientSource).toContain('from "./schema.generated.ts"');
-      expect(clientSource).not.toContain('export type GraphQLInputs =');
-      expect(clientSource).not.toContain('export type GraphQLFieldArguments =');
-      expect(clientSource).not.toContain('export type GraphQLTypes =');
-      expect(clientSource).not.toContain('export type GraphQLEntities =');
-      expect(clientSource).not.toContain('export type GraphQLResponses =');
+      for (const name of [
+        'GraphQLInputs',
+        'GraphQLFieldArguments',
+        'GraphQLTypes',
+        'GraphQLEntities',
+        'GraphQLResponses',
+      ]) {
+        expect(clientSource.match(new RegExp(`export type ${name} =`, 'g'))).toHaveLength(1);
+      }
+      expect(
+        (await readdir(path.join(root, path.dirname(generatedFile)))).filter((file) =>
+          file.endsWith('.ts'),
+        ),
+      ).toEqual([path.basename(generatedFile)]);
       expect(code).not.toContain('GraphQLEntities');
       expect(code).not.toContain('buildSchema');
     } finally {
@@ -322,9 +326,7 @@ test('generates and executes the schema-driven GraphQL client template', async (
     const source = await readFile(path.join(root, '.fate/client.generated.ts'), 'utf8');
     expect(source).not.toContain('readFileSync');
     expect(source).not.toMatch(/import[^;]*src\/fate\/graphql\.ts/);
-    expect(await readFile(path.join(root, '.fate/schema.generated.ts'), 'utf8')).toContain(
-      'GraphQLEntities',
-    );
+    expect(source).toContain('GraphQLEntities');
   } finally {
     await server?.close();
     await rm(root, { force: true, recursive: true });

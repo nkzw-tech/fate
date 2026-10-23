@@ -1,5 +1,5 @@
 import schema from '@app/server/src/graphql/schema.graphql?raw';
-import type { GraphQLEntities } from '../../.fate/schema.generated.ts';
+import type { GraphQLEntities } from '../../.fate/client.generated.ts';
 
 export type User = GraphQLEntities['User'];
 export type Post = GraphQLEntities['Post'];

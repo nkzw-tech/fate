@@ -43,7 +43,7 @@ Replace `src/fate/schema.graphql` with your server's schema, then edit `src/fate
 
 The sample schema includes `viewer`, `posts(first:, after:)`, `postLike(input:)`, `node(id:)`, and `nodes(ids:)`, with Relay-style connections. Replace these with your server's fields and arguments.
 
-After changing the schema or mapping, run `vp run fate:generate`. Client views use `GraphQLEntities` from the generated `.fate/schema.generated.ts`. The schema stays out of the browser bundle.
+After changing the schema or mapping, run `vp run fate:generate`. Client views use `GraphQLEntities` from the generated `.fate/client.generated.ts`. Schema types are erased from the browser bundle.
 
 ## Development
 

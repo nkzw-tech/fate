@@ -2133,11 +2133,11 @@ The plugin generates a typed `createFateClient` helper from your schema and Grap
 
 ### Generated Types
 
-With a schema configured, fate generates `.fate/schema.generated.ts`. Use its `GraphQLEntities` types when defining client views:
+With a schema configured, `.fate/client.generated.ts` includes schema types. Use its `GraphQLEntities` types when defining client views:
 
 ```tsx
 import { view } from 'react-fate';
-import type { GraphQLEntities } from '../../.fate/schema.generated.ts';
+import type { GraphQLEntities } from '../../.fate/client.generated.ts';
 
 type User = GraphQLEntities['User'];
 

@@ -137,22 +137,18 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         clientModule,
         moduleExports,
         moduleName: './contract.ts',
-        schemaModule: clientModule === 'react-fate' ? './schema.generated.ts' : undefined,
         transport: 'graphql',
       });
       expect(source).toContain('schema: graphQL.schema');
       expect(source).not.toContain('buildSchema');
       await writeFile(path.join(directory, 'client.ts'), source);
-      await writeFile(
-        path.join(directory, 'schema.generated.ts'),
-        createGraphQLSchemaSource(schema),
-      );
       await writeFile(path.join(directory, 'package.json'), '{"type":"module"}');
       await writeFile(
         path.join(directory, 'contract.ts'),
         `
       import type { GraphQLMutationDefinition } from '@nkzw/fate';
-      export type Map = { __typename: 'Map'; id: string; name: string; state: string };
+      import type { GraphQLEntities } from './client.ts';
+      export type Map = GraphQLEntities['Map'];
       export declare const fateGraphQL: { mutations: {
         edit: GraphQLMutationDefinition<Map, unknown, Map>;
         rename: GraphQLMutationDefinition<Map, unknown, Map>;

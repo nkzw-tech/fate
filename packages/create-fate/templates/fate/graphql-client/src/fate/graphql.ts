@@ -1,4 +1,4 @@
-import type { GraphQLEntities } from '../../.fate/schema.generated.ts';
+import type { GraphQLEntities } from '../../.fate/client.generated.ts';
 import schema from './schema.graphql?raw';
 
 export type User = GraphQLEntities['User'];
