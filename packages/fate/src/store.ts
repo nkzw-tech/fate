@@ -15,6 +15,15 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
+import {
+  addIndexValue,
+  appendIndexValue,
+  copyIndexValues,
+  indexValues,
+  removeIndexValue,
+  type IndexedValues,
+  type ReferenceIndex,
+} from './reference-index.ts';
 import type { AnyRecord, EntityId, Pagination } from './types.ts';
 
 export type List = Readonly<{
@@ -213,11 +222,11 @@ const areListIdsEqual = (
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
   private readonly sharedCoverage = new WeakMap<FieldMask, ReadonlyArray<string>>();
-  private listKeysByOwnerField = new Map<string, Set<string>>();
-  private listKeysByReferencedEntity = new Map<EntityId, Set<string>>();
+  private listKeysByOwnerField: ReferenceIndex = new Map();
+  private listKeysByReferencedEntity: ReferenceIndex = new Map();
   private lists = new Map<string, List>();
-  private recordReferenceFields = new Map<EntityId, Map<string, Set<EntityId>>>();
-  private recordReferencesByTarget = new Map<EntityId, Map<EntityId, Set<string>>>();
+  private recordReferenceFields = new Map<EntityId, ReferenceIndex>();
+  private recordReferencesByTarget = new Map<EntityId, ReferenceIndex>();
   private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
   private listSubscriptions = new Map<string, Set<() => void>>();
@@ -492,14 +501,14 @@ export class Store {
   /** @internal Indexed owners needed for mutation rollback. */
   getPersistenceOwners(id: EntityId) {
     return {
-      lists: [...(this.listKeysByReferencedEntity.get(id) ?? [])],
+      lists: copyIndexValues(this.listKeysByReferencedEntity.get(id)),
       records: [...(this.recordReferencesByTarget.get(id)?.keys() ?? [])],
     };
   }
 
   /** @internal List keys whose result depends on this entity's coverage. */
   getListKeysForEntity(id: EntityId): ReadonlyArray<string> {
-    return [...(this.listKeysByReferencedEntity.get(id) ?? [])];
+    return copyIndexValues(this.listKeysByReferencedEntity.get(id));
   }
 
   /** @internal Read one confirmed record without copying the cache. */
@@ -916,11 +925,11 @@ export class Store {
   getListsForField(ownerId: EntityId, field: string): Array<readonly [string, List]> {
     const entries: Array<readonly [string, List]> = [];
     const keys = this.listKeysByOwnerField.get(getOwnerFieldKey(ownerId, field));
-    if (!keys) {
+    if (keys === undefined) {
       return entries;
     }
 
-    for (const key of keys) {
+    for (const key of indexValues(keys)) {
       const list = this.lists.get(key);
       if (list) {
         entries.push([key, list]);
@@ -954,7 +963,7 @@ export class Store {
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
     return this.update(() => {
-      const keys = [...(this.listKeysByReferencedEntity.get(previousId) ?? [])];
+      const keys = copyIndexValues(this.listKeysByReferencedEntity.get(previousId));
       for (const key of keys) {
         const list = this.lists.get(key);
         if (!list) {
@@ -1118,7 +1127,7 @@ export class Store {
 
   removeReferencesTo(targetId: EntityId, viewDataCache: ViewDataCache) {
     return this.update(() => {
-      const listKeys = [...(this.listKeysByReferencedEntity.get(targetId) ?? [])];
+      const listKeys = copyIndexValues(this.listKeysByReferencedEntity.get(targetId));
       for (const key of listKeys) {
         const list = this.lists.get(key);
         if (!list) {
@@ -1183,7 +1192,7 @@ export class Store {
         const next: AnyRecord = Object.create(null);
         const paths = new Set<string>();
 
-        for (const key of fields) {
+        for (const key of indexValues(fields)) {
           const value = record[key];
           if (Array.isArray(value)) {
             const filtered = value.filter(
@@ -1246,47 +1255,23 @@ export class Store {
 
   private addListIndexes(key: string, list: List, parsed = parseListKey(key)) {
     if (parsed) {
-      const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
-      let keys = this.listKeysByOwnerField.get(ownerFieldKey);
-      if (!keys) {
-        keys = new Set();
-        this.listKeysByOwnerField.set(ownerFieldKey, keys);
-      }
-      keys.add(key);
+      addIndexValue(this.listKeysByOwnerField, getOwnerFieldKey(parsed.ownerId, parsed.field), key);
     }
-
     for (const id of this.getListReferencedEntityIds(list)) {
-      let keys = this.listKeysByReferencedEntity.get(id);
-      if (!keys) {
-        keys = new Set();
-        this.listKeysByReferencedEntity.set(id, keys);
-      }
-      keys.add(key);
+      addIndexValue(this.listKeysByReferencedEntity, id, key);
     }
   }
 
   private removeListIndexes(key: string, list: List, parsed = parseListKey(key)) {
     if (parsed) {
-      const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
-      const keys = this.listKeysByOwnerField.get(ownerFieldKey);
-      if (keys) {
-        keys.delete(key);
-        if (keys.size === 0) {
-          this.listKeysByOwnerField.delete(ownerFieldKey);
-        }
-      }
+      removeIndexValue(
+        this.listKeysByOwnerField,
+        getOwnerFieldKey(parsed.ownerId, parsed.field),
+        key,
+      );
     }
-
     for (const id of this.getListReferencedEntityIds(list)) {
-      const keys = this.listKeysByReferencedEntity.get(id);
-      if (!keys) {
-        continue;
-      }
-
-      keys.delete(key);
-      if (keys.size === 0) {
-        this.listKeysByReferencedEntity.delete(id);
-      }
+      removeIndexValue(this.listKeysByReferencedEntity, id, key);
     }
   }
 
@@ -1318,27 +1303,17 @@ export class Store {
     return ids;
   }
 
-  private getRecordFieldReferences(value: unknown): Set<EntityId> | null {
+  private getRecordFieldReferences(value: unknown): IndexedValues | undefined {
     if (Array.isArray(value)) {
-      let ids: Set<EntityId> | null = null;
+      let ids: IndexedValues | undefined;
       for (const item of value) {
-        if (!isNodeRef(item)) {
-          continue;
+        if (isNodeRef(item)) {
+          ids = appendIndexValue(ids, getNodeRefId(item));
         }
-
-        if (!ids) {
-          ids = new Set();
-        }
-        ids.add(getNodeRefId(item));
       }
       return ids;
     }
-
-    if (isNodeRef(value)) {
-      return new Set([getNodeRefId(value)]);
-    }
-
-    return null;
+    return isNodeRef(value) ? getNodeRefId(value) : undefined;
   }
 
   private recordReferencesChanged(
@@ -1355,12 +1330,18 @@ export class Store {
       }
       const before = this.getRecordFieldReferences(previous?.[field]);
       const after = this.getRecordFieldReferences(next?.[field]);
-      if (before?.size !== after?.size) {
+      if (before === after) {
+        continue;
+      }
+      if (
+        (typeof before === 'string' ? 1 : before?.size) !==
+        (typeof after === 'string' ? 1 : after?.size)
+      ) {
         return true;
       }
-      if (before) {
-        for (const id of before) {
-          if (!after?.has(id)) {
+      if (before !== undefined) {
+        for (const id of indexValues(before)) {
+          if (typeof after === 'string' ? id !== after : !after?.has(id)) {
             return true;
           }
         }
@@ -1371,56 +1352,40 @@ export class Store {
 
   private addRecordFieldReferenceIndex(id: EntityId, field: string, value: unknown) {
     const targets = this.getRecordFieldReferences(value);
-    if (!targets || targets.size === 0) {
+    if (targets === undefined) {
       return;
     }
-
     let fields = this.recordReferenceFields.get(id);
     if (!fields) {
       fields = new Map();
       this.recordReferenceFields.set(id, fields);
     }
     fields.set(field, targets);
-
-    for (const targetId of targets) {
+    for (const targetId of indexValues(targets)) {
       let records = this.recordReferencesByTarget.get(targetId);
       if (!records) {
         records = new Map();
         this.recordReferencesByTarget.set(targetId, records);
       }
-
-      let targetFields = records.get(id);
-      if (!targetFields) {
-        targetFields = new Set();
-        records.set(id, targetFields);
-      }
-      targetFields.add(field);
+      addIndexValue(records, id, field);
     }
   }
 
   private removeRecordFieldReferenceIndex(id: EntityId, field: string) {
     const fields = this.recordReferenceFields.get(id);
     const targets = fields?.get(field);
-    if (!fields || !targets) {
+    if (!fields || targets === undefined) {
       return;
     }
-
-    for (const targetId of targets) {
+    for (const targetId of indexValues(targets)) {
       const records = this.recordReferencesByTarget.get(targetId);
-      const targetFields = records?.get(id);
-      if (!records || !targetFields) {
-        continue;
-      }
-
-      targetFields.delete(field);
-      if (targetFields.size === 0) {
-        records.delete(id);
-      }
-      if (records.size === 0) {
-        this.recordReferencesByTarget.delete(targetId);
+      if (records) {
+        removeIndexValue(records, id, field);
+        if (records.size === 0) {
+          this.recordReferencesByTarget.delete(targetId);
+        }
       }
     }
-
     fields.delete(field);
     if (fields.size === 0) {
       this.recordReferenceFields.delete(id);

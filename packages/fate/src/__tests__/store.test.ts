@@ -4,6 +4,43 @@ import { CoverageSelection } from '../mask.ts';
 import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
 
+test('preserves references as index memberships shrink, grow, roll back, and are collected', () => {
+  const store = new Store();
+  const cache = new ViewDataCache();
+  store.merge(
+    'Post:1',
+    {
+      author: createNodeRef('User:1'),
+      reviewers: [createNodeRef('User:1'), createNodeRef('User:2'), createNodeRef('User:1')],
+    },
+    ['author', 'reviewers'],
+  );
+  store.merge('Post:1', { reviewers: [createNodeRef('User:1')] }, ['reviewers']);
+  expect(store.getPersistenceOwners('User:2').records).toEqual([]);
+  store.merge('Post:1', { author: null }, ['author']);
+  expect(store.getPersistenceOwners('User:1').records).toEqual(['Post:1']);
+  const settle = store.optimisticUpdate(() => {
+    store.merge('Post:1', { author: createNodeRef('User:2') }, ['author']);
+  });
+  expect(store.getPersistenceOwners('User:2').records).toEqual(['Post:1']);
+  settle();
+  expect(store.getPersistenceOwners('User:2').records).toEqual([]);
+  store.removeReferencesTo('User:1', cache);
+  expect(store.read('Post:1')).toEqual({ author: null, reviewers: [] });
+  expect(store.getPersistenceOwners('User:1').records).toEqual([]);
+
+  const first = getListKey('User:1', 'posts', 'first');
+  const second = getListKey('User:1', 'posts', 'second');
+  store.setList(first, { ids: ['Post:1', 'Post:1'] });
+  store.setList(second, { ids: ['Post:1'] });
+  store.collectGarbage(new Set(['Post:1']), new Set([second]));
+  expect(store.getListsForField('User:1', 'posts').map(([key]) => key)).toEqual([second]);
+  expect(store.getPersistenceOwners('Post:1').lists).toEqual([second]);
+  store.removeReferencesTo('Post:1', cache);
+  expect(store.getListState(second)?.ids).toEqual([]);
+  expect(store.getListKeysForEntity('Post:1')).toEqual([]);
+});
+
 test('isolates shared coverage when a record gains fields or replaces an embedded selection', () => {
   const store = new Store();
   const coverage = new CoverageSelection(['id', 'profile.name']);
