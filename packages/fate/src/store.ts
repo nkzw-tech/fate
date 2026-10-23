@@ -1290,7 +1290,15 @@ export class Store {
     }
   }
 
-  private getListReferencedEntityIds(list: List): Set<EntityId> {
+  private getListReferencedEntityIds(list: List): Iterable<EntityId> {
+    if (
+      !list.liveAfterIds?.length &&
+      !list.liveBeforeIds?.length &&
+      !list.pendingAfterIds?.length &&
+      !list.pendingBeforeIds?.length
+    ) {
+      return list.ids;
+    }
     const ids = new Set<EntityId>();
     for (const id of list.ids) {
       ids.add(id);
