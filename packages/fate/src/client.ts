@@ -97,6 +97,7 @@ import {
   type Pagination,
   type Request,
   type RequestResult,
+  type RelationDescriptor,
   type Selection,
   type TypeConfig,
   type View,
@@ -483,10 +484,37 @@ const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection
   return selection;
 };
 
+type NormalizationField = {
+  args: ReturnType<SelectionPlan['args']['get']>;
+  descriptor: RelationDescriptor | undefined;
+  path: string;
+  storageKey: string;
+};
+const normalizationField = (
+  fields: Record<string, NormalizationField>,
+  key: string,
+  prefix: string | null,
+  config: TypeConfig,
+  plan?: SelectionPlan,
+): NormalizationField => {
+  let field = fields[key];
+  if (!field) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    field = fields[key] = {
+      args: plan?.args.get(path),
+      descriptor: config.fields?.[schemaField(key)],
+      path,
+      storageKey: getFieldKey(path, plan),
+    };
+  }
+  return field;
+};
+
 type NormalizationSelection = {
   children: ReadonlyMap<string, Set<string>>;
   coverage: Map<string, CoverageSelection>;
   embedded: Map<string, EmbeddedSelection>;
+  fields: Map<string, Record<string, NormalizationField>>;
   paths: ReadonlySet<string>;
   storagePaths: Map<
     string,
@@ -496,7 +524,6 @@ type NormalizationSelection = {
 type NormalizationSelections = Map<ReadonlySet<string>, Map<string, NormalizationSelection>>;
 type NormalizationContext = {
   selections: NormalizationSelections;
-  storageKeys: Map<string, string>;
   windows: Map<
     string,
     {
@@ -509,7 +536,6 @@ type NormalizationContext = {
 };
 const createNormalizationContext = (): NormalizationContext => ({
   selections: new Map(),
-  storageKeys: new Map(),
   windows: new Map(),
 });
 
@@ -4229,7 +4255,7 @@ export class FateClient<
     insert?: InsertPosition,
     normalization: NormalizationContext = createNormalizationContext(),
   ): EntityId {
-    const { selections, storageKeys, windows } = normalization;
+    const { selections, windows } = normalization;
     if (this.store.hasOptimisticUpdates && !this.store.isRebasing) {
       return this.store.update(() =>
         this.writeEntity(type, record, select, plan, pathPrefix, insert, normalization),
@@ -4260,6 +4286,7 @@ export class FateClient<
         children: groupSelectionByPrefix(paths),
         coverage: new Map(),
         embedded: new Map(),
+        fields: new Map(),
         paths,
         storagePaths: new Map(),
       };
@@ -4279,20 +4306,24 @@ export class FateClient<
       );
     }
     const selectionTree = normalized.children;
+    const prefix = pathPrefix ?? '';
+    let fields = normalized.fields.get(prefix);
+    if (!fields) {
+      fields = Object.create(null) as Record<string, NormalizationField>;
+      normalized.fields.set(prefix, fields);
+    }
 
     for (const key of Object.keys(record)) {
-      const relationDescriptor = config.fields?.[schemaField(key)];
+      const {
+        args: fieldArgs,
+        descriptor: relationDescriptor,
+        path: fieldPath,
+        storageKey,
+      } = normalizationField(fields, key, pathPrefix, config, plan);
       if (!relationDescriptor) {
         continue;
       }
       const value = record[key];
-      const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-      const fieldArgs = plan?.args.get(fieldPath);
-      let storageKey = storageKeys.get(fieldPath);
-      if (storageKey === undefined) {
-        storageKey = getFieldKey(fieldPath, plan);
-        storageKeys.set(fieldPath, storageKey);
-      }
       const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
       if (relationDescriptor === 'scalar') {
         if (!acceptField) {
@@ -4564,14 +4595,9 @@ export class FateClient<
     }
 
     for (const key of Object.keys(record)) {
-      if (config.fields?.[schemaField(key)]) {
+      const { descriptor, storageKey } = normalizationField(fields, key, pathPrefix, config, plan);
+      if (descriptor) {
         continue;
-      }
-      const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-      let storageKey = storageKeys.get(fieldPath);
-      if (storageKey === undefined) {
-        storageKey = getFieldKey(fieldPath, plan);
-        storageKeys.set(fieldPath, storageKey);
       }
       if (this.acceptFieldWrite(entityId, storageKey, generation)) {
         setRecordValue(
@@ -4583,7 +4609,6 @@ export class FateClient<
     }
 
     const selectedPaths: Array<string> = [];
-    const prefix = pathPrefix ?? '';
     let storagePaths = normalized.storagePaths.get(prefix);
     if (!storagePaths) {
       storagePaths = [...expandedSelection].map((path) => {
