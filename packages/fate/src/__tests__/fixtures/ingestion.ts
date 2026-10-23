@@ -127,15 +127,19 @@ const graphQLValue = (value: unknown): unknown => {
   );
 };
 
-const project = (index: number) => ({
+const project = (index: number, authorCount: number) => ({
   __typename: 'Project',
   description: `Description for project ${index}`,
   'heading:name': `Project ${index}`,
   id: `project-${index}`,
   name: `Project ${index}`,
-  owner: { __typename: 'User', id: `author-${index % 20}`, username: `Author ${index % 20}` },
+  owner: {
+    __typename: 'User',
+    id: `author-${index % authorCount}`,
+    username: `Author ${index % authorCount}`,
+  },
   published: index % 3 === 0,
-  slug: `author-${index % 20}/project-${index}`,
+  slug: `author-${index % authorCount}/project-${index}`,
   state: JSON.stringify({
     blocks: Array.from({ length: 32 }, (_, block) => ({
       text: `Project ${index}, block ${block}: document content`,
@@ -148,11 +152,11 @@ const project = (index: number) => ({
   tags: ['example', index % 3 === 0 ? 'published' : 'draft'],
 });
 
-export const createIngestionFixture = (count: number) => {
+export const createIngestionFixture = (count: number, authorCount = 20) => {
   const connection = (offset: number) => ({
     items: Array.from({ length: count }, (_, index) => ({
       cursor: `cursor-${index + offset}`,
-      node: project(index + offset),
+      node: project(index + offset, authorCount),
     })),
     pagination: { hasNext: false, hasPrevious: false },
   });

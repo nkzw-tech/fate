@@ -14,8 +14,10 @@ vp test bench ingestion --run --reporter=json --outputFile=/tmp/ingestion.json
 
 The fixture contains two paginated project collections with 20, 100, or 1,000
 records each. Projects include varied serialized document state, scalar arrays,
-shared authors, embedded statistics, field aliases, and username-based refetch
-locators. IDs and collection order stay fixed when scalar and embedded values
+shared or distinct authors, embedded statistics, field aliases, and username-based refetch
+locators. The largest workload runs with both 20 shared authors and 2,000 distinct
+authors, so improvements must hold when nested entities are unique as well as
+repeated. IDs and collection order stay fixed when scalar and embedded values
 change. Responses are precomputed; no real server, database, or network is involved.
 
 The cases separate:

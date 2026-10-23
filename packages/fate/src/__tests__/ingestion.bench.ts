@@ -3,9 +3,14 @@ import type { ViewSelection } from '../types.ts';
 import bench from './bench.ts';
 import { createIngestionFixture, ProjectView, type User } from './fixtures/ingestion.ts';
 
-for (const count of [20, 100, 1000]) {
-  describe(`${count} projects and ${count} templates`, async () => {
-    const fixture = createIngestionFixture(count);
+for (const [count, authorCount] of [
+  [20, 20],
+  [100, 20],
+  [1000, 20],
+  [1000, 2000],
+]) {
+  describe(`${count} projects and ${count} templates, ${authorCount} authors`, async () => {
+    const fixture = createIngestionFixture(count, authorCount);
 
     bench('GraphQL response decoding and selection normalization', async () => {
       await fixture.transport.fetchQuery!('viewer', fixture.plan.paths);
