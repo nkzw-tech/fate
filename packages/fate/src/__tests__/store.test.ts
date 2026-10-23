@@ -3,6 +3,33 @@ import ViewDataCache from '../cache.ts';
 import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
 
+test('updates list metadata and notifications while preserving unchanged membership indexes', () => {
+  const store = new Store();
+  const key = getListKey('User:1', 'posts');
+  store.setList(key, {
+    ids: ['Post:1'],
+    pagination: { hasNext: true, hasPrevious: false },
+    pendingBeforeIds: ['Post:2'],
+  });
+  const listener = vi.fn();
+  store.subscribeList(key, listener);
+  store.setList(key, {
+    cursors: ['one'],
+    ids: ['Post:1'],
+    pagination: { hasNext: false, hasPrevious: false },
+    pendingBeforeIds: ['Post:2'],
+  });
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(store.getListState(key)?.pagination?.hasNext).toBe(false);
+  expect(store.getListKeysForEntity('Post:1')).toContain(key);
+  expect(store.getListKeysForEntity('Post:2')).toContain(key);
+  store.setList(key, { ids: ['Post:1'], liveAfterIds: ['Post:3'] });
+  expect(store.getListKeysForEntity('Post:2')).not.toContain(key);
+  expect(store.getListKeysForEntity('Post:3')).toContain(key);
+  store.removeReferencesTo('Post:3', new ViewDataCache());
+  expect(store.getListState(key)?.liveAfterIds).toEqual([]);
+});
+
 test('keeps cursor alignment when removing ids with undefined cursors', () => {
   const store = new Store();
   const cache = new ViewDataCache();

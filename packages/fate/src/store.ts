@@ -194,6 +194,13 @@ const areNormalizedValuesEqual = (left: unknown, right: unknown): boolean =>
     left.length === right.length &&
     left.every((value, index) => areNormalizedValuesEqual(value, right[index])));
 
+const areListIdsEqual = (
+  left: ReadonlyArray<EntityId> | undefined,
+  right: ReadonlyArray<EntityId> | undefined,
+): boolean =>
+  left === right ||
+  (left?.length === right?.length && !!left && left.every((id, index) => id === right?.[index]));
+
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
   private listKeysByOwnerField = new Map<string, Set<string>>();
@@ -888,11 +895,20 @@ export class Store {
     }
     this.captureList(key);
     const previous = this.lists.get(key);
-    if (previous) {
+    const sameReferences =
+      previous &&
+      areListIdsEqual(previous.ids, state.ids) &&
+      areListIdsEqual(previous.liveAfterIds, state.liveAfterIds) &&
+      areListIdsEqual(previous.liveBeforeIds, state.liveBeforeIds) &&
+      areListIdsEqual(previous.pendingAfterIds, state.pendingAfterIds) &&
+      areListIdsEqual(previous.pendingBeforeIds, state.pendingBeforeIds);
+    if (previous && !sameReferences) {
       this.removeListIndexes(key, previous);
     }
     this.lists.set(key, state);
-    this.addListIndexes(key, state);
+    if (!sameReferences) {
+      this.addListIndexes(key, state);
+    }
     this.notifyListSubscribers(key, true, previous);
   }
 
