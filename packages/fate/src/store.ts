@@ -9,6 +9,7 @@ import {
   fromPaths,
   intersects,
   isCovered,
+  isCoverageSelection,
   removePath,
   toPaths,
   union,
@@ -203,6 +204,7 @@ const areListIdsEqual = (
 
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
+  private readonly sharedCoverage = new WeakMap<FieldMask, ReadonlyArray<string>>();
   private listKeysByOwnerField = new Map<string, Set<string>>();
   private listKeysByReferencedEntity = new Map<EntityId, Set<string>>();
   private lists = new Map<string, List>();
@@ -667,6 +669,7 @@ export class Store {
   ): { paths: ReadonlySet<string>; referencesChanged: boolean } | null {
     this.captureRecord(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
+    const selection = isCoverageSelection(selectedPaths) ? selectedPaths : undefined;
     if (this.recordingLayer) {
       const write = this.recordingLayer.writes.get(id) ?? {
         partial: Object.create(null) as AnyRecord,
@@ -686,19 +689,43 @@ export class Store {
 
     let mask = this.coverage.get(id);
     if (!mask) {
-      mask = emptyMask();
+      mask = !previous && selection ? selection.mask : emptyMask();
+      if (!previous && selection) {
+        this.sharedCoverage.set(mask, selection.paths);
+      }
       this.coverage.set(id, mask);
     }
 
-    const coveragePaths = [...selectedPaths];
+    const coveragePaths = selection ? selection.paths : [...selectedPaths];
     const replacements = previous ? [...replacedPaths] : [];
     const previousMask = replacements.length ? cloneMask(mask) : undefined;
+    const sharedPaths = this.sharedCoverage.get(mask);
+    const sameCoverage =
+      mask === selection?.mask ||
+      (sharedPaths?.length === coveragePaths.length &&
+        coveragePaths.every((path, index) => path === sharedPaths?.[index]));
+    let shared = sharedPaths !== undefined;
+    if (shared && replacements.length) {
+      mask = cloneMask(mask);
+      this.coverage.set(id, mask);
+      shared = false;
+    }
     for (const path of replacements) {
       removePath(mask, path);
     }
-    for (const path of coveragePaths) {
-      if (addPath(mask, path) && previous) {
-        changedPaths.add(path);
+    if (replacements.length || !sameCoverage) {
+      for (const path of coveragePaths) {
+        if (shared) {
+          if (isCovered(mask, path)) {
+            continue;
+          }
+          mask = cloneMask(mask);
+          this.coverage.set(id, mask);
+          shared = false;
+        }
+        if (addPath(mask, path) && previous) {
+          changedPaths.add(path);
+        }
       }
     }
     if (previousMask && !areMasksEqual(previousMask, mask)) {

@@ -82,6 +82,26 @@ export function fromPaths(paths: Iterable<string>): FieldMask {
   return mask;
 }
 
+const coverageSelections = new WeakSet<CoverageSelection>();
+
+export const isCoverageSelection = (paths: Iterable<string>): paths is CoverageSelection =>
+  coverageSelections.has(paths as CoverageSelection);
+
+export class CoverageSelection implements Iterable<string> {
+  readonly mask: FieldMask;
+  readonly paths: ReadonlyArray<string>;
+
+  constructor(paths: ReadonlyArray<string>) {
+    this.paths = [...paths];
+    this.mask = fromPaths(this.paths);
+    coverageSelections.add(this);
+  }
+
+  [Symbol.iterator]() {
+    return this.paths[Symbol.iterator]();
+  }
+}
+
 export function toPaths(mask: FieldMask): Array<string> {
   const paths: Array<string> = [];
 

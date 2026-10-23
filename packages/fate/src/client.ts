@@ -26,6 +26,7 @@ import {
   type HydrateOptions,
 } from './hydration.ts';
 import { getListEntries } from './list.ts';
+import { CoverageSelection } from './mask.ts';
 import {
   FateMutations,
   InsertPosition,
@@ -484,6 +485,7 @@ const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection
 
 type NormalizationSelection = {
   children: ReadonlyMap<string, Set<string>>;
+  coverage: Map<string, CoverageSelection>;
   embedded: Map<string, EmbeddedSelection>;
   paths: ReadonlySet<string>;
   storagePaths: Map<
@@ -4256,6 +4258,7 @@ export class FateClient<
       const paths = expanded === select ? select : new Set(expanded);
       normalized = {
         children: groupSelectionByPrefix(paths),
+        coverage: new Map(),
         embedded: new Map(),
         paths,
         storagePaths: new Map(),
@@ -4609,8 +4612,17 @@ export class FateClient<
       }
     }
 
+    let coverage = normalized.coverage.get(prefix);
+    if (
+      !coverage ||
+      coverage.paths.length !== selectedPaths.length ||
+      !selectedPaths.every((path, index) => path === coverage?.paths[index])
+    ) {
+      coverage = new CoverageSelection(selectedPaths);
+      normalized.coverage.set(prefix, coverage);
+    }
     this.withWriteGeneration(generation, () =>
-      this.store.merge(entityId, result, selectedPaths, replacedPaths),
+      this.store.merge(entityId, result, coverage, replacedPaths),
     );
     this.linkParentLists(type, entityId, result, insert ?? 'none');
     if (!pathPrefix && insert) {

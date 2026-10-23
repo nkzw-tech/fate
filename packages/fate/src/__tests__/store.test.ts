@@ -1,7 +1,32 @@
 import { expect, test, vi } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
+import { CoverageSelection } from '../mask.ts';
 import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
+
+test('isolates shared coverage when a record gains fields or replaces an embedded selection', () => {
+  const store = new Store();
+  const coverage = new CoverageSelection(['id', 'profile.name']);
+  for (const id of ['User:1', 'User:2']) {
+    store.merge(id, { id, profile: { name: id } }, coverage);
+  }
+  store.merge('User:1', { bio: 'Biography' }, ['bio']);
+  expect(store.hasCoverage('User:1', 'bio')).toBe(true);
+  expect(store.hasCoverage('User:2', 'bio')).toBe(false);
+  store.merge('User:1', { profile: { color: 'blue' } }, ['profile.color'], ['profile']);
+  expect(store.hasCoverage('User:1', 'profile.name')).toBe(false);
+  expect(store.hasCoverage('User:1', 'profile.color')).toBe(true);
+  expect(store.hasCoverage('User:2', 'profile.name')).toBe(true);
+  const settle = store.optimisticUpdate(() =>
+    store.merge('User:2', { name: 'Temporary' }, ['name']),
+  );
+  expect(store.hasCoverage('User:2', 'name')).toBe(true);
+  settle();
+  expect(store.hasCoverage('User:2', 'name')).toBe(false);
+  store.merge('User:3', { id: '3' }, coverage);
+  expect(store.hasCoverage('User:3', 'bio')).toBe(false);
+  expect(store.hasCoverage('User:3', 'profile.name')).toBe(true);
+});
 
 test('updates list metadata and notifications while preserving unchanged membership indexes', () => {
   const store = new Store();
