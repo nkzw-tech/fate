@@ -524,6 +524,7 @@ type NormalizationSelection = {
   embedded: Map<string, EmbeddedSelection>;
   fields: Map<string, Record<string, NormalizationField>>;
   paths: ReadonlySet<string>;
+  refetchPaths: ReadonlyArray<string>;
   storagePaths: Map<
     string,
     Array<{ path: string; recordKey: string; storageKey: string; storagePath: string }>
@@ -4302,6 +4303,7 @@ export class FateClient<
         embedded: new Map(),
         fields: new Map(),
         paths,
+        refetchPaths: [...paths].filter((path) => !select.has(path) && !path.includes('.')),
         storagePaths: new Map(),
       };
       let byType = selections.get(select);
@@ -4313,11 +4315,13 @@ export class FateClient<
     }
     const expandedSelection = normalized.paths;
     if (expandedSelection.size !== select.size) {
-      select = new Set(
-        [...expandedSelection].filter(
-          (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
-        ),
-      );
+      select = normalized.refetchPaths.every((path) => Object.hasOwn(record, path))
+        ? expandedSelection
+        : new Set(
+            [...expandedSelection].filter(
+              (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
+            ),
+          );
     }
     const selectionTree = normalized.children;
     const prefix = pathPrefix ?? '';
