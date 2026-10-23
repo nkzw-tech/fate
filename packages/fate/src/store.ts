@@ -79,8 +79,16 @@ const decodeListKeyPart = (part: string): string => {
 
 const encodeListKeyPart = (part: string): string => encodeURIComponent(part);
 
+const listKeySuffix = (field: string, hash: string): string =>
+  `${listKeySeparator}${encodeListKeyPart(field)}${listKeySeparator}${encodeListKeyPart(hash)}`;
+
 export const getListKey = (ownerId: EntityId, field: string, hash = 'default'): string =>
-  `${encodeListKeyPart(ownerId)}${listKeySeparator}${encodeListKeyPart(field)}${listKeySeparator}${encodeListKeyPart(hash)}`;
+  `${encodeListKeyPart(ownerId)}${listKeySuffix(field, hash)}`;
+
+export const compileListKey = (field: string, hash = 'default') => {
+  const suffix = listKeySuffix(field, hash);
+  return (ownerId: EntityId): string => `${encodeListKeyPart(ownerId)}${suffix}`;
+};
 
 const getOwnerFieldKey = (ownerId: EntityId, field: string): string =>
   JSON.stringify([ownerId, field]);

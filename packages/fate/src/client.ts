@@ -78,7 +78,7 @@ import {
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
 import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
-import { getListKey, List, mergePreservingExisting, Store } from './store.ts';
+import { compileListKey, getListKey, List, mergePreservingExisting, Store } from './store.ts';
 import { Transport } from './transport.ts';
 import {
   ConnectionMetadata,
@@ -487,6 +487,7 @@ const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection
 type NormalizationField = {
   args: ReturnType<SelectionPlan['args']['get']>;
   descriptor: RelationDescriptor | undefined;
+  listKey?: (ownerId: EntityId) => string;
   name: string;
   nodeSelection?: Set<string>;
   path: string;
@@ -4485,7 +4486,7 @@ export class FateClient<
             continue;
           }
 
-          const listKey = getListKey(entityId, field.name, fieldArgs?.hash);
+          const listKey = (field.listKey ??= compileListKey(field.name, fieldArgs?.hash))(entityId);
           const previousList = this.store.getListState(listKey);
           const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
