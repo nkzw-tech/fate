@@ -745,7 +745,7 @@ export class FateClient<
               this.acceptFieldWrite(change.key, path.split('.')[0], generation);
             }
           } else {
-            this.acceptWrite(JSON.stringify([change.key]), generation);
+            this.acceptWrite(`record:${change.key}`, generation);
           }
         } else {
           this.acceptWrite(`list:${change.key}`, generation);
@@ -2723,7 +2723,7 @@ export class FateClient<
 
         if (
           !acceptsList() ||
-          (this.writeVersions.get(JSON.stringify([connection.owner])) ?? 0) > generation
+          (this.writeVersions.get(`record:${connection.owner}`) ?? 0) > generation
         ) {
           return;
         }
@@ -4288,7 +4288,7 @@ export class FateClient<
     if (
       !this.store.isRecordingOptimistic &&
       this.writeVersions.size > 0 &&
-      (this.writeVersions.get(JSON.stringify([entityId])) ?? 0) > generation
+      (this.writeVersions.get(`record:${entityId}`) ?? 0) > generation
     ) {
       return entityId;
     }
