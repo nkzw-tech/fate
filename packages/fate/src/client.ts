@@ -288,6 +288,9 @@ const createNodeRefsForIds = (
     }
   }
 
+  if (!Array.isArray(current) || current.length === 0) {
+    return ids.map(createNodeRef);
+  }
   const existingRefsById = new Map<EntityId, ReturnType<typeof createNodeRef>>();
   if (Array.isArray(current)) {
     for (const value of current) {
