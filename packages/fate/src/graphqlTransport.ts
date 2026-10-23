@@ -136,7 +136,7 @@ type PendingOperation = {
 
 type SelectionTree = {
   fields: Map<string, SelectionTree>;
-  responseFields: Map<string, string>;
+  responseFields: Map<string, { field: string; key: string; selection: SelectionTree }>;
 };
 
 const createSelectionTree = (): SelectionTree => ({
@@ -413,7 +413,11 @@ const buildSelectionTree = (select: Iterable<string>): SelectionTree => {
         current.fields.set(segment, next);
         const responseKey = responseField(segment);
         if (!current.responseFields.has(responseKey)) {
-          current.responseFields.set(responseKey, segment);
+          current.responseFields.set(responseKey, {
+            field: schemaField(segment),
+            key: segment,
+            selection: next,
+          });
         }
       }
       current = next;
@@ -594,15 +598,16 @@ const normalizeGraphQLValue = ({
 
   for (const responseKey of Object.keys(value)) {
     const entry = value[responseKey];
-    const key = selection?.responseFields.get(responseKey) ?? responseKey;
-    const field = schemaField(key);
-    if (field === 'id' && typename && (typeof entry === 'string' || typeof entry === 'number')) {
+    const field = selection?.responseFields.get(responseKey);
+    const key = field?.key ?? responseKey;
+    const name = field?.field ?? schemaField(key);
+    if (name === 'id' && typename && (typeof entry === 'string' || typeof entry === 'number')) {
       result[key] = decodeNodeId(typename, entry);
     } else if (entry && typeof entry === 'object') {
-      const descriptor = config?.fields?.[field];
+      const descriptor = config?.fields?.[name];
       result[key] = normalizeGraphQLValue({
         decodeNodeId,
-        selection: selection?.fields.get(key),
+        selection: field?.selection ?? selection?.fields.get(key),
         type:
           descriptor && typeof descriptor === 'object'
             ? 'type' in descriptor
