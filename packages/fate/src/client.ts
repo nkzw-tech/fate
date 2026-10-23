@@ -2382,7 +2382,6 @@ export class FateClient<
     // A snapshot starts a new window; only cursor pages extend the old one.
     const previousWindow = options.replace && !options.hasCursorArg ? undefined : previous;
     const existingIds = previousWindow?.ids ?? [];
-    const existingSet = new Set(existingIds);
     const isBackward = options.direction === 'backward';
 
     const mergeIds = () => {
@@ -2396,6 +2395,7 @@ export class FateClient<
         return isBackward ? [...remaining, ...incomingIds] : [...incomingIds, ...remaining];
       }
 
+      const existingSet = new Set(existingIds);
       const newIds = incomingIds.filter((id) => !existingSet.has(id));
       return isBackward ? [...newIds, ...existingIds] : [...existingIds, ...newIds];
     };
@@ -2403,21 +2403,27 @@ export class FateClient<
     const ids = mergeIds();
     const hasIncomingCursor = incomingCursors.some((cursor) => cursor !== undefined);
 
-    const cursorMap = new Map<EntityId, string | undefined>();
-    if (previousWindow?.cursors) {
-      previousWindow.cursors.forEach((cursor, index) => {
-        cursorMap.set(existingIds[index], cursor);
-      });
-    }
-    incomingCursors.forEach((cursor, index) => {
-      if (cursor !== undefined) {
-        cursorMap.set(incomingIds[index], cursor);
-      }
-    });
-
     const shouldStoreCursors =
       hasIncomingCursor || Boolean(previousWindow?.cursors) || options.hasCursorArg;
-    const cursors = shouldStoreCursors ? ids.map((id) => cursorMap.get(id)) : undefined;
+    let cursors: Array<string | undefined> | undefined;
+    if (shouldStoreCursors) {
+      if (!previousWindow && ids.length < 2) {
+        cursors = ids.length ? [incomingCursors[0]] : [];
+      } else {
+        const cursorMap = new Map<EntityId, string | undefined>();
+        if (previousWindow?.cursors) {
+          previousWindow.cursors.forEach((cursor, index) => {
+            cursorMap.set(existingIds[index], cursor);
+          });
+        }
+        incomingCursors.forEach((cursor, index) => {
+          if (cursor !== undefined) {
+            cursorMap.set(incomingIds[index], cursor);
+          }
+        });
+        cursors = ids.map((id) => cursorMap.get(id));
+      }
+    }
 
     const previousPagination = previousWindow?.pagination;
     const newPagination = incomingPagination;
