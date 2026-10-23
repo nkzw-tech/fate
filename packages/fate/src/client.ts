@@ -699,6 +699,10 @@ export class FateClient<
         }
       }
       this.persistenceRuntime?.changed(change);
+      if (this.requestListeners.size === 0) {
+        this.requestRevision++;
+        return;
+      }
       this.notifyRequests(
         change.kind === 'record'
           ? [
