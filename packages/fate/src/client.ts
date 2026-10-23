@@ -523,6 +523,29 @@ export class FateClient<
   private applyingGeneration: number | undefined;
   private applyingPaginationList: string | undefined;
   private readonly writeVersions = new Map<string, number>();
+  private readonly fieldWriteVersions = new Map<EntityId, Map<string, number>>();
+
+  private acceptFieldWrite(id: EntityId, field: string, generation: number): boolean {
+    if (this.store.isRecordingOptimistic || !this.pendingNetworkRequests) {
+      return true;
+    }
+    let fields = this.fieldWriteVersions.get(id);
+    const previous = fields?.get(field);
+    if (previous !== undefined) {
+      if (previous > generation) {
+        return false;
+      }
+      if (previous === generation) {
+        return true;
+      }
+    }
+    if (!fields) {
+      fields = new Map();
+      this.fieldWriteVersions.set(id, fields);
+    }
+    fields.set(field, generation);
+    return true;
+  }
 
   private acceptWrite(key: string, generation: number): boolean {
     if (this.store.isRecordingOptimistic || !this.pendingNetworkRequests) {
@@ -656,7 +679,7 @@ export class FateClient<
         if (change.kind === 'record') {
           if (change.paths) {
             for (const path of change.paths) {
-              this.acceptWrite(JSON.stringify([change.key, path.split('.')[0]]), generation);
+              this.acceptFieldWrite(change.key, path.split('.')[0], generation);
             }
           } else {
             this.acceptWrite(JSON.stringify([change.key]), generation);
@@ -3434,6 +3457,7 @@ export class FateClient<
         this.pendingNetworkRequests -= 1;
         if (!this.pendingNetworkRequests) {
           this.writeVersions.clear();
+          this.fieldWriteVersions.clear();
         }
         this.persistenceRuntime?.changed();
       }
@@ -4234,7 +4258,7 @@ export class FateClient<
           if (!Object.hasOwn(record, key)) {
             continue;
           }
-          const acceptField = this.acceptWrite(JSON.stringify([entityId, storageKey]), generation);
+          const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
           if (relationDescriptor === 'scalar') {
             if (!acceptField) {
               continue;
@@ -4517,7 +4541,7 @@ export class FateClient<
         if (!fields[key]) {
           const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
           const storageKey = getFieldKey(fieldPath, plan);
-          if (this.acceptWrite(JSON.stringify([entityId, storageKey]), generation)) {
+          if (this.acceptFieldWrite(entityId, storageKey, generation)) {
             setRecordValue(
               result,
               storageKey,
@@ -4551,7 +4575,7 @@ export class FateClient<
         if (
           Object.hasOwn(result, storageKey) ||
           (!Object.hasOwn(record, recordKey) &&
-            this.acceptWrite(JSON.stringify([entityId, storageKey]), generation))
+            this.acceptFieldWrite(entityId, storageKey, generation))
         ) {
           selectedPaths.push(storagePath);
         }

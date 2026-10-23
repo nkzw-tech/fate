@@ -193,21 +193,24 @@ test('late requests do not overwrite optimistic mutations after they commit', as
 
 test('write-version history exists only while network responses can still arrive stale', async () => {
   const { client, pending, start } = setup();
-  const versions = (client as unknown as { writeVersions: ReadonlyMap<string, number> })
-    .writeVersions;
+  const { fieldWriteVersions, writeVersions } = client as unknown as {
+    fieldWriteVersions: ReadonlyMap<string, ReadonlyMap<string, number>>;
+    writeVersions: ReadonlyMap<string, number>;
+  };
+  const historySize = () => fieldWriteVersions.size + writeVersions.size;
   for (let index = 0; index < 1000; index++) {
     client.write('User', { id: String(index), name: 'Local' }, new Set(['name']));
   }
   client.gc();
-  expect(versions.size).toBe(0);
+  expect(historySize()).toBe(0);
   const older = start();
   await vi.waitFor(() => expect(pending).toHaveLength(1));
   client.write('User', { id: '1', name: 'Confirmed' }, new Set(['name']));
-  expect(versions.size).toBeGreaterThan(0);
+  expect(historySize()).toBeGreaterThan(0);
   pending[0]({ id: '1', name: 'Stale' });
   await older;
   expect(client.store.read('User:1')?.name).toBe('Confirmed');
-  expect(versions.size).toBe(0);
+  expect(historySize()).toBe(0);
   client.deleteRecord('User', '1');
-  expect(versions.size).toBe(0);
+  expect(historySize()).toBe(0);
 });
