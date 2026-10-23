@@ -66,7 +66,7 @@ export type StoreHydrationState = Readonly<{
 }>;
 
 export type StoreChange =
-  | Readonly<{ key: string; kind: 'list'; owner: ListKeyParts | null; previousList?: List }>
+  | Readonly<{ key: string; kind: 'list'; previousList?: List }>
   | Readonly<{
       key: EntityId;
       kind: 'record';
@@ -238,7 +238,7 @@ export class Store {
 
   constructor(
     private readonly onRebase?: (ids: ReadonlySet<EntityId>, lists: ReadonlySet<string>) => void,
-    private readonly onChange?: (change: StoreChange) => void,
+    private readonly onChange?: (change: StoreChange, owner?: ListKeyParts | null) => void,
   ) {}
 
   get hasOptimisticUpdates(): boolean {
@@ -895,7 +895,7 @@ export class Store {
     owner = parseListKey(key),
   ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.({ key, kind: 'list', owner, previousList });
+      this.onChange?.({ key, kind: 'list', previousList }, owner);
     }
     if (this.rebase) {
       return;

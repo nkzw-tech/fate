@@ -78,7 +78,14 @@ import {
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
 import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
-import { compileListKey, getListKey, List, mergePreservingExisting, Store } from './store.ts';
+import {
+  compileListKey,
+  getListKey,
+  List,
+  mergePreservingExisting,
+  parseListKey,
+  Store,
+} from './store.ts';
 import { Transport } from './transport.ts';
 import {
   ConnectionMetadata,
@@ -736,7 +743,7 @@ export class FateClient<
         ),
       ]);
     },
-    (change) => {
+    (change, listOwner) => {
       if (!this.store.isRecordingOptimistic) {
         const generation = this.applyingGeneration ?? ++this.writeGeneration;
         if (change.kind === 'record') {
@@ -754,7 +761,7 @@ export class FateClient<
       if (change.kind === 'record') {
         this.viewDataCache.invalidate(change.key, change.paths);
       } else {
-        const owner = change.owner;
+        const owner = listOwner === undefined ? parseListKey(change.key) : listOwner;
         if (owner) {
           this.viewDataCache.invalidateField(owner.ownerId, owner.field, owner.hash);
         }

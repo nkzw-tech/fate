@@ -66,7 +66,8 @@ test('isolates shared coverage when a record gains fields or replaces an embedde
 });
 
 test('updates list metadata and notifications while preserving unchanged membership indexes', () => {
-  const store = new Store();
+  const onChange = vi.fn();
+  const store = new Store(undefined, onChange);
   const key = getListKey('User:1', 'posts');
   store.setList(key, {
     ids: ['Post:1'],
@@ -75,6 +76,7 @@ test('updates list metadata and notifications while preserving unchanged members
   });
   const listener = vi.fn();
   store.subscribeList(key, listener);
+  const previousList = store.getListState(key);
   store.setList(key, {
     cursors: ['one'],
     ids: ['Post:1'],
@@ -82,6 +84,7 @@ test('updates list metadata and notifications while preserving unchanged members
     pendingBeforeIds: ['Post:2'],
   });
   expect(listener).toHaveBeenCalledTimes(1);
+  expect(onChange.mock.lastCall?.[0]).toEqual({ key, kind: 'list', previousList });
   expect(store.getListState(key)?.pagination?.hasNext).toBe(false);
   expect(store.getListKeysForEntity('Post:1')).toContain(key);
   expect(store.getListKeysForEntity('Post:2')).toContain(key);
