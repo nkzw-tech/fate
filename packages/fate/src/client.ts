@@ -4656,9 +4656,13 @@ export class FateClient<
       coverage = new CoverageSelection(selectedPaths);
       normalized.coverage.set(prefix, coverage);
     }
-    this.withWriteGeneration(generation, () =>
-      this.store.merge(entityId, result, coverage, replacedPaths),
-    );
+    if (this.applyingGeneration === generation) {
+      this.store.merge(entityId, result, coverage, replacedPaths);
+    } else {
+      this.withWriteGeneration(generation, () =>
+        this.store.merge(entityId, result, coverage, replacedPaths),
+      );
+    }
     this.linkParentLists(type, entityId, result, insert ?? 'none');
     if (!pathPrefix && insert) {
       this.insertIntoRootLists(type, entityId, insert);
