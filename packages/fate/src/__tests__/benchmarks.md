@@ -58,12 +58,39 @@ for 1,000 projects and 1,000 templates:
 | GraphQL changed-data refresh                        |  66.36 | 37.97 |
 | Cached reads of all project views                   |   1.08 |  1.06 |
 
-The 20-record cases also improved: a fresh GraphQL request went from 1.31 ms to
-0.78 ms and a fresh native request from 0.90 ms to 0.59 ms. Cached parent reads
-remained about 0.0005 ms; these changes target ingestion, not cached read speed.
-
 The optimizations index response aliases, normalize connections in one pass,
 reuse selection and storage-path metadata within each response, and reduce
 temporary coverage allocations. The metadata is scoped to one write rather than
 retained globally. These numbers describe this fixture and machine; rerun the
 benchmark for an application's actual selections and payloads.
+
+## Response ingestion and retained metadata
+
+A subsequent run on an Apple M5 Max with Node 26.12.1 compares the v1.11.1
+runtime with `3456e10`. Both use the same current fixture and dependencies. The
+baseline configuration substitutes the tagged runtime source before transformation;
+it does not substitute older fixtures. Times are per-operation medians in
+milliseconds. Each collection contains 1,000 records.
+
+| Case                                                | 20 authors, v1.11.1 | 20 authors, optimized | 2,000 authors, v1.11.1 | 2,000 authors, optimized |
+| --------------------------------------------------- | ------------------: | --------------------: | ---------------------: | -----------------------: |
+| GraphQL JSON decoding and selection normalization   |               10.71 |                  7.12 |                  10.02 |                     7.15 |
+| Unchanged cache write, excluding transport decoding |               19.70 |                  6.73 |                  17.14 |                     6.62 |
+| Native request into a fresh client                  |               30.32 |                 14.09 |                  33.35 |                    14.37 |
+| Native unchanged refresh                            |               25.96 |                 12.14 |                  25.49 |                    12.27 |
+| Native changed-data refresh                         |               30.33 |                 13.71 |                  34.75 |                    14.16 |
+| GraphQL request into a fresh client                 |               36.59 |                 16.09 |                  37.31 |                    16.49 |
+| GraphQL unchanged refresh                           |               30.76 |                 14.30 |                  31.42 |                    14.49 |
+| GraphQL changed-data refresh                        |               33.64 |                 16.62 |                  34.51 |                    19.00 |
+
+Fresh-client cases include construction; refresh cases reuse the client. These
+package benchmarks differ from application benchmarks that exclude construction.
+They remain manual and do not add work to the normal test run. Cases where both
+versions complete in less than 1 ms are omitted here.
+
+The changes share compiled coverage until a record needs its own mask, compact
+single-entry reference indexes, reuse response-local field metadata and list
+ownership, and avoid write-history allocations without competing requests. They
+retain response isolation, optimistic rebasing, stale-response protection, and
+store change notifications. Record-specific coverage is copied before mutation;
+normalization metadata is released after each write.
