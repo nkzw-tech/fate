@@ -56,7 +56,7 @@ export type StoreHydrationState = Readonly<{
 }>;
 
 export type StoreChange =
-  | Readonly<{ key: string; kind: 'list'; previousList?: List }>
+  | Readonly<{ key: string; kind: 'list'; owner: ListKeyParts | null; previousList?: List }>
   | Readonly<{
       key: EntityId;
       kind: 'record';
@@ -844,9 +844,14 @@ export class Store {
     }
   }
 
-  private notifyListSubscribers(key: string, confirmed = true, previousList?: List) {
+  private notifyListSubscribers(
+    key: string,
+    confirmed = true,
+    previousList?: List,
+    owner = parseListKey(key),
+  ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.({ key, kind: 'list', previousList });
+      this.onChange?.({ key, kind: 'list', owner, previousList });
     }
     if (this.rebase) {
       return;
@@ -894,6 +899,7 @@ export class Store {
       return this.update(() => this.setList(key, state));
     }
     this.captureList(key);
+    const owner = parseListKey(key);
     const previous = this.lists.get(key);
     const sameReferences =
       previous &&
@@ -903,13 +909,13 @@ export class Store {
       areListIdsEqual(previous.pendingAfterIds, state.pendingAfterIds) &&
       areListIdsEqual(previous.pendingBeforeIds, state.pendingBeforeIds);
     if (previous && !sameReferences) {
-      this.removeListIndexes(key, previous);
+      this.removeListIndexes(key, previous, owner);
     }
     this.lists.set(key, state);
     if (!sameReferences) {
-      this.addListIndexes(key, state);
+      this.addListIndexes(key, state, owner);
     }
-    this.notifyListSubscribers(key, true, previous);
+    this.notifyListSubscribers(key, true, previous, owner);
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
@@ -1204,8 +1210,7 @@ export class Store {
     });
   }
 
-  private addListIndexes(key: string, list: List) {
-    const parsed = parseListKey(key);
+  private addListIndexes(key: string, list: List, parsed = parseListKey(key)) {
     if (parsed) {
       const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
       let keys = this.listKeysByOwnerField.get(ownerFieldKey);
@@ -1226,8 +1231,7 @@ export class Store {
     }
   }
 
-  private removeListIndexes(key: string, list: List) {
-    const parsed = parseListKey(key);
+  private removeListIndexes(key: string, list: List, parsed = parseListKey(key)) {
     if (parsed) {
       const ownerFieldKey = getOwnerFieldKey(parsed.ownerId, parsed.field);
       const keys = this.listKeysByOwnerField.get(ownerFieldKey);

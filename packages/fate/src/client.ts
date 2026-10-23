@@ -77,7 +77,7 @@ import {
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
 import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
-import { getListKey, List, mergePreservingExisting, parseListKey, Store } from './store.ts';
+import { getListKey, List, mergePreservingExisting, Store } from './store.ts';
 import { Transport } from './transport.ts';
 import {
   ConnectionMetadata,
@@ -717,7 +717,7 @@ export class FateClient<
       if (change.kind === 'record') {
         this.viewDataCache.invalidate(change.key, change.paths);
       } else {
-        const owner = parseListKey(change.key);
+        const owner = change.owner;
         if (owner) {
           this.viewDataCache.invalidate(owner.ownerId, [argumentFieldKey(owner.field, owner.hash)]);
         }
