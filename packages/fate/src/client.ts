@@ -4287,6 +4287,7 @@ export class FateClient<
     const generation = this.applyingGeneration ?? ++this.writeGeneration;
     if (
       !this.store.isRecordingOptimistic &&
+      this.writeVersions.size > 0 &&
       (this.writeVersions.get(JSON.stringify([entityId])) ?? 0) > generation
     ) {
       return entityId;
