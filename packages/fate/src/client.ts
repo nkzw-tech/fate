@@ -524,6 +524,7 @@ export class FateClient<
   private mutationWrite: { fields?: ReadonlySet<string> } | undefined;
   private applyingGeneration: number | undefined;
   private applyingPaginationList: string | undefined;
+  private uncontendedWriteGeneration: number | undefined;
   private readonly writeVersions = new Map<string, number>();
   private readonly fieldWriteVersions = new Map<EntityId, Map<string, number>>();
 
@@ -541,6 +542,9 @@ export class FateClient<
         return true;
       }
     }
+    if (this.uncontendedWriteGeneration === generation) {
+      return true;
+    }
     if (!fields) {
       fields = new Map();
       this.fieldWriteVersions.set(id, fields);
@@ -556,6 +560,9 @@ export class FateClient<
     if ((this.writeVersions.get(key) ?? 0) > generation) {
       return false;
     }
+    if (this.uncontendedWriteGeneration === generation) {
+      return true;
+    }
     this.writeVersions.set(key, generation);
     if (key.startsWith('list:') && key !== `list:${this.applyingPaginationList}`) {
       this.writeVersions.set(`refresh:${key}`, generation);
@@ -570,6 +577,23 @@ export class FateClient<
       return apply();
     } finally {
       this.applyingGeneration = previous;
+    }
+  }
+
+  private withResponseWrite<T>(generation: number, apply: () => T): T {
+    const previous = this.uncontendedWriteGeneration;
+    if (
+      this.pendingNetworkRequests === 1 &&
+      generation === this.writeGeneration &&
+      this.writeVersions.size === 0 &&
+      this.fieldWriteVersions.size === 0
+    ) {
+      this.uncontendedWriteGeneration = generation;
+    }
+    try {
+      return this.withWriteGeneration(generation, apply);
+    } finally {
+      this.uncontendedWriteGeneration = previous;
     }
   }
 
@@ -3978,7 +4002,7 @@ export class FateClient<
       this.assertPersistenceActive();
       const normalization = createNormalizationContext();
       for (const { generation, record } of records) {
-        this.withWriteGeneration(generation, () =>
+        this.withResponseWrite(generation, () =>
           this.writeEntity(
             type,
             record as AnyRecord,
@@ -4020,7 +4044,7 @@ export class FateClient<
         return;
       }
 
-      const entityId = this.withWriteGeneration(generation, () =>
+      const entityId = this.withResponseWrite(generation, () =>
         this.writeEntity(item.type, record as AnyRecord, item.plan.paths, item.plan),
       );
       if (this.acceptWrite(`root:${item.queryKey}`, generation)) {
@@ -4083,7 +4107,7 @@ export class FateClient<
         this.rootValues.delete(`list:${item.listKey}`);
       }
       const { items, pagination } = connection;
-      this.withWriteGeneration(generation, () =>
+      this.withResponseWrite(generation, () =>
         this.store.update(() => {
           const normalization = createNormalizationContext();
           const ids: Array<EntityId> = [];

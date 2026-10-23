@@ -82,6 +82,33 @@ test('a late request cannot overwrite a confirmed local write or resurrect a del
   expect(client.store.read('User:1')).toBeUndefined();
 });
 
+test('preserves local writes when a subscriber starts another request during normalization', async () => {
+  type Person = User & { friend: User };
+  const pending: Array<(record: Record<string, unknown>) => void> = [];
+  const client = createClient({
+    roots: { viewer: clientRoot<Person, 'User'>('User') },
+    transport: {
+      fetchById: async () => [],
+      fetchQuery: () => new Promise<Record<string, unknown>>((resolve) => pending.push(resolve)),
+    },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  let next: Promise<unknown> | undefined;
+  const unsubscribe = client.store.subscribe('User:2', () => {
+    next = client.request({ viewer: { view: Name } }, { mode: 'network-only' });
+  });
+  const first = client.request({ viewer: { view: view<Person>()({ friend: Name, id: true }) } });
+  await vi.waitFor(() => expect(pending).toHaveLength(1));
+  pending[0]({ friend: { id: '2', name: 'Friend' }, id: '1' });
+  await first;
+  unsubscribe();
+  await vi.waitFor(() => expect(pending).toHaveLength(2));
+  client.write('User', { id: '1', name: 'Confirmed' }, new Set(['name']));
+  pending[1]({ id: '1', name: 'Stale' });
+  await next;
+  expect(client.store.read('User:1')?.name).toBe('Confirmed');
+});
+
 test('requests update the confirmed base beneath optimistic writes and rollback reveals it', async () => {
   const { client, pending, start } = setup();
   client.write('User', { id: '1', name: 'Initial' }, new Set(['id', 'name']));
