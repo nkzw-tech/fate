@@ -760,7 +760,7 @@ export class Store {
       this.updateRecordReferenceIndexes(id, undefined, nextRecord, Object.keys(nextRecord));
       return {
         paths: changedPaths,
-        referencesChanged: this.recordReferencesChanged(undefined, nextRecord),
+        referencesChanged: this.recordReferenceFields.has(id),
       };
     }
   }
@@ -1335,6 +1335,9 @@ export class Store {
     ]),
   ) {
     for (const field of fields) {
+      if (previous?.[field] === next?.[field]) {
+        continue;
+      }
       const before = this.getRecordFieldReferences(previous?.[field]);
       const after = this.getRecordFieldReferences(next?.[field]);
       if (before?.size !== after?.size) {
