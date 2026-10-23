@@ -487,6 +487,7 @@ const compileEmbeddedSelection = (paths: ReadonlySet<string>): EmbeddedSelection
 type NormalizationField = {
   args: ReturnType<SelectionPlan['args']['get']>;
   descriptor: RelationDescriptor | undefined;
+  nodeSelection?: Set<string>;
   path: string;
   storageKey: string;
 };
@@ -4314,12 +4315,13 @@ export class FateClient<
     }
 
     for (const key of Object.keys(record)) {
+      const field = normalizationField(fields, key, pathPrefix, config, plan);
       const {
         args: fieldArgs,
         descriptor: relationDescriptor,
         path: fieldPath,
         storageKey,
-      } = normalizationField(fields, key, pathPrefix, config, plan);
+      } = field;
       if (!relationDescriptor) {
         continue;
       }
@@ -4392,69 +4394,55 @@ export class FateClient<
           throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
         }
 
-        const connection = (() => {
-          if (Array.isArray(value)) {
-            return {
-              items: value.map((item) => ({ node: item })),
-            };
-          }
+        const array = Array.isArray(value);
+        const items = array
+          ? value
+          : value && typeof value === 'object' && Array.isArray((value as AnyRecord).items)
+            ? ((value as AnyRecord).items as Array<unknown>)
+            : null;
 
-          if (value && typeof value === 'object') {
-            const record = value as AnyRecord;
-            if (Array.isArray(record.items)) {
-              return {
-                items: record.items.map((node) => {
-                  if (node && typeof node === 'object' && 'node' in node) {
-                    const itemRecord = node as AnyRecord;
-                    return {
-                      cursor: itemRecord.cursor,
-                      node: itemRecord.node,
-                    };
-                  }
-
-                  return { node };
-                }),
-                pagination: record.pagination,
-              };
-            }
-          }
-
-          return null;
-        })();
-
-        if (connection) {
+        if (items) {
           const ids: Array<EntityId> = [];
           const cursors: Array<string | undefined> = [];
 
-          const nodeSelection = [...childPaths].some(
-            (path) => path.startsWith('items.') || path.startsWith('node.'),
-          )
-            ? new Set<string>()
-            : childPaths;
+          let nodeSelection = field.nodeSelection;
+          if (!nodeSelection) {
+            nodeSelection = [...childPaths].some(
+              (path) => path.startsWith('items.') || path.startsWith('node.'),
+            )
+              ? new Set<string>()
+              : childPaths;
 
-          if (nodeSelection !== childPaths) {
-            for (const path of childPaths) {
-              if (path.startsWith('items.node.')) {
-                nodeSelection.add(path.slice('items.node.'.length));
-                continue;
+            if (nodeSelection !== childPaths) {
+              for (const path of childPaths) {
+                if (path.startsWith('items.node.')) {
+                  nodeSelection.add(path.slice('items.node.'.length));
+                  continue;
+                }
+
+                if (path.startsWith('node.')) {
+                  nodeSelection.add(path.slice('node.'.length));
+                  continue;
+                }
+
+                if (path === 'items.node' || path.startsWith('items.')) {
+                  continue;
+                }
+
+                nodeSelection.add(path);
               }
-
-              if (path.startsWith('node.')) {
-                nodeSelection.add(path.slice('node.'.length));
-                continue;
-              }
-
-              if (path === 'items.node' || path.startsWith('items.')) {
-                continue;
-              }
-
-              nodeSelection.add(path);
             }
+
+            field.nodeSelection = nodeSelection;
           }
 
-          for (const entry of connection.items) {
-            const node = entry.node;
-            const cursor = 'cursor' in entry ? (entry.cursor as string) : undefined;
+          for (const entry of items) {
+            const item =
+              !array && entry && typeof entry === 'object' && 'node' in entry
+                ? (entry as AnyRecord)
+                : undefined;
+            const node = item ? item.node : entry;
+            const cursor = item?.cursor as string | undefined;
             cursors.push(cursor);
             if (isNodeRef(node)) {
               ids.push(getNodeRefId(node));
@@ -4473,9 +4461,7 @@ export class FateClient<
                   `fate: Unknown related type '${concreteType}' (field '${type}.${key}').`,
                 );
               }
-              const childId = toEntityId(concreteType, childConfig.getId(node as AnyRecord));
-
-              this.writeEntity(
+              const childId = this.writeEntity(
                 concreteType,
                 node as AnyRecord,
                 nodeSelection,
@@ -4501,7 +4487,9 @@ export class FateClient<
           const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
           const mergeInfo = getPaginationMergeInfo(argsValue);
-          const pagination = connection.pagination as List['pagination'];
+          const pagination = (
+            array ? undefined : (value as AnyRecord).pagination
+          ) as List['pagination'];
           const complete =
             Array.isArray(value) ||
             (mergeInfo.direction === 'forward'
