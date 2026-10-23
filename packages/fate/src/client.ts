@@ -4200,398 +4200,395 @@ export class FateClient<
     normalization: NormalizationContext = createNormalizationContext(),
   ): EntityId {
     const { selections, storageKeys, windows } = normalization;
-    return this.store.update(() => {
-      type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
-      const config = this.types.get(type);
-      if (!config) {
-        throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
-      }
+    if (this.store.hasOptimisticUpdates && !this.store.isRebasing) {
+      return this.store.update(() =>
+        this.writeEntity(type, record, select, plan, pathPrefix, insert, normalization),
+      );
+    }
+    type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
+    const config = this.types.get(type);
+    if (!config) {
+      throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
+    }
 
-      const id = config.getId(record);
-      const entityId = toEntityId(type, id);
-      const generation = this.applyingGeneration ?? ++this.writeGeneration;
-      if (
-        !this.store.isRecordingOptimistic &&
-        (this.writeVersions.get(JSON.stringify([entityId])) ?? 0) > generation
-      ) {
-        return entityId;
+    const id = config.getId(record);
+    const entityId = toEntityId(type, id);
+    const generation = this.applyingGeneration ?? ++this.writeGeneration;
+    if (
+      !this.store.isRecordingOptimistic &&
+      (this.writeVersions.get(JSON.stringify([entityId])) ?? 0) > generation
+    ) {
+      return entityId;
+    }
+    const result: AnyRecord = {};
+    const replacedPaths = new Set<string>();
+    let normalized = selections.get(select)?.get(type);
+    if (!normalized) {
+      const expanded = expandRefetchSelection(this.types, type, select);
+      const paths = expanded === select ? select : new Set(expanded);
+      normalized = {
+        children: groupSelectionByPrefix(paths),
+        embedded: new Map(),
+        paths,
+        storagePaths: new Map(),
+      };
+      let byType = selections.get(select);
+      if (!byType) {
+        byType = new Map();
+        selections.set(select, byType);
       }
-      const result: AnyRecord = {};
-      const replacedPaths = new Set<string>();
-      let normalized = selections.get(select)?.get(type);
-      if (!normalized) {
-        const expanded = expandRefetchSelection(this.types, type, select);
-        const paths = expanded === select ? select : new Set(expanded);
-        normalized = {
-          children: groupSelectionByPrefix(paths),
-          embedded: new Map(),
-          paths,
-          storagePaths: new Map(),
-        };
-        let byType = selections.get(select);
-        if (!byType) {
-          byType = new Map();
-          selections.set(select, byType);
-        }
-        byType.set(type, normalized);
-      }
-      const expandedSelection = normalized.paths;
-      if (expandedSelection.size !== select.size) {
-        select = new Set(
-          [...expandedSelection].filter(
-            (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
-          ),
-        );
-      }
-      const selectionTree = normalized.children;
+      byType.set(type, normalized);
+    }
+    const expandedSelection = normalized.paths;
+    if (expandedSelection.size !== select.size) {
+      select = new Set(
+        [...expandedSelection].filter(
+          (path) => select.has(path) || path.includes('.') || Object.hasOwn(record, path),
+        ),
+      );
+    }
+    const selectionTree = normalized.children;
 
-      for (const key of Object.keys(record)) {
-        const relationDescriptor = config.fields?.[schemaField(key)];
-        if (!relationDescriptor) {
+    for (const key of Object.keys(record)) {
+      const relationDescriptor = config.fields?.[schemaField(key)];
+      if (!relationDescriptor) {
+        continue;
+      }
+      const value = record[key];
+      const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+      const fieldArgs = plan?.args.get(fieldPath);
+      let storageKey = storageKeys.get(fieldPath);
+      if (storageKey === undefined) {
+        storageKey = getFieldKey(fieldPath, plan);
+        storageKeys.set(fieldPath, storageKey);
+      }
+      const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
+      if (relationDescriptor === 'scalar') {
+        if (!acceptField) {
           continue;
         }
-        const value = record[key];
-        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-        const fieldArgs = plan?.args.get(fieldPath);
-        let storageKey = storageKeys.get(fieldPath);
-        if (storageKey === undefined) {
-          storageKey = getFieldKey(fieldPath, plan);
-          storageKeys.set(fieldPath, storageKey);
+        setRecordValue(
+          result,
+          storageKey,
+          reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
+        );
+      } else if (
+        relationDescriptor &&
+        typeof relationDescriptor === 'object' &&
+        'type' in relationDescriptor
+      ) {
+        const childPaths = selectionTree.get(key) ?? emptySet;
+        if (value === null) {
+          if (acceptField) {
+            setRecordValue(result, storageKey, null);
+          }
+          continue;
         }
-        const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
-        if (relationDescriptor === 'scalar') {
+        if (value && typeof value === 'object' && !isNodeRef(value)) {
+          const childType = this.relatedEntityType(
+            relationDescriptor.type,
+            relationDescriptor.possibleTypes,
+            value as AnyRecord,
+          );
+          const childConfig = this.types.get(childType);
+          if (!childConfig) {
+            throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
+          }
+          const childId = toEntityId(childType, childConfig.getId(value));
+          if (acceptField) {
+            setRecordValue(
+              result,
+              storageKey,
+              reuseNormalizedField(createNodeRef(childId), this.store.read(entityId)?.[storageKey]),
+            );
+          }
+
+          this.writeEntity(
+            childType,
+            value as AnyRecord,
+            childPaths,
+            plan,
+            fieldPath,
+            undefined,
+            normalization,
+          );
+        }
+      } else if (
+        relationDescriptor &&
+        typeof relationDescriptor === 'object' &&
+        'listOf' in relationDescriptor
+      ) {
+        const childPaths = selectionTree.get(key) ?? emptySet;
+        if (value === null) {
+          if (acceptField) {
+            setRecordValue(result, storageKey, null);
+          }
+          continue;
+        }
+        const childType = relationDescriptor.listOf;
+        if (!this.types.has(childType)) {
+          throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
+        }
+
+        const connection = (() => {
+          if (Array.isArray(value)) {
+            return {
+              items: value.map((item) => ({ node: item })),
+            };
+          }
+
+          if (value && typeof value === 'object') {
+            const record = value as AnyRecord;
+            if (Array.isArray(record.items)) {
+              return {
+                items: record.items.map((node) => {
+                  if (node && typeof node === 'object' && 'node' in node) {
+                    const itemRecord = node as AnyRecord;
+                    return {
+                      cursor: itemRecord.cursor,
+                      node: itemRecord.node,
+                    };
+                  }
+
+                  return { node };
+                }),
+                pagination: record.pagination,
+              };
+            }
+          }
+
+          return null;
+        })();
+
+        if (connection) {
+          const ids: Array<EntityId> = [];
+          const cursors: Array<string | undefined> = [];
+
+          const nodeSelection = [...childPaths].some(
+            (path) => path.startsWith('items.') || path.startsWith('node.'),
+          )
+            ? new Set<string>()
+            : childPaths;
+
+          if (nodeSelection !== childPaths) {
+            for (const path of childPaths) {
+              if (path.startsWith('items.node.')) {
+                nodeSelection.add(path.slice('items.node.'.length));
+                continue;
+              }
+
+              if (path.startsWith('node.')) {
+                nodeSelection.add(path.slice('node.'.length));
+                continue;
+              }
+
+              if (path === 'items.node' || path.startsWith('items.')) {
+                continue;
+              }
+
+              nodeSelection.add(path);
+            }
+          }
+
+          for (const entry of connection.items) {
+            const node = entry.node;
+            const cursor = 'cursor' in entry ? (entry.cursor as string) : undefined;
+            cursors.push(cursor);
+            if (isNodeRef(node)) {
+              ids.push(getNodeRefId(node));
+              continue;
+            }
+
+            if (node && typeof node === 'object') {
+              const concreteType = this.relatedEntityType(
+                childType,
+                relationDescriptor.possibleTypes,
+                node as AnyRecord,
+              );
+              const childConfig = this.types.get(concreteType);
+              if (!childConfig) {
+                throw new Error(
+                  `fate: Unknown related type '${concreteType}' (field '${type}.${key}').`,
+                );
+              }
+              const childId = toEntityId(concreteType, childConfig.getId(node as AnyRecord));
+
+              this.writeEntity(
+                concreteType,
+                node as AnyRecord,
+                nodeSelection,
+                plan,
+                fieldPath,
+                undefined,
+                normalization,
+              );
+
+              ids.push(childId);
+              continue;
+            }
+
+            continue;
+          }
+
           if (!acceptField) {
             continue;
           }
+
+          const listKey = getListKey(entityId, schemaField(key), fieldArgs?.hash);
+          const previousList = this.store.getListState(listKey);
+          const argsValue = fieldArgs?.value as AnyRecord | undefined;
+
+          const mergeInfo = getPaginationMergeInfo(argsValue);
+          const pagination = connection.pagination as List['pagination'];
+          const complete =
+            Array.isArray(value) ||
+            (mergeInfo.direction === 'forward'
+              ? pagination?.hasNext === false && pagination.hasPrevious !== true
+              : pagination?.hasPrevious === false && pagination.hasNext !== true);
+          // Queries are authoritative windows. Mutations can return only a
+          // partial page or extra unselected relations; retain loaded pages
+          // unless the selected relation is a complete snapshot.
+          const replace =
+            !this.mutationWrite ||
+            ((!this.mutationWrite.fields || this.mutationWrite.fields.has(fieldPath)) && complete);
+          // A preview must not truncate a compatible full page returned by another alias.
+          // These windows belong to one response; a later snapshot still replaces them.
+          const responseWindow = windows.get(listKey);
+          const preserveWindow =
+            responseWindow?.generation === generation &&
+            !mergeInfo.hasCursorArg &&
+            responseWindow.direction === mergeInfo.direction &&
+            (responseWindow.pageLimit ?? Infinity) >= (mergeInfo.pageLimit ?? Infinity) &&
+            ids.length <= responseWindow.ids.length &&
+            ids.every(
+              (id, index) =>
+                id ===
+                responseWindow.ids[
+                  mergeInfo.direction === 'forward'
+                    ? index
+                    : responseWindow.ids.length - ids.length + index
+                ],
+            );
+          // Equal windows can contribute complementary cursors and pagination.
+          const mergeWindowMetadata =
+            preserveWindow &&
+            previousList &&
+            ids.length === previousList.ids.length &&
+            (pagination !== undefined || cursors.some((cursor) => cursor !== undefined));
+          const nextListState =
+            preserveWindow && previousList && !mergeWindowMetadata
+              ? previousList
+              : this.mergeListState(previousList, ids, cursors, pagination, {
+                  ...mergeInfo,
+                  replace: mergeWindowMetadata ? false : replace,
+                });
+          if (replace && !mergeInfo.hasCursorArg && !preserveWindow) {
+            windows.set(listKey, {
+              direction: mergeInfo.direction,
+              generation,
+              ids,
+              pageLimit: mergeInfo.pageLimit,
+            });
+          }
+
+          const listChanged = !areListStatesEqual(previousList, nextListState);
           setRecordValue(
             result,
             storageKey,
-            reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
+            createNodeRefsForIds(
+              nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
+                ? getListEntries(nextListState).map(({ id }) => id)
+                : nextListState.ids,
+              this.store.read(entityId)?.[storageKey],
+              {
+                reuseCurrentArray: !listChanged,
+              },
+            ),
           );
-        } else if (
-          relationDescriptor &&
-          typeof relationDescriptor === 'object' &&
-          'type' in relationDescriptor
-        ) {
-          const childPaths = selectionTree.get(key) ?? emptySet;
-          if (value === null) {
-            if (acceptField) {
-              setRecordValue(result, storageKey, null);
-            }
-            continue;
-          }
-          if (value && typeof value === 'object' && !isNodeRef(value)) {
-            const childType = this.relatedEntityType(
-              relationDescriptor.type,
-              relationDescriptor.possibleTypes,
-              value as AnyRecord,
-            );
-            const childConfig = this.types.get(childType);
-            if (!childConfig) {
-              throw new Error(
-                `fate: Unknown related type '${childType}' (field '${type}.${key}').`,
-              );
-            }
-            const childId = toEntityId(childType, childConfig.getId(value));
-            if (acceptField) {
-              setRecordValue(
-                result,
-                storageKey,
-                reuseNormalizedField(
-                  createNodeRef(childId),
-                  this.store.read(entityId)?.[storageKey],
-                ),
-              );
-            }
 
-            this.writeEntity(
-              childType,
-              value as AnyRecord,
-              childPaths,
+          this.store.setList(listKey, nextListState);
+        }
+      } else {
+        if (acceptField) {
+          let embedded = normalized.embedded.get(key);
+          if (!embedded) {
+            embedded = compileEmbeddedSelection(selectionTree.get(key) ?? emptySet);
+            normalized.embedded.set(key, embedded);
+          }
+          setRecordValue(
+            result,
+            storageKey,
+            this.normalizeEmbedded(
+              value,
+              this.store.read(entityId)?.[storageKey],
+              embedded,
               plan,
               fieldPath,
-              undefined,
-              normalization,
-            );
-          }
-        } else if (
-          relationDescriptor &&
-          typeof relationDescriptor === 'object' &&
-          'listOf' in relationDescriptor
-        ) {
-          const childPaths = selectionTree.get(key) ?? emptySet;
-          if (value === null) {
-            if (acceptField) {
-              setRecordValue(result, storageKey, null);
-            }
-            continue;
-          }
-          const childType = relationDescriptor.listOf;
-          if (!this.types.has(childType)) {
-            throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
-          }
-
-          const connection = (() => {
-            if (Array.isArray(value)) {
-              return {
-                items: value.map((item) => ({ node: item })),
-              };
-            }
-
-            if (value && typeof value === 'object') {
-              const record = value as AnyRecord;
-              if (Array.isArray(record.items)) {
-                return {
-                  items: record.items.map((node) => {
-                    if (node && typeof node === 'object' && 'node' in node) {
-                      const itemRecord = node as AnyRecord;
-                      return {
-                        cursor: itemRecord.cursor,
-                        node: itemRecord.node,
-                      };
-                    }
-
-                    return { node };
-                  }),
-                  pagination: record.pagination,
-                };
-              }
-            }
-
-            return null;
-          })();
-
-          if (connection) {
-            const ids: Array<EntityId> = [];
-            const cursors: Array<string | undefined> = [];
-
-            const nodeSelection = [...childPaths].some(
-              (path) => path.startsWith('items.') || path.startsWith('node.'),
-            )
-              ? new Set<string>()
-              : childPaths;
-
-            if (nodeSelection !== childPaths) {
-              for (const path of childPaths) {
-                if (path.startsWith('items.node.')) {
-                  nodeSelection.add(path.slice('items.node.'.length));
-                  continue;
-                }
-
-                if (path.startsWith('node.')) {
-                  nodeSelection.add(path.slice('node.'.length));
-                  continue;
-                }
-
-                if (path === 'items.node' || path.startsWith('items.')) {
-                  continue;
-                }
-
-                nodeSelection.add(path);
-              }
-            }
-
-            for (const entry of connection.items) {
-              const node = entry.node;
-              const cursor = 'cursor' in entry ? (entry.cursor as string) : undefined;
-              cursors.push(cursor);
-              if (isNodeRef(node)) {
-                ids.push(getNodeRefId(node));
-                continue;
-              }
-
-              if (node && typeof node === 'object') {
-                const concreteType = this.relatedEntityType(
-                  childType,
-                  relationDescriptor.possibleTypes,
-                  node as AnyRecord,
-                );
-                const childConfig = this.types.get(concreteType);
-                if (!childConfig) {
-                  throw new Error(
-                    `fate: Unknown related type '${concreteType}' (field '${type}.${key}').`,
-                  );
-                }
-                const childId = toEntityId(concreteType, childConfig.getId(node as AnyRecord));
-
-                this.writeEntity(
-                  concreteType,
-                  node as AnyRecord,
-                  nodeSelection,
-                  plan,
-                  fieldPath,
-                  undefined,
-                  normalization,
-                );
-
-                ids.push(childId);
-                continue;
-              }
-
-              continue;
-            }
-
-            if (!acceptField) {
-              continue;
-            }
-
-            const listKey = getListKey(entityId, schemaField(key), fieldArgs?.hash);
-            const previousList = this.store.getListState(listKey);
-            const argsValue = fieldArgs?.value as AnyRecord | undefined;
-
-            const mergeInfo = getPaginationMergeInfo(argsValue);
-            const pagination = connection.pagination as List['pagination'];
-            const complete =
-              Array.isArray(value) ||
-              (mergeInfo.direction === 'forward'
-                ? pagination?.hasNext === false && pagination.hasPrevious !== true
-                : pagination?.hasPrevious === false && pagination.hasNext !== true);
-            // Queries are authoritative windows. Mutations can return only a
-            // partial page or extra unselected relations; retain loaded pages
-            // unless the selected relation is a complete snapshot.
-            const replace =
-              !this.mutationWrite ||
-              ((!this.mutationWrite.fields || this.mutationWrite.fields.has(fieldPath)) &&
-                complete);
-            // A preview must not truncate a compatible full page returned by another alias.
-            // These windows belong to one response; a later snapshot still replaces them.
-            const responseWindow = windows.get(listKey);
-            const preserveWindow =
-              responseWindow?.generation === generation &&
-              !mergeInfo.hasCursorArg &&
-              responseWindow.direction === mergeInfo.direction &&
-              (responseWindow.pageLimit ?? Infinity) >= (mergeInfo.pageLimit ?? Infinity) &&
-              ids.length <= responseWindow.ids.length &&
-              ids.every(
-                (id, index) =>
-                  id ===
-                  responseWindow.ids[
-                    mergeInfo.direction === 'forward'
-                      ? index
-                      : responseWindow.ids.length - ids.length + index
-                  ],
-              );
-            // Equal windows can contribute complementary cursors and pagination.
-            const mergeWindowMetadata =
-              preserveWindow &&
-              previousList &&
-              ids.length === previousList.ids.length &&
-              (pagination !== undefined || cursors.some((cursor) => cursor !== undefined));
-            const nextListState =
-              preserveWindow && previousList && !mergeWindowMetadata
-                ? previousList
-                : this.mergeListState(previousList, ids, cursors, pagination, {
-                    ...mergeInfo,
-                    replace: mergeWindowMetadata ? false : replace,
-                  });
-            if (replace && !mergeInfo.hasCursorArg && !preserveWindow) {
-              windows.set(listKey, {
-                direction: mergeInfo.direction,
-                generation,
-                ids,
-                pageLimit: mergeInfo.pageLimit,
-              });
-            }
-
-            const listChanged = !areListStatesEqual(previousList, nextListState);
-            setRecordValue(
-              result,
               storageKey,
-              createNodeRefsForIds(
-                nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
-                  ? getListEntries(nextListState).map(({ id }) => id)
-                  : nextListState.ids,
-                this.store.read(entityId)?.[storageKey],
-                {
-                  reuseCurrentArray: !listChanged,
-                },
-              ),
-            );
-
-            this.store.setList(listKey, nextListState);
-          }
-        } else {
-          if (acceptField) {
-            let embedded = normalized.embedded.get(key);
-            if (!embedded) {
-              embedded = compileEmbeddedSelection(selectionTree.get(key) ?? emptySet);
-              normalized.embedded.set(key, embedded);
-            }
-            setRecordValue(
-              result,
-              storageKey,
-              this.normalizeEmbedded(
-                value,
-                this.store.read(entityId)?.[storageKey],
-                embedded,
-                plan,
-                fieldPath,
-                storageKey,
-                replacedPaths,
-              ),
-            );
-          }
-        }
-      }
-
-      for (const key of Object.keys(record)) {
-        if (config.fields?.[schemaField(key)]) {
-          continue;
-        }
-        const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
-        let storageKey = storageKeys.get(fieldPath);
-        if (storageKey === undefined) {
-          storageKey = getFieldKey(fieldPath, plan);
-          storageKeys.set(fieldPath, storageKey);
-        }
-        if (this.acceptFieldWrite(entityId, storageKey, generation)) {
-          setRecordValue(
-            result,
-            storageKey,
-            reuseNormalizedField(record[key], this.store.read(entityId)?.[storageKey]),
+              replacedPaths,
+            ),
           );
         }
       }
+    }
 
-      const selectedPaths: Array<string> = [];
-      const prefix = pathPrefix ?? '';
-      let storagePaths = normalized.storagePaths.get(prefix);
-      if (!storagePaths) {
-        storagePaths = [...expandedSelection].map((path) => {
-          const storagePath = getStoragePath(path, plan, prefix);
-          return {
-            path,
-            recordKey: path.split('.')[0],
-            storageKey: storagePath.split('.')[0],
-            storagePath,
-          };
-        });
-        normalized.storagePaths.set(prefix, storagePaths);
+    for (const key of Object.keys(record)) {
+      if (config.fields?.[schemaField(key)]) {
+        continue;
       }
-      for (const { path, recordKey, storageKey, storagePath } of storagePaths) {
-        if (!select.has(path)) {
-          continue;
-        }
-        // JSON omits selected undefined fields; they still have coverage unless
-        // a newer write has superseded this response.
-        if (
-          Object.hasOwn(result, storageKey) ||
-          (!Object.hasOwn(record, recordKey) &&
-            this.acceptFieldWrite(entityId, storageKey, generation))
-        ) {
-          selectedPaths.push(storagePath);
-        }
+      const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+      let storageKey = storageKeys.get(fieldPath);
+      if (storageKey === undefined) {
+        storageKey = getFieldKey(fieldPath, plan);
+        storageKeys.set(fieldPath, storageKey);
       }
+      if (this.acceptFieldWrite(entityId, storageKey, generation)) {
+        setRecordValue(
+          result,
+          storageKey,
+          reuseNormalizedField(record[key], this.store.read(entityId)?.[storageKey]),
+        );
+      }
+    }
 
-      this.withWriteGeneration(generation, () =>
-        this.store.merge(entityId, result, selectedPaths, replacedPaths),
-      );
-      this.linkParentLists(type, entityId, result, insert ?? 'none');
-      if (!pathPrefix && insert) {
-        this.insertIntoRootLists(type, entityId, insert);
+    const selectedPaths: Array<string> = [];
+    const prefix = pathPrefix ?? '';
+    let storagePaths = normalized.storagePaths.get(prefix);
+    if (!storagePaths) {
+      storagePaths = [...expandedSelection].map((path) => {
+        const storagePath = getStoragePath(path, plan, prefix);
+        return {
+          path,
+          recordKey: path.split('.')[0],
+          storageKey: storagePath.split('.')[0],
+          storagePath,
+        };
+      });
+      normalized.storagePaths.set(prefix, storagePaths);
+    }
+    for (const { path, recordKey, storageKey, storagePath } of storagePaths) {
+      if (!select.has(path)) {
+        continue;
       }
-      return entityId;
-    });
+      // JSON omits selected undefined fields; they still have coverage unless
+      // a newer write has superseded this response.
+      if (
+        Object.hasOwn(result, storageKey) ||
+        (!Object.hasOwn(record, recordKey) &&
+          this.acceptFieldWrite(entityId, storageKey, generation))
+      ) {
+        selectedPaths.push(storagePath);
+      }
+    }
+
+    this.withWriteGeneration(generation, () =>
+      this.store.merge(entityId, result, selectedPaths, replacedPaths),
+    );
+    this.linkParentLists(type, entityId, result, insert ?? 'none');
+    if (!pathPrefix && insert) {
+      this.insertIntoRootLists(type, entityId, insert);
+    }
+    return entityId;
   }
 
   private linkParentLists(

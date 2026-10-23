@@ -642,13 +642,14 @@ export class Store {
     partial: AnyRecord,
     paths: Iterable<string>,
     replacedPaths: Iterable<string> = [],
-  ) {
-    return this.update(() => {
-      const change = this.mergeInternal(id, partial, paths, replacedPaths);
-      if (change) {
-        this.notify(id, change.paths, true, change.referencesChanged);
-      }
-    });
+  ): void {
+    if (!this.rebase && this.optimisticLayers.size) {
+      return this.update(() => this.merge(id, partial, paths, replacedPaths));
+    }
+    const change = this.mergeInternal(id, partial, paths, replacedPaths);
+    if (change) {
+      this.notify(id, change.paths, true, change.referencesChanged);
+    }
   }
 
   private mergeInternal(
@@ -881,17 +882,18 @@ export class Store {
     return entries;
   }
 
-  setList(key: string, state: List) {
-    return this.update(() => {
-      this.captureList(key);
-      const previous = this.lists.get(key);
-      if (previous) {
-        this.removeListIndexes(key, previous);
-      }
-      this.lists.set(key, state);
-      this.addListIndexes(key, state);
-      this.notifyListSubscribers(key, true, previous);
-    });
+  setList(key: string, state: List): void {
+    if (!this.rebase && this.optimisticLayers.size) {
+      return this.update(() => this.setList(key, state));
+    }
+    this.captureList(key);
+    const previous = this.lists.get(key);
+    if (previous) {
+      this.removeListIndexes(key, previous);
+    }
+    this.lists.set(key, state);
+    this.addListIndexes(key, state);
+    this.notifyListSubscribers(key, true, previous);
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
