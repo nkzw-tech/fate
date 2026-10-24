@@ -1335,3 +1335,42 @@ test('ingests frozen root connection edges without retaining mutable response va
   expect(client.store.read('Post:1')?.tags).toEqual(['one']);
   expect(edges[0].node).toBe(node);
 });
+
+test.each([false, true])(
+  'normalizes bulk ID results with one-shot selections (mapped: %s)',
+  async (mapped) => {
+    const rows = [
+      { __typename: 'User', id: 'User-1', label: 'Ada' },
+      { __typename: 'User', id: 'User-2', label: 'Lin' },
+    ];
+    const createTransport = () =>
+      createGraphQLTransport({
+        ...(mapped ? { byId: { User: { field: 'user' } } } : {}),
+        fetch: async () =>
+          jsonResponse({ data: mapped ? { f1: rows[0], f2: rows[1] } : { f1: rows } }),
+        live: false,
+        types: [{ type: 'User' }],
+        url: '/graphql',
+      });
+    const select = (function* () {
+      yield 'id';
+      yield 'label:name';
+    })();
+    await expect(createTransport().fetchById('User', ['1', '2'], select)).resolves.toEqual([
+      { __typename: 'User', id: '1', 'label:name': 'Ada' },
+      { __typename: 'User', id: '2', 'label:name': 'Lin' },
+    ]);
+    const client = createClient({
+      roots: { users: clientRoot('User') },
+      transport: createTransport(),
+      types: [{ type: 'User' }],
+    });
+    const UserView = view<{ __typename: 'User'; id: string; name: string }>()({
+      id: true,
+      label: alias('name', true),
+    });
+    await client.request({ users: { ids: ['1', '2'], view: UserView } });
+    expect(client.store.read('User:1')).toMatchObject({ id: '1', name: 'Ada' });
+    expect(client.store.read('User:2')).toMatchObject({ id: '2', name: 'Lin' });
+  },
+);

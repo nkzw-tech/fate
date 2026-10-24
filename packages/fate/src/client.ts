@@ -44,7 +44,6 @@ import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import {
   normalizationInput,
   normalizationReadContext,
-  withNormalizationInput,
   type NormalizationInput,
 } from './normalization-input.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
@@ -2638,6 +2637,7 @@ export class FateClient<
         return this.store.getListState(connection.key);
       }
       const { items, pagination } = connectionResult;
+      const input = normalizationInput(connectionResult);
 
       if (!items) {
         return this.store.getListState(connection.key);
@@ -2649,12 +2649,15 @@ export class FateClient<
           const incomingCursors: Array<string | undefined> = [];
 
           for (const entry of items) {
-            const id = this.write(
+            const id = this.writeEntity(
               connection.type,
               entry.node as AnyRecord,
               plan.paths,
               plan,
+              null,
               'none',
+              undefined,
+              input,
             );
             if (!this.store.read(id)) {
               continue;
@@ -2727,13 +2730,6 @@ export class FateClient<
           pagination: undefined,
         }
       : list;
-    if (listInput) {
-      const items = connectionPayload?.items ?? [];
-      for (let index = 0; index < items.length; index++) {
-        const { cursor, node } = items[index];
-        items[index] = { cursor, node: withNormalizationInput(node, listInput) };
-      }
-    }
 
     if (!connectionPayload) {
       return this.store.getListState(connection.key);
@@ -2748,7 +2744,16 @@ export class FateClient<
 
         for (const entry of connectionPayload.items) {
           const { node } = entry;
-          const id = this.write(nodeType, node, nodeSelection, plan, 'none');
+          const id = this.writeEntity(
+            nodeType,
+            node,
+            nodeSelection,
+            plan,
+            null,
+            'none',
+            undefined,
+            listInput,
+          );
           if (!this.store.read(id)) {
             continue;
           }
@@ -4192,6 +4197,7 @@ export class FateClient<
         this.rootValues.delete(`list:${item.listKey}`);
       }
       const { items, pagination } = connection;
+      const input = normalizationInput(connection);
       this.withResponseWrite(generation, () =>
         this.store.update(() => {
           const normalization = createNormalizationContext();
@@ -4206,6 +4212,7 @@ export class FateClient<
               null,
               undefined,
               normalization,
+              input,
             );
             ids.push(id);
             cursors.push(entry.cursor);

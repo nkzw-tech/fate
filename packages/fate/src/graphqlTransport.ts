@@ -673,17 +673,7 @@ class GraphQLInput implements NormalizationInput {
   }
 
   read(value: unknown): unknown {
-    const connection = this.connection(value);
-    if (connection !== value) {
-      const items = (connection as { items: Array<{ cursor: string | undefined; node: unknown }> })
-        .items;
-      for (let index = 0; index < items.length; index++) {
-        const { cursor, node } = items[index];
-        items[index] = { cursor, node: withNormalizationInput(node, this) };
-      }
-      return connection;
-    }
-    return withNormalizationInput(value, this);
+    return withNormalizationInput(this.connection(value), this);
   }
 }
 
@@ -998,9 +988,12 @@ export function createGraphQLTransport<
       if (!ids.length) {
         return Promise.resolve([]);
       }
+      const paths = new Set(select);
+      const input = new GraphQLInput(decodeNodeId, types, buildSelectionTree(paths), type);
+      const normalize = (value: unknown) =>
+        isNormalizationRead(context) ? input.read(value) : input.materialize(value);
       const mapping = byId?.[type];
       if (mapping) {
-        const paths = new Set(select);
         const operations = ids.map((id) => {
           const { argumentsForField, variables } = operationArguments();
           const fieldArgs = argumentsForField(schema?.queryType ?? 'Query', mapping.field, {
@@ -1018,15 +1011,7 @@ export function createGraphQLTransport<
             kind: 'query' as const,
             selection: `${mapping.field}${fieldArgs} { ${selection} }`,
             signal: context?.signal,
-            transform: (value: unknown) =>
-              normalizeGraphQLValue({
-                context,
-                decodeNodeId,
-                selection: buildSelectionTree(select),
-                type,
-                types,
-                value,
-              }),
+            transform: normalize,
             variables,
           };
         });
@@ -1045,7 +1030,7 @@ export function createGraphQLTransport<
         args,
         argumentsForField,
         path: '',
-        select,
+        select: paths,
         type,
         types,
       });
@@ -1056,17 +1041,7 @@ export function createGraphQLTransport<
           'type',
         )} { ${selection} } }`,
         signal: context?.signal,
-        transform: (value) =>
-          (Array.isArray(value) ? value : []).filter(Boolean).map((entry) =>
-            normalizeGraphQLValue({
-              context,
-              decodeNodeId,
-              selection: buildSelectionTree(select),
-              type,
-              types,
-              value: entry,
-            }),
-          ),
+        transform: (value) => (Array.isArray(value) ? value : []).filter(Boolean).map(normalize),
         variables,
       }) as Promise<Array<unknown>>;
     },
