@@ -9,10 +9,16 @@ import {
   type GraphQLArgumentSchema,
   type GraphQLByIdConfig,
 } from './graphqlSchema.ts';
+import {
+  isNormalizationRead,
+  registerNormalizationTransport,
+  withNormalizationInput,
+  type NormalizationInput,
+} from './normalization-input.ts';
 import { abortable, batchReadControl } from './read-control.ts';
 import { isRecord } from './record.ts';
 import { encodeRefetchArgs, getRefetchFields } from './refetch.ts';
-import type { Transport } from './transport.ts';
+import type { ReadContext, Transport } from './transport.ts';
 import type { AnyRecord, Entity, MutationShape, Pagination, TypeConfig } from './types.ts';
 
 type TransportMutations = Record<string, MutationShape>;
@@ -545,36 +551,92 @@ const buildRecordSelection = ({
   return walk(type, tree, path, embedded);
 };
 
-const normalizeGraphQLValue = ({
-  decodeNodeId,
-  selection,
-  type,
-  types,
-  value,
-}: {
-  decodeNodeId: (type: string, id: string | number) => string | number;
-  selection?: SelectionTree;
-  type?: string;
-  types: ReadonlyMap<string, TypeConfig>;
-  value: unknown;
-}): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((entry) =>
-      entry && typeof entry === 'object'
-        ? normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: entry })
-        : entry,
-    );
+class GraphQLInput implements NormalizationInput {
+  private readonly children = new Map<string, Map<string | undefined, GraphQLInput>>();
+  private readonly responseKeys = new Map<string, string>();
+
+  constructor(
+    private readonly decodeNodeId: (type: string, id: string | number) => string | number,
+    private readonly types: ReadonlyMap<string, TypeConfig>,
+    private readonly selection?: SelectionTree,
+    private readonly type?: string,
+  ) {
+    for (const [responseKey, field] of selection?.responseFields ?? []) {
+      if (field.key !== responseKey) {
+        this.responseKeys.set(field.key, responseKey);
+      }
+    }
   }
 
-  if (isRecord(value) && (value.edges === null || Array.isArray(value.edges))) {
+  keys(record: AnyRecord): Array<string> {
+    const keys = Object.keys(record);
+    if (this.responseKeys.size) {
+      for (let index = 0; index < keys.length; index++) {
+        keys[index] = this.selection?.responseFields.get(keys[index])?.key ?? keys[index];
+      }
+    }
+    return keys;
+  }
+
+  has(record: AnyRecord, key: string): boolean {
+    return Object.hasOwn(record, this.responseKeys.get(key) ?? key);
+  }
+
+  get(record: AnyRecord, key: string): unknown {
+    const value = record[this.responseKeys.get(key) ?? key];
+    if (key !== 'id' && !key.endsWith(':id')) {
+      return value;
+    }
+    const type = typeof record.__typename === 'string' ? record.__typename : this.type;
+    return type && (typeof value === 'string' || typeof value === 'number')
+      ? this.decodeNodeId(type, value)
+      : value;
+  }
+
+  child(record: AnyRecord, key: string): GraphQLInput {
+    const type = typeof record.__typename === 'string' ? record.__typename : this.type;
+    let byType = this.children.get(key);
+    const cached = byType?.get(type);
+    if (cached) {
+      return cached;
+    }
+    const descriptor = type ? this.types.get(type)?.fields?.[schemaField(key)] : undefined;
+    const childType =
+      descriptor && typeof descriptor === 'object'
+        ? 'type' in descriptor
+          ? descriptor.type
+          : 'embedded' in descriptor
+            ? descriptor.embedded
+            : undefined
+        : undefined;
+    const responseKey = this.responseKeys.get(key) ?? key;
+    const selection =
+      this.selection?.responseFields.get(responseKey)?.selection ?? this.selection?.fields.get(key);
+    const child = new GraphQLInput(this.decodeNodeId, this.types, selection, childType);
+    if (!byType) {
+      byType = new Map();
+      this.children.set(key, byType);
+    }
+    byType.set(type, child);
+    return child;
+  }
+
+  connection(value: unknown, materialize = false): unknown {
+    if (!isRecord(value) || !(value.edges === null || Array.isArray(value.edges))) {
+      return value;
+    }
     const pageInfo = isRecord(value.pageInfo) ? value.pageInfo : {};
     const items: Array<{ cursor: string | undefined; node: unknown }> = [];
     for (const edge of value.edges ?? []) {
       if (isRecord(edge) && edge.node != null) {
-        items.push({
-          cursor: typeof edge.cursor === 'string' ? edge.cursor : undefined,
-          node: normalizeGraphQLValue({ decodeNodeId, selection, type, types, value: edge.node }),
-        });
+        items.push(
+          !materialize && (edge.cursor === undefined || typeof edge.cursor === 'string')
+            ? (edge as { cursor: string | undefined; node: unknown })
+            : {
+                cursor: typeof edge.cursor === 'string' ? edge.cursor : undefined,
+                node: materialize ? this.materialize(edge.node) : edge.node,
+              },
+        );
       }
     }
     return {
@@ -588,43 +650,60 @@ const normalizeGraphQLValue = ({
     };
   }
 
-  if (!isRecord(value)) {
-    return value;
-  }
-
-  const typename = typeof value.__typename === 'string' ? value.__typename : type;
-  const config = typename ? types.get(typename) : undefined;
-  const result: AnyRecord = {};
-
-  for (const responseKey of Object.keys(value)) {
-    const entry = value[responseKey];
-    const field = selection?.responseFields.get(responseKey);
-    const key = field?.key ?? responseKey;
-    const name = field?.field ?? schemaField(key);
-    if (name === 'id' && typename && (typeof entry === 'string' || typeof entry === 'number')) {
-      result[key] = decodeNodeId(typename, entry);
-    } else if (entry && typeof entry === 'object') {
-      const descriptor = config?.fields?.[name];
-      result[key] = normalizeGraphQLValue({
-        decodeNodeId,
-        selection: field?.selection ?? selection?.fields.get(key),
-        type:
-          descriptor && typeof descriptor === 'object'
-            ? 'type' in descriptor
-              ? descriptor.type
-              : 'embedded' in descriptor
-                ? descriptor.embedded
-                : undefined
-            : undefined,
-        types,
-        value: entry,
-      });
-    } else {
-      result[key] = entry;
+  materialize(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((entry) =>
+        entry && typeof entry === 'object' ? this.materialize(entry) : entry,
+      );
     }
+    if (!isRecord(value)) {
+      return value;
+    }
+    const connection = this.connection(value, true);
+    if (connection !== value) {
+      return connection;
+    }
+    const result: AnyRecord = {};
+    for (const key of this.keys(value)) {
+      const entry = this.get(value, key);
+      result[key] =
+        entry && typeof entry === 'object' ? this.child(value, key).materialize(entry) : entry;
+    }
+    return result;
   }
 
-  return result;
+  read(value: unknown): unknown {
+    const connection = this.connection(value);
+    if (connection !== value) {
+      const items = (connection as { items: Array<{ cursor: string | undefined; node: unknown }> })
+        .items;
+      for (let index = 0; index < items.length; index++) {
+        const { cursor, node } = items[index];
+        items[index] = { cursor, node: withNormalizationInput(node, this) };
+      }
+      return connection;
+    }
+    return withNormalizationInput(value, this);
+  }
+}
+
+const normalizeGraphQLValue = ({
+  context,
+  decodeNodeId,
+  selection,
+  type,
+  types,
+  value,
+}: {
+  context?: ReadContext;
+  decodeNodeId: (type: string, id: string | number) => string | number;
+  selection?: SelectionTree;
+  type?: string;
+  types: ReadonlyMap<string, TypeConfig>;
+  value: unknown;
+}): unknown => {
+  const input = new GraphQLInput(decodeNodeId, types, selection, type);
+  return isNormalizationRead(context) ? input.read(value) : input.materialize(value);
 };
 
 const graphQLRequest = async ({
@@ -941,6 +1020,7 @@ export function createGraphQLTransport<
             signal: context?.signal,
             transform: (value: unknown) =>
               normalizeGraphQLValue({
+                context,
                 decodeNodeId,
                 selection: buildSelectionTree(select),
                 type,
@@ -979,6 +1059,7 @@ export function createGraphQLTransport<
         transform: (value) =>
           (Array.isArray(value) ? value : []).filter(Boolean).map((entry) =>
             normalizeGraphQLValue({
+              context,
               decodeNodeId,
               selection: buildSelectionTree(select),
               type,
@@ -1019,6 +1100,7 @@ export function createGraphQLTransport<
         signal: context?.signal,
         transform: (value) =>
           normalizeGraphQLValue({
+            context,
             decodeNodeId,
             selection: buildSelectionTree(select),
             type: root.type,
@@ -1073,6 +1155,7 @@ export function createGraphQLTransport<
         signal: context?.signal,
         transform: (value) =>
           normalizeGraphQLValue({
+            context,
             decodeNodeId,
             selection: buildSelectionTree(select),
             type: root.type,
@@ -1292,9 +1375,9 @@ export function createGraphQLTransport<
   // The live endpoint uses fate's selection protocol, so lower aliases there as
   // for other native transports. Ordinary GraphQL operations keep native aliases.
   const liveTransport = withAliasSupport({ ...transport, supportsAliases: false });
-  return {
+  return registerNormalizationTransport({
     ...transport,
     subscribeById: liveTransport.subscribeById,
     subscribeConnection: liveTransport.subscribeConnection,
-  };
+  });
 }

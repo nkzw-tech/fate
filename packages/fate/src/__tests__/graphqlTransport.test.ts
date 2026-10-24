@@ -1,5 +1,6 @@
 import { buildSchema, graphql, parse, validate } from 'graphql';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
 import { graphQLOutputRelations } from '../graphqlSchema.ts';
@@ -1194,4 +1195,143 @@ test('preserves connection order and cursor validation while skipping absent nod
       previousCursor: undefined,
     },
   });
+});
+
+test.each([false, true])(
+  'ingests wire responses like canonical responses (custom identity: %s)',
+  async (custom) => {
+    const types = [
+      {
+        fields: {
+          friend: { type: 'User' },
+          friends: { listOf: 'User' },
+          profile: { embedded: 'Profile' },
+          tags: 'scalar' as const,
+        },
+        ...(custom
+          ? {
+              getId: (record: unknown) => {
+                const user = record as { friend?: { id: string }; id: string };
+                if (user.friend) {
+                  expect(user.friend.id).toBe('2');
+                }
+                return String(user.id);
+              },
+            }
+          : {}),
+        type: 'User',
+      },
+      { type: 'Profile' },
+    ];
+    const tags = ['one'];
+    const friend = Object.freeze({ __typename: 'User', id: 'User:2', name: 'Lin' });
+    let record: Record<string, unknown> = Object.freeze({
+      __typename: 'User',
+      friend,
+      friends: {
+        edges: [{ cursor: 1, node: friend }, { node: null }, null],
+        pageInfo: { hasNextPage: false },
+      },
+      id: 'User:1',
+      label: 'Ada',
+      profile: { id: 'profile', rows: [{ label: 'one', stale: true }] },
+      tags,
+    });
+    const clients = [false, true].map((canonical) => {
+      const transport = createGraphQLTransport({
+        decodeNodeId: (_, id) => String(id).split(':').at(-1)!,
+        fetch: async (_url, init) => {
+          const alias = JSON.parse(String(init?.body)).query.match(/(f\d+): viewer/)[1];
+          return Object.assign(new Response(), {
+            json: async () => ({ data: { [alias]: record } }),
+          });
+        },
+        live: false,
+        roots: { viewer: { type: 'User' } },
+        types,
+        url: '/graphql',
+      });
+      return createClient({
+        roots: { viewer: clientRoot('User') },
+        transport: canonical ? { ...transport } : transport,
+        types,
+      });
+    });
+    const UserView = view<{
+      __typename: 'User';
+      friend: { __typename: 'User'; id: string; name: string };
+      friends: Array<{ __typename: 'User'; id: string; name: string }>;
+      id: string;
+      name: string;
+      profile: {
+        __typename: 'Profile';
+        rows: Array<{ __typename: 'Row'; label: string }>;
+        toString: string;
+      };
+      tags: Array<string>;
+    }>()({
+      friend: { id: true, name: true },
+      friends: { id: true, name: true },
+      id: true,
+      label: alias('name', true),
+      profile: { rows: { label: true }, toString: true },
+      tags: true,
+    });
+    let settle: Array<() => void> = [];
+    for (let index = 0; index < 2; index++) {
+      const results = await Promise.all(
+        clients.map((client) =>
+          client.request({ viewer: { view: UserView } }, { mode: 'network-only' }),
+        ),
+      );
+      expect(results[0]).toEqual(results[1]);
+      expect(clients[0].store.dehydrate()).toEqual(clients[1].store.dehydrate());
+      if (index === 0) {
+        settle = clients.map((client) =>
+          client.store.optimisticUpdate(() =>
+            client.write('User', { id: '1', name: 'Optimistic' }, new Set(['name'])),
+          ),
+        );
+        record = Object.freeze({
+          ...record,
+          friend: null,
+          profile: { rows: [{ label: 'changed' }] },
+        });
+      }
+    }
+    settle.forEach((rollback) => rollback());
+    expect(clients[0].store.dehydrate()).toEqual(clients[1].store.dehydrate());
+    tags.push('later');
+    expect(clients[0].store.read('User:1')?.tags).toEqual(['one']);
+    expect(clients[1].store.read('User:1')?.tags).toEqual(['one']);
+  },
+);
+
+test('ingests frozen root connection edges without retaining mutable response values', async () => {
+  type Post = { __typename: 'Post'; id: string; tags: Array<string> };
+  const tags = ['one'];
+  const node = Object.freeze({ __typename: 'Post', id: 'Post:1', tags });
+  const edges = Object.freeze([Object.freeze({ cursor: 'first', node })]);
+  const transport = createGraphQLTransport({
+    decodeNodeId: (_, id) => String(id).split(':')[1],
+    fetch: async () =>
+      Object.assign(new Response(), {
+        json: async () => ({ data: { f1: { edges, pageInfo: {} } } }),
+      }),
+    live: false,
+    roots: { posts: { type: 'Post' } },
+    types: [{ type: 'Post' }],
+    url: '/graphql',
+  });
+  const client = createClient({
+    roots: { posts: clientRoot<{ items: Array<{ node: Post }> }, 'Post'>('Post') },
+    transport,
+    types: [{ type: 'Post' }],
+  });
+  await client.request({
+    posts: { list: { items: { node: view<Post>()({ id: true, tags: true }) } } },
+  });
+  tags.push('later');
+  expect(client.store.read('Post:1')?.tags).toEqual(['one']);
+  expect(edges[0].node).toBe(node);
 });

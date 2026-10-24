@@ -41,7 +41,12 @@ import {
   wrapMutation,
 } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
-import { normalizationInput, type NormalizationInput } from './normalization-input.ts';
+import {
+  normalizationInput,
+  normalizationReadContext,
+  withNormalizationInput,
+  type NormalizationInput,
+} from './normalization-input.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
 import type {
   MutationIdentity,
@@ -2620,10 +2625,12 @@ export class FateClient<
         );
       }
 
+      const context = normalizationReadContext(this.transport);
       const connectionResult = await this.transport.fetchList(
         connection.field,
         expandRefetchSelection(this.types, connection.type, plan.paths),
         argsPayload,
+        ...(context ? [context] : []),
       );
       this.assertPersistenceActive();
 
@@ -2705,16 +2712,28 @@ export class FateClient<
       return this.store.getListState(connection.key);
     }
 
-    const list = (parentRecord as AnyRecord)[connection.field] as {
+    const parentInput = normalizationInput(parentRecord);
+    const listValue = parentInput
+      ? parentInput.get(parentRecord as AnyRecord, connection.field)
+      : (parentRecord as AnyRecord)[connection.field];
+    const listInput = parentInput?.child(parentRecord as AnyRecord, connection.field);
+    const list = (listInput ? listInput.connection(listValue) : listValue) as {
       items: Array<{ cursor: string | undefined; node: unknown }>;
       pagination: Pagination;
     };
     const connectionPayload = Array.isArray(list)
       ? {
-          items: list.map((item) => ({ cursor: undefined, node: item })),
+          items: list.map((node) => ({ cursor: undefined, node })),
           pagination: undefined,
         }
       : list;
+    if (listInput) {
+      const items = connectionPayload?.items ?? [];
+      for (let index = 0; index < items.length; index++) {
+        const { cursor, node } = items[index];
+        items[index] = { cursor, node: withNormalizationInput(node, listInput) };
+      }
+    }
 
     if (!connectionPayload) {
       return this.store.getListState(connection.key);
@@ -3973,10 +3992,9 @@ export class FateClient<
     const config = this.getTypeConfig(type);
     const selection = expandRefetchSelection(this.types, type, select);
     if (!config.refetch) {
+      const context = normalizationReadContext(this.transport, signal ? { signal } : undefined);
       const records = await abortable(
-        signal
-          ? this.transport.fetchById(type, ids, selection, args, { signal })
-          : this.transport.fetchById(type, ids, selection, args),
+        this.transport.fetchById(type, ids, selection, args, ...(context ? [context] : [])),
         signal,
       );
       return records.map((record) => ({ generation, record }));
@@ -4014,10 +4032,15 @@ export class FateClient<
           key,
           async (signal) => {
             const record = await abortable(
-              this.transport.fetchQuery!(recipe.root, selection, requestArgs, {
-                refetch: type,
-                ...(signal ? { signal } : {}),
-              }),
+              this.transport.fetchQuery!(
+                recipe.root,
+                selection,
+                requestArgs,
+                normalizationReadContext(this.transport, {
+                  refetch: type,
+                  ...(signal ? { signal } : {}),
+                }),
+              ),
               signal,
             );
             signal?.throwIfAborted();
@@ -4031,7 +4054,8 @@ export class FateClient<
             if (
               !isRecord(record) ||
               (record.__typename != null && record.__typename !== type) ||
-              toEntityId(type, config.getId(record)) !== entityId
+              toEntityId(type, normalizationId(config, record, normalizationInput(record))) !==
+                entityId
             ) {
               throw new Error(
                 `fate: Refetch query '${recipe.root}' returned a different entity for '${entityId}'.`,
@@ -4084,13 +4108,14 @@ export class FateClient<
     }
 
     const generation = ++this.writeGeneration;
+    const context = normalizationReadContext(this.transport, signal ? { signal } : undefined);
     await this.trackPendingRequest(async () => {
       const record = await abortable(
         this.transport.fetchQuery!(
           item.procedure,
           expandRefetchSelection(this.types, item.type, item.plan.paths),
           item.argsPayload,
-          ...(signal ? [{ signal }] : []),
+          ...(context ? [context] : []),
         ),
         signal,
       );
@@ -4143,13 +4168,14 @@ export class FateClient<
     }
 
     const generation = ++this.writeGeneration;
+    const context = normalizationReadContext(this.transport, signal ? { signal } : undefined);
     await this.trackPendingRequest(async () => {
       const connection = await abortable(
         this.transport.fetchList!(
           item.procedure,
           expandRefetchSelection(this.types, item.type, item.plan.paths),
           item.argsPayload,
-          ...(signal ? [{ signal }] : []),
+          ...(context ? [context] : []),
         ),
         signal,
       );
@@ -4215,6 +4241,18 @@ export class FateClient<
     preserveSiblings = true,
     input?: NormalizationInput,
   ): unknown {
+    if (input && input.connection(value) !== value) {
+      return this.normalizeEmbedded(
+        input.materialize(value),
+        previous,
+        selection,
+        plan,
+        prefix,
+        storagePrefix,
+        replacedPaths,
+        preserveSiblings,
+      );
+    }
     if (selection.size === 0) {
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
@@ -4252,16 +4290,24 @@ export class FateClient<
     }
     const result: AnyRecord = preserveSiblings ? { ...existing } : {};
     const keys = input ? input.keys(value) : Object.keys(value);
+    const returned = keys.length;
     for (const key of selection.keys()) {
       if (!(input ? input.has(value, key) : Object.hasOwn(value, key))) {
         keys.push(key);
       }
     }
-    for (const key of keys) {
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index];
       const path = `${prefix}.${key}`;
       const storageKey = getFieldKey(path, plan);
       const normalized = this.normalizeEmbedded(
-        input ? input.get(value, key) : Object.hasOwn(value, key) ? value[key] : undefined,
+        input
+          ? index < returned
+            ? input.get(value, key)
+            : undefined
+          : Object.hasOwn(value, key)
+            ? value[key]
+            : undefined,
         existing && Object.hasOwn(existing, storageKey) ? existing[storageKey] : undefined,
         selection.get(key) ?? emptyEmbeddedSelection,
         plan,
@@ -4302,6 +4348,10 @@ export class FateClient<
       throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
     }
 
+    if (input && config.getId !== getId) {
+      record = input.materialize(record) as AnyRecord;
+      input = undefined;
+    }
     const id = normalizationId(config, record, input);
     const entityId = toEntityId(type, id);
     const generation = this.applyingGeneration ?? ++this.writeGeneration;
@@ -4370,7 +4420,8 @@ export class FateClient<
         continue;
       }
       const value = input ? input.get(record, key) : record[key];
-      const childInput = input?.child(record, key);
+      const childInput =
+        input && value && typeof value === 'object' ? input.child(record, key) : undefined;
       const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
       if (relationDescriptor === 'scalar') {
         if (!acceptField) {
@@ -4406,9 +4457,13 @@ export class FateClient<
           if (!childConfig) {
             throw new Error(`fate: Unknown related type '${childType}' (field '${type}.${key}').`);
           }
+          const childReader = childConfig.getId === getId ? childInput : undefined;
+          const childRecord = (
+            childInput && !childReader ? childInput.materialize(value) : value
+          ) as AnyRecord;
           const childId = toEntityId(
             childType,
-            normalizationId(childConfig, value as AnyRecord, childInput),
+            normalizationId(childConfig, childRecord, childReader),
           );
           if (acceptField) {
             setRecordValue(
@@ -4420,13 +4475,13 @@ export class FateClient<
 
           this.writeEntity(
             childType,
-            value as AnyRecord,
+            childRecord,
             childPaths,
             plan,
             fieldPath,
             undefined,
             normalization,
-            childInput,
+            childReader,
           );
         }
       } else if (
@@ -4650,11 +4705,14 @@ export class FateClient<
         continue;
       }
       if (this.acceptFieldWrite(entityId, storageKey, generation)) {
+        const value = input ? input.get(record, key) : record[key];
         setRecordValue(
           result,
           storageKey,
           reuseNormalizedField(
-            input ? input.child(record, key).materialize(input.get(record, key)) : record[key],
+            input && value && typeof value === 'object'
+              ? input.child(record, key).materialize(value)
+              : value,
             this.store.read(entityId)?.[storageKey],
           ),
         );

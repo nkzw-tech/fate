@@ -152,7 +152,12 @@ const project = (index: number, authorCount: number) => ({
   tags: ['example', index % 3 === 0 ? 'published' : 'draft'],
 });
 
-export const createIngestionFixture = (count: number, authorCount = 20) => {
+export const createIngestionFixture = (
+  count: number,
+  authorCount = 20,
+  { customIdentity = true } = {},
+) => {
+  const clientTypes = customIdentity ? types : types.map(({ getId: _getId, ...config }) => config);
   const connection = (offset: number) => ({
     items: Array.from({ length: count }, (_, index) => ({
       cursor: `cursor-${index + offset}`,
@@ -210,7 +215,7 @@ export const createIngestionFixture = (count: number, authorCount = 20) => {
                 fetchQuery: async () => JSON.parse(json[version]),
                 supportsAliases: true,
               },
-        types,
+        types: clientTypes,
       }),
     current: () => records[version],
     graphQLBytes: Buffer.byteLength(graphQL[0]),

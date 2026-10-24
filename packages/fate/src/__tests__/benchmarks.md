@@ -94,3 +94,21 @@ ownership, and avoid write-history allocations without competing requests. They
 retain response isolation, optimistic rebasing, stale-response protection, and
 store change notifications. Record-specific coverage is copied before mutation;
 normalization metadata is released after each write.
+
+## GraphQL input readers
+
+GraphQL request cases run with both default and custom identity functions. The
+default case reads wire fields during cache normalization, avoiding intermediate
+entity snapshots. Custom identity functions receive canonical snapshots because
+they may inspect nested values. Both paths use the same cache writer, including
+coverage, pagination, write ordering, optimistic rebasing, and notifications.
+
+The GraphQL input reader also materializes results for direct transport calls,
+mutations, value queries, and live events. Alias mapping, identity decoding, and
+connection conversion stay shared between those results and cache ingestion.
+Scalar objects and arrays are copied before entering the cache; wire records are
+never mutated. Reader metadata belongs to the response rather than the retained
+store.
+
+Use the native and custom-identity cases as controls when changing the direct
+path. These benchmarks remain separate from the normal test run.

@@ -22,8 +22,13 @@ for (const [count, authorCount] of [
       writer.write('User', fixture.current(), fixture.plan.paths, fixture.plan);
     });
 
-    for (const mode of ['native', 'graphql'] as const) {
-      describe(mode, async () => {
+    for (const [mode, customIdentity] of [
+      ['native', true],
+      ['graphql', true],
+      ['graphql', false],
+    ] as const) {
+      const fixture = createIngestionFixture(count, authorCount, { customIdentity });
+      describe(`${mode}, ${customIdentity ? 'custom' : 'default'} identity`, async () => {
         const client = fixture.createClient(mode);
         const result = await client.request(fixture.request);
         const snapshot = await client.readView<
