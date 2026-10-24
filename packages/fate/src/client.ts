@@ -2418,22 +2418,18 @@ export class FateClient<
       hasIncomingCursor || Boolean(previousWindow?.cursors) || options.hasCursorArg;
     let cursors: Array<string | undefined> | undefined;
     if (shouldStoreCursors) {
-      if (!previousWindow && ids.length < 2) {
-        cursors = ids.length ? [incomingCursors[0]] : [];
-      } else {
-        const cursorMap = new Map<EntityId, string | undefined>();
-        if (previousWindow?.cursors) {
-          previousWindow.cursors.forEach((cursor, index) => {
-            cursorMap.set(existingIds[index], cursor);
-          });
-        }
-        incomingCursors.forEach((cursor, index) => {
-          if (cursor !== undefined) {
-            cursorMap.set(incomingIds[index], cursor);
-          }
+      const cursorMap = new Map<EntityId, string | undefined>();
+      if (previousWindow?.cursors) {
+        previousWindow.cursors.forEach((cursor, index) => {
+          cursorMap.set(existingIds[index], cursor);
         });
-        cursors = ids.map((id) => cursorMap.get(id));
       }
+      incomingCursors.forEach((cursor, index) => {
+        if (cursor !== undefined) {
+          cursorMap.set(incomingIds[index], cursor);
+        }
+      });
+      cursors = ids.map((id) => cursorMap.get(id));
     }
 
     const previousPagination = previousWindow?.pagination;
