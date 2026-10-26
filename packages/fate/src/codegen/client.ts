@@ -928,10 +928,9 @@ const createNativeClientSource = ({
   };
   const hasLive = Object.keys(manifest.live ?? {}).length > 0;
 
-  const byIdEntries = Object.keys(manifest.types ?? {}).map((type) => ({
-    name: lowerTypeName(type),
-    type,
-  }));
+  const byIdEntries = Object.keys(manifest.types ?? {})
+    .map((type) => ({ name: lowerTypeName(type), type }))
+    .filter(({ name }) => !Object.hasOwn(roots, name));
   const mutationEntries = Object.entries(manifest.mutations ?? {}).map(([name, config]) => ({
     name,
     type: config.type,
@@ -954,7 +953,7 @@ const createNativeClientSource = ({
   const importedTypes = Array.from(
     new Set([
       fateExportName === 'fate' ? 'fate as fateServer' : 'fateServer',
-      ...types.map((type) => type.type),
+      ...byIdEntries.map(({ type }) => type),
       ...mutationEntries.map((entry) => entry.type),
     ]),
   ).sort((a, b) => a.localeCompare(b));

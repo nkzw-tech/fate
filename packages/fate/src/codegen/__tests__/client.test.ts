@@ -301,6 +301,81 @@ test('generates a native HTTP client source without react-fate for core clients'
   expect(sourceText).not.toContain("declare module 'react-fate/client'");
 });
 
+test.each(['native', 'void'] as const)(
+  'prefers explicit query and list roots over implicit entity roots for %s clients',
+  (transport) => {
+    type Post = { id: string; title: string };
+    const postDataView = dataView<Post>('Post')({ id: true, title: true });
+    const source: SourceDefinition<Post> = { id: 'id', view: postDataView };
+
+    for (const root of [postDataView, list(postDataView)]) {
+      const Root = { post: root };
+      const fateServer = createFateServer({
+        queries:
+          root.kind === 'list'
+            ? {}
+            : {
+                post: { resolve: () => ({ id: '1', title: 'Post' }) },
+              },
+        roots: Root,
+        sources: {
+          getSource: <Item extends Record<string, unknown>>() =>
+            source as unknown as SourceDefinition<Item>,
+          registry: createSourceRegistry([[source, {}]]),
+        },
+      });
+      const sourceText = createClientSource({
+        moduleExports: { fateServer, postDataView, Root },
+        moduleName: '@org/server/http.ts',
+        transport,
+      });
+      const section = root.kind === 'list' ? 'lists' : 'queries';
+
+      expect(sourceText.match(/'post': clientRoot</g)).toHaveLength(1);
+      expect(sourceText).toContain(
+        `'post': clientRoot<FateAPI['${section}']['post']['output'], 'Post'>('Post')`,
+      );
+      expect(sourceText).toContain("import type { fateServer } from '@org/server/http.ts';");
+    }
+  },
+);
+
+test.each(['native', 'void'] as const)(
+  'keeps mutation entity imports when an explicit %s root replaces its implicit root',
+  (transport) => {
+    type Post = { id: string; title: string };
+    const postDataView = dataView<Post>('Post')({ id: true, title: true });
+    const source: SourceDefinition<Post> = { id: 'id', view: postDataView };
+    const Root = { post: postDataView };
+    const fateServer = createFateServer({
+      mutations: {
+        'post.like': {
+          resolve: ({ input }: { input: { id: string } }) => ({ id: input.id, title: 'Liked' }),
+          type: 'Post',
+        },
+      },
+      queries: { post: { resolve: () => ({ id: '1', title: 'Post' }) } },
+      roots: Root,
+      sources: {
+        getSource: <Item extends Record<string, unknown>>() =>
+          source as unknown as SourceDefinition<Item>,
+        registry: createSourceRegistry([[source, {}]]),
+      },
+    });
+    const sourceText = createClientSource({
+      moduleExports: { fateServer, postDataView, Root },
+      moduleName: '@org/server/http.ts',
+      transport,
+    });
+
+    expect(sourceText.match(/'post': clientRoot</g)).toHaveLength(1);
+    expect(sourceText).toContain("import type { fateServer, Post } from '@org/server/http.ts';");
+    expect(sourceText).toContain(
+      "mutation<\n    Post,\n    FateAPI['mutations']['post.like']['input']",
+    );
+  },
+);
+
 test('generates a native HTTP client source for fateServer exports', () => {
   type Post = { id: string; title: string };
   const postDataView = dataView<Post>('Post')({
