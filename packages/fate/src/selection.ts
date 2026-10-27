@@ -1,5 +1,5 @@
 import { aliasedField, isAliasedSelection, isAliasedView, responseField } from './alias.ts';
-import { cloneArgs, hashArgs, paginationArgKeys } from './args.ts';
+import { cloneArgs, getConnectionWindowIgnoreKeys, hashArgs, hashConnectionArgs } from './args.ts';
 import { isDeferredSelection } from './defer.ts';
 import { isRecord } from './record.ts';
 import {
@@ -55,7 +55,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     if (previous && hashArgs(previous.value) !== hashArgs(value)) {
       throw new Error(`fate: Conflicting arguments for '${path}'. Use distinct aliases.`);
     }
-    const hash = hashArgs(value, { ignoreKeys });
+    const hash = ignoreKeys ? hashConnectionArgs(value, ignoreKeys) : hashArgs(value);
     args.set(path, { hash, ignoreKeys, value });
   };
 
@@ -76,7 +76,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
         const clonedArgs = cloneArgs(selection.args, 'args');
         const ignoreKeys =
           isRecord(selection.items) && isRecord(selection.items.node)
-            ? paginationArgKeys
+            ? getConnectionWindowIgnoreKeys(clonedArgs)
             : undefined;
         assignArgs('', clonedArgs, ignoreKeys);
       }
@@ -167,7 +167,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
             const clonedArgs = cloneArgs(selectionObject.args, path);
             const ignoreKeys =
               isRecord(selectionObject.items) && isRecord(selectionObject.items.node)
-                ? paginationArgKeys
+                ? getConnectionWindowIgnoreKeys(clonedArgs)
                 : undefined;
             assignArgs(path, clonedArgs, ignoreKeys);
           }
@@ -183,7 +183,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
           const clonedArgs = cloneArgs(selectionObject.args as AnyRecord, path);
           const ignoreKeys =
             isRecord(selectionObject.items) && isRecord(selectionObject.items?.node)
-              ? paginationArgKeys
+              ? getConnectionWindowIgnoreKeys(clonedArgs)
               : undefined;
           assignArgs(path, clonedArgs, ignoreKeys);
           const { args: _args, ...rest } = selectionObject;

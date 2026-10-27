@@ -347,6 +347,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
             paths: {
               '@nkzw/fate': [path.join(root, 'packages/fate/src/index.ts')],
               '@nkzw/fate/client': [path.join(root, 'packages/fate/lib/clientStub.d.mts')],
+              '@nkzw/fate/list': [path.join(root, 'packages/fate/src/list.ts')],
               react: [path.join(root, 'packages/react-fate/node_modules/@types/react/index.d.ts')],
               'react-fate': [path.join(root, 'packages/react-fate/src/index.tsx')],
               'react-fate/client': [path.join(root, 'packages/react-fate/lib/client.d.mts')],

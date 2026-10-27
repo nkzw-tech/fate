@@ -1,3 +1,4 @@
+import { GraphQLError } from 'graphql';
 import { auth } from '../lib/auth.tsx';
 import prisma from '../prisma/prisma.tsx';
 import builder, { JSONScalar } from './builder.tsx';
@@ -57,6 +58,12 @@ builder.mutationField('postAdd', (t) =>
     resolve: async (query, _root, { input }, { sessionUser }) => {
       if (!sessionUser) {
         throw new Error('You must be logged in to add a post.');
+      }
+
+      if (!input.title.length || !input.content.length) {
+        throw new GraphQLError('Title and content are required.', {
+          extensions: { code: 'BAD_USER_INPUT' },
+        });
       }
 
       const post = await prisma.post.create({

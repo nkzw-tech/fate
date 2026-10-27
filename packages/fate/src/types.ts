@@ -101,6 +101,7 @@ export type ConnectionMetadata = Readonly<{
   procedure: string;
   root?: boolean;
   type: string;
+  windowKey?: string;
 }>;
 
 /** A fully resolved view payload augmented with the set of view tags applied to it. */

@@ -1374,3 +1374,92 @@ test.each([false, true])(
     expect(client.store.read('User:2')).toMatchObject({ id: '2', name: 'Lin' });
   },
 );
+
+test('GraphQL previews and independently requested cursor pages keep separate windows', async () => {
+  type Item = { __typename: 'Item'; id: string; name: string };
+  const schema = buildSchema(`
+    type Item { id: ID!, name: String! }
+    type Edge { cursor: String!, node: Item! }
+    type PageInfo { hasNextPage: Boolean!, hasPreviousPage: Boolean!, startCursor: String, endCursor: String }
+    type Connection { edges: [Edge!]!, pageInfo: PageInfo! }
+    type Query { items(first: Int, last: Int, after: String): Connection! }
+  `);
+  const metadata = createGraphQLArgumentSchema(schema);
+  const types = graphQLOutputRelations(metadata);
+  const fetch = vi.fn(async (_url, init) => {
+    const { query, variables } = JSON.parse(String(init?.body));
+    return jsonResponse(
+      await graphql({
+        rootValue: {
+          items: ({ after, first, last }: { after?: string; first?: number; last?: number }) => {
+            const start = after ? Number(after) : last == null ? 0 : Math.max(0, 6 - last);
+            const nodes = Array.from(
+              { length: Math.min(first ?? last ?? 6, 6 - start) },
+              (_, index) => ({
+                id: String(start + index + 1),
+                name: String(start + index + 1),
+              }),
+            );
+            return {
+              edges: nodes.map((node) => ({ cursor: node.id, node })),
+              pageInfo: {
+                endCursor: nodes.at(-1)?.id,
+                hasNextPage: start + nodes.length < 6,
+                hasPreviousPage: start > 0,
+                startCursor: nodes[0]?.id,
+              },
+            };
+          },
+        },
+        schema,
+        source: query,
+        variableValues: variables,
+      }),
+    );
+  });
+  const roots = { items: clientRoot<Item, 'Item'>('Item') };
+  const client = createClient<[typeof roots, Record<never, never>]>({
+    roots,
+    transport: createGraphQLTransport({
+      fetch,
+      live: false,
+      roots: { items: { connection: 'relay', type: 'Item' } },
+      schema: metadata,
+      types,
+      url: '/graphql',
+    }),
+    types,
+  });
+  const ItemView = view<Item>()({ id: true, name: true });
+  const Selection = {
+    items: { node: ItemView },
+    pagination: { hasNext: true, nextCursor: true },
+  } as const;
+  const preview = { items: { args: { first: 2 }, list: Selection } };
+  await client.request({ items: { args: { first: 4 }, list: Selection } });
+  expect((await client.request(preview)).items.items.map(({ node }) => node.id)).toEqual([
+    '1',
+    '2',
+  ]);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const later = await client.request({
+    items: { args: { after: '4', first: 2 }, list: Selection },
+  });
+  expect(later.items.items.map(({ node }) => node.id)).toEqual(['5', '6']);
+  expect(client.getRequestResult(preview).items.items.map(({ node }) => node.id)).toEqual([
+    '1',
+    '2',
+  ]);
+  const tail = await client.request({ items: { args: { last: 2 }, list: Selection } });
+  expect(tail.items.items.map(({ node }) => node.id)).toEqual(['5', '6']);
+  expect(client.getRequestResult(preview).items.items.map(({ node }) => node.id)).toEqual([
+    '1',
+    '2',
+  ]);
+  await client.request(preview, { mode: 'network-only' });
+  expect(
+    client
+      .getRequestResult({ items: { args: { first: 4 }, list: Selection } })
+      .items.items.map(({ node }) => node.id),
+  ).toEqual(['1', '2', '3', '4']);
+});

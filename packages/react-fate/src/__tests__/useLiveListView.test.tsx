@@ -74,6 +74,7 @@ test('renders like useListView and updates from live connection events', async (
     new Set(['__typename', 'content', 'id']),
   );
   client.store.setList('posts', {
+    afterCursor: 'before-first',
     cursors: ['cursor-1'],
     ids: [postId],
     pagination: {
@@ -91,7 +92,7 @@ test('renders like useListView and updates from live connection events', async (
   };
   Object.defineProperty(posts, ConnectionTag, {
     value: {
-      args: { after: 'cursor-1', first: 10, topic: 'fruit' },
+      args: { after: 'before-first', first: 10, topic: 'fruit' },
       field: 'posts',
       key: 'posts',
       owner: 'posts',

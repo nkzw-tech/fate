@@ -4,6 +4,8 @@
 
 You can wrap a list of references using `useListView` to enable connection-style lists with pagination support.
 
+Run the regular example with `vp run dev` (tRPC) or `vp run dev:graphql` (GraphQL), then open [Pagination](http://localhost:6001/pagination/preview) from its header. The demo uses the existing posts, client, and router to exercise independent view ranges, navigation, refreshes, and optimistic insertion and rollback. Reading and pagination work without signing in; insertions require an example account and successful insertions create real posts in its database. Browser network throttling makes pending work easier to observe.
+
 For example, you can define a `CommentView` and reuse it inside of a `CommentConnectionView`:
 
 ```tsx
@@ -80,7 +82,11 @@ const CommentConnectionView = {
 
 When `loadNext` runs, fate sends the next cursor as `after` and keeps the page size in `first`. When `loadPrevious` runs, fate sends the previous cursor as `before` and uses `last` for the page size. This lets the server distinguish forward and backward pagination while keeping the component API small.
 
-Loading another page adds items to the list. Refreshing the query without `after` or `before` replaces the loaded list with the latest result, including removed items or an empty list. This applies to nested connections as well as root lists. A failed page load can be retried.
+Each logical view has its own requested window, identified by the view, connection, and original arguments. Calling `loadNext` or `loadPrevious` expands that window. Fate retains the loaded range with the cached connection, so returning to the same view after a remount restores its range. Fetching or paginating the same data through a different view does not expand the original view. Failed page loads leave the window unchanged and can be retried. Multiple readers of the same logical view share its pagination progress.
+
+Queries share cached entities and compatible pages, but `first` and `last` still bound an ordinary request's result. A smaller preview refresh does not truncate pages already loaded by another reader. Partial refreshes update the fetched portion and retain cached continuation pages. A complete server result, including an empty result, can remove stale membership. These rules apply to nested connections and root lists.
+
+Explicit mutation insertions remain visible beyond the initial page size and survive background refreshes. Insertions not yet reconciled with a server list remain local overrides, including across empty responses. Once the server has included an inserted entry, a later authoritative response covering that entry can remove it. Explicit deletions and relationship replacements also remove entries.
 
 Additional arguments on a root request are scoped to that root list:
 

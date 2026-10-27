@@ -34,7 +34,7 @@
       "default": "./lib/clientStub.mjs"
     },
     "./list": {
-      "types": "./src/list.ts",
+      "types": "./lib/list.d.mts",
       "@nkzw/source": "./src/list.ts",
       "default": "./lib/list.mjs"
     },

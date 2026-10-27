@@ -4498,7 +4498,12 @@ test(`'request' keeps cursor args in root list request cache keys`, async () => 
     client
       .getRequestResult({ posts: { list: PostConnectionView } })
       .posts.items.map(({ node }) => node.id),
-  ).toEqual(['post-1', 'post-2']);
+  ).toEqual(['post-1']);
+  expect(
+    client
+      .getRequestResult({ posts: { args: { after: 'cursor-1' }, list: PostConnectionView } })
+      .posts.items.map(({ node }) => node.id),
+  ).toEqual(['post-2']);
 });
 
 test.each(['forward', 'backward'] as const)(
@@ -4575,13 +4580,10 @@ test.each(['forward', 'backward'] as const)(
     expect.soft(fetchList).toHaveBeenCalledTimes(2);
     expect.soft(revisited.posts.items.map(({ node }) => node.id)).toEqual(expectedIds);
 
-    // An explicit refresh still replaces the list and both of its boundaries.
     const refreshed = await client.request(request, { mode: 'network-only' });
     expect(fetchList).toHaveBeenCalledTimes(3);
-    expect(refreshed.posts.items.map(({ node }) => node.id)).toEqual(
-      isBackward ? ['5', '6'] : ['1', '2'],
-    );
-    expect(refreshed.posts.pagination).toEqual(posts.pagination);
+    expect(refreshed.posts.items.map(({ node }) => node.id)).toEqual(expectedIds);
+    expect(refreshed.posts.pagination).toEqual(expanded.pagination);
   },
 );
 

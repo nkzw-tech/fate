@@ -2,10 +2,11 @@ import { aliasedField, isAliasedSelection } from './alias.ts';
 import {
   applyArgsPayloadToPlan,
   combineArgsPayload,
-  filterConnectionArgs,
+  hashConnectionArgs,
   hashArgs,
   resolvedArgsFromPlan,
 } from './args.ts';
+import { getListWindowKey } from './list.ts';
 import { getRootViewNames } from './ref.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
 import { getListKey } from './store.ts';
@@ -24,7 +25,7 @@ import { getViewNames } from './view.ts';
 
 const serializeId = (value: string | number): string => `${typeof value}:${String(value)}`;
 
-const getViewSignature = (view: unknown): string => {
+export const getViewSignature = (view: unknown): string => {
   const viewNames = new Set<string>();
   const seen = new Set<object>();
 
@@ -70,16 +71,13 @@ const getRootListDescriptorKey = (
     return name;
   }
 
-  return getListKey(
-    '__root__',
-    name,
-    plan.args.get('')?.hash ?? hashArgs(filterConnectionArgs(argsPayload) ?? {}),
-  );
+  return getListKey('__root__', name, plan.args.get('')?.hash ?? hashConnectionArgs(argsPayload));
 };
 
 export const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boolean =>
   Boolean(
-    argsPayload && ('after' in argsPayload || 'before' in argsPayload || 'cursor' in argsPayload),
+    argsPayload &&
+    (argsPayload.after != null || argsPayload.before != null || argsPayload.cursor != null),
   );
 
 export type NodeRequestDescriptor = Readonly<{
@@ -129,6 +127,12 @@ export type ListRequestDescriptor = Readonly<{
   viewSignature: string;
 }>;
 
+export const getRootListWindowKey = (item: ListRequestDescriptor): string =>
+  getListWindowKey(
+    item.argsPayload,
+    JSON.stringify([item.name, item.viewSignature, [...item.plan.paths].sort()]),
+  );
+
 export type RequestItemDescriptor =
   | NodeRequestDescriptor
   | QueryRequestDescriptor
@@ -143,8 +147,7 @@ export type RequestDescriptor = Readonly<{
 export const getPaginationArgsInfo = (
   argsPayload: ResolvedArgsPayload | undefined,
 ): { direction: 'backward' | 'forward'; hasCursorArg: boolean } => ({
-  direction:
-    argsPayload?.before !== undefined || argsPayload?.last !== undefined ? 'backward' : 'forward',
+  direction: argsPayload?.before != null || argsPayload?.last != null ? 'backward' : 'forward',
   hasCursorArg: hasCursorArgs(argsPayload),
 });
 

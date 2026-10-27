@@ -7,6 +7,7 @@ import {
   type ConnectionRef,
   type Transport,
   type ViewRef,
+  type ViewSelection,
 } from '@nkzw/fate';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { createApp, defineComponent, h, nextTick, shallowRef } from 'vue';
@@ -15,7 +16,14 @@ import { FateClient, useListView, useLiveListView, useView } from '../index.ts';
 type Comment = { __typename: 'Comment'; content: string; id: string };
 const CommentView = view<Comment>()({ content: true, id: true });
 const Selection = { items: { node: CommentView } };
+const page = (ids: Array<string>, hasNext: boolean) => ({
+  items: ids.map((id) => ({ cursor: id, node: { content: id, id } })),
+  pagination: { hasNext, hasPrevious: false, nextCursor: ids.at(-1), previousCursor: ids[0] },
+});
+
 type Item = ConnectionRef<'Comment'>['items'][number];
+const ids = (items: ReadonlyArray<{ node: { id: string | number } }> | undefined) =>
+  items?.map(({ node }) => node.id);
 const setup = () => {
   const fetchById = vi.fn<Transport['fetchById']>(async () => []);
   const client = createClient({
@@ -134,6 +142,60 @@ test('accepts nullable deferred connections in list and live-list resources', as
     expect(await resource.live.ready()).toBeUndefined();
     expect(resource.live.error.value).toBeNull();
     expect(fetchById).toHaveBeenCalledTimes(1);
+  } finally {
+    app.unmount();
+  }
+});
+
+test('list readers keep independent bounded ranges while sharing cached pages', async () => {
+  type Post = { __typename: 'Post'; comments: Array<Comment>; id: string };
+  const { client, fetchById } = setup();
+  const PostView = view<Post>()(({ first }: { first: number }) => ({
+    comments: { args: { first }, items: { node: { content: true, id: true } } },
+    id: true,
+  }));
+  const large = PostView({ first: 4 });
+  const small = PostView({ first: 2 });
+  fetchById.mockResolvedValueOnce([{ comments: page(['1', '2', '3', '4'], false), id: 'post' }]);
+  await client.readView(large, client.ref('Post', 'post', large));
+  const result = await client.readView<Post, ViewSelection<typeof small>, typeof small>(
+    small,
+    client.ref('Post', 'post', small),
+  );
+  const PreviewView = view<Post>()({
+    comments: { args: { first: 2 }, items: { node: { content: true, id: true } } },
+    id: true,
+  });
+  const preview = await client.readView<
+    Post,
+    ViewSelection<typeof PreviewView>,
+    typeof PreviewView
+  >(PreviewView, client.ref('Post', 'post', PreviewView));
+  const connection = shallowRef(result.data.comments);
+  const createResources = () => ({
+    feed: useListView(Selection, connection),
+    preview: useListView(Selection, preview.data.comments),
+  });
+  let { app, resource } = mount(client, createResources);
+  try {
+    await Promise.all([resource.feed.ready(), resource.preview.ready()]);
+    expect(ids(resource.feed[0].value)).toEqual(['1', '2']);
+    expect(ids(resource.preview[0].value)).toEqual(['1', '2']);
+    fetchById.mockResolvedValueOnce([{ comments: page(['3', '4'], false), id: 'post' }]);
+    await resource.feed[1].value!();
+    expect(ids(resource.feed[0].value)).toEqual(['1', '2', '3', '4']);
+    expect(ids(resource.preview[0].value)).toEqual(['1', '2']);
+    await resource.feed.refresh();
+    expect(ids(resource.feed[0].value)).toEqual(['1', '2', '3', '4']);
+    expect(fetchById).toHaveBeenCalledTimes(2);
+    app.unmount();
+    const remounted = mount(client, createResources);
+    app = remounted.app;
+    resource = remounted.resource;
+    await Promise.all([resource.feed.ready(), resource.preview.ready()]);
+    expect(ids(resource.feed[0].value)).toEqual(['1', '2', '3', '4']);
+    expect(ids(resource.preview[0].value)).toEqual(['1', '2']);
+    expect(fetchById).toHaveBeenCalledTimes(2);
   } finally {
     app.unmount();
   }

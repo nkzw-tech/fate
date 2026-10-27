@@ -1,5 +1,5 @@
 import { type Deferred, type DeferredSnapshot, isDeferred } from '@nkzw/fate';
-import { getListEntries } from '@nkzw/fate/list';
+import { createConnectionReader, getListEntries, getListWindowKey } from '@nkzw/fate/list';
 import {
   markRaw,
   onScopeDispose,
@@ -54,6 +54,8 @@ export function useListView<
   let currentConnection: ConnectionValue | null | undefined;
   let disposed = false;
   let listUnsubscribe: (() => void) | null = null;
+  let reader: ReturnType<typeof createConnectionReader> | null = null;
+  let readerIdentity = '';
   let token = 0;
   let currentPromise: Promise<ConnectionItems<ResolvedConnection<C>>> | null = null;
 
@@ -65,64 +67,21 @@ export function useListView<
   };
 
   const setLoadMore = () => {
-    const metadata = getConnectionMetadata(currentConnection);
-    const listState = metadata ? activeClient.store.getListState(metadata.key) : undefined;
-    const pagination = listState?.pagination ?? currentConnection?.pagination;
-    const hasNext = Boolean(pagination?.hasNext);
-    const hasPrevious = Boolean(pagination?.hasPrevious);
-    const nextCursor = pagination?.nextCursor;
-    const previousCursor = pagination?.previousCursor;
-
+    const pagination = reader?.getSnapshot()?.pagination ?? currentConnection?.pagination;
+    const currentReader = reader;
     loadNext.value =
-      metadata && hasNext && nextCursor
-        ? async () => {
-            const { before: _before, first, last, ...values } = metadata.args || {};
-            const nextPageSize = first ?? last;
-
-            await activeClient.loadConnection(
-              nodeView,
-              metadata,
-              {
-                ...values,
-                after: nextCursor,
-                before: undefined,
-                ...(nextPageSize !== undefined ? { first: nextPageSize } : null),
-                last: undefined,
-              },
-              {
-                direction: 'forward',
-              },
-            );
-          }
+      currentReader && pagination?.hasNext && pagination.nextCursor
+        ? () => currentReader.load(nodeView, 'forward')
         : null;
-
     loadPrevious.value =
-      metadata && hasPrevious && previousCursor
-        ? async () => {
-            const { after: _after, first, last, ...values } = metadata.args || {};
-            const previousPageSize = last ?? first;
-
-            await activeClient.loadConnection(
-              nodeView,
-              metadata,
-              {
-                ...values,
-                after: undefined,
-                before: previousCursor,
-                first: undefined,
-                ...(previousPageSize !== undefined ? { last: previousPageSize } : null),
-              },
-              {
-                direction: 'backward',
-              },
-            );
-          }
+      currentReader && pagination?.hasPrevious && pagination.previousCursor
+        ? () => currentReader.load(nodeView, 'backward')
         : null;
   };
 
   const updateItemsFromStore = () => {
     const metadata = getConnectionMetadata(currentConnection);
-    const listState = metadata ? activeClient.store.getListState(metadata.key) : undefined;
+    const listState = reader?.getSnapshot();
 
     if (metadata && listState) {
       items.value = markRaw(
@@ -144,9 +103,14 @@ export function useListView<
   const updateListSubscription = () => {
     cleanupListSubscription();
     const metadata = getConnectionMetadata(currentConnection);
-    if (metadata) {
-      listUnsubscribe = activeClient.store.subscribeList(metadata.key, updateItemsFromStore);
+    const identity = metadata
+      ? `${metadata.key}|${metadata.windowKey ?? getListWindowKey(metadata.args)}`
+      : '';
+    if (identity !== readerIdentity || !reader) {
+      reader = metadata ? createConnectionReader(activeClient, metadata) : null;
+      readerIdentity = identity;
     }
+    listUnsubscribe = reader?.subscribe(updateItemsFromStore) ?? null;
   };
 
   const resolveConnection = async (): Promise<ConnectionValue | null | undefined> => {
@@ -167,6 +131,8 @@ export function useListView<
     if (nextClient !== activeClient) {
       cleanupListSubscription();
       activeClient = nextClient;
+      reader = null;
+      readerIdentity = '';
     }
     pending.value = true;
     errorState.value = null;

@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
+import { createNodeRef } from '../node-ref.ts';
 import { clientRoot } from '../root.ts';
 import type { Transport } from '../transport.ts';
 import { ConnectionTag, type ConnectionMetadata, type SelectionOf } from '../types.ts';
@@ -175,7 +176,7 @@ test('an optimistic rollback restores the latest refreshed membership rather tha
   expect(client.store.read('User:1')).toMatchObject({ id: '1' });
 });
 
-test('a new first page replaces the previously loaded window and can paginate again', async () => {
+test('a partial first-page refresh retains loaded pages and can paginate again', async () => {
   const { client, fetchById, read, refresh, Selection } = setup();
   const first = await refresh(['1'], true);
   const connection = metadata(first);
@@ -183,22 +184,25 @@ test('a new first page replaces the previously loaded window and can paginate ag
   await client.loadConnection(UserView, connection, { after: 'cursor-1', first: 1 });
   expect(client.store.getListState(connection.key)?.ids).toEqual(['User:1', 'User:2']);
   await refresh(['3'], true);
-  expect(client.store.getListState(connection.key)?.ids).toEqual(['User:3']);
+  expect(client.store.getListState(connection.key)?.ids).toEqual(['User:3', 'User:1', 'User:2']);
   fetchById.mockResolvedValueOnce([{ id: 'g', users: page(['4']) }]);
-  await client.loadConnection(Selection.items.node, connection, { after: 'cursor-3', first: 1 });
-  expect((await read()).items.map(({ node }) => node.id)).toEqual(['3', '4']);
+  await client.loadConnection(Selection.items.node, connection, {
+    after: (await read()).pagination.nextCursor,
+    first: 1,
+  });
+  expect((await read()).items.map(({ node }) => node.id)).toEqual(['3', '1', '2', '4']);
 });
 
-test('a smaller refreshed window does not retain the larger window coverage', async () => {
+test('a smaller preview refresh retains the larger cached window', async () => {
   const { client, fetchQuery, refresh, Selection } = setup();
   const initial = await refresh(['1', '2']);
   const Smaller = view<Group>()({ users: { ...Selection, args: { first: 1 } } });
   fetchQuery.mockResolvedValueOnce({ id: 'g', users: page(['1'], true) });
   await client.request({ group: { view: Smaller } }, { mode: 'network-only' });
   expect(client.store.getListState(metadata(initial).key)).toMatchObject({
-    forwardPageLimit: 1,
-    ids: ['User:1'],
-    pagination: { hasNext: true },
+    forwardPageLimit: 20,
+    ids: ['User:1', 'User:2'],
+    pagination: { hasNext: false },
   });
 });
 
@@ -220,4 +224,17 @@ test('explicit optimistic relationships replace membership and roll back onto a 
   response.reject(new Error('Rejected'));
   await pending;
   expect((await read()).items.map(({ node }) => node.id)).toEqual(['3']);
+});
+
+test('terminal nested pagination reconciles both membership and owner references', async () => {
+  const { client, fetchById, read, refresh } = setup();
+  const first = await refresh(['1', '2', '3', '4']);
+  const connection = metadata(first);
+  fetchById.mockResolvedValueOnce([{ id: 'g', users: page(['2']) }]);
+  await client.loadConnection(UserView, connection, { after: 'cursor-1', first: 1 });
+  expect((await read()).items.map(({ node }) => node.id)).toEqual(['1', '2']);
+  expect(client.store.read('Group:g')?.users).toEqual([
+    createNodeRef('User:1'),
+    createNodeRef('User:2'),
+  ]);
 });

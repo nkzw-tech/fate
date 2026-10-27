@@ -178,7 +178,10 @@ const mergeIds = (
 };
 
 const membershipFields = [
+  'acknowledgedInsertions',
   'ids',
+  'insertedAfterIds',
+  'insertedBeforeIds',
   'liveAfterIds',
   'liveBeforeIds',
   'pendingAfterIds',
@@ -203,6 +206,9 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
     result.cursors = ids.map((id) => cursors.get(id));
   }
   for (const field of [
+    'acknowledgedInsertions',
+    'insertedAfterIds',
+    'insertedBeforeIds',
     'liveAfterIds',
     'liveBeforeIds',
     'pendingAfterIds',
@@ -215,6 +221,21 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
         latest[field] ?? [],
       );
     }
+  }
+  if (before.windows !== after.windows && after.windows) {
+    const windows = { ...latest.windows };
+    for (const [key, value] of Object.entries(after.windows)) {
+      if (value !== before.windows?.[key]) {
+        windows[key] = value;
+      }
+    }
+    result.windows = windows;
+  }
+  if (before.afterCursor !== after.afterCursor) {
+    result.afterCursor = after.afterCursor;
+  }
+  if (before.beforeCursor !== after.beforeCursor) {
+    result.beforeCursor = after.beforeCursor;
   }
   for (const field of ['backwardPageLimit', 'forwardPageLimit'] as const) {
     if (before[field] !== after[field]) {
@@ -729,8 +750,11 @@ export class PersistenceCache {
         const list = value as List;
         return {
           ...list,
+          acknowledgedInsertions: list.acknowledgedInsertions?.filter((id) => !deleted(id)),
           cursors: list.cursors?.filter((_, index) => !deleted(list.ids[index])),
           ids: list.ids.filter((id) => !deleted(id)),
+          insertedAfterIds: list.insertedAfterIds?.filter((id) => !deleted(id)),
+          insertedBeforeIds: list.insertedBeforeIds?.filter((id) => !deleted(id)),
           liveAfterIds: list.liveAfterIds?.filter((id) => !deleted(id)),
           liveBeforeIds: list.liveBeforeIds?.filter((id) => !deleted(id)),
           pendingAfterIds: list.pendingAfterIds?.filter((id) => !deleted(id)),

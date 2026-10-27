@@ -31,6 +31,14 @@ export const cloneArgs = (value: AnyRecord, path: string): AnyRecord =>
   cloneValue(value, path) as AnyRecord;
 
 export const paginationArgKeys = new Set(['after', 'before', 'cursor', 'first', 'last']);
+const connectionWindowArgKeys = new Set(['first', 'last']);
+export const getAbsentCursorKeys = (args: AnyRecord): Array<string> =>
+  ['after', 'before', 'cursor'].filter((key) => key in args && args[key] == null);
+
+export const getConnectionWindowIgnoreKeys = (args: AnyRecord): ReadonlySet<string> => {
+  const absent = getAbsentCursorKeys(args);
+  return absent.length ? new Set([...connectionWindowArgKeys, ...absent]) : connectionWindowArgKeys;
+};
 
 const stableSerialize = (value: unknown): string => {
   if (value === null) {
@@ -81,6 +89,14 @@ export const hashArgs = (
     keys[key] = value;
   }
   return stableSerialize(keys);
+};
+
+export const hashConnectionArgs = (
+  args: AnyRecord,
+  ignoreKeys: ReadonlySet<string> = getConnectionWindowIgnoreKeys(args),
+): string => {
+  const hash = hashArgs(args, { ignoreKeys });
+  return args.before != null || args.last != null ? `${hash}:backward` : hash;
 };
 
 export const filterConnectionArgs = (
@@ -224,8 +240,9 @@ export const applyArgsPayloadToPlan = (plan: SelectionPlan, payload: ResolvedArg
         }
       }
     }
-    const hash = hashArgs(cloned, { ignoreKeys: entry.ignoreKeys });
-    plan.args.set(path, { hash, ignoreKeys: entry.ignoreKeys, value: cloned });
+    const ignoreKeys = entry.ignoreKeys ? getConnectionWindowIgnoreKeys(cloned) : undefined;
+    const hash = ignoreKeys ? hashConnectionArgs(cloned, ignoreKeys) : hashArgs(cloned);
+    plan.args.set(path, { hash, ignoreKeys, value: cloned });
   }
 };
 

@@ -138,8 +138,8 @@ test('selection plan resolves arguments and hashes connection args', () => {
     value: { format: 'md' },
   });
   expect(plan.args.get('comments')).toEqual({
-    hash: 'object:{}',
-    ignoreKeys: new Set(['after', 'before', 'cursor', 'first', 'last']),
+    hash: 'object:{"after":string:"cursor-1"}',
+    ignoreKeys: new Set(['first', 'last']),
     value: { after: 'cursor-1', first: 5 },
   });
   expect(plan.live.get('comments')).toEqual({
@@ -223,7 +223,7 @@ test('omits deferred fields from the eager selection plan', () => {
   expect(deferred.paths).toEqual(new Set(['comments.content', 'comments.id']));
   expect(deferred.args.get('comments')).toEqual({
     hash: 'object:{}',
-    ignoreKeys: new Set(['after', 'before', 'cursor', 'first', 'last']),
+    ignoreKeys: new Set(['first', 'last']),
     value: { first: 3 },
   });
 });
@@ -246,7 +246,7 @@ test('collects selections for root connections', () => {
 
   expect(selection.args.get('')).toEqual({
     hash: 'object:{}',
-    ignoreKeys: new Set(['after', 'before', 'cursor', 'first', 'last']),
+    ignoreKeys: new Set(['first', 'last']),
     value: { first: 1 },
   });
   expect(selection.paths).toEqual(new Set(['id', 'name']));

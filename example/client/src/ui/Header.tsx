@@ -56,6 +56,9 @@ export default function Header() {
         </Link>
         <Stack alignCenter>
           <Button asChild size="sm" variant="ghost">
+            <Link to="/pagination/preview">Pagination</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
             <Link to="/search">
               <Search className="h-4 w-4" />
               <span className="hidden sm:inline">Search</span>

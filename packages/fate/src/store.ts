@@ -1,5 +1,6 @@
 import ViewDataCache from './cache.ts';
 import { argumentFieldKey } from './field-key.ts';
+import type { ListWindow } from './list.ts';
 import {
   addPath,
   cloneMask,
@@ -27,10 +28,15 @@ import {
 import type { AnyRecord, EntityId, Pagination } from './types.ts';
 
 export type List = Readonly<{
+  acknowledgedInsertions?: ReadonlyArray<EntityId>;
+  afterCursor?: string;
   backwardPageLimit?: number;
+  beforeCursor?: string;
   cursors?: ReadonlyArray<string | undefined>;
   forwardPageLimit?: number;
   ids: ReadonlyArray<EntityId>;
+  insertedAfterIds?: ReadonlyArray<EntityId>;
+  insertedBeforeIds?: ReadonlyArray<EntityId>;
   liveAfterIds?: ReadonlyArray<EntityId>;
   liveBeforeIds?: ReadonlyArray<EntityId>;
   pagination?: Pagination;
@@ -38,6 +44,7 @@ export type List = Readonly<{
   pendingBeforeIds?: ReadonlyArray<EntityId>;
   /** Membership changes held before any server page has been fetched. */
   unloaded?: true;
+  windows?: Readonly<Record<string, ListWindow>>;
 }>;
 
 type Snapshot = { mask?: FieldMask; record?: AnyRecord };
@@ -1014,6 +1021,10 @@ export class Store {
           return next;
         };
 
+        const acknowledgedInsertions =
+          dedupe(list.acknowledgedInsertions) ?? list.acknowledgedInsertions;
+        const insertedBeforeIds = dedupe(list.insertedBeforeIds) ?? list.insertedBeforeIds;
+        const insertedAfterIds = dedupe(list.insertedAfterIds) ?? list.insertedAfterIds;
         const pendingBeforeIds = dedupe(list.pendingBeforeIds) ?? list.pendingBeforeIds;
         const pendingAfterIds = dedupe(list.pendingAfterIds) ?? list.pendingAfterIds;
         const liveBeforeIds = dedupe(list.liveBeforeIds) ?? list.liveBeforeIds;
@@ -1025,16 +1036,22 @@ export class Store {
 
         const canonicalIds = new Set(ids);
         this.setList(key, {
+          acknowledgedInsertions,
+          afterCursor: list.afterCursor,
           backwardPageLimit: list.backwardPageLimit,
+          beforeCursor: list.beforeCursor,
           cursors,
           forwardPageLimit: list.forwardPageLimit,
           ids,
+          insertedAfterIds,
+          insertedBeforeIds,
           liveAfterIds: liveAfterIds?.filter((id) => !canonicalIds.has(id)),
           liveBeforeIds: liveBeforeIds?.filter((id) => !canonicalIds.has(id)),
           pagination: list.pagination,
           pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
           pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
           unloaded: list.unloaded,
+          windows: list.windows,
         });
       }
     });
@@ -1165,16 +1182,22 @@ export class Store {
         }
 
         this.setList(key, {
+          acknowledgedInsertions: list.acknowledgedInsertions?.filter((id) => id !== targetId),
+          afterCursor: list.afterCursor,
           backwardPageLimit: list.backwardPageLimit,
+          beforeCursor: list.beforeCursor,
           cursors,
           forwardPageLimit: list.forwardPageLimit,
           ids: entityIds,
+          insertedAfterIds: list.insertedAfterIds?.filter((id) => id !== targetId),
+          insertedBeforeIds: list.insertedBeforeIds?.filter((id) => id !== targetId),
           liveAfterIds: list.liveAfterIds?.filter((id) => id !== targetId),
           liveBeforeIds: list.liveBeforeIds?.filter((id) => id !== targetId),
           pagination: list.pagination,
           pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
           pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
           unloaded: list.unloaded,
+          windows: list.windows,
         });
       }
 

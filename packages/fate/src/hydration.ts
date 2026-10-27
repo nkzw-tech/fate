@@ -400,16 +400,22 @@ const hasOnlyKeys = (value: AnyRecord, keys: ReadonlySet<string>): boolean =>
   Object.keys(value).every((key) => keys.has(key));
 
 const listKeys = new Set([
+  'acknowledgedInsertions',
+  'afterCursor',
+  'beforeCursor',
   'backwardPageLimit',
   'cursors',
   'forwardPageLimit',
   'ids',
+  'insertedAfterIds',
+  'insertedBeforeIds',
   'liveAfterIds',
   'liveBeforeIds',
   'pagination',
   'pendingAfterIds',
   'pendingBeforeIds',
   'unloaded',
+  'windows',
 ]);
 const paginationKeys = new Set(['hasNext', 'hasPrevious', 'nextCursor', 'previousCursor']);
 const clientStateKeys = new Set(['rootLists', 'rootRequests', 'rootValues', 'store']);
@@ -443,9 +449,15 @@ const isList = (value: unknown): value is List => {
   }
 
   return (
+    (value.acknowledgedInsertions === undefined ||
+      isUniqueStringArray(value.acknowledgedInsertions)) &&
+    (value.afterCursor === undefined || typeof value.afterCursor === 'string') &&
+    (value.beforeCursor === undefined || typeof value.beforeCursor === 'string') &&
     (value.cursors === undefined ||
       (Array.isArray(value.cursors) &&
         value.cursors.every((entry) => entry === undefined || typeof entry === 'string'))) &&
+    (value.insertedAfterIds === undefined || isUniqueStringArray(value.insertedAfterIds)) &&
+    (value.insertedBeforeIds === undefined || isUniqueStringArray(value.insertedBeforeIds)) &&
     (value.liveAfterIds === undefined || isUniqueStringArray(value.liveAfterIds)) &&
     (value.liveBeforeIds === undefined || isUniqueStringArray(value.liveBeforeIds)) &&
     isOptionalLimit(value.backwardPageLimit) &&
@@ -453,7 +465,18 @@ const isList = (value: unknown): value is List => {
     isPagination(value.pagination) &&
     (value.pendingAfterIds === undefined || isUniqueStringArray(value.pendingAfterIds)) &&
     (value.pendingBeforeIds === undefined || isUniqueStringArray(value.pendingBeforeIds)) &&
-    (value.unloaded === undefined || value.unloaded === true)
+    (value.unloaded === undefined || value.unloaded === true) &&
+    (value.windows === undefined ||
+      (isRecord(value.windows) &&
+        Object.values(value.windows).every(
+          (window) =>
+            isRecord(window) &&
+            hasOnlyKeys(window, new Set(['end', 'size', 'start'])) &&
+            typeof window.size === 'number' &&
+            isOptionalLimit(window.size) &&
+            (window.start === undefined || typeof window.start === 'string') &&
+            (window.end === undefined || typeof window.end === 'string'),
+        )))
   );
 };
 

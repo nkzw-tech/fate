@@ -595,8 +595,8 @@ test.each(
     client.write('User', { id: '1', 'preview:games': page(1) }, refreshPlan.paths, refreshPlan);
     expect((await client.readView(Both, client.ref('User', '1', Both))).data).toMatchObject({
       detail: {
-        items: [{ node: { id: backwards ? '2' : '0' } }],
-        pagination: { hasNext: !backwards, hasPrevious: backwards },
+        items: [{ node: { id: '0' } }, { node: { id: '1' } }, { node: { id: '2' } }],
+        pagination: { hasNext: false, hasPrevious: false },
       },
     });
   },

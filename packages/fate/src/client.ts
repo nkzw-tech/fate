@@ -25,7 +25,13 @@ import {
   type HydrationLimits,
   type HydrateOptions,
 } from './hydration.ts';
-import { getListEntries } from './list.ts';
+import {
+  extendListWindow,
+  getListEntries,
+  getListPageSize,
+  getListWindow,
+  getListWindowKey,
+} from './list.ts';
 import { CoverageSelection } from './mask.ts';
 import {
   FateMutations,
@@ -69,6 +75,8 @@ import RenderReadErrors from './render-read-errors.ts';
 import {
   createRequestDescriptor,
   getPaginationArgsInfo,
+  getRootListWindowKey,
+  getViewSignature,
   resolveSelectionPlan,
   type ListRequestDescriptor,
   type QueryRequestDescriptor,
@@ -278,7 +286,10 @@ const arePaginationStatesEqual = (left: Pagination | undefined, right: Paginatio
 const areListStatesEqual = (left: List | undefined, right: List) =>
   Boolean(left) &&
   areArraysEqual(left?.ids, right.ids) &&
+  areArraysEqual(left?.acknowledgedInsertions, right.acknowledgedInsertions) &&
   areArraysEqual(left?.cursors, right.cursors) &&
+  areArraysEqual(left?.insertedAfterIds, right.insertedAfterIds) &&
+  areArraysEqual(left?.insertedBeforeIds, right.insertedBeforeIds) &&
   areArraysEqual(left?.liveAfterIds, right.liveAfterIds) &&
   areArraysEqual(left?.liveBeforeIds, right.liveBeforeIds) &&
   areArraysEqual(left?.pendingAfterIds, right.pendingAfterIds) &&
@@ -341,16 +352,36 @@ const isConnectionWindowFull = (
   return limit != null && listState.ids.length >= limit;
 };
 
+const hasConnectionCursorCoverage = (
+  listState: List,
+  args: AnyRecord | undefined,
+  direction: 'forward' | 'backward',
+) => {
+  const pagination = listState.pagination;
+  const selected = getListWindow(listState, args);
+  return (
+    !selected?.ids.length ||
+    !(direction === 'forward'
+      ? selected.pagination?.hasNext &&
+        selected.pagination.nextCursor === undefined &&
+        pagination?.nextCursor !== undefined
+      : selected.pagination?.hasPrevious &&
+        selected.pagination.previousCursor === undefined &&
+        pagination?.previousCursor !== undefined)
+  );
+};
+
 const hasConnectionPageCoverage = (
   listState: List,
   args: AnyRecord | undefined,
   direction: 'forward' | 'backward',
 ) => {
-  if (listState.unloaded) {
+  if (listState.unloaded || !hasConnectionCursorCoverage(listState, args, direction)) {
     return false;
   }
   const limit = getConnectionPageLimit(args, direction);
   const pagination = listState.pagination;
+  const size = getListPageSize(listState);
 
   if (direction === 'forward') {
     if (pagination?.hasPrevious) {
@@ -359,7 +390,7 @@ const hasConnectionPageCoverage = (
 
     return (
       limit == null ||
-      listState.ids.length >= limit ||
+      size >= limit ||
       (listState.forwardPageLimit != null && listState.forwardPageLimit >= limit) ||
       pagination?.hasNext === false
     );
@@ -371,7 +402,7 @@ const hasConnectionPageCoverage = (
 
   return (
     limit == null ||
-    listState.ids.length >= limit ||
+    size >= limit ||
     (listState.backwardPageLimit != null && listState.backwardPageLimit >= limit) ||
     pagination?.hasPrevious === false
   );
@@ -381,6 +412,8 @@ const getPaginationMergeInfo = (args: AnyRecord | undefined) => {
   const paginationArgs = getPaginationArgsInfo(args);
   return {
     ...paginationArgs,
+    after: typeof args?.after === 'string' ? args.after : undefined,
+    before: typeof args?.before === 'string' ? args.before : undefined,
     pageLimit: getConnectionPageLimit(args, paginationArgs.direction),
   };
 };
@@ -712,10 +745,13 @@ export class FateClient<
   >();
   private readonly rootLists = new Map<string, Set<string>>();
   private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
-  private readonly deferredTargets = new WeakSet<object>();
+  private readonly deferredTargets = new WeakMap<object, string>();
   private readonly mutationLists = new Map<string, { count: number; list: ConnectionMetadata }>();
   private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
-  private readonly connectionRequests = new Map<string, Promise<List | undefined>>();
+  private readonly connectionRequests = new Map<
+    string,
+    Promise<{ list: List | undefined; page?: List }>
+  >();
   private readonly pendingDeferred = new Map<string, PromiseLike<DeferredSnapshot<any>>>();
   private readonly pendingOptimisticMutations = new Map<EntityId, Set<Promise<unknown>>>();
   // Live refs own redirect cells. The ID index must not keep those cells alive.
@@ -1131,6 +1167,11 @@ export class FateClient<
       return { list: listState, pending: false };
     }
 
+    const insertion =
+      insert === 'before'
+        ? { insertedBeforeIds: [entityId, ...(listState.insertedBeforeIds ?? [])] }
+        : { insertedAfterIds: [...(listState.insertedAfterIds ?? []), entityId] };
+
     const shouldStayPending =
       listState.unloaded ||
       (insert === 'before'
@@ -1163,6 +1204,7 @@ export class FateClient<
     return {
       list: {
         ...listState,
+        ...insertion,
         cursors,
         ids,
       },
@@ -1201,7 +1243,13 @@ export class FateClient<
     return target;
   }
 
-  private nestedListMetadata(owner: EntityId, field: string, plan: SelectionPlan, path: string) {
+  private nestedListMetadata(
+    owner: EntityId,
+    field: string,
+    plan: SelectionPlan,
+    path: string,
+    windowScope?: string,
+  ) {
     const { type } = parseEntityId(owner);
     const descriptor = this.types.get(type)?.fields?.[field];
     if (!descriptor || descriptor === 'scalar' || !('listOf' in descriptor)) {
@@ -1218,6 +1266,10 @@ export class FateClient<
       procedure: `${type}.${field}`,
       root: false,
       type: descriptor.listOf,
+      windowKey: getListWindowKey(
+        args?.value,
+        windowScope === undefined ? undefined : JSON.stringify([windowScope, path]),
+      ),
     } satisfies ConnectionMetadata;
   }
 
@@ -1777,6 +1829,8 @@ export class FateClient<
         this.stableRefWithViewNames(ownerType, rawOwnerId, new Set()),
         resolvedOwner,
         plan,
+        null,
+        this.deferredTargets.get(deferred),
       );
       const resolved = {
         coverage: snapshot.coverage,
@@ -2095,48 +2149,11 @@ export class FateClient<
       return;
     }
 
-    const ids: Array<EntityId> = [];
-    const cursors = listState.cursors ? ([] as Array<string | undefined>) : undefined;
-    let changed = false;
-
-    listState.ids.forEach((id, index) => {
-      if (id === entityId) {
-        changed = true;
-        return;
-      }
-      ids.push(id);
-      if (cursors) {
-        cursors.push(listState.cursors?.[index]);
-      }
-    });
-
-    const liveAfterIds = removeListId(listState.liveAfterIds, entityId);
-    const liveBeforeIds = removeListId(listState.liveBeforeIds, entityId);
-    const pendingAfterIds = removeListId(listState.pendingAfterIds, entityId);
-    const pendingBeforeIds = removeListId(listState.pendingBeforeIds, entityId);
-    changed =
-      changed ||
-      liveAfterIds?.length !== listState.liveAfterIds?.length ||
-      liveBeforeIds?.length !== listState.liveBeforeIds?.length ||
-      pendingAfterIds?.length !== listState.pendingAfterIds?.length ||
-      pendingBeforeIds?.length !== listState.pendingBeforeIds?.length;
-
-    if (changed) {
-      const nextListState = {
-        ...listState,
-        cursors,
-        ids,
-        liveAfterIds,
-        liveBeforeIds,
-        pendingAfterIds,
-        pendingBeforeIds,
-      };
-      this.store.setList(connection.key, nextListState);
-      this.syncNestedConnectionOwnerField(connection, entityId, nextListState, 'delete');
-      return;
+    const next = this.removeEntityFromListState(listState, entityId);
+    if (!areListStatesEqual(listState, next)) {
+      this.store.setList(connection.key, next);
     }
-
-    this.syncNestedConnectionOwnerField(connection, entityId, listState, 'delete');
+    this.syncNestedConnectionOwnerField(connection, entityId, next, 'delete');
   }
 
   private insertConnectionEdge(
@@ -2166,14 +2183,24 @@ export class FateClient<
     const isVisibleAppendEvent = isAppendEvent && appendMode === 'visible';
     const isVisiblePrependEvent = isPrependEvent && prependMode === 'visible';
     if (visibleIndex >= 0 && (isVisibleAppendEvent || isVisiblePrependEvent)) {
+      const acknowledge =
+        !listState.acknowledgedInsertions?.includes(entityId) &&
+        (listState.insertedBeforeIds?.includes(entityId) ||
+          listState.insertedAfterIds?.includes(entityId));
       const nextListState =
-        cursor === undefined
+        cursor === undefined && !acknowledge
           ? listState
           : {
               ...listState,
-              cursors: listState.ids.map((_, index) =>
-                index === visibleIndex ? cursor : listState.cursors?.[index],
-              ),
+              acknowledgedInsertions: acknowledge
+                ? [...(listState.acknowledgedInsertions ?? []), entityId]
+                : listState.acknowledgedInsertions,
+              cursors:
+                cursor === undefined
+                  ? listState.cursors
+                  : listState.ids.map((_, index) =>
+                      index === visibleIndex ? cursor : listState.cursors?.[index],
+                    ),
             };
 
       if (nextListState !== listState) {
@@ -2270,8 +2297,22 @@ export class FateClient<
 
     const nextListState = {
       ...withoutExisting,
+      acknowledgedInsertions:
+        isVisibleAppendEvent ||
+        isVisiblePrependEvent ||
+        type === 'insertEdgeAfter' ||
+        type === 'insertEdgeBefore'
+          ? [...(withoutExisting.acknowledgedInsertions ?? []), entityId]
+          : withoutExisting.acknowledgedInsertions,
       cursors,
       ids,
+      insertedAfterIds:
+        isVisibleAppendEvent || type === 'insertEdgeAfter' || type === 'insertEdgeBefore'
+          ? [...(withoutExisting.insertedAfterIds ?? []), entityId]
+          : withoutExisting.insertedAfterIds,
+      insertedBeforeIds: isVisiblePrependEvent
+        ? [entityId, ...(withoutExisting.insertedBeforeIds ?? [])]
+        : withoutExisting.insertedBeforeIds,
       liveAfterIds: removeListId(withoutExisting.liveAfterIds, entityId),
       liveBeforeIds: removeListId(withoutExisting.liveBeforeIds, entityId),
     };
@@ -2386,8 +2427,11 @@ export class FateClient<
 
     return {
       ...listState,
+      acknowledgedInsertions: removeListId(listState.acknowledgedInsertions, entityId),
       cursors,
       ids,
+      insertedAfterIds: removeListId(listState.insertedAfterIds, entityId),
+      insertedBeforeIds: removeListId(listState.insertedBeforeIds, entityId),
       liveAfterIds: removeListId(listState.liveAfterIds, entityId),
       liveBeforeIds: removeListId(listState.liveBeforeIds, entityId),
       pendingAfterIds: removeListId(listState.pendingAfterIds, entityId),
@@ -2401,16 +2445,45 @@ export class FateClient<
     incomingCursors: ReadonlyArray<string | undefined>,
     incomingPagination: Pagination | undefined,
     options: {
+      after?: string;
+      before?: string;
       direction: 'forward' | 'backward';
       hasCursorArg: boolean;
       pageLimit?: number | null;
       replace?: boolean;
+      resetInsertions?: boolean;
     },
   ): List {
-    // A snapshot starts a new window; only cursor pages extend the old one.
-    const previousWindow = options.replace && !options.hasCursorArg ? undefined : previous;
-    const existingIds = previousWindow?.ids ?? [];
     const isBackward = options.direction === 'backward';
+    const preserveTail = Boolean(
+      options.replace &&
+      !options.hasCursorArg &&
+      !options.resetInsertions &&
+      previous &&
+      options.pageLimit != null &&
+      previous.ids.length > Math.min(options.pageLimit, incomingIds.length) &&
+      (isBackward
+        ? incomingPagination?.hasPrevious === true
+        : incomingPagination?.hasNext === true),
+    );
+    const previousWindow =
+      options.replace && !options.hasCursorArg && !preserveTail ? undefined : previous;
+    const existingIds = previousWindow?.ids ?? [];
+    const cursor = isBackward ? options.before : options.after;
+    const cursorIndex =
+      cursor === undefined ? -1 : (previousWindow?.cursors?.indexOf(cursor) ?? -1);
+    const cursorAnchor =
+      cursorIndex >= 0
+        ? cursorIndex
+        : cursor !== undefined &&
+            cursor === (isBackward ? previousWindow?.beforeCursor : previousWindow?.afterCursor)
+          ? isBackward
+            ? existingIds.length
+            : -1
+          : undefined;
+    const terminalPage =
+      (isBackward ? incomingPagination?.hasPrevious : incomingPagination?.hasNext) === false;
+    let preserveCursorContinuation = false;
 
     const mergeIds = () => {
       if (!previousWindow) {
@@ -2419,8 +2492,40 @@ export class FateClient<
 
       if (!options.hasCursorArg) {
         const incomingSet = new Set(incomingIds);
-        const remaining = existingIds.filter((id) => !incomingSet.has(id));
+        const boundary = isBackward ? incomingIds[0] : incomingIds.at(-1);
+        const boundaryIndex = boundary === undefined ? -1 : existingIds.indexOf(boundary);
+        const retained =
+          preserveTail && boundaryIndex >= 0
+            ? isBackward
+              ? existingIds.slice(0, boundaryIndex)
+              : existingIds.slice(boundaryIndex + 1)
+            : existingIds;
+        const remaining = retained.filter((id) => !incomingSet.has(id));
         return isBackward ? [...remaining, ...incomingIds] : [...incomingIds, ...remaining];
+      }
+
+      if (cursorAnchor !== undefined) {
+        const incomingSet = new Set(incomingIds);
+        const boundary = isBackward ? incomingIds[0] : incomingIds.at(-1);
+        const boundaryIndex = boundary === undefined ? -1 : existingIds.indexOf(boundary);
+        const continuation = terminalPage
+          ? []
+          : isBackward
+            ? existingIds.slice(
+                0,
+                boundaryIndex >= 0 && boundaryIndex < cursorAnchor ? boundaryIndex : cursorAnchor,
+              )
+            : existingIds.slice(
+                boundaryIndex > cursorAnchor ? boundaryIndex + 1 : cursorAnchor + 1,
+              );
+        const remaining = continuation.filter((id) => !incomingSet.has(id));
+        preserveCursorContinuation = remaining.length > 0;
+        const untouched = (
+          isBackward ? existingIds.slice(cursorAnchor) : existingIds.slice(0, cursorAnchor + 1)
+        ).filter((id) => !incomingSet.has(id));
+        return isBackward
+          ? [...remaining, ...incomingIds, ...untouched]
+          : [...untouched, ...incomingIds, ...remaining];
       }
 
       const existingSet = new Set(existingIds);
@@ -2428,11 +2533,86 @@ export class FateClient<
       return isBackward ? [...newIds, ...existingIds] : [...existingIds, ...newIds];
     };
 
-    const ids = mergeIds();
+    let acknowledgedInsertions = options.resetInsertions
+      ? undefined
+      : previous?.acknowledgedInsertions;
+    let insertedBeforeIds = options.resetInsertions ? undefined : previous?.insertedBeforeIds;
+    let insertedAfterIds = options.resetInsertions ? undefined : previous?.insertedAfterIds;
+    const mergedIds = mergeIds();
+    let ids = mergedIds;
+    if (
+      !options.resetInsertions &&
+      (insertedBeforeIds?.length ||
+        insertedAfterIds?.length ||
+        previous?.pendingBeforeIds?.length ||
+        previous?.pendingAfterIds?.length)
+    ) {
+      const incomingSet = new Set(incomingIds);
+      const confirmInsertions = (
+        existing: ReadonlyArray<EntityId> | undefined,
+        pending: ReadonlyArray<EntityId> | undefined,
+      ) => {
+        const confirmed = pending?.filter((id) => incomingSet.has(id));
+        return confirmed?.length ? [...new Set([...(existing ?? []), ...confirmed])] : existing;
+      };
+      insertedBeforeIds = confirmInsertions(insertedBeforeIds, previous?.pendingBeforeIds);
+      insertedAfterIds = confirmInsertions(insertedAfterIds, previous?.pendingAfterIds);
+      const acknowledged = new Set(acknowledgedInsertions);
+      const boundary = isBackward ? incomingIds[0] : incomingIds.at(-1);
+      const boundaryIndex = boundary === undefined ? -1 : (previous?.ids.indexOf(boundary) ?? -1);
+      const complete =
+        incomingPagination?.hasNext === false && incomingPagination.hasPrevious === false;
+      const retainInsertion = (id: EntityId) => {
+        if (incomingSet.has(id)) {
+          acknowledged.add(id);
+          return true;
+        }
+        if (!acknowledged.has(id)) {
+          return true;
+        }
+        const index = previous?.ids.indexOf(id) ?? -1;
+        if (options.hasCursorArg) {
+          return (
+            cursorAnchor === undefined ||
+            index < 0 ||
+            (isBackward ? index >= cursorAnchor : index <= cursorAnchor) ||
+            (!terminalPage &&
+              (boundaryIndex < 0 || (isBackward ? index < boundaryIndex : index > boundaryIndex)))
+          );
+        }
+        return (
+          !complete &&
+          (boundaryIndex < 0 ||
+            index < 0 ||
+            (isBackward ? index < boundaryIndex : index > boundaryIndex))
+        );
+      };
+      insertedBeforeIds = insertedBeforeIds?.filter(retainInsertion);
+      insertedAfterIds = insertedAfterIds?.filter(retainInsertion);
+      const retained = new Set([...(insertedBeforeIds ?? []), ...(insertedAfterIds ?? [])]);
+      const confirmed = [...acknowledged].filter((id) => retained.has(id));
+      acknowledgedInsertions = confirmed.length ? confirmed : undefined;
+      const mergedSet = new Set(mergedIds);
+      const pendingIds = new Set([
+        ...(previous?.pendingBeforeIds ?? []),
+        ...(previous?.pendingAfterIds ?? []),
+      ]);
+      const missingInsertions = (values: ReadonlyArray<EntityId> | undefined) =>
+        values?.filter((id) => !mergedSet.has(id) && !pendingIds.has(id)) ?? [];
+      ids = [
+        ...missingInsertions(insertedBeforeIds),
+        ...mergedIds,
+        ...missingInsertions(insertedAfterIds),
+      ];
+    }
     const hasIncomingCursor = incomingCursors.some((cursor) => cursor !== undefined);
 
     const shouldStoreCursors =
-      hasIncomingCursor || Boolean(previousWindow?.cursors) || options.hasCursorArg;
+      hasIncomingCursor ||
+      incomingPagination?.nextCursor !== undefined ||
+      incomingPagination?.previousCursor !== undefined ||
+      Boolean(previousWindow?.cursors) ||
+      options.hasCursorArg;
     let cursors: Array<string | undefined> | undefined;
     if (shouldStoreCursors) {
       const cursorMap = new Map<EntityId, string | undefined>();
@@ -2441,9 +2621,13 @@ export class FateClient<
           cursorMap.set(existingIds[index], cursor);
         });
       }
-      incomingCursors.forEach((cursor, index) => {
+      incomingIds.forEach((id, index) => {
+        const cursor =
+          incomingCursors[index] ??
+          (index === incomingIds.length - 1 ? incomingPagination?.nextCursor : undefined) ??
+          (index === 0 ? incomingPagination?.previousCursor : undefined);
         if (cursor !== undefined) {
-          cursorMap.set(incomingIds[index], cursor);
+          cursorMap.set(id, cursor);
         }
       });
       cursors = ids.map((id) => cursorMap.get(id));
@@ -2453,11 +2637,18 @@ export class FateClient<
     const newPagination = incomingPagination;
     // Cursor pages extend one edge of the accumulated list. Keep the other
     // edge's flag and cursor instead of replacing them with the new page's.
-    const extendsExistingList = options.hasCursorArg && existingIds.length > 0;
-    const leadingPagination =
-      extendsExistingList && !isBackward ? (previousPagination ?? newPagination) : newPagination;
-    const trailingPagination =
-      extendsExistingList && isBackward ? (previousPagination ?? newPagination) : newPagination;
+    const keepLeading =
+      existingIds.length > 0 &&
+      (options.hasCursorArg
+        ? !isBackward || preserveCursorContinuation
+        : preserveTail && isBackward);
+    const keepTrailing =
+      existingIds.length > 0 &&
+      (options.hasCursorArg
+        ? isBackward || preserveCursorContinuation
+        : preserveTail && !isBackward);
+    const leadingPagination = keepLeading ? (previousPagination ?? newPagination) : newPagination;
+    const trailingPagination = keepTrailing ? (previousPagination ?? newPagination) : newPagination;
 
     const pagination =
       previousPagination || newPagination
@@ -2470,21 +2661,27 @@ export class FateClient<
         : undefined;
 
     return {
+      acknowledgedInsertions,
+      afterCursor: keepLeading ? previousWindow?.afterCursor : options.after,
       backwardPageLimit:
         !options.hasCursorArg && isBackward && options.pageLimit != null
           ? Math.max(previousWindow?.backwardPageLimit ?? 0, options.pageLimit)
           : previousWindow?.backwardPageLimit,
+      beforeCursor: keepTrailing ? previousWindow?.beforeCursor : options.before,
       cursors,
       forwardPageLimit:
         !options.hasCursorArg && !isBackward && options.pageLimit != null
           ? Math.max(previousWindow?.forwardPageLimit ?? 0, options.pageLimit)
           : previousWindow?.forwardPageLimit,
       ids,
+      insertedAfterIds,
+      insertedBeforeIds,
       liveAfterIds: dropCanonicalListIds(previous?.liveAfterIds, ids),
       liveBeforeIds: dropCanonicalListIds(previous?.liveBeforeIds, ids),
       pagination,
       pendingAfterIds: dropCanonicalListIds(previous?.pendingAfterIds, ids),
       pendingBeforeIds: dropCanonicalListIds(previous?.pendingBeforeIds, ids),
+      windows: previous?.windows,
     };
   }
 
@@ -2567,6 +2764,47 @@ export class FateClient<
     args: Record<string, unknown>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
+    const key = connection.windowKey ?? getListWindowKey(connection.args);
+    const initial = this.store.getListState(connection.key);
+    const previous = getListWindow(initial, connection.args, key);
+    const initialWindow = initial?.windows?.[key];
+    const response = await this.loadConnectionPage(view, connection, args, options);
+    const current = this.store.getListState(connection.key);
+    if (
+      !current ||
+      !response.page ||
+      (connection.args?.first === undefined && connection.args?.last === undefined)
+    ) {
+      return current;
+    }
+    const window = extendListWindow(
+      current.windows?.[key] === initialWindow
+        ? previous
+        : getListWindow(current, connection.args, key),
+      response.page,
+      connection.args,
+      current.windows?.[key],
+      options.direction ?? 'forward',
+    );
+    this.withPaginationWrite(
+      connection.key,
+      this.writeVersions.get(`list:${connection.key}`) ?? this.writeGeneration,
+      () =>
+        this.store.setList(connection.key, {
+          ...current,
+          windows: { ...current.windows, [key]: window },
+        }),
+    );
+    return this.store.getListState(connection.key);
+  }
+
+  /** @internal */
+  async loadConnectionPage<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+    args: Record<string, unknown>,
+    options: { direction?: 'forward' | 'backward' } = {},
+  ) {
     const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
     const selection = resolveSelectionPlan(view, requestArgs);
     const key = hashArgs({
@@ -2602,6 +2840,7 @@ export class FateClient<
     { argsPayload, plan }: ReturnType<typeof resolveSelectionPlan>,
     options: { direction?: 'forward' | 'backward' } = {},
   ) {
+    let receivedPage: List | undefined;
     let generation = ++this.writeGeneration;
     const direction = options.direction ?? 'forward';
     const isPage = getPaginationMergeInfo(requestArgs).hasCursorArg;
@@ -2634,13 +2873,13 @@ export class FateClient<
       this.assertPersistenceActive();
 
       if (connectionResult === null) {
-        return this.store.getListState(connection.key);
+        return { list: this.store.getListState(connection.key), page: receivedPage };
       }
       const { items, pagination } = connectionResult;
       const input = normalizationInput(connectionResult);
 
       if (!items) {
-        return this.store.getListState(connection.key);
+        return { list: this.store.getListState(connection.key), page: receivedPage };
       }
 
       applyResponse(() =>
@@ -2670,6 +2909,7 @@ export class FateClient<
           if (!acceptsList()) {
             return;
           }
+          receivedPage = { cursors: incomingCursors, ids: incomingIds, pagination };
           const previous = this.store.getListState(connection.key);
 
           const nextListState = this.mergeListState(
@@ -2686,7 +2926,7 @@ export class FateClient<
           this.store.setList(connection.key, nextListState);
         }),
       );
-      return this.store.getListState(connection.key);
+      return { list: this.store.getListState(connection.key), page: receivedPage };
     }
 
     const owner = parseEntityId(connection.owner);
@@ -2712,7 +2952,7 @@ export class FateClient<
     generation = response?.generation ?? generation;
     const parentRecord = response?.record;
     if (!parentRecord || typeof parentRecord !== 'object') {
-      return this.store.getListState(connection.key);
+      return { list: this.store.getListState(connection.key), page: receivedPage };
     }
 
     const parentInput = normalizationInput(parentRecord);
@@ -2732,7 +2972,7 @@ export class FateClient<
       : list;
 
     if (!connectionPayload) {
-      return this.store.getListState(connection.key);
+      return { list: this.store.getListState(connection.key), page: receivedPage };
     }
 
     applyResponse(() =>
@@ -2767,10 +3007,12 @@ export class FateClient<
         ) {
           return;
         }
+        receivedPage = {
+          cursors: incomingCursors,
+          ids: incomingIds,
+          pagination: connectionPayload.pagination,
+        };
         const previous = this.store.getListState(connection.key);
-        const previousIds = previous?.ids ?? [];
-        const previousSet = new Set(previousIds);
-        const newIds = incomingIds.filter((id) => !previousSet.has(id));
         const nextListState = this.mergeListState(
           previous,
           incomingIds,
@@ -2782,16 +3024,12 @@ export class FateClient<
         this.store.setList(connection.key, nextListState);
 
         const current = this.store.read(connection.owner);
-        const existingField = Array.isArray(
+        const nextField = createNodeRefsForIds(
+          nextListState.pendingBeforeIds?.length || nextListState.pendingAfterIds?.length
+            ? getListEntries(nextListState).map(({ id }) => id)
+            : nextListState.ids,
           current?.[argumentFieldKey(connection.field, connection.hash)],
-        )
-          ? (current?.[argumentFieldKey(connection.field, connection.hash)] as Array<unknown>) || []
-          : [];
-        const nodeRefs = createNodeRefsForIds(newIds, undefined);
-        const nextField =
-          direction === 'forward'
-            ? [...existingField, ...nodeRefs]
-            : [...nodeRefs, ...existingField];
+        );
 
         this.viewDataCache.invalidate(connection.owner);
         this.store.merge(
@@ -2801,7 +3039,7 @@ export class FateClient<
         );
       }),
     );
-    return this.store.getListState(connection.key);
+    return { list: this.store.getListState(connection.key), page: receivedPage };
   }
 
   private queryResultKey(item: QueryRequestDescriptor): string {
@@ -3638,14 +3876,23 @@ export class FateClient<
           const key = getListKey(id, schemaField(field), args?.hash);
           dependencies?.add(`list:${key}`);
           const list = this.store.getListState(key);
+          let childrenCovered =
+            !list ||
+            hasConnectionCursorCoverage(
+              list,
+              args?.value,
+              getPaginationArgsInfo(args?.value).direction,
+            );
+          if (!childrenCovered && !dependencies) {
+            return false;
+          }
           if (parts.length === 1) {
-            return true;
+            return childrenCovered;
           }
           const children = list
-            ? getListEntries(list).map(({ id }) => id)
+            ? getListEntries(getListWindow(list, args?.value)).map(({ id }) => id)
             : value.filter(isNodeRef).map(getNodeRefId);
           const childPaths = parts.slice(1);
-          let childrenCovered = true;
           for (const child of children) {
             // Keep collecting dependencies even if an earlier child is missing.
             if (!covered(child, childPaths, path)) {
@@ -3665,6 +3912,13 @@ export class FateClient<
         missing.add(path);
       }
     }
+    // Masked node views can leave only the connection arguments in this plan.
+    // Its membership and boundary cursors still need to be covered.
+    for (const [path, args] of plan.args) {
+      if (path && args.ignoreKeys && !covered(entityId, path.split('.'), '')) {
+        missing.add(path);
+      }
+    }
     return missing;
   }
 
@@ -3678,6 +3932,30 @@ export class FateClient<
     }
 
     const paginationArgs = getPaginationArgsInfo(item.argsPayload);
+    if (paginationArgs.hasCursorArg) {
+      const args = item.argsPayload;
+      const cursor = args?.after ?? args?.before;
+      const origin = args?.after != null ? listState.afterCursor : listState.beforeCursor;
+      if (cursor !== origin && !listState.cursors?.includes(cursor as string)) {
+        return false;
+      }
+      const selected = getListWindow(listState, args);
+      const limit = getConnectionPageLimit(args, paginationArgs.direction);
+      const hasMore =
+        paginationArgs.direction === 'forward'
+          ? selected?.pagination?.hasNext
+          : selected?.pagination?.hasPrevious;
+      if (
+        limit != null &&
+        (selected ? getListPageSize(selected) : 0) < limit &&
+        hasMore !== false
+      ) {
+        return false;
+      }
+    } else if (listState.afterCursor !== undefined || listState.beforeCursor !== undefined) {
+      return false;
+    }
+
     if (
       !paginationArgs.hasCursorArg &&
       !hasConnectionPageCoverage(listState, item.argsPayload, paginationArgs.direction)
@@ -3685,7 +3963,9 @@ export class FateClient<
       return false;
     }
 
-    for (const id of listState.ids) {
+    for (const { id } of getListEntries(
+      getListWindow(listState, item.argsPayload, getRootListWindowKey(item)),
+    )) {
       if (this.missingForSelection(id, item.plan.paths, item.plan).size > 0) {
         return false;
       }
@@ -3783,11 +4063,7 @@ export class FateClient<
           continue;
         }
 
-        if (
-          !fetchAll &&
-          !getPaginationArgsInfo(item.argsPayload).hasCursorArg &&
-          this.hasRootListData(item)
-        ) {
+        if (!fetchAll && this.hasRootListData(item)) {
           fetchedAll = false;
           continue;
         }
@@ -3934,7 +4210,14 @@ export class FateClient<
       return null;
     }
 
-    const listState = item.kind === 'list' ? this.store.getListState(item.listKey) : undefined;
+    const listState =
+      item.kind === 'list'
+        ? getListWindow(
+            this.store.getListState(item.listKey),
+            item.argsPayload,
+            getRootListWindowKey(item),
+          )
+        : undefined;
     // These containers depend only on immutable descriptor IDs or normalized list
     // state. Entity field changes are observed by views through their stable refs.
     const source = item.kind === 'nodes' ? item.ids : listState;
@@ -3966,6 +4249,7 @@ export class FateClient<
           procedure: item.procedure,
           root: true,
           type: item.type,
+          windowKey: getRootListWindowKey(item),
         };
         value = this.exposeListTarget(connection, metadata);
       } else {
@@ -3977,6 +4261,7 @@ export class FateClient<
           procedure: item.procedure,
           root: true,
           type: item.type,
+          windowKey: getRootListWindowKey(item),
         });
       }
     }
@@ -4649,6 +4934,7 @@ export class FateClient<
               : this.mergeListState(previousList, ids, cursors, pagination, {
                   ...mergeInfo,
                   replace: mergeWindowMetadata ? false : replace,
+                  resetInsertions: Boolean(this.mutationWrite && replace),
                 });
           if (replace && !mergeInfo.hasCursorArg && !preserveWindow) {
             windows.set(listKey, {
@@ -4869,6 +5155,7 @@ export class FateClient<
     entityId: EntityId,
     plan: SelectionPlan,
     pathPrefix: string | null = null,
+    windowScope?: string,
   ): ViewSnapshot<T, S> {
     const cached = this.store.read(entityId);
     if (!cached && plan.paths.size > 0) {
@@ -4880,6 +5167,7 @@ export class FateClient<
     const record = cached ?? { id: ref.id };
 
     const coverageById = new Map<EntityId, Set<string>>();
+    const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
     const walk = (
       viewPayload: object,
@@ -4942,7 +5230,7 @@ export class FateClient<
             selection: getDeferredSelection(selectionKind),
             type,
           });
-          this.deferredTargets.add(deferred);
+          this.deferredTargets.set(deferred, JSON.stringify([getWindowScope(), fieldPath]));
           const ownerRef =
             parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
           this.optimisticRefOwners.set(
@@ -4959,7 +5247,7 @@ export class FateClient<
         if (selectionType === 'boolean' && selectionKind) {
           const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
           const metadata = Array.isArray(value)
-            ? this.nestedListMetadata(parentId, field, plan, fieldPath)
+            ? this.nestedListMetadata(parentId, field, plan, fieldPath, getWindowScope())
             : undefined;
           setRecordValue(
             target,
@@ -4977,7 +5265,7 @@ export class FateClient<
           if (hasArgsOnly) {
             const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
             const metadata = Array.isArray(value)
-              ? this.nestedListMetadata(parentId, field, plan, fieldPath)
+              ? this.nestedListMetadata(parentId, field, plan, fieldPath, getWindowScope())
               : undefined;
             setRecordValue(
               target,
@@ -5009,7 +5297,11 @@ export class FateClient<
               const selection = nextSelection.items as AnyRecord;
               const fieldArgs = plan.args.get(fieldPath);
               const listKey = getListKey(parentId, field, fieldArgs?.hash);
-              const listState = this.store.getListState(listKey);
+              const listState = getListWindow(
+                this.store.getListState(listKey),
+                fieldArgs?.value,
+                getListWindowKey(fieldArgs?.value, JSON.stringify([getWindowScope(), fieldPath])),
+              );
               const entries = listState
                 ? getListEntries(listState)
                 : value.map((item) => ({
@@ -5073,7 +5365,13 @@ export class FateClient<
                   connection.pagination = undefined;
                 }
               }
-              const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
+              const metadata = this.nestedListMetadata(
+                parentId,
+                field,
+                plan,
+                fieldPath,
+                getWindowScope(),
+              );
               setRecordValue(
                 target,
                 key,
@@ -5098,7 +5396,13 @@ export class FateClient<
 
                 return null;
               });
-              const metadata = this.nestedListMetadata(parentId, field, plan, fieldPath);
+              const metadata = this.nestedListMetadata(
+                parentId,
+                field,
+                plan,
+                fieldPath,
+                getWindowScope(),
+              );
               setRecordValue(
                 target,
                 key,

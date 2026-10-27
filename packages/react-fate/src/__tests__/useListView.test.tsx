@@ -964,3 +964,141 @@ test('loads previous items when loadPrevious is invoked', async () => {
   expect(loadPreviousRef).toBeNull();
   expect(renders.at(-1)).toEqual(['comment-0', 'comment-1']);
 });
+
+const projectWindowPage = (ids: Array<string>, backwards = false) => ({
+  items: ids.map((id) => ({ cursor: id, node: { __typename: 'Project', id, name: id } })),
+  pagination: {
+    hasNext: !backwards,
+    hasPrevious: backwards,
+    nextCursor: ids.at(-1),
+    previousCursor: ids[0],
+  },
+});
+
+test.each([false, true])(
+  'pagination belongs to its list reader rather than every reader of the same connection (backwards: %s)',
+  async (backwards) => {
+    type Project = { __typename: 'Project'; id: string; name: string };
+    const ProjectView = view<Project>()({ id: true, name: true });
+    const Selection = {
+      items: { cursor: true, node: ProjectView },
+      pagination: { hasNext: true, hasPrevious: true, nextCursor: true, previousCursor: true },
+    } as const;
+    const request = { projects: { args: backwards ? { last: 2 } : { first: 2 }, list: Selection } };
+    const PreviewView = view<Project>()({ id: true, name: true });
+    const previewSelection = { ...Selection, items: { cursor: true, node: PreviewView } } as const;
+    const previewRequest = { projects: { ...request.projects, list: previewSelection } };
+    const roots = { projects: clientRoot<Project, 'Project'>('Project') };
+    const fetchList = vi
+      .fn()
+      .mockResolvedValueOnce(projectWindowPage(backwards ? ['5', '6'] : ['1', '2'], backwards))
+      .mockResolvedValueOnce(projectWindowPage(['3', '4'], backwards))
+      .mockResolvedValueOnce(projectWindowPage(backwards ? ['5', '6'] : ['1', '2'], backwards));
+    const mutations = { add: mutation<Project, { name: string }, Project>('Project') };
+    const client = createClient<[typeof roots, typeof mutations]>({
+      mutations,
+      roots,
+      transport: {
+        fetchById: async () => [],
+        fetchList,
+        mutate: vi.fn().mockResolvedValue({ __typename: 'Project', id: 'new', name: 'New' }),
+      },
+      types: [{ type: 'Project' }],
+    });
+    const observed = new Map<string, ReadonlyArray<string | number>>();
+    const loaders = new Map<string, (() => Promise<void>) | null>();
+    function Reader({ name }: { name: string }) {
+      const selectedRequest = name === 'preview' ? previewRequest : request;
+      const { projects } = useRequest<typeof request, typeof roots>(selectedRequest);
+      const [items, next, previous] = useListView(
+        name === 'preview' ? previewSelection : Selection,
+        projects,
+      );
+      observed.set(
+        name,
+        items.map(({ node }) => node.id),
+      );
+      loaders.set(name, backwards ? previous : next);
+      return null;
+    }
+    await client.request(request);
+    const root = createRoot(document.createElement('div'));
+    try {
+      await act(async () => {
+        root.render(
+          <FateClient client={client}>
+            <Suspense fallback={null}>
+              <Reader name="preview" />
+              <Reader name="feed" />
+            </Suspense>
+          </FateClient>,
+        );
+        await flushAsync();
+      });
+      expect(observed.get('preview')).toEqual(backwards ? ['5', '6'] : ['1', '2']);
+      await act(async () => {
+        await Promise.all([loaders.get('feed')?.(), loaders.get('feed')?.()]);
+      });
+      expect(observed.get('feed')).toEqual(backwards ? ['3', '4', '5', '6'] : ['1', '2', '3', '4']);
+      expect(observed.get('preview')).toEqual(backwards ? ['5', '6'] : ['1', '2']);
+      expect(
+        client.getRequestResult(previewRequest).projects.items.map(({ node }) => node.id),
+      ).toEqual(backwards ? ['5', '6'] : ['1', '2']);
+      expect(fetchList).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await client.request(request, { mode: 'network-only' });
+      });
+      expect(observed.get('feed')).toEqual(backwards ? ['3', '4', '5', '6'] : ['1', '2', '3', '4']);
+      expect(observed.get('preview')).toEqual(backwards ? ['5', '6'] : ['1', '2']);
+      fetchList.mockRejectedValueOnce(new Error('Failed page'));
+      await act(async () => {
+        await expect(loaders.get('feed')!()).rejects.toThrow('Failed page');
+      });
+      expect(observed.get('feed')).toEqual(backwards ? ['3', '4', '5', '6'] : ['1', '2', '3', '4']);
+      fetchList.mockResolvedValueOnce(
+        projectWindowPage(backwards ? ['1', '2'] : ['5', '6'], backwards),
+      );
+      await act(async () => {
+        await loaders.get('feed')?.();
+      });
+      expect(observed.get('feed')).toEqual(['1', '2', '3', '4', '5', '6']);
+      expect(observed.get('preview')).toEqual(backwards ? ['5', '6'] : ['1', '2']);
+      await act(async () => {
+        await client.mutations.add({
+          input: { name: 'New' },
+          insert: { into: client.getRequestResult(request).projects, position: 'before' },
+          view: ProjectView,
+        });
+      });
+      expect(observed.get('feed')).toEqual(['new', '1', '2', '3', '4', '5', '6']);
+      expect(observed.get('preview')).toEqual(backwards ? ['new', '5', '6'] : ['new', '1', '2']);
+      fetchList.mockResolvedValueOnce(projectWindowPage(backwards ? ['6'] : ['1'], backwards));
+      await act(async () => {
+        await client.request(
+          { projects: { args: backwards ? { last: 1 } : { first: 1 }, list: Selection } },
+          { mode: 'network-only' },
+        );
+      });
+      expect(observed.get('feed')).toEqual(['new', '1', '2', '3', '4', '5', '6']);
+      expect(observed.get('preview')).toEqual(backwards ? ['new', '5', '6'] : ['new', '1', '2']);
+      await act(async () => root.render(null));
+      const calls = fetchList.mock.calls.length;
+      await act(async () => {
+        root.render(
+          <FateClient client={client}>
+            <Suspense fallback={null}>
+              <Reader name="preview" />
+              <Reader name="feed" />
+            </Suspense>
+          </FateClient>,
+        );
+        await flushAsync();
+      });
+      expect(observed.get('feed')).toEqual(['new', '1', '2', '3', '4', '5', '6']);
+      expect(observed.get('preview')).toEqual(backwards ? ['new', '5', '6'] : ['new', '1', '2']);
+      expect(fetchList).toHaveBeenCalledTimes(calls);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  },
+);

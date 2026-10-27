@@ -1,5 +1,5 @@
 import { isDeferred, type Deferred, type DeferredSnapshot } from '@nkzw/fate';
-import { getListEntries } from '@nkzw/fate/list';
+import { createConnectionReader, getListEntries, getListWindowKey } from '@nkzw/fate/list';
 import { use, useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
 import { useFateClient } from './context.tsx';
 import {
@@ -33,16 +33,19 @@ export function useListView<
   ) as ConnectionValue | null | undefined;
   const { metadata, nodeView } = useListViewInfo(selection, resolvedConnection);
 
+  const identity = metadata
+    ? `${metadata.key}|${metadata.windowKey ?? getListWindowKey(metadata.args)}`
+    : '';
+  const reader = useMemo(
+    () => (metadata ? createConnectionReader(client, metadata) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, identity],
+  );
   const subscribe = useCallback(
-    (onStoreChange: () => void) =>
-      metadata ? client.store.subscribeList(metadata.key, onStoreChange) : () => {},
-    [client, metadata],
+    (listener: () => void) => reader?.subscribe(listener) ?? (() => {}),
+    [reader],
   );
-
-  const getSnapshot = useCallback(
-    () => (metadata ? client.store.getListState(metadata.key) : undefined),
-    [client, metadata],
-  );
+  const getSnapshot = useCallback(() => reader?.getSnapshot(), [reader]);
 
   const listState = useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot));
   const pagination = listState?.pagination ?? resolvedConnection?.pagination;
@@ -62,56 +65,15 @@ export function useListView<
     return resolvedConnection?.items;
   }, [client, resolvedConnection?.items, listState, metadata, nodeView]);
 
-  const loadNext = useMemo(() => {
-    if (!metadata || !hasNext || !nextCursor) {
-      return null;
-    }
-
-    return async () => {
-      const { before: _before, first, last, ...values } = metadata.args || {};
-      const nextPageSize = first ?? last;
-
-      await client.loadConnection(
-        nodeView,
-        metadata,
-        {
-          ...values,
-          after: nextCursor,
-          before: undefined,
-          ...(nextPageSize !== undefined ? { first: nextPageSize } : null),
-          last: undefined,
-        },
-        {
-          direction: 'forward',
-        },
-      );
-    };
-  }, [client, hasNext, nodeView, metadata, nextCursor]);
-
-  const loadPrevious = useMemo(() => {
-    if (!metadata || !hasPrevious || !previousCursor) {
-      return null;
-    }
-
-    return async () => {
-      const { after: _after, first, last, ...values } = metadata.args || {};
-      const previousPageSize = last ?? first;
-      await client.loadConnection(
-        nodeView,
-        metadata,
-        {
-          ...values,
-          after: undefined,
-          before: previousCursor,
-          first: undefined,
-          ...(previousPageSize !== undefined ? { last: previousPageSize } : null),
-        },
-        {
-          direction: 'backward',
-        },
-      );
-    };
-  }, [client, hasPrevious, nodeView, metadata, previousCursor]);
+  const loadNext = useMemo(
+    () => (reader && hasNext && nextCursor ? () => reader.load(nodeView, 'forward') : null),
+    [reader, hasNext, nextCursor, nodeView],
+  );
+  const loadPrevious = useMemo(
+    () =>
+      reader && hasPrevious && previousCursor ? () => reader.load(nodeView, 'backward') : null,
+    [reader, hasPrevious, previousCursor, nodeView],
+  );
 
   return [items as ConnectionItems<ResolvedConnection<C>>, loadNext, loadPrevious];
 }
