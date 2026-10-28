@@ -35,6 +35,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 credentials: 'include',
               })
           : undefined,
+        streaming: true,
         url: `${env('SERVER_URL')}/graphql`,
       }),
     [userId],

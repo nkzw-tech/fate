@@ -1,4 +1,5 @@
 import { styleText } from 'node:util';
+import { useDeferStream as createGraphQLDeferPlugin } from '@graphql-yoga/plugin-defer-stream';
 import { useGraphQLSSE as createGraphQLSSEPlugin } from '@graphql-yoga/plugin-graphql-sse';
 import { createYoga } from 'graphql-yoga';
 import { Hono } from 'hono';
@@ -30,6 +31,7 @@ app.on(['POST', 'GET'], '/api/auth/*', ({ req }) => auth.handler(req.raw));
 const yoga = createYoga<Context>({
   graphiql: process.env.NODE_ENV === 'development',
   plugins: [
+    createGraphQLDeferPlugin(),
     createGraphQLSSEPlugin({
       endpoint: '/graphql/stream',
     }),

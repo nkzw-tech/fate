@@ -39,6 +39,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       (isGraphQLTransport
         ? {
             fetch: credentialFetch,
+            streaming: true,
             url: `${env('SERVER_URL')}/graphql`,
           }
         : {
