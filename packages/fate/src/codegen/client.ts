@@ -859,6 +859,7 @@ export const createFateClient = (options: {
   mutateDurably?: Parameters<typeof createGraphQLTransport<GraphQLTransportMutations>>[0]['mutateDurably'];
   onLiveError?: (error: unknown) => void;
   persistence?: import("@nkzw/fate").Persistence;
+  streaming?: Parameters<typeof createGraphQLTransport>[0]['streaming'];
   url: string | URL;
 }) =>
   createClient<[GeneratedClientRoots, GeneratedClientMutations], typeof hydrationScope>({
@@ -880,6 +881,7 @@ export const createFateClient = (options: {
       ${graphQLConfig.nodes !== undefined ? 'nodes: graphQL.nodes,' : ''}
       roots: graphQL.roots,
       ${argumentSchema ? 'schema: graphQL.schema,' : ''}
+      streaming: options.streaming,
       types: ${typesBlock.trimStart()},
       url: options.url,
     }),

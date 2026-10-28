@@ -58,3 +58,5 @@ function PostComments({
 `title` and `content` are available when `useView(PostView, postRef)` returns. Reading the comments with `useListView` loads any missing data and suspends only `PostComments`.
 
 `useView` and `useLiveListView` can read deferred values too. This works with every transport. GraphQL currently fetches deferred fields with separate queries, rather than streaming `@defer` responses.
+
+For GraphQL servers with incremental delivery enabled, [streaming batched reads](/integrations/graphql#streaming-batched-reads) allows deferred follow-up requests to resolve independently within one HTTP response. This does not change when a deferred field is read or require different React hooks.

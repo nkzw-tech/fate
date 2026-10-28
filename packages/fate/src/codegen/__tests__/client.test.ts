@@ -503,6 +503,10 @@ test('generates a GraphQL client source with Relay roots and configured mutation
     "eventSource?: Parameters<typeof createGraphQLTransport>[0]['eventSource'];",
   );
   expect(sourceText).toContain("live?: Parameters<typeof createGraphQLTransport>[0]['live'];");
+  expect(sourceText).toContain(
+    "streaming?: Parameters<typeof createGraphQLTransport>[0]['streaming'];",
+  );
+  expect(sourceText).toContain('streaming: options.streaming');
   expect(sourceText).not.toContain('ConstructorParameters<typeof createGraphQLTransport>');
   expect(sourceText).toContain(`}),
     types: [`);
