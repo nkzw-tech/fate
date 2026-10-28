@@ -151,9 +151,10 @@ export const batchReadControl = (operations: ReadonlyArray<{ signal?: AbortSigna
   const controller = new AbortController();
   let remaining = operations.length;
   const listeners = new Map<AbortSignal, () => void>();
-  for (const [signal, count] of counts) {
+  for (const signal of counts.keys()) {
     const abort = () => {
-      remaining -= count;
+      remaining -= counts.get(signal) ?? 0;
+      counts.delete(signal);
       if (remaining === 0) {
         controller.abort(signal.reason);
       }
@@ -166,6 +167,17 @@ export const batchReadControl = (operations: ReadonlyArray<{ signal?: AbortSigna
     }
   }
   return {
+    complete: ({ signal }: { signal?: AbortSignal }) => {
+      if (!signal?.aborted) {
+        remaining--;
+        if (signal) {
+          counts.set(signal, (counts.get(signal) ?? 0) - 1);
+        }
+        if (!remaining) {
+          controller.abort();
+        }
+      }
+    },
     dispose: () => {
       for (const [signal, listener] of listeners) {
         signal.removeEventListener('abort', listener);

@@ -1,6 +1,7 @@
 import { withAliasSupport } from './alias-transport.ts';
 import { responseField, schemaField } from './alias.ts';
 import { GraphQLRequestError, type GraphQLErrorPayload } from './graphql-error.ts';
+import { readGraphQLIncremental } from './graphqlIncremental.ts';
 import {
   graphQLOutputRelations,
   validateGraphQLArguments,
@@ -120,6 +121,7 @@ export type GraphQLTransportOptions<
   nodes?: boolean;
   roots?: Record<string, GraphQLRootConfig>;
   schema?: GraphQLArgumentSchema;
+  streaming?: boolean;
   types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<Pick<TypeConfig, 'getId'>>>;
   url: string | URL;
 };
@@ -701,6 +703,7 @@ const graphQLRequest = async ({
   headers,
   query,
   signal,
+  streaming,
   url,
   variables,
 }: {
@@ -708,10 +711,20 @@ const graphQLRequest = async ({
   headers: HeadersFactory | undefined;
   query: string;
   signal?: AbortSignal;
+  streaming?: boolean;
   url: string;
   variables?: Record<string, unknown>;
 }) => {
-  const requestHeadersValue = await requestHeaders({ 'content-type': 'application/json' }, headers);
+  const requestHeadersValue = await requestHeaders(
+    streaming
+      ? {
+          accept:
+            'multipart/mixed;incrementalSpec=v0.2, application/graphql-response+json, application/json',
+          'content-type': 'application/json',
+        }
+      : { 'content-type': 'application/json' },
+    headers,
+  );
   signal?.throwIfAborted();
   const response = await fetchImpl(url, {
     ...(signal ? { signal } : {}),
@@ -724,13 +737,7 @@ const graphQLRequest = async ({
     throw await responseError(response);
   }
 
-  const payload = assertGraphQLResponse(await response.json());
-
-  return {
-    data: payload.data,
-    errors: payload.errors ?? [],
-    status: response.status,
-  };
+  return response;
 };
 
 const reportExecutionError = (
@@ -782,6 +789,7 @@ export function createGraphQLTransport<
   nodes = true,
   roots,
   schema,
+  streaming = false,
   types: typeConfigs,
   url,
 }: GraphQLTransportOptions<Mutations>): Transport<Mutations> {
@@ -890,13 +898,19 @@ export function createGraphQLTransport<
         ([name, variable]) => `$${name}: ${variable.type}`,
       );
       const variableDefinitions = definitions.length ? `(${definitions.join(', ')})` : '';
-      const { data, errors, status } = await graphQLRequest({
+      const incremental = streaming && kind === 'query';
+      const response = await graphQLRequest({
         fetchImpl,
         headers,
         query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions} { ${operations
-          .map((entry) => `${entry.alias}: ${entry.selection}`)
+          .map((entry) =>
+            incremental
+              ? `... @defer(label: "${entry.alias}") { ${entry.alias}: ${entry.selection} }`
+              : `${entry.alias}: ${entry.selection}`,
+          )
           .join(' ')} }`,
         signal: control?.signal,
+        streaming: incremental,
         url: endpoint,
         variables: schema
           ? Object.fromEntries(
@@ -904,6 +918,39 @@ export function createGraphQLTransport<
             )
           : undefined,
       });
+      const status = response.status;
+      const deliver = (
+        operation: PendingOperation,
+        data: unknown,
+        errors: ReadonlyArray<GraphQLErrorPayload>,
+      ) => {
+        if (operation.signal?.aborted) {
+          operation.reject(operation.signal.reason);
+        } else if (errors.length) {
+          operation.reject(new GraphQLRequestError(errors, { data, status }));
+        } else {
+          operation.resolve(operation.transform(data));
+        }
+      };
+      if (
+        incremental &&
+        response.headers.get('content-type')?.toLowerCase().startsWith('multipart/mixed')
+      ) {
+        const waiting = new Map(operations.map((operation) => [operation.alias, operation]));
+        await readGraphQLIncremental(
+          response,
+          new Set(waiting.keys()),
+          ({ alias, data, errors }) => {
+            const operation = waiting.get(alias)!;
+            deliver(operation, data, errors);
+            waiting.delete(alias);
+            control?.complete(operation);
+          },
+          control?.signal,
+        );
+        return;
+      }
+      const { data, errors = [] } = assertGraphQLResponse(await response.json());
       const aliases = new Set(operations.map((operation) => operation.alias));
       const errorsByAlias = new Map<string, Array<GraphQLErrorPayload>>();
       const globalErrors: Array<GraphQLErrorPayload> = [];
@@ -933,15 +980,8 @@ export function createGraphQLTransport<
           operation.reject(operation.signal.reason);
           continue;
         }
-        const operationErrors = errorsByAlias.get(operation.alias);
-        if (operationErrors?.length) {
-          operation.reject(
-            new GraphQLRequestError(operationErrors, { data: data[operation.alias], status }),
-          );
-          continue;
-        }
 
-        if (!Object.hasOwn(data, operation.alias)) {
+        if (!errorsByAlias.has(operation.alias) && !Object.hasOwn(data, operation.alias)) {
           operation.reject(
             new GraphQLRequestError([], {
               data,
@@ -953,7 +993,7 @@ export function createGraphQLTransport<
           continue;
         }
 
-        operation.resolve(operation.transform(data[operation.alias]));
+        deliver(operation, data[operation.alias], errorsByAlias.get(operation.alias) ?? []);
       }
     } catch (error) {
       for (const operation of operations) {
