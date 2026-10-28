@@ -4,7 +4,7 @@
 
 You can wrap a list of references using `useListView` to enable connection-style lists with pagination support.
 
-Run the regular example with `vp run dev` (tRPC) or `vp run dev:graphql` (GraphQL), then open [Pagination](http://localhost:6001/pagination/preview) from its header. The demo uses the existing posts, client, and router to exercise independent view ranges, navigation, refreshes, and optimistic insertion and rollback. Reading and pagination work without signing in; insertions require an example account and successful insertions create real posts in its database. Browser network throttling makes pending work easier to observe.
+Run the regular example with `vp run dev` (tRPC) or `vp run dev:graphql` (GraphQL), then open **Pagination** from its header (`http://localhost:6001/pagination/preview`). The demo uses the existing posts, client, and router to exercise independent view ranges, navigation, refreshes, and optimistic insertion and rollback. Reading and pagination work without signing in; insertions require an example account and successful insertions create real posts in its database. Browser network throttling makes pending work easier to observe.
 
 For example, you can define a `CommentView` and reuse it inside of a `CommentConnectionView`:
 

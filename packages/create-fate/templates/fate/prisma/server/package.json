@@ -23,8 +23,8 @@
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "@trpc/server": "^11.19.0",
-    "better-auth": "^1.7.11",
-    "hono": "^4.13.13",
+    "better-auth": "^1.7.14",
+    "hono": "^4.13.14",
     "zod": "^4.6.7"
   },
   "devDependencies": {

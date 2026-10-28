@@ -12,8 +12,8 @@ allowBuilds:
   workerd: true
 
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
-  vite-plus: 1.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
   vitest: 5.0.5
 
 minimumReleaseAgeExclude:
@@ -31,7 +31,7 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
-  better-auth: 1.7.11
+  better-auth: 1.7.14
   kysely: 0.28.17
   vite: 'catalog:'
   vitest: 'catalog:'
