@@ -874,6 +874,8 @@ function PostComments({
 
 `useView` and `useLiveListView` can read deferred values too. This works with every transport. GraphQL currently fetches deferred fields with separate queries, rather than streaming `@defer` responses.
 
+For GraphQL servers with incremental delivery enabled, [streaming batched reads](/docs/integrations/graphql.md#streaming-batched-reads) allows deferred follow-up requests to resolve independently within one HTTP response. This does not change when a deferred field is read or require different React hooks.
+
 ## List Views
 
 ### Pagination with `useListView`
@@ -2220,6 +2222,25 @@ const fate = createFateClient({
 Queries made together are batched into one GraphQL operation. Mutations run separately and are not retried unless you configure [Persistence](/docs/guide/persistence.md).
 
 [Deferred fields](/docs/guide/deferred-views.md) load when a component reads them. This uses ordinary GraphQL queries; incremental `@defer` responses are not supported yet.
+
+### Streaming Batched Reads
+
+For a server that supports GraphQL `@defer` and the `v0.2` incremental delivery protocol, enable streaming when creating your client:
+
+```tsx
+const fate = createFateClient({
+  streaming: true,
+  url: 'https://api.example.com/graphql',
+});
+```
+
+Reads still share one HTTP request. Each read is wrapped in its own labeled `@defer` fragment and resolves when that operation's complete result arrives. Separate requests under separate Suspense boundaries can render independently, while one request continues to wait for all the data it declares.
+
+The transport negotiates `multipart/mixed;incrementalSpec=v0.2` and also accepts complete JSON responses. Mutations continue to use ordinary JSON responses. Streaming is disabled by default; enable it only after configuring your server and verifying that your proxy forwards response chunks promptly. Unsupported directives and incompatible multipart protocols produce errors rather than silently retrying requests.
+
+With GraphQL Yoga, install `@graphql-yoga/plugin-defer-stream` and add `useDeferStream()` to the server's plugins. Keep client timeouts and error boundaries in place: completed reads remain available if another operation fails or the connection ends, while unfinished reads reject. Canceling one read keeps the connection alive for its siblings; the connection is released when no reads still need it.
+
+This mode delivers complete operation results through the existing normalized cache. Field-level patches and item-by-item `@stream` updates are not supported. Existing fate `defer()` selections remain lazy identity-based follow-up reads, which can themselves share a streaming batch.
 
 ### Refetch Fields
 
