@@ -1,9 +1,6 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="/public/fate-logo.svg">
-    <img alt="Logo" src="/public/fate-logo.svg" width="50%">
-  </picture>
+  <img alt="fate" src="/public/fate-logo.svg#gh-light-mode-only" width="50%">
+  <img alt="fate" src="/public/fate-logo-dark.svg#gh-dark-mode-only" width="50%">
 </p>
 
 **_fate_** is a modern data client for the web inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.
