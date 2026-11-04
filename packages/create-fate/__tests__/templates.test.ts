@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -127,6 +127,45 @@ describe('create-fate templates', () => {
     expect(voidGitignore).toContain('.fate/');
     expect(voidGitignore).toContain('.void/');
   });
+
+  test.each(['react', 'vue'])(
+    'bootstraps Void preparation in a clean %s checkout',
+    async (framework) => {
+      const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-void-prepare-'));
+      try {
+        const target = join(tempRoot, 'app');
+        await execFileAsync(
+          process.execPath,
+          [
+            join(packageRoot, 'bin/create-fate.mjs'),
+            target,
+            '--template',
+            'void',
+            '--framework',
+            framework,
+            '--no-setup',
+          ],
+          { env: { ...process.env, npm_config_registry: registryURL } },
+        );
+
+        const prepare = () =>
+          execFileAsync(process.execPath, ['scripts/prepare-void.mjs'], { cwd: target });
+        const tsconfig = join(target, '.void/tsconfig.json');
+        expect(existsSync(join(target, 'void.config.ts'))).toBe(true);
+        expect(existsSync(join(target, 'void.json'))).toBe(false);
+        expect(existsSync(tsconfig)).toBe(false);
+        await prepare();
+        expect(JSON.parse(readFileSync(tsconfig, 'utf8'))).toEqual({});
+
+        const generated = JSON.stringify({ files: ['db.d.ts', 'routes.d.ts'] });
+        writeFileSync(tsconfig, generated);
+        await prepare();
+        expect(readFileSync(tsconfig, 'utf8')).toBe(generated);
+      } finally {
+        rmSync(tempRoot, { force: true, recursive: true });
+      }
+    },
+  );
 
   test('applies the Void auth migrations without losing seeded data', () => {
     const migrationsRoot = join(packageRoot, 'templates/fate/void/db/migrations');

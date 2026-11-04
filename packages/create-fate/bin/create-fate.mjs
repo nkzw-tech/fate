@@ -805,6 +805,7 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
   }
 
   if (selectedVariant === 'void') {
+    removeIfExists(path.join(frontendRoot, 'void.json'));
     configureVueVoidServerFiles(frontendRoot);
   }
 
@@ -827,12 +828,12 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
     __FATE_TYPE_MODULE__: config.typeModule,
     __FMT_IGNORE_PATTERNS__:
       selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? "['.fate/', '.void/', 'dist/', 'node_modules/', 'pnpm-lock.yaml']"
-        : "['.fate/', '.void/', 'dist/', 'node_modules/', '../dist/', 'pnpm-lock.yaml']",
+        ? "['**/.cloudflare/**', '.fate/', '.void/', '.void-wrangler.jsonc', 'dist/', 'node_modules/', 'pnpm-lock.yaml']"
+        : "['**/.cloudflare/**', '.fate/', '.void/', 'dist/', 'node_modules/', '../dist/', 'pnpm-lock.yaml']",
     __LINT_IGNORE_PATTERNS__:
       selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? "['.fate', '.void', 'dist', 'node_modules', 'vite.config.ts.timestamp-*']"
-        : "['.fate', '.void', 'dist', 'node_modules', '../dist', 'vite.config.ts.timestamp-*']",
+        ? "['**/.cloudflare/**', '.fate', '.void', '.void-wrangler.jsonc', 'dist', 'node_modules', 'vite.config.ts.timestamp-*']"
+        : "['**/.cloudflare/**', '.fate', '.void', 'dist', 'node_modules', '../dist', 'vite.config.ts.timestamp-*']",
     __TSCONFIG_EXTENDS__:
       selectedVariant === 'void' || selectedVariant === 'graphql-client'
         ? './.void/tsconfig.json'

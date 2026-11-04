@@ -1,3 +1,5 @@
+.cloudflare/
+**/.cloudflare/
 .fate/
 **/.fate/
 .void/

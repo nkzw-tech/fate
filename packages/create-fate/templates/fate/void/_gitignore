@@ -1,5 +1,8 @@
+.cloudflare/
+**/.cloudflare/
 .fate/
 .void/
+.void-wrangler.jsonc
 .wrangler/
 .eslintcache
 .pnpm-debug.log

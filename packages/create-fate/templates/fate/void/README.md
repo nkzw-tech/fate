@@ -62,7 +62,7 @@ Deploy directly to your own Cloudflare account:
 vp exec void deploy --platform cloudflare
 ```
 
-Void signs you into Cloudflare when needed, provisions resources, applies the checked-in database migrations, and deploys the app. Commit the resource IDs saved in `wrangler.jsonc` for subsequent deployments. Keep the template's `VOID_LIVE` Durable Object binding and class migration for live updates.
+Void signs you into Cloudflare when needed, provisions resources, applies the checked-in database migrations, and deploys the app. Commit the resource IDs saved in `void.lock.json` for subsequent deployments. Keep the template's `VOID_LIVE` Durable Object binding and class migration in `void.config.ts` for live updates.
 
 After changing the database schema or auth configuration, run `vp run db:generate`, review and commit the migration, then deploy. The template's migrations include the production Better Auth schema.
 

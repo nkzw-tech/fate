@@ -21,7 +21,7 @@
     "fbtee:collect": "vp exec fbtee collect",
     "fbtee:prepare": "vp run fbtee:collect && vp exec fbtee prepare-translations --source-strings source_strings.json --output-dir translations --locales de-DE ja-JP",
     "fbtee:translate": "vp exec fbtee translate --source-strings source_strings.json --output-dir src/translations --output-locale-style=bcp47",
-    "prepare:void": "void prepare",
+    "prepare:void": "node scripts/prepare-void.mjs && void prepare",
     "test:all": "vp check && vp test"
   },
   "dependencies": {

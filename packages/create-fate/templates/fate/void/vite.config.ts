@@ -36,12 +36,28 @@ export default defineConfig({
     experimentalTailwindcss: {
       stylesheet: 'src/App.css',
     },
-    ignorePatterns: ['.fate/', '.void/', 'dist/', 'node_modules/', 'pnpm-lock.yaml'],
+    ignorePatterns: [
+      '**/.cloudflare/**',
+      '.fate/',
+      '.void/',
+      '.void-wrangler.jsonc',
+      'dist/',
+      'node_modules/',
+      'pnpm-lock.yaml',
+    ],
     singleQuote: true,
   },
   lint: {
     extends: [nkzw],
-    ignorePatterns: ['.fate', '.void', 'dist', 'node_modules', 'vite.config.ts.timestamp-*'],
+    ignorePatterns: [
+      '**/.cloudflare/**',
+      '.fate',
+      '.void',
+      '.void-wrangler.jsonc',
+      'dist',
+      'node_modules',
+      'vite.config.ts.timestamp-*',
+    ],
     options: { typeAware: true, typeCheck: true },
     overrides: [
       {

@@ -22,6 +22,7 @@ export default defineConfig({
       stylesheet: 'client/src/App.css',
     },
     ignorePatterns: [
+      '**/.cloudflare/**',
       'coverage/',
       'dist/',
       '.fate/',
@@ -36,6 +37,7 @@ export default defineConfig({
   lint: {
     extends: [nkzw],
     ignorePatterns: [
+      '**/.cloudflare/**',
       'coverage',
       'dist',
       '.fate',
