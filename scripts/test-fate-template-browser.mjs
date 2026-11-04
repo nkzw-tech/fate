@@ -111,22 +111,11 @@ try {
     await input.locator('..').getByRole('button', { exact: true, name: 'Post comment' }).click();
     await expect(input).toHaveValue('', { timeout: 30_000 });
     if (hasBackend) {
-      await observer.reload({ waitUntil: 'networkidle' });
-      for (let attempt = 0; attempt < 20; attempt++) {
-        if (await observer.getByText(comment, { exact: true }).isVisible()) {
-          break;
-        }
-        const more = observer
-          .getByRole('button', { exact: true, name: 'Load more comments' })
-          .first();
-        if (!(await more.isVisible())) {
-          break;
-        }
-        await Promise.all([
-          observer.waitForResponse((response) => /\/(fate|trpc|graphql)/.test(response.url())),
-          more.click(),
-        ]);
-      }
+      await observer.goto(`${url}search`);
+      const search = observer.getByPlaceholder('Search comments...', { exact: true });
+      // The input receives focus when React attaches its ref.
+      await expect(search).toBeFocused({ timeout: 30_000 });
+      await search.fill(comment);
     } else {
       // Live delivery can briefly overlap the optimistic comment before reconciliation.
       await expect(page.getByText(comment, { exact: true })).toHaveCount(1, { timeout: 30_000 });
