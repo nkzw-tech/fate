@@ -302,8 +302,8 @@ importers:
         specifier: ^11.23.0
         version: 11.23.0(@trpc/server@11.23.0(@types/ws@8.18.2)(typescript@7.0.2))(typescript@7.0.2)
       '@void/react':
-        specifier: ^1.6.0
-        version: 1.6.0(df5e906ac1c3d16f90b431ec91a29cf6)
+        specifier: ^1.6.1
+        version: 1.6.1(4cdc396f14c4e9ef7daf0aad194539c0)
       better-auth:
         specifier: 1.7.15
         version: 1.7.15(c2349cfee0ba9de431bdbb308f4f4694)
@@ -335,8 +335,8 @@ importers:
         specifier: ^3.7.0
         version: 3.7.0
       void:
-        specifier: ^1.6.0
-        version: 1.6.0(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
+        specifier: ^1.6.1
+        version: 1.6.1(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
     devDependencies:
       '@nkzw/fate':
         specifier: workspace:*
@@ -695,8 +695,8 @@ importers:
         specifier: ^1.5.0
         version: 1.5.0(@types/react@19.3.0)(react@19.3.1)
       '@void/react':
-        specifier: ^1.6.0
-        version: 1.6.0(df5e906ac1c3d16f90b431ec91a29cf6)
+        specifier: ^1.6.1
+        version: 1.6.1(4cdc396f14c4e9ef7daf0aad194539c0)
       better-auth:
         specifier: 1.7.15
         version: 1.7.15(c2349cfee0ba9de431bdbb308f4f4694)
@@ -728,8 +728,8 @@ importers:
         specifier: ^3.7.0
         version: 3.7.0
       void:
-        specifier: ^1.6.0
-        version: 1.6.0(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
+        specifier: ^1.6.1
+        version: 1.6.1(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
       void-fate:
         specifier: workspace:*
         version: link:../../packages/void-fate
@@ -892,8 +892,8 @@ importers:
         specifier: 'catalog:'
         version: 1.5.0(@types/node@26.6.6)(@vitest/coverage-v8@5.1.0)(@vitest/ui@5.1.0)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(playwright@1.64.1)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
       void:
-        specifier: ^1.6.0
-        version: 1.6.0(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
+        specifier: ^1.6.1
+        version: 1.6.1(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
 
   packages/vue-fate:
     dependencies:
@@ -3876,28 +3876,28 @@ packages:
   '@vitest/utils@5.1.0':
     resolution: {integrity: sha512-V+qgCwkvVw+s1t1S5TaoBHsLi5Sz/YmohCMoOu0mZ8ZQst2bKhRYARAQucWpVg8D0mv0x5MHcWXY5QdOsoiGBQ==}
 
-  '@void/deploy-cloudflare@1.6.0':
-    resolution: {integrity: sha512-l7XnuB/jU8twiNstdAIcmDc8kWBh2G47t0LqDEnFRun0V6RokjKvmrHIPNMQgaQb96eE7ZaY9dThOZDJsGYQtA==}
+  '@void/deploy-cloudflare@1.6.1':
+    resolution: {integrity: sha512-4xI04uxsLSvD8WJQHLdiDTMpaJ/BA0rqzj5FYJsp4l/zI9FBYUTNEYEBzFlgY4lrB+3c3Gh9h8J/rxY2RZxQJw==}
 
-  '@void/deploy-core@1.6.0':
-    resolution: {integrity: sha512-sUSOcWl8KgdQH7W1hibzeJ0otXpqhztT29upbAcmlm+gBh81WM+8bEAdLAgzFhcp5XkcU1RaEcBFPcNE1GzXkw==}
+  '@void/deploy-core@1.6.1':
+    resolution: {integrity: sha512-RVlo37YyFWqRo8hePquKS+1lhWMpPz8Oqp0OdidA6+N7mhKX1Vz6XSGPuVX7v8GhCz6SsnA8oL7l9x8g/uMDfg==}
 
-  '@void/edge@1.6.0':
-    resolution: {integrity: sha512-PuVgtfY6PNNTw5nuvd2OV9pOL5aOL/1nKv0eupnK/Tu23Uu3ilcwGPGkqVrDt5M32EYnVP4LO9WiWnjDMCIq9w==}
+  '@void/edge@1.6.1':
+    resolution: {integrity: sha512-utwwrLWHRPIGQUXXoCnuWpgVRzTDp906niM/QMZbCjvi6FsnNrBaMVHyw8wIp1ecvSVtTMABvkrT01Gu+GCHfg==}
 
-  '@void/isr@1.6.0':
-    resolution: {integrity: sha512-uIzqlL+Eq37AY4qOPIs5lAHk+HztO2rHRVallu59QebgUaNo1d68yydiVOUBLvFlvms/lPBL+ztKqx0oY/Ox0A==}
+  '@void/isr@1.6.1':
+    resolution: {integrity: sha512-9iRc4DbzCwqlJ4YvRc/rmPMm934AL2lJslqIkdxvyKrve3XF0FigbTdvq+z8XGrB5rORIfUMRTSO6dAIRl1T0A==}
 
-  '@void/platform@1.6.0':
-    resolution: {integrity: sha512-NhkmkTQE/CGXQt4ZfI+PwSmPTUonvrhfygHo7gHSdcMt2mCDEhlNCU1UsAx2rtDmViwMNFYbnQ5VsKXyHFPSPQ==}
+  '@void/platform@1.6.1':
+    resolution: {integrity: sha512-iXgVr1OTJQlQwzMyHGNFS6yc8YIFMzz7Z1yVcFhr822XwkxicQwPsGOsFHLS2OVKE0UHRITcfrDtGRG69rOM7g==}
 
-  '@void/react@1.6.0':
-    resolution: {integrity: sha512-u8tHUZosoGgrE0dHDy8ndQc8dq5OJXwPiGAIOs5nmjmKmHh1lmUh7vAgCPqPSs7YFfLxoe/el8UVu6PAscegeA==}
+  '@void/react@1.6.1':
+    resolution: {integrity: sha512-soae4fx9r8HqJCYc3asLeKmtNxAGZFIRUaj3Av11DGkjY8VOF5qMOC3hLOweVwAZkFFVTo2uFL8i2lceTVoXaQ==}
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
       vite: ^8.0.0
-      void: 1.6.0
+      void: 1.6.1
 
   '@voidzero-dev/vite-plus-core@1.5.0':
     resolution: {integrity: sha512-Xq0tVwnkq9IYgD7Zgd9Ih8uvX84HOJlgKh4PVNpcT4IZ1AfGwNklExhFHLIc0EVt9mmWvTebuCEoHo39Xyer0g==}
@@ -6082,12 +6082,12 @@ packages:
       jsdom:
         optional: true
 
-  void@1.6.0:
-    resolution: {integrity: sha512-P/Pxny7gGIRbWhU/lCO7hjsA5ErFoO0Z5nl4Yr4FvsrBnQenfrRIONcneQcZu6AGPKMbiQOBakJXztoVX1oYpg==}
+  void@1.6.1:
+    resolution: {integrity: sha512-xK1q51jXUw2l0AWo+pdPe81Q9q5l1rrVdXWIg1B6lhdqkbuVDpzBU6mWzmBHoRZXSw5ltVbr4O50MHao1g/2/w==}
     engines: {node: ^24.22.0 || >=26.12.0}
     hasBin: true
     peerDependencies:
-      '@void/md': 1.6.0
+      '@void/md': 1.6.1
       arktype: '>=2.0.0'
       valibot: '>=1.0.0-beta.7'
       vite: ^8.0.0
@@ -8388,33 +8388,33 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
-  '@void/deploy-cloudflare@1.6.0':
+  '@void/deploy-cloudflare@1.6.1':
     dependencies:
-      '@void/deploy-core': 1.6.0
+      '@void/deploy-core': 1.6.1
       jsonc-parser: 3.3.1
 
-  '@void/deploy-core@1.6.0': {}
+  '@void/deploy-core@1.6.1': {}
 
-  '@void/edge@1.6.0':
+  '@void/edge@1.6.1':
     dependencies:
-      '@void/deploy-core': 1.6.0
+      '@void/deploy-core': 1.6.1
 
-  '@void/isr@1.6.0':
+  '@void/isr@1.6.1':
     dependencies:
       '@cloudflare/workers-types': 5.20261103.1
-      '@void/edge': 1.6.0
+      '@void/edge': 1.6.1
 
-  '@void/platform@1.6.0':
+  '@void/platform@1.6.1':
     dependencies:
       pathslash: 0.1.0
 
-  '@void/react@1.6.0(df5e906ac1c3d16f90b431ec91a29cf6)':
+  '@void/react@1.6.1(4cdc396f14c4e9ef7daf0aad194539c0)':
     dependencies:
       '@vitejs/plugin-react': 6.2.1(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(oxc-transform-react@0.157.0)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
       vite: '@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)'
-      void: 1.6.0(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
+      void: 1.6.1(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7)
     transitivePeerDependencies:
       - '@rolldown/plugin-babel'
       - babel-plugin-react-compiler
@@ -10594,7 +10594,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  void@1.6.0(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7):
+  void@1.6.1(@electric-sql/pglite@0.4.3)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@types/node@26.6.6)(@types/pg@8.23.1)(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(arktype@2.2.9)(kysely@0.28.17)(postgres@3.4.7)(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(better-sqlite3@13.0.3)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(valibot@1.4.2(typescript@7.0.2))(vitest@5.1.0)(vue@3.5.44(typescript@7.0.2))(workerd@1.20261102.1)(zod@4.6.7):
     dependencies:
       '@cloudflare/build-output-utils': 0.9.8
       '@cloudflare/codemods': 0.7.2
@@ -10605,11 +10605,11 @@ snapshots:
       '@cloudflare/workers-types': 5.20261103.1
       '@cloudflare/workers-utils': 0.50.2(vitest@5.1.0)
       '@napi-rs/keyring': 2.1.2
-      '@void/deploy-cloudflare': 1.6.0
-      '@void/deploy-core': 1.6.0
-      '@void/edge': 1.6.0
-      '@void/isr': 1.6.0
-      '@void/platform': 1.6.0
+      '@void/deploy-cloudflare': 1.6.1
+      '@void/deploy-core': 1.6.1
+      '@void/edge': 1.6.1
+      '@void/isr': 1.6.1
+      '@void/platform': 1.6.1
       better-auth: 1.7.15(c2349cfee0ba9de431bdbb308f4f4694)
       better-sqlite3: 13.0.3
       blake3-jit: 1.1.0

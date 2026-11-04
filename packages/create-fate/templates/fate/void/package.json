@@ -21,7 +21,7 @@
     "fbtee:collect": "vp exec fbtee collect",
     "fbtee:prepare": "vp run fbtee:collect && vp exec fbtee prepare-translations --source-strings source_strings.json --output-dir translations --locales de-DE ja-JP",
     "fbtee:translate": "vp exec fbtee translate --source-strings source_strings.json --output-dir src/translations --output-locale-style=bcp47",
-    "prepare:void": "node scripts/prepare-void.mjs && void prepare",
+    "prepare:void": "void prepare",
     "test:all": "vp check && vp test"
   },
   "dependencies": {
@@ -29,7 +29,7 @@
     "@nkzw/fate": "latest",
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.5.0",
-    "@void/react": "^1.6.0",
+    "@void/react": "^1.6.1",
     "better-auth": "^1.7.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -41,7 +41,7 @@
     "react-error-boundary": "^6.1.6",
     "react-fate": "latest",
     "tailwind-merge": "^3.7.0",
-    "void": "^1.6.0",
+    "void": "^1.6.1",
     "void-fate": "latest",
     "zod": "^4.6.7"
   },
