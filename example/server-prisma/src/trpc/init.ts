@@ -17,8 +17,8 @@ export const fate = createPrismaFate<AppContext, typeof procedure>({
   views: Root,
 });
 
-export const fateServer = createFateServer<AppContext>({
-  context: async ({ adapterContext }) => {
+export const fateServer = createFateServer({
+  context: async ({ adapterContext }): Promise<AppContext> => {
     const { createContext } = await import('./context.ts');
     return createContext({ context: adapterContext as Context });
   },
@@ -28,15 +28,17 @@ export const fateServer = createFateServer<AppContext>({
       resolve: ({
         ctx,
         input,
+        select,
       }: {
         ctx: AppContext;
-        input: { args?: Record<string, unknown>; select: Array<string> };
+        input: { args?: Record<string, unknown> };
+        select: Array<string>;
       }) =>
         ctx.sessionUser
           ? fate.resolveById({
               ctx,
               id: ctx.sessionUser.id,
-              input,
+              input: { ...input, select },
               view: Root.viewer,
             })
           : null,
