@@ -13,10 +13,10 @@
     "prisma": "prisma"
   },
   "dependencies": {
-    "@graphql-tools/utils": "^13.2.0",
+    "@graphql-tools/utils": "^13.2.1",
     "@graphql-yoga/plugin-defer-stream": "^4.0.1",
     "@graphql-yoga/plugin-graphql-sse": "^4.0.1",
-    "@hono/node-server": "^2.1.5",
+    "@hono/node-server": "^2.1.6",
     "@nkzw/core": "^1.3.1",
     "@nkzw/define-env": "^1.1.0",
     "@nkzw/fate": "workspace:*",
@@ -28,22 +28,22 @@
     "@pothos/plugin-scope-auth": "^4.2.2",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
-    "better-auth": "^1.7.14",
+    "better-auth": "^1.7.15",
     "graphql": "^17.0.2",
     "graphql-yoga": "^6.0.1",
-    "hono": "^4.13.14"
+    "hono": "^4.13.16"
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/oxlint-config": "^2.0.1",
     "@oxc-node/core": "^1.0.1",
-    "@swc/core": "^1.16.20",
-    "@types/node": "^26.6.5",
+    "@swc/core": "^1.16.21",
+    "@types/node": "^26.6.6",
     "dotenv": "^18.0.9",
-    "glob": "^13.0.6",
+    "glob": "^14.0.3",
     "nodemon": "^3.1.14",
-    "prisma": "^7.10.0",
-    "prisma-json-types-generator": "^5.2.0",
+    "prisma": "^7.10.1",
+    "prisma-json-types-generator": "^6.0.0",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"

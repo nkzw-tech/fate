@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "source": {
+    "durable_objects": {
+      "bindings": [
+        {
+          "name": "VOID_LIVE",
+          "class_name": "VoidLiveStreamDurableObject"
+        }
+      ]
+    },
+    "migrations": [
+      {
+        "tag": "live-v1",
+        "new_sqlite_classes": ["VoidLiveStreamDurableObject"]
+      }
+    ],
+    "account_id": "004b3cabb810ff98895ea3a690f6ba00",
+    "compatibility_date": "2026-02-24",
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "nkzw-fate-void-example-db",
+        "database_id": "7ebb25e6-7c27-4283-b9cc-bf5f8099d5d9",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "name": "nkzw-fate-void-example"
+  },
+  "resolved": {
+    "durable_objects": {
+      "bindings": [
+        {
+          "name": "VOID_LIVE",
+          "class_name": "VoidLiveStreamDurableObject"
+        }
+      ]
+    },
+    "migrations": [
+      {
+        "tag": "live-v1",
+        "new_sqlite_classes": ["VoidLiveStreamDurableObject"]
+      }
+    ],
+    "account_id": "004b3cabb810ff98895ea3a690f6ba00",
+    "compatibility_date": "2026-02-24",
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "nkzw-fate-void-example-db",
+        "database_id": "7ebb25e6-7c27-4283-b9cc-bf5f8099d5d9",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "name": "nkzw-fate-void-example"
+  },
+  "text": "{\n  \"durable_objects\": {\n    \"bindings\": [\n      {\n        \"name\": \"VOID_LIVE\",\n        \"class_name\": \"VoidLiveStreamDurableObject\",\n      },\n    ],\n  },\n  \"migrations\": [\n    {\n      \"tag\": \"live-v1\",\n      \"new_sqlite_classes\": [\"VoidLiveStreamDurableObject\"],\n    },\n  ],\n  \"account_id\": \"004b3cabb810ff98895ea3a690f6ba00\",\n  \"compatibility_date\": \"2026-02-24\",\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_name\": \"nkzw-fate-void-example-db\",\n      \"database_id\": \"7ebb25e6-7c27-4283-b9cc-bf5f8099d5d9\",\n      \"migrations_dir\": \"./db/migrations\",\n    },\n  ],\n  \"name\": \"nkzw-fate-void-example\",\n}\n"
+}

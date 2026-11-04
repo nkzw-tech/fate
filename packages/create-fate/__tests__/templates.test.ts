@@ -151,7 +151,7 @@ describe('create-fate templates', () => {
         const prepare = () =>
           execFileAsync(process.execPath, ['scripts/prepare-void.mjs'], { cwd: target });
         const tsconfig = join(target, '.void/tsconfig.json');
-        expect(existsSync(join(target, 'void.config.ts'))).toBe(true);
+        expect(readFileSync(join(target, 'void.config.ts'), 'utf8')).toContain('typedRoutes: true');
         expect(existsSync(join(target, 'void.json'))).toBe(false);
         expect(existsSync(tsconfig)).toBe(false);
         await prepare();

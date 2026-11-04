@@ -28,7 +28,7 @@
     "@types/node": "^26.6.5",
     "dotenv": "^18.0.9",
     "npm-run-all2": "^9.0.4",
-    "prisma": "^7.10.0",
+    "prisma": "^7.10.1",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",

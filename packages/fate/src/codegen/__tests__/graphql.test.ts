@@ -357,7 +357,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
             skipLibCheck: true,
             strict: true,
             target: 'esnext',
-            types: ['vite/client'],
+            types: ['node', 'vite/client'],
           },
           include: ['./*.ts'],
         }),

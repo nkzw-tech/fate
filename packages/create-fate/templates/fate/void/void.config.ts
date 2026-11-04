@@ -32,6 +32,7 @@ export default defineConfig({
     title: 'fate',
     titleTemplate: '%s | fate',
   },
+  routing: { typedRoutes: true },
   worker: {
     compatibility_date: '2025-12-01',
     compatibility_flags: ['nodejs_compat', 'no_handle_cross_request_promise_resolution'],

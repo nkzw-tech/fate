@@ -46,8 +46,8 @@
     "glob": "^13.0.6",
     "nodemon": "^3.1.14",
     "oxfmt": "^0.65.0",
-    "prisma": "^7.10.0",
-    "prisma-json-types-generator": "^5.2.0",
+    "prisma": "^7.10.1",
+    "prisma-json-types-generator": "^6.0.0",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

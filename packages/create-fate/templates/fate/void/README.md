@@ -17,7 +17,7 @@ This template uses the Void pages router with Drizzle, `void-fate`, `react-fate`
 
 ## Initial Setup
 
-You'll need Node.js 24+ and [Vite+](https://viteplus.dev/guide/).
+You'll need Node.js 24.22+ on the 24.x line or Node.js 26.12+, and [Vite+](https://viteplus.dev/guide/).
 
 Install dependencies:
 

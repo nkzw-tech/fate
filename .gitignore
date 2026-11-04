@@ -1,9 +1,11 @@
+.cloudflare/
 .DS_Store
 .fate/
 .pnpm-debug.log
 .vite-hooks/_/
 .vitepress/cache
 .void/
+.void-wrangler.jsonc
 .wrangler/
 **/.fate/
 **/.void/
