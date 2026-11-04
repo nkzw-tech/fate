@@ -1,11 +1,8 @@
 <!-- auto-generated from docs/guide/*.md and docs/integrations/*.md. Do not edit directly. -->
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="/public/fate-logo.svg">
-    <img alt="Logo" src="/public/fate-logo.svg" width="50%">
-  </picture>
+  <img alt="fate" src="/public/fate-logo.svg#gh-light-mode-only" width="50%">
+  <img alt="fate" src="/public/fate-logo-dark.svg#gh-dark-mode-only" width="50%">
 </p>
 
 **_fate_** is a modern data client for the web inspired by [Relay](https://relay.dev/) and [GraphQL](https://graphql.org/). It combines view composition, normalized caching, data masking, Async React features, and type-safe data fetching.
@@ -141,11 +138,8 @@ In fate, each component declares the data it needs using views. Views are compos
 Traditionally, React apps are built with components and hooks. fate introduces a third primitive: views – a declarative way for components to express their data requirements. An app built with fate looks more like this:
 
 <p align="center">
-  <picture class="fate-tree">
-    <source media="(prefers-color-scheme: dark)" srcset="/public/fate-tree-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="/public/fate-tree.svg">
-    <img alt="Tree" src="/public/fate-tree.svg" width="90%">
-  </picture>
+  <img alt="Tree" src="/public/fate-tree.svg#gh-light-mode-only" width="90%">
+  <img alt="Tree" src="/public/fate-tree-dark.svg#gh-dark-mode-only" width="90%">
 </p>
 
 With fate, you no longer worry about _when_ to fetch data, how to coordinate loading states, or how to handle errors imperatively. You avoid overfetching, stop passing unnecessary data down the tree, and eliminate boilerplate types created solely for passing server data to child components.

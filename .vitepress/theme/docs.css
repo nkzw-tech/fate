@@ -167,6 +167,11 @@ pre {
   line-height: 1.6;
 }
 
+html.dark img[src$='#gh-light-mode-only'],
+html:not(.dark) img[src$='#gh-dark-mode-only'] {
+  display: none;
+}
+
 picture.fetch-tree > img {
   content: url('/public/fetch-tree.svg');
 }
