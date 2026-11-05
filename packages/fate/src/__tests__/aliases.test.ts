@@ -713,3 +713,23 @@ test('prototype-named aliases create own result containers without mutating buil
     Reflect.deleteProperty(Object.prototype, 'fateViewPrototypeMarker');
   }
 });
+
+test('lowers aliases for custom abstract lists without wire alias support', async () => {
+  const ItemView = view<User>()({ label: alias('name', { args: { prefix: '@' } }) });
+  const fetchList = vi.fn<NonNullable<Transport['fetchList']>>(async () => ({
+    items: [{ cursor: '1', node: { __typename: 'User', id: '1', name: 'Ada' } }],
+    pagination: { hasNext: false, hasPrevious: false },
+  }));
+  const client = createClient({
+    roots: { feed: clientRoot('FeedItem') },
+    transport: { fetchById: async () => [], fetchList },
+    types: [{ possibleTypes: ['User'], type: 'FeedItem' }, { type: 'User' }],
+  });
+
+  const { feed } = await client.request({ feed: { list: ItemView } });
+
+  expect(fetchList).toHaveBeenCalledExactlyOnceWith('feed', new Set(['name']), {
+    name: { prefix: '@' },
+  });
+  expect((await client.readView(ItemView, feed[0])).data).toMatchObject({ label: 'Ada' });
+});

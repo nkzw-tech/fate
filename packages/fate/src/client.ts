@@ -911,12 +911,7 @@ export class FateClient<
     this.hydrationScope = hydrationScope as HydrationScope;
     this.roots = options.roots;
     this.types = new Map(options.types.map((entity) => [entity.type, { getId, ...entity }]));
-    this.transport = withAliasSupport(
-      options.transport,
-      options.types.some((config) => config.possibleTypes?.length)
-        ? (name) => Boolean(this.types.get(this.roots[name]?.type)?.possibleTypes?.length)
-        : undefined,
-    );
+    this.transport = withAliasSupport(options.transport);
 
     for (const config of this.types.values()) {
       if (config.refetch) {

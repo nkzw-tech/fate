@@ -75,6 +75,8 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     args?: ResolvedArgsPayload,
     context?: ReadContext,
   ): Promise<unknown>;
+  /** List procedures that handle aliases and type conditions on the server. */
+  mixedLists?: ReadonlyArray<string>;
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],
@@ -185,6 +187,7 @@ export function createTRPCTransport<
   byId,
   client,
   lists,
+  mixedLists,
   mutateDurably,
   mutations,
   queries,
@@ -192,6 +195,7 @@ export function createTRPCTransport<
   byId: TRPCByIdResolvers<AppRouter>;
   client: TRPCClient<AppRouter>;
   lists?: TRPCListResolvers<AppRouter>;
+  mixedLists?: ReadonlyArray<string>;
   mutateDurably?: Transport<MutationMapFromResolvers<Mutations>>['mutateDurably'];
   mutations?: Mutations;
   queries?: TRPCQueryResolvers<AppRouter>;
@@ -248,6 +252,7 @@ export function createTRPCTransport<
         ...(context?.signal ? [{ signal: context.signal }] : []),
       );
     },
+    mixedLists,
     mutateDurably,
   };
 

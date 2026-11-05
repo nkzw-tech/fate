@@ -274,6 +274,7 @@ export function createHTTPTransport<
   live = true,
   liveRetryMs = 1000,
   liveUrl,
+  mixedLists,
   url,
 }: {
   eventSource?: EventSourceConstructor;
@@ -282,6 +283,7 @@ export function createHTTPTransport<
   live?: boolean | LiveConnector;
   liveRetryMs?: number;
   liveUrl?: string | URL;
+  mixedLists?: ReadonlyArray<string>;
   url: string | URL;
 }): Transport<Mutations> {
   const endpoint = normalizeEndpoint(url);
@@ -416,6 +418,7 @@ export function createHTTPTransport<
         context?.signal,
       );
     },
+    mixedLists,
     mutate(name, input, select) {
       return enqueue({
         input,

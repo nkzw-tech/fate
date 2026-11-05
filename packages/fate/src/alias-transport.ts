@@ -144,7 +144,6 @@ export const readAliases = (
 /** Lower read aliases for existing native/custom transports without changing their protocol. */
 export const withAliasSupport = <M extends Record<string, MutationShape>>(
   transport: Transport<M>,
-  acceptsListTypeConditions?: (name: string) => boolean,
 ): Transport<M> => {
   if (transport.supportsAliases) {
     return transport;
@@ -185,7 +184,7 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
       ) as ReturnType<Transport<M>['fetchById']>,
     fetchList: transport.fetchList
       ? (name, select, args, context) => {
-          if (acceptsListTypeConditions?.(name)) {
+          if (transport.mixedLists?.includes(name)) {
             return context
               ? transport.fetchList!(name, select, args, context)
               : transport.fetchList!(name, select, args);

@@ -73,6 +73,14 @@ const indentBlock = (value: string, spaces: number) =>
     .map((line) => (line.length ? `${' '.repeat(spaces)}${line}` : line))
     .join('\n');
 
+const formatMixedLists = ({ roots, types }: ReturnType<typeof createSchema>) => {
+  const mixedTypes = new Set(types.filter((type) => type.possibleTypes).map(({ type }) => type));
+  const lists = Object.entries(roots).flatMap(([name, root]) =>
+    root.kind === 'list' && mixedTypes.has(root.type) ? [name] : [],
+  );
+  return lists.length ? `    mixedLists: ${JSON.stringify(lists)},\n` : '';
+};
+
 const compareStrings = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
 const getHydrationScope = (
@@ -125,6 +133,7 @@ export const createClientSource = ({
     Root ?? {},
   );
   const routerRecord = appRouter._def?.record ?? {};
+  const mixedLists = formatMixedLists({ roots, types });
 
   const mutationEntries: Array<{
     entityType: string;
@@ -375,7 +384,7 @@ ${indentBlock(liveOptions.trim(), 2)}
 ${liveTransportSetup}
 
   const transport = createTRPCTransport<AppRouter, typeof trpcMutations>({
-    byId: {
+${mixedLists}    byId: {
 ${byIdBlock}
     },
     client: trpcClient,
@@ -934,6 +943,7 @@ const createNativeClientSource = ({
     types?: Record<string, true>;
   };
   const hasLive = Object.keys(manifest.live ?? {}).length > 0;
+  const mixedLists = indentBlock(formatMixedLists({ roots, types }), 2);
 
   const byIdEntries = Object.keys(manifest.types ?? {})
     .map((type) => ({ name: lowerTypeName(type), type }))
@@ -1081,7 +1091,7 @@ const createVoidFetch = (options: {
     persistence: options.persistence,
     roots,
     transport: createHTTPTransport<FateAPI>({
-      fetch: createVoidFetch(options),
+${mixedLists}      fetch: createVoidFetch(options),
       headers: options.headers,
       live: ${hasLive ? 'connectLiveStream' : 'false'},
       liveRetryMs: options.liveRetryMs,
@@ -1103,7 +1113,7 @@ const createVoidFetch = (options: {
     persistence: options.persistence,
     roots,
     transport: createHTTPTransport<FateAPI>({
-      fetch: options.fetch,
+${mixedLists}      fetch: options.fetch,
       headers: options.headers,
       live: ${String(hasLive)},
       liveRetryMs: options.liveRetryMs,

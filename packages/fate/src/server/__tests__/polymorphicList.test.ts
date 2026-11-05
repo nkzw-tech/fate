@@ -102,6 +102,7 @@ test.each(['native', 'trpc'] as const)(
             fetch,
             live: false,
             url: 'http://test.local/fate',
+            mixedLists: ['feed'],
           })
         : createTRPCTransport<typeof appRouter>({
             byId: {},
@@ -110,6 +111,7 @@ test.each(['native', 'trpc'] as const)(
             }),
             lists: { feed: (client) => client.feedItem.list.query },
           });
+            mixedLists: ['feed'],
     const roots = { feed: clientRoot<API['lists']['feed']['output'], 'FeedItem'>('FeedItem') };
     const { types } = createSchema([], Root);
     const generated = createClientSource({
@@ -118,6 +120,7 @@ test.each(['native', 'trpc'] as const)(
       transport: kind,
     });
     expect(generated).toContain('possibleTypes: ["Post","User"]');
+    expect(generated).toContain('mixedLists: ["feed"]');
 
     const client = createClient<[typeof roots, Record<never, never>]>({ roots, transport, types });
     type PostResult = Post & { __typename: 'Post' };
