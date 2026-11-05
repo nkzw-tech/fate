@@ -335,6 +335,36 @@ test('handles named native SSE live entity events emitted by the server', async 
   dispose?.();
 });
 
+test('subscribes after the native SSE stream recovers from an initial error', async () => {
+  const fetch = liveControlFetch();
+  const transport = createHTTPTransport({
+    eventSource: resetMockEventSource(),
+    fetch,
+    url: 'http://local/fate',
+  });
+  const handlers = { onData: vi.fn(), onError: vi.fn() };
+  const dispose = transport.subscribeById!('Post', '1', new Set(['id']), undefined, handlers);
+  const source = MockEventSource.instances[0]!;
+  try {
+    source.emit('error');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handlers.onError).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+
+    source.emit('open');
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const [, init] = fetch.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body)).operations).toEqual([
+      { entityId: '1', id: '1', kind: 'subscribe', select: ['id'], type: 'Post' },
+    ]);
+    source.message({ event: { data: { id: '1' } }, id: '1', kind: 'next' }, 'next');
+    expect(handlers.onData).toHaveBeenCalledWith({ id: '1' });
+  } finally {
+    dispose();
+  }
+  expect(source.closed).toBe(true);
+});
+
 test('closes the native SSE stream without unsubscribing from a closed connection', async () => {
   const fetch = vi.fn(async () =>
     jsonResponse({

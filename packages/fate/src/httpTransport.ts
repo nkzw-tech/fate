@@ -493,12 +493,8 @@ export function createHTTPTransport<
       // then rejects requests for this connection.
       let closed = false;
       let opened = false;
-      let resolveOpen: (() => void) | undefined;
-      let rejectOpen: ((error: Error | Event) => void) | undefined;
-      const open = new Promise<void>((resolve, reject) => {
-        resolveOpen = resolve;
-        rejectOpen = reject;
-      });
+      let connected = false;
+      let generation = 0;
       const sourceUrl = new URL(
         liveEndpointUrl,
         typeof globalThis.location === 'object' ? globalThis.location.href : 'http://local',
@@ -507,23 +503,32 @@ export function createHTTPTransport<
       const source = new EventSourceCtor(sourceUrl.href, { withCredentials: true });
 
       const control = async (controlOperations: Array<FateLiveControlOperation>) => {
-        if (closed) {
+        if (closed || !connected) {
           return;
         }
+        const connectionGeneration = generation;
+        const isCurrentConnection = () =>
+          !closed && connected && connectionGeneration === generation;
 
         try {
           const controlHeaders = await requestHeaders(
             { 'content-type': 'application/json' },
             headers,
           );
-          if (closed) {
+          if (!isCurrentConnection()) {
+            return;
+          }
+          const activeOperations = controlOperations.filter(
+            ({ id, kind }) => kind === 'unsubscribe' || operations.has(id),
+          );
+          if (activeOperations.length === 0) {
             return;
           }
 
           const response = await fetchImpl(liveEndpointUrl, {
             body: JSON.stringify({
               connectionId,
-              operations: controlOperations,
+              operations: activeOperations,
               version: 1,
             } satisfies FateLiveControlRequest),
             headers: controlHeaders,
@@ -540,7 +545,7 @@ export function createHTTPTransport<
         } catch (error) {
           // Requests already in flight can fail after shutdown; their errors
           // must not reach subscriptions on a replacement connection.
-          if (!closed) {
+          if (isCurrentConnection()) {
             throw error;
           }
         }
@@ -556,9 +561,16 @@ export function createHTTPTransport<
       };
 
       source.addEventListener('open', () => {
+        if (closed) {
+          return;
+        }
+        connected = true;
+        generation++;
         if (!opened) {
           opened = true;
-          resolveOpen?.();
+          for (const operation of operations.values()) {
+            void control([operation]).catch(reportError);
+          }
           return;
         }
 
@@ -604,14 +616,15 @@ export function createHTTPTransport<
       };
 
       source.addEventListener('error', (event) => {
+        if (closed) {
+          return;
+        }
         if ('data' in event) {
           handleLiveMessage(event);
           return;
         }
 
-        if (!opened) {
-          rejectOpen?.(event);
-        }
+        connected = false;
         reportError(event);
       });
       source.addEventListener('message', handleLiveMessage);
@@ -621,13 +634,7 @@ export function createHTTPTransport<
       nativeLiveClient = {
         add(operation) {
           operations.set(operation.id, operation);
-          void open
-            .then(() => control([withLastEventId(operation)]))
-            .catch((error) => {
-              operations.delete(operation.id);
-              liveSubscriptions.delete(operation.id);
-              reportError(error);
-            });
+          void control([operation]).catch(reportError);
         },
         remove(id) {
           operations.delete(id);
@@ -639,16 +646,7 @@ export function createHTTPTransport<
             return;
           }
 
-          void open
-            .then(() =>
-              control([
-                {
-                  id,
-                  kind: 'unsubscribe',
-                },
-              ]),
-            )
-            .catch(reportError);
+          void control([{ id, kind: 'unsubscribe' }]).catch(reportError);
         },
       };
 
