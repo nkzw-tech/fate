@@ -259,3 +259,33 @@ test('discovers mixed list member views from the root declaration', () => {
     feed: { type: 'FeedItem' },
   });
 });
+
+test('rejects a repeated member even when the second occurrence is the lookahead row', async () => {
+  const post = dataView<{ id: string }>('Post')({ id: true });
+  const sources = createPrismaSourceAdapter({ views: { post } });
+  const server = createFateServer({
+    context: () => ({ prisma: { post: { findMany: async () => [{ id: 'post' }] } } }),
+    roots: {
+      feed: list(
+        { Post: post },
+        {
+          query: async () => [
+            { __typename: 'Post' as const, cursor: 'first', id: 'post' },
+            { __typename: 'Post' as const, cursor: 'second', id: 'post' },
+          ],
+          typeName: 'FeedItem',
+        },
+      ),
+    },
+    sources,
+  });
+  const transport = createHTTPTransport({
+    fetch: (input, init) => server.handleRequest(new Request(input, init)),
+    live: false,
+    url: 'http://test.local/fate',
+  });
+
+  await expect(transport.fetchList!('feed', ['id'], { first: 1 })).rejects.toThrow(
+    /repeated member/,
+  );
+});

@@ -67,15 +67,32 @@ export async function resolvePolymorphicList<Context, const Views extends ListVi
     ctx,
     getCursor: (entry: ListEntry<ViewName<Views>>) => entry.cursor,
     input,
-    query: ({ cursor, direction, take }) =>
-      list.query({ args: input.args, ctx, cursor, direction, take }),
+    async query({ cursor, direction, take }) {
+      const entries = await list.query({ args: input.args, ctx, cursor, direction, take });
+      const identities = new Set<string>();
+      const cursors = new Set<string>();
+      for (const entry of entries) {
+        if (!Object.hasOwn(list.views, entry.__typename)) {
+          throw new Error(
+            `fate: Unregistered member '${entry.__typename}' returned by '${list.typeName}'.`,
+          );
+        }
+        const identity = JSON.stringify([entry.__typename, entry.id]);
+        if (identities.has(identity) || !entry.cursor || cursors.has(entry.cursor)) {
+          throw new FateRequestError(
+            'INTERNAL_ERROR',
+            `fate: Mixed list '${list.typeName}' returned a repeated member or an invalid cursor.`,
+          );
+        }
+        identities.add(identity);
+        cursors.add(entry.cursor);
+      }
+      return entries;
+    },
   });
   const idsByType = new Map<string, Set<string>>();
   for (const { node } of page.items) {
     const { __typename: type, id } = node;
-    if (!Object.hasOwn(list.views, type)) {
-      throw new Error(`fate: Unregistered member '${type}' returned by '${list.typeName}'.`);
-    }
     let ids = idsByType.get(type);
     if (!ids) {
       ids = new Set();

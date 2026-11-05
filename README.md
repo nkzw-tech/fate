@@ -2734,7 +2734,7 @@ export const Root = {
 };
 ```
 
-Your `querySearch` function receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries in display order, starting after the cursor for forward pagination or ending before it for backward pagination. Each entry has a `__typename`, a string `id`, and a unique string `cursor`. `take` includes one extra entry so fate can tell whether there's another page. fate fetches the selected fields in batches for each type and applies the permissions from its data view.
+Your `querySearch` function receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries in display order, starting after the cursor for forward pagination or ending before it for backward pagination. Each entry has a `__typename`, a string `id`, and a unique nonempty string `cursor`. Include each `(__typename, id)` pair once across the results. `take` includes one extra entry so fate can tell whether there's another page. fate fetches the selected fields in batches for each type and applies the permissions from its data view.
 
 For native HTTP, pass `Root` to `createFateServer`. For tRPC, use `fate.procedures` and register the router as `searchResult` in `appRouter`.
 
