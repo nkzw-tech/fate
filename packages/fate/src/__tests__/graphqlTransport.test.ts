@@ -1062,7 +1062,7 @@ test('multiplexes live GraphQL subscriptions over one SSE client', async () => {
 
 test('subscribes to mixed GraphQL lists and refreshes their scoped selection on membership changes', async () => {
   const schema = buildSchema(`
-    type Query { search(query: String!): SearchConnection! }
+    type Query { search(query: String!): SearchConnection }
     union SearchResult = Post | User
     type Post { id: ID!, title: String! }
     type User { id: ID!, name: String! }
@@ -1076,15 +1076,18 @@ test('subscribes to mixed GraphQL lists and refreshes their scoped selection on 
     }
   `);
   const metadata = createGraphQLArgumentSchema(schema);
-  let node: { __typename: string; id: string; name?: string; title?: string } = {
+  let node: { __typename: string; id: string; name?: string; title?: string } | null = {
     __typename: 'Post',
     id: 'Post-p1',
     title: 'Original',
   };
-  const scopedSearch = vi.fn((_args: { query: string }) => ({
-    edges: [{ cursor: node.id, node }],
-    pageInfo: { hasNextPage: false, hasPreviousPage: false },
-  }));
+  const scopedSearch = vi.fn(
+    (_args: { query: string }) =>
+      node && {
+        edges: [{ cursor: node.id, node }],
+        pageInfo: { hasNextPage: false, hasPreviousPage: false },
+      },
+  );
   const fetch = vi.fn(async (_url, init) => {
     const { query, variables } = JSON.parse(String(init?.body));
     return jsonResponse(
@@ -1099,7 +1102,9 @@ test('subscribes to mixed GraphQL lists and refreshes their scoped selection on 
   type Post = { __typename: 'Post'; title: string };
   type User = { __typename: 'User'; name: string };
   const roots = {
-    search: clientRoot<{ items: Array<{ node: Post | User }> }, 'SearchResult'>('SearchResult'),
+    search: clientRoot<{ items: Array<{ node: Post | User }> } | null, 'SearchResult'>(
+      'SearchResult',
+    ),
   };
   const transport = createGraphQLTransport({
     fetch,
@@ -1124,10 +1129,13 @@ test('subscribes to mixed GraphQL lists and refreshes their scoped selection on 
   const request = { search: { args: { query: 'visible' }, list: SearchView } };
   const { search } = await client.request(request);
   expect(search).toMatchObject([{ __typename: 'Post', id: 'p1' }]);
-  const connection = (search as typeof search & { [ConnectionTag]: ConnectionMetadata })[
-    ConnectionTag
-  ];
+  const connection = (
+    search! as NonNullable<typeof search> & { [ConnectionTag]: ConnectionMetadata }
+  )[ConnectionTag];
 
+  const observed = client.observeRequestResult(request);
+  const onChange = vi.fn(() => observed.getSnapshot().search);
+  const unsubscribe = observed.subscribe(onChange);
   const dispose = client.subscribeLiveListView(SearchView, connection);
   try {
     await vi.waitFor(() => expect(graphQLSSE.subscribe).toHaveBeenCalledTimes(1));
@@ -1155,14 +1163,27 @@ test('subscribes to mixed GraphQL lists and refreshes their scoped selection on 
     );
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(scopedSearch.mock.calls.map(([args]) => args.query)).toEqual(['visible', 'visible']);
-    const [result] = client.getRequestResult(request).search;
+    const [result] = client.getRequestResult(request).search!;
     if (result.__typename !== 'User') {
       throw new Error('Expected a user after refreshing the list');
     }
     expect((await client.readView(UserView, result)).data).toMatchObject({ name: 'Updated' });
     expect(client.store.read('Post:outside')).toBeUndefined();
+
+    node = null;
+    sink.next({ data: { fateLiveConnection: { type: 'invalidate' } } });
+    await vi.waitFor(() => expect(onChange).toHaveLastReturnedWith(null));
+    expect(client.store.getListState(connection.key)).toBeUndefined();
+
+    node = { __typename: 'Post', id: 'Post-p2', title: 'Restored' };
+    sink.next({ data: { fateLiveConnection: { type: 'invalidate' } } });
+    await vi.waitFor(() =>
+      expect(onChange).toHaveLastReturnedWith([expect.objectContaining({ id: 'p2' })]),
+    );
+    expect(fetch).toHaveBeenCalledTimes(4);
     expect(onLiveError).not.toHaveBeenCalled();
   } finally {
+    unsubscribe();
     dispose();
   }
 });

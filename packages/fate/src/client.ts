@@ -3104,6 +3104,10 @@ export class FateClient<
       this.assertPersistenceActive();
 
       if (connectionResult === null) {
+        if (replacing && acceptsList()) {
+          this.rootValues.set(listVersionKey, null);
+          applyResponse(() => this.store.restoreList(connection.key));
+        }
         return { list: this.store.getListState(connection.key), page: receivedPage };
       }
       const { items, pagination } = connectionResult;
@@ -3140,6 +3144,7 @@ export class FateClient<
           if (!acceptsList()) {
             return;
           }
+          this.rootValues.delete(listVersionKey);
           receivedPage = { cursors: incomingCursors, ids: incomingIds, pagination };
           const previous = replacing ? undefined : this.store.getListState(connection.key);
 
