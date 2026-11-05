@@ -1351,7 +1351,7 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-The options are the same as for Actions, including `optimistic`, `insert`, `invalidate`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
+The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
 
 ### Mutation Server Implementation
 
@@ -1456,6 +1456,35 @@ Insertions work with pagination, optimistic updates, and [offline mutations](/do
 #### Migrating from automatic insertion
 
 Earlier versions appended mutation results automatically. Add an `insert` option to calls that relied on that behavior. The strings `'before'` and `'after'` still enable automatic list matching, but prefer an explicit target. `'none'` is now the default.
+
+### Removing Items from Lists
+
+To remove a post from the inbox when it is archived, pass the list as `from` and the post's view ref as `node`. You can move the same post into another list in the same call:
+
+```tsx
+await fate.mutations.post.archive({
+  input: { id: postRef.id },
+  optimistic: { archived: true },
+  remove: { from: inbox, node: postRef },
+  insert: { into: archivedPosts, position: 'before' },
+});
+```
+
+fate removes the item immediately and restores it if the mutation fails. The record stays available to views and other lists. Pass an array of removal objects to remove more than one item or update several lists:
+
+```tsx
+await fate.mutations.post.archive({
+  input: { id: postRef.id },
+  remove: [
+    { from: inbox, node: postRef },
+    { from: starredPosts, node: postRef },
+  ],
+});
+```
+
+Use the original list, connection, or deferred list from the same client. Passing a deferred list keeps it lazy. If the list loads while the mutation is pending, fate applies the removal to the loaded items. Removals also work with [offline mutations](/docs/guide/persistence.md).
+
+If the server needs to fill the empty slot or recalculate pagination, add the list to `invalidate`. To try a scoped removal, open **Pagination** in the regular example and choose **Like and hide the first post** or **Fail a scoped removal**.
 
 ### Invalidating Lists
 

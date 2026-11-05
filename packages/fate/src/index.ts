@@ -50,7 +50,9 @@ export type {
   InsertionTarget,
   InsertPosition,
   ListInsertion,
+  ListRemoval,
   MutationInsertion,
+  MutationRemoval,
 } from './mutation.ts';
 export type { ReadContext, Transport } from './transport.ts';
 export type {

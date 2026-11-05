@@ -40,6 +40,8 @@ import {
   MutationFunction,
   MutationFunctionsFor,
   type MutationInsertion,
+  type MutationRemoval,
+  type ResolvedRemoval,
   type ResolvedInsertion,
   type ResolvedMutationInsertion,
   type InvalidationTarget,
@@ -1164,7 +1166,10 @@ export class FateClient<
 
   /** @internal */
   hasMutation(key: string, entity: string): boolean {
-    return this.mutationEntities?.get(key) === entity && this.types.has(entity);
+    return (
+      this.mutationEntities?.get(key) === entity &&
+      (entity === '__value__' || this.types.has(entity))
+    );
   }
 
   private registerRootList(type: string, key: string) {
@@ -1370,6 +1375,82 @@ export class FateClient<
     return version;
   }
 
+  private resolveMutationList(target: object, operation: 'Insertion' | 'Removal') {
+    let metadata = this.listTargets.get(target);
+    const deferred = isDeferred(target) && this.deferredTargets.has(target);
+    if (deferred) {
+      const reference = getDeferredMetadata(target);
+      const owner = this.resolveEntityId(reference.owner, target);
+      if (!this.store.read(owner)) {
+        throw new Error(`fate: The ${operation.toLowerCase()} list owner is no longer cached.`);
+      }
+      const descriptor = this.types.get(parseEntityId(owner).type)?.fields?.[reference.field];
+      if (descriptor && descriptor !== 'scalar' && 'listOf' in descriptor) {
+        metadata = this.nestedListMetadata(
+          owner,
+          reference.field,
+          getDeferredSelectionPlan(reference.field, reference.selection),
+          reference.field,
+        );
+      }
+    }
+    if (!metadata || (!deferred && !this.store.getListState(metadata.key))) {
+      throw new Error(`fate: ${operation} requires a list returned by this client.`);
+    }
+    return metadata;
+  }
+
+  /** @internal Capture the scoped removals for live and restored mutations. */
+  resolveMutationRemoval(remove: MutationRemoval): ReadonlyArray<ResolvedRemoval> {
+    const targets: Array<ResolvedRemoval> = [];
+    const nodesByList = new Map<string, Set<EntityId>>();
+    for (const instruction of Array.isArray(remove) ? remove : [remove]) {
+      const { from, node } = isRecord(instruction) ? instruction : {};
+      if (!from || typeof from !== 'object' || !isRecord(node) || !(ViewsTag in node)) {
+        throw new Error('fate: Scoped removal requires a list and a node view ref.');
+      }
+      const type = node.__typename;
+      if (typeof type !== 'string') {
+        throw new Error('fate: Scoped removal requires a list and a node view ref.');
+      }
+      const metadata = this.resolveMutationList(from, 'Removal');
+      if (metadata.type !== type && !this.types.get(metadata.type)?.possibleTypes?.includes(type)) {
+        throw new Error(`fate: Cannot remove '${type}' from a '${metadata.type}' list.`);
+      }
+      const entityId = this.resolveEntityId(toEntityId(type, validateId(node.id)), node);
+      let nodes = nodesByList.get(metadata.key);
+      if (!nodes) {
+        nodes = new Set();
+        nodesByList.set(metadata.key, nodes);
+      }
+      if (!nodes.has(entityId)) {
+        const { field, hash, key, owner, procedure, root, type } = metadata;
+        targets.push({ list: { field, hash, key, owner, procedure, root, type }, node: entityId });
+        nodes.add(entityId);
+      }
+    }
+    return targets;
+  }
+
+  /** @internal Apply membership changes in the caller's optimistic transaction. */
+  removeMutationTargets(targets: ReadonlyArray<ResolvedRemoval> | undefined, confirmed = false) {
+    for (const { list, node } of targets ?? []) {
+      const owner = list.root ? list.owner : this.resolveEntityId(list.owner);
+      const target =
+        owner === list.owner
+          ? list
+          : { ...list, key: getListKey(owner, list.field, list.hash), owner };
+      const entityId = this.resolveEntityId(node);
+      if (confirmed) {
+        const generation = this.recordInvalidation(`list:${target.key}`);
+        this.acceptWrite(`list:${target.key}`, generation);
+        this.withWriteGeneration(generation, () => this.deleteConnectionEdge(target, entityId));
+      } else {
+        this.deleteConnectionEdge(target, entityId);
+      }
+    }
+  }
+
   /** @internal Capture a mutation's list identities without retaining its result snapshots. */
   resolveMutationInsertion(type: string, insert: MutationInsertion): ResolvedMutationInsertion {
     if (typeof insert === 'string') {
@@ -1389,28 +1470,7 @@ export class FateClient<
       ) {
         throw new Error('fate: Invalid scoped list insertion.');
       }
-      const into = instruction.into;
-      let metadata = this.listTargets.get(into);
-      const deferred = isDeferred(into) && this.deferredTargets.has(into);
-      if (deferred) {
-        const reference = getDeferredMetadata(into);
-        const owner = this.resolveEntityId(reference.owner, into);
-        if (!this.store.read(owner)) {
-          throw new Error('fate: The insertion list owner is no longer cached.');
-        }
-        const descriptor = this.types.get(parseEntityId(owner).type)?.fields?.[reference.field];
-        if (descriptor && descriptor !== 'scalar' && 'listOf' in descriptor) {
-          metadata = this.nestedListMetadata(
-            owner,
-            reference.field,
-            getDeferredSelectionPlan(reference.field, reference.selection),
-            reference.field,
-          );
-        }
-      }
-      if (!metadata || (!deferred && !this.store.getListState(metadata.key))) {
-        throw new Error('fate: Insertion requires a list returned by this client.');
-      }
+      const metadata = this.resolveMutationList(instruction.into, 'Insertion');
       if (metadata.type !== type && !this.types.get(metadata.type)?.possibleTypes?.includes(type)) {
         throw new Error(`fate: Cannot insert '${type}' into a '${metadata.type}' list.`);
       }
@@ -1437,18 +1497,33 @@ export class FateClient<
   }
 
   /** @internal Keep mutation targets alive until an optimistic or durable operation settles. */
-  retainMutationTargets({ insert, invalidate = [], invalidateRecords = [] }: MutationCommand) {
-    if (typeof insert === 'string' && !invalidate.length && !invalidateRecords.length) {
+  retainMutationTargets({
+    insert,
+    invalidate = [],
+    invalidateRecords = [],
+    remove,
+  }: MutationCommand) {
+    if (
+      typeof insert === 'string' &&
+      !invalidate.length &&
+      !invalidateRecords.length &&
+      !remove?.length
+    ) {
       return () => {};
     }
     const keys = new Set(invalidate);
+    const records = new Set(invalidateRecords);
+    for (const { list, node } of remove ?? []) {
+      keys.add(list.key);
+      records.add(node);
+    }
     if (typeof insert !== 'string') {
       for (const { list } of insert) {
         keys.add(list.key);
       }
     }
     const releaseLists = retainTargets(this.mutationLists, keys);
-    const releaseRecords = retainTargets(this.mutationRecords, invalidateRecords);
+    const releaseRecords = retainTargets(this.mutationRecords, records);
     let released = false;
     return () => {
       if (!released) {
@@ -5119,9 +5194,10 @@ export class FateClient<
         const previousList = this.store.getListState(listKey);
         const acceptList =
           acceptField &&
-          (!previousList?.stale ||
-            this.store.isRecordingOptimistic ||
-            (this.writeVersions.get(`list:${listKey}`) ?? 0) <= generation);
+          (this.store.isRecordingOptimistic ||
+            ((this.writeVersions.get(`invalidate:list:${listKey}`) ?? 0) <= generation &&
+              (!previousList?.stale ||
+                (this.writeVersions.get(`list:${listKey}`) ?? 0) <= generation)));
         const refreshStale =
           previousList?.stale &&
           !this.mutationWrite &&

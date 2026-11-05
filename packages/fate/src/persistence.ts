@@ -7,6 +7,7 @@ import {
 import {
   getErrorStatusCode,
   isResolvedMutationInsertion,
+  isResolvedMutationRemoval,
   prepareMutation,
   type MutationCommand,
 } from './mutation.ts';
@@ -103,6 +104,7 @@ const decodeCommand = (value: Encoded): MutationCommand => {
     typeof command.key !== 'string' ||
     typeof command.entity !== 'string' ||
     !isResolvedMutationInsertion(command.insert) ||
+    (command.remove !== undefined && !isResolvedMutationRemoval(command.remove)) ||
     (command.invalidate !== undefined &&
       (!Array.isArray(command.invalidate) ||
         !command.invalidate.every((key) => typeof key === 'string'))) ||

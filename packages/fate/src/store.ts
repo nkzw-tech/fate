@@ -330,7 +330,7 @@ export class Store {
         this.restore(id, snapshot);
       }
       for (const [key, list] of this.optimisticBase.lists) {
-        this.restoreList(key, list);
+        this.writeList(key, list, undefined, false);
       }
       this.optimisticBase.records.clear();
       this.optimisticBase.lists.clear();
@@ -1090,10 +1090,20 @@ export class Store {
     if (!this.rebase && this.optimisticLayers.size) {
       return this.update(() => this.setList(key, state, owner));
     }
+    this.writeList(key, state, owner);
+  }
+
+  private writeList(
+    key: string,
+    state: List | undefined,
+    owner = parseListKey(key),
+    confirmed = true,
+  ) {
     this.captureList(key);
     const previous = this.lists.get(key);
     const sameReferences =
       previous &&
+      state &&
       areListIdsEqual(previous.ids, state.ids) &&
       areListIdsEqual(previous.liveAfterIds, state.liveAfterIds) &&
       areListIdsEqual(previous.liveBeforeIds, state.liveBeforeIds) &&
@@ -1102,11 +1112,15 @@ export class Store {
     if (previous && !sameReferences) {
       this.removeListIndexes(key, previous, owner);
     }
-    this.lists.set(key, state);
-    if (!sameReferences) {
-      this.addListIndexes(key, state, owner);
+    if (state) {
+      this.lists.set(key, state);
+      if (!sameReferences) {
+        this.addListIndexes(key, state, owner);
+      }
+    } else {
+      this.lists.delete(key);
     }
-    this.notifyListSubscribers(key, true, previous, owner);
+    this.notifyListSubscribers(key, confirmed, previous, owner);
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
@@ -1200,13 +1214,7 @@ export class Store {
   }
 
   restoreList(key: string, list?: List) {
-    return this.update(() => {
-      if (list == null) {
-        this.deleteList(key);
-      } else {
-        this.setList(key, list);
-      }
-    });
+    return this.update(() => this.writeList(key, list));
   }
 
   collectGarbage(
@@ -1245,22 +1253,10 @@ export class Store {
     }
 
     for (const key of lists) {
-      this.deleteList(key, true);
+      this.update(() => this.writeList(key, undefined, undefined, false));
     }
 
     return { lists, records };
-  }
-
-  private deleteList(key: string, collected = false) {
-    return this.update(() => {
-      this.captureList(key);
-      const previous = this.lists.get(key);
-      if (previous) {
-        this.removeListIndexes(key, previous);
-      }
-      this.lists.delete(key);
-      this.notifyListSubscribers(key, !collected, previous);
-    });
   }
 
   subscribeList(key: string, fn: () => void): () => void {
@@ -1416,7 +1412,7 @@ export class Store {
 
       // This only exposes the existing confirmed base before optimistic layers
       // are replayed. The authoritative write, if any, reports reference changes.
-      this.notify(id);
+      this.notify(id, undefined, false);
     });
   }
 

@@ -53,7 +53,16 @@ function Feed({ name }: { name: keyof typeof feeds }) {
   const [error, act, isPending] = useActionState(
     async (
       _error: string | null,
-      action: 'load' | 'refresh' | 'insert' | 'fail' | 'invalidate' | 'revisit' | 'read',
+      action:
+        | 'load'
+        | 'refresh'
+        | 'insert'
+        | 'fail'
+        | 'invalidate'
+        | 'revisit'
+        | 'read'
+        | 'remove'
+        | 'fail-removal',
     ) => {
       try {
         if (action === 'load') {
@@ -69,6 +78,19 @@ function Feed({ name }: { name: keyof typeof feeds }) {
               fate.request({ post: { id, view: PaginationPostView } }, { mode: 'network-only' }),
               fate.request({ post: { id, view: PostTitleView } }, { mode: 'network-only' }),
             ]);
+          }
+        } else if (action === 'remove' || action === 'fail-removal') {
+          const node = items[0]?.node;
+          if (node) {
+            const result = await fate.mutations.post.like({
+              input: {
+                id: String(node.id),
+                slow: true,
+                ...(action === 'fail-removal' && { error: 'callSite' as const }),
+              },
+              remove: { from: posts, node },
+            });
+            return result.error?.message ?? null;
           }
         } else {
           const result = await fate.mutations.post.add({
@@ -118,6 +140,20 @@ function Feed({ name }: { name: keyof typeof feeds }) {
         </Button>
         <Button action={() => act('read')} disabled={isPending || !items.length} variant="outline">
           Read the first post twice
+        </Button>
+        <Button
+          action={() => act('remove')}
+          disabled={isPending || !items.length}
+          variant="outline"
+        >
+          Like and hide the first post
+        </Button>
+        <Button
+          action={() => act('fail-removal')}
+          disabled={isPending || !items.length}
+          variant="outline"
+        >
+          Fail a scoped removal
         </Button>
         <Button action={() => act('fail')} disabled={isPending || !session} variant="outline">
           Fail an optimistic insertion
@@ -193,6 +229,10 @@ export default function PaginationPage() {
           <li>
             With the Network tab open, read the first post twice. The request for just its title
             shares the fetch for its title and content.
+          </li>
+          <li>
+            Like and hide the first post to remove it from this feed. Refresh to show it again. Fail
+            a scoped removal to see the row return after the server rejects the mutation.
           </li>
           <li>
             Sign in to insert a real post or reject an optimistic insertion using an invalid title.

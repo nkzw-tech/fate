@@ -86,12 +86,49 @@ export type MutationInsertion<TName extends string = string> =
   | ListInsertion<TName>
   | ReadonlyArray<ListInsertion<TName>>;
 
+/** Remove a node from one specific list while keeping its record. */
+export type ListRemoval<TName extends string = string> = Readonly<{
+  from: InsertionTarget<TName>;
+  node: ViewRef<TName>;
+}>;
+
+export type MutationRemoval<TName extends string = string> =
+  | ListRemoval<TName>
+  | ReadonlyArray<ListRemoval<TName>>;
+
+/** @internal Serializable removal targets captured before executing a mutation. */
+export type ResolvedRemoval = Readonly<{ list: ConnectionMetadata; node: EntityId }>;
+
 /** @internal Serializable insertion targets captured before executing a mutation. */
 export type ResolvedInsertion = Readonly<{
   list: ConnectionMetadata;
   position: Exclude<InsertPosition, 'none'>;
 }>;
 export type ResolvedMutationInsertion = InsertPosition | ReadonlyArray<ResolvedInsertion>;
+
+const isResolvedMutationList = (list: unknown): list is ConnectionMetadata =>
+  isRecord(list) &&
+  typeof list.key === 'string' &&
+  list.key.length > 0 &&
+  ['owner', 'field', 'procedure', 'type'].every(
+    (key) => typeof list[key] === 'string' && list[key].length > 0,
+  ) &&
+  (list.hash === undefined || typeof list.hash === 'string') &&
+  typeof list.root === 'boolean';
+
+/** @internal Validate serialized removal targets before journal replay. */
+export function isResolvedMutationRemoval(value: unknown): value is ReadonlyArray<ResolvedRemoval> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.node === 'string' &&
+        entry.node.includes(':') &&
+        isResolvedMutationList(entry.list),
+    )
+  );
+}
 
 /** @internal Validate serialized insertion descriptors before journal replay. */
 export function isResolvedMutationInsertion(value: unknown): value is ResolvedMutationInsertion {
@@ -106,24 +143,12 @@ export function isResolvedMutationInsertion(value: unknown): value is ResolvedMu
     if (
       !isRecord(entry) ||
       (entry.position !== 'before' && entry.position !== 'after') ||
-      !isRecord(entry.list)
+      !isResolvedMutationList(entry.list) ||
+      keys.has(entry.list.key)
     ) {
       return false;
     }
-    const list = entry.list;
-    if (
-      typeof list.key !== 'string' ||
-      !list.key ||
-      !['owner', 'field', 'procedure', 'type'].every(
-        (key) => typeof list[key] === 'string' && list[key].length > 0,
-      ) ||
-      (list.hash !== undefined && typeof list.hash !== 'string') ||
-      typeof list.root !== 'boolean' ||
-      keys.has(list.key)
-    ) {
-      return false;
-    }
-    keys.add(list.key);
+    keys.add(entry.list.key);
     return true;
   });
 }
@@ -145,6 +170,8 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
   /** Skip durable delivery for this call, even when persistence is configured. */
   persist?: boolean;
+  /** Remove nodes from the specified lists as part of the optimistic update. */
+  remove?: MutationRemoval;
   /** Fields to select from a value mutation result. */
   select?: {
     [K in keyof NonNullable<MutationResult<Identifier>>]?: true | Record<string, unknown>;
@@ -357,6 +384,7 @@ export type MutationCommand = {
   key: string;
   optimistic?: AnyRecord;
   plan?: SelectionPlan;
+  remove?: ReadonlyArray<ResolvedRemoval>;
 };
 
 /** @internal Creates the same optimistic/confirmation machinery for live and restored calls. */
@@ -366,25 +394,53 @@ export function prepareMutation(
   config: TypeConfig | undefined,
   durable = false,
 ) {
-  const { args, delete: deleteRecord, entity, input, insert, key, optimistic, plan } = command;
+  const {
+    args,
+    delete: deleteRecord,
+    entity,
+    input,
+    insert,
+    key,
+    optimistic,
+    plan,
+    remove,
+  } = command;
   const position = typeof insert === 'string' ? insert : 'none';
   if (!config) {
     if (deleteRecord || optimistic) {
       throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
     }
     const release = client.retainMutationTargets(command);
-    return {
-      commit: (_result: unknown) => {
-        try {
-          client.invalidateMutationTargets(command);
-        } finally {
-          release();
+    let settle: ReturnType<typeof client.store.optimisticUpdate> | undefined;
+    try {
+      if (remove?.length) {
+        settle = client.store.optimisticUpdate(() => client.removeMutationTargets(remove), durable);
+      }
+    } catch (error) {
+      release();
+      throw error;
+    }
+    const finish = (commit?: () => void) => {
+      try {
+        if (settle) {
+          settle(commit);
+        } else {
+          commit?.();
         }
-      },
+      } finally {
+        release();
+      }
+    };
+    return {
+      commit: (_result: unknown) =>
+        finish(() => {
+          client.removeMutationTargets(remove, true);
+          client.invalidateMutationTargets(command);
+        }),
       entityId: null,
       execute: (identity?: MutationIdentity) =>
         client.executeMutation(key, input, plan?.paths ?? new Set(), { args, identity }),
-      rollback: release,
+      rollback: () => finish(),
     };
   }
   const id = maybeGetId(config.getId, input);
@@ -434,6 +490,7 @@ export function prepareMutation(
       if (deleteRecord && id != null) {
         client.deleteRecord(entity, id);
       }
+      client.removeMutationTargets(remove);
     }, durable);
   } catch (error) {
     release();
@@ -465,6 +522,7 @@ export function prepareMutation(
           if (deleteRecord && id != null) {
             client.deleteRecord(entity, id);
           }
+          client.removeMutationTargets(remove, true);
           client.invalidateMutationTargets(command);
         });
       } finally {
@@ -500,6 +558,7 @@ export function wrapMutation<
     invalidate,
     optimistic,
     persist,
+    remove,
     select,
     view,
   }: MutationOptions<I>) => {
@@ -517,6 +576,7 @@ export function wrapMutation<
         : select
           ? getSelectionPlan(select as View<any, any>, null)
           : undefined,
+      ...(remove && { remove: client.resolveMutationRemoval(remove) }),
     };
     // Durable admission can await restoration and disk writes before preparation
     // acquires its own pins. Keep the caller's targets alive throughout that gap.

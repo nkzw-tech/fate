@@ -434,7 +434,12 @@ export class PersistenceCache {
         }
       }
     }
-    const targets = typeof command.insert === 'string' ? [] : command.insert;
+    const insertions = typeof command.insert === 'string' ? [] : command.insert;
+    const removals = command.remove ?? [];
+    for (const { node } of removals) {
+      ids.add(node);
+    }
+    const targets = [...insertions, ...removals];
     for (const { list } of targets) {
       if (!list.root) {
         ids.add(list.owner);
