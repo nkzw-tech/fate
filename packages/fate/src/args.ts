@@ -1,7 +1,10 @@
-import { isRecord } from './record.ts';
+import { isDate, isRecord } from './record.ts';
 import { SelectionPlan } from './selection.ts';
 import { ResolvedArgsPayload } from './transport.ts';
 import { AnyRecord } from './types.ts';
+
+export const isArgumentRecord = (value: unknown): value is AnyRecord =>
+  isRecord(value) && !isDate(value);
 
 const ensureSerializable = (value: unknown, path: string) => {
   const type = typeof value;
@@ -13,6 +16,10 @@ const ensureSerializable = (value: unknown, path: string) => {
 const cloneValue = (entry: unknown, currentPath: string): unknown => {
   if (Array.isArray(entry)) {
     return entry.map((item, index) => cloneValue(item, `${currentPath}[${index}]`));
+  }
+
+  if (isDate(entry)) {
+    return new Date(entry.getTime());
   }
 
   if (isRecord(entry)) {
@@ -61,6 +68,10 @@ const stableSerialize = (value: unknown): string => {
 
   if (Array.isArray(value)) {
     return `array:[${value.map(stableSerialize).join(',')}]`;
+  }
+
+  if (isDate(value)) {
+    return `date:${value.getTime()}`;
   }
 
   if (typeof value === 'object') {
@@ -118,9 +129,9 @@ export const filterConnectionArgs = (
 
 const mergeArgs = (target: AnyRecord, source: AnyRecord) => {
   for (const [key, value] of Object.entries(source)) {
-    if (isRecord(value)) {
+    if (isArgumentRecord(value)) {
       const existing = Object.hasOwn(target, key) ? target[key] : undefined;
-      if (isRecord(existing)) {
+      if (isArgumentRecord(existing)) {
         mergeArgs(existing, value);
       } else {
         target[key] = cloneArgs(value, key);
@@ -153,7 +164,7 @@ export const resolvedArgsFromPlan = (plan?: SelectionPlan): ResolvedArgsPayload 
 
       if (isLeaf) {
         const existing = current[segment];
-        if (isRecord(existing)) {
+        if (isArgumentRecord(existing)) {
           mergeArgs(existing, entry.value);
         } else {
           current[segment] = cloneArgs(entry.value, path);
@@ -162,7 +173,7 @@ export const resolvedArgsFromPlan = (plan?: SelectionPlan): ResolvedArgsPayload 
       }
 
       const existing = current[segment];
-      if (isRecord(existing)) {
+      if (isArgumentRecord(existing)) {
         current = existing;
         return;
       }
@@ -212,7 +223,7 @@ export const getArgsAtPath = (
   let current: unknown = payload;
 
   for (const segment of segments) {
-    if (!isRecord(current) || !Object.hasOwn(current, segment)) {
+    if (!isArgumentRecord(current) || !Object.hasOwn(current, segment)) {
       return undefined;
     }
     current = current[segment];
@@ -221,7 +232,7 @@ export const getArgsAtPath = (
     }
   }
 
-  return isRecord(current) ? (current as AnyRecord) : undefined;
+  return isArgumentRecord(current) ? current : undefined;
 };
 
 export const applyArgsPayloadToPlan = (plan: SelectionPlan, payload: ResolvedArgsPayload) => {

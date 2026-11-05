@@ -1,4 +1,5 @@
 import { schemaField } from './alias.ts';
+import { isArgumentRecord } from './args.ts';
 import { isRecord } from './record.ts';
 import type { Transport } from './transport.ts';
 import type { AnyRecord, MutationShape } from './types.ts';
@@ -85,7 +86,9 @@ const scopedArgs = (args: AnyRecord | undefined, group: Group): AnyRecord | unde
         if ((selected || key.includes(':')) && selected?.split('.').at(-1) !== key) {
           return [];
         }
-        return [[schemaField(key), selected && isRecord(child) ? walk(child, sourcePath) : child]];
+        return [
+          [schemaField(key), selected && isArgumentRecord(child) ? walk(child, sourcePath) : child],
+        ];
       }),
     );
   return walk(args, '');

@@ -3933,6 +3933,28 @@ test(`'request' fetches root queries via the transport`, async () => {
   expect(user.name).toBe('Kiwi');
 });
 
+test('preserves Date arguments and caches requests by timestamp', async () => {
+  type User = { __typename: 'User'; id: string };
+  const UserView = view<User>()({ id: true });
+  const fetchQuery = vi.fn().mockResolvedValue({ id: 'user-1' });
+  const client = createClient({
+    roots: { viewer: clientRoot<User, 'User'>('User') },
+    transport: { fetchById: vi.fn(), fetchQuery },
+    types: [{ type: 'User' }],
+  });
+
+  const request = (since: Date) => client.request({ viewer: { args: { since }, view: UserView } });
+  const january = new Date('2026-01-01');
+  const february = new Date('2026-02-01');
+  await request(january);
+  await request(february);
+  await request(new Date(january));
+
+  expect(fetchQuery).toHaveBeenCalledTimes(2);
+  expect(fetchQuery).toHaveBeenNthCalledWith(1, 'viewer', new Set(['id']), { since: january });
+  expect(fetchQuery).toHaveBeenNthCalledWith(2, 'viewer', new Set(['id']), { since: february });
+});
+
 test(`'request' caches null root query results`, async () => {
   type User = { __typename: 'User'; id: string; name: string };
 

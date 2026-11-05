@@ -17,7 +17,7 @@ import {
   type NormalizationInput,
 } from './normalization-input.ts';
 import { abortable, batchReadControl } from './read-control.ts';
-import { isRecord } from './record.ts';
+import { isDate, isRecord } from './record.ts';
 import { encodeRefetchArgs, getRefetchFields } from './refetch.ts';
 import type { ReadContext, Transport } from './transport.ts';
 import type { AnyRecord, Entity, MutationShape, Pagination, TypeConfig } from './types.ts';
@@ -312,6 +312,10 @@ const graphQLLiteral = (value: unknown): string => {
 
   if (Array.isArray(value)) {
     return `[${value.map(graphQLLiteral).join(', ')}]`;
+  }
+
+  if (isDate(value)) {
+    return JSON.stringify(value);
   }
 
   if (isRecord(value)) {

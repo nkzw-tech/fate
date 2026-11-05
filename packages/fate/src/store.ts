@@ -16,6 +16,7 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
+import { isDate } from './record.ts';
 import {
   addIndexValue,
   appendIndexValue,
@@ -132,12 +133,6 @@ const isPlainRecord = (value: unknown): value is AnyRecord => {
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 };
-
-const isDate = (value: unknown): value is Date =>
-  value != null &&
-  typeof value === 'object' &&
-  Object.prototype.toString.call(value) === '[object Date]' &&
-  typeof (value as Date).getTime === 'function';
 
 export const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
   if (!isPlainRecord(incoming) || !isPlainRecord(existing)) {
