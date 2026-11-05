@@ -213,29 +213,34 @@ export function useView<V extends View<any, any>>(
     errorState.value = null;
 
     const nextSnapshot = getSnapshot();
-    currentPromise = Promise.resolve(nextSnapshot).then(
-      (value) => {
-        if (!disposed && currentToken === token) {
-          snapshot = value ?? null;
-          data.value = value ? (markRaw(value.data) as typeof data.value) : value;
+    const publish = (value: Awaited<typeof nextSnapshot>) => {
+      if (!disposed && currentToken === token) {
+        snapshot = value ?? null;
+        updateSubscriptions();
+        data.value = value ? (markRaw(value.data) as typeof data.value) : value;
+        if (currentToken === token) {
           pending.value = false;
-          updateSubscriptions();
         }
-        return (value ? value.data : value) as
-          | ViewData<ViewEntityWithTypename<V>, ViewSelection<V>>
-          | null
-          | undefined;
-      },
-      (error) => {
-        if (!disposed && currentToken === token) {
-          errorState.value = error;
-          pending.value = false;
-          snapshot = null;
-          updateSubscriptions();
-        }
-        throw error;
-      },
-    );
+      }
+      return (value ? value.data : value) as typeof data.value;
+    };
+    if (isFulfilledThenable(nextSnapshot)) {
+      const ready = Promise.resolve(
+        (nextSnapshot.value ? nextSnapshot.value.data : nextSnapshot.value) as typeof data.value,
+      );
+      currentPromise = ready;
+      publish(nextSnapshot.value);
+      return ready;
+    }
+    currentPromise = Promise.resolve(nextSnapshot).then(publish, (error) => {
+      if (!disposed && currentToken === token) {
+        errorState.value = error;
+        pending.value = false;
+        snapshot = null;
+        updateSubscriptions();
+      }
+      throw error;
+    });
     void currentPromise.catch(() => {});
 
     return currentPromise;
