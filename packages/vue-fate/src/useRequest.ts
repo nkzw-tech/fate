@@ -53,8 +53,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   const pending = shallowRef(false);
   const mode = options?.mode ?? 'cache-first';
   let disposed = false;
-  let activeClient: FateClientT<any, any> | null = null;
-  let requestKey: null | string = null;
+  let disposePreparation: (() => void) | undefined;
   let retainDispose: (() => void) | null = null;
   let unsubscribe: (() => void) | null = null;
   let token = 0;
@@ -65,16 +64,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     unsubscribe = null;
     releaseDisposable(retainDispose);
     retainDispose = null;
-
-    if (
-      activeClient &&
-      requestKey &&
-      (mode === 'network-only' || mode === 'stale-while-revalidate')
-    ) {
-      activeClient.releaseRequestKey(requestKey, mode);
-    }
-    activeClient = null;
-    requestKey = null;
+    disposePreparation?.();
   };
 
   const execute = (refresh = false) => {
@@ -89,12 +79,21 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
           requestKey: null,
         }
       : client.prepareRequestForRender(currentRequest, options);
-    activeClient = client;
-    requestKey = prepared.requestKey;
+    const { promise, requestKey } = prepared;
+    const releasePreparation =
+      requestKey !== null && mode !== 'cache-first'
+        ? () => {
+            if (disposePreparation === releasePreparation) {
+              disposePreparation = undefined;
+              client.releaseRequestKey(requestKey, mode, promise);
+            }
+          }
+        : undefined;
+    disposePreparation = releasePreparation;
     retainDispose = (
-      prepared.requestKey === null
+      requestKey === null
         ? client.retain(currentRequest)
-        : client.retainRequestKey(prepared.requestKey, mode)
+        : client.retainRequestKey(requestKey, mode)
     ).dispose;
     pending.value = true;
     errorState.value = null;
@@ -107,8 +106,9 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     };
     unsubscribe = observer.subscribe(updateResult);
 
-    currentPromise = Promise.resolve(prepared.promise).then(
+    currentPromise = Promise.resolve(promise).then(
       (value) => {
+        releasePreparation?.();
         if (!disposed && currentToken === token) {
           resolved = true;
           updateResult();
@@ -117,6 +117,7 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
         return value as RequestResult<O, R>;
       },
       (error) => {
+        releasePreparation?.();
         if (!disposed && currentToken === token) {
           errorState.value = error;
           pending.value = false;

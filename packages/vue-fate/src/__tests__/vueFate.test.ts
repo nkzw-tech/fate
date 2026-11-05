@@ -239,7 +239,7 @@ test('retains cache-first requests while mounted and disposes them on unmount', 
   expect(client.store.read(postId)).toBeUndefined();
 });
 
-test('releases network-only requests on unmount', async () => {
+test('releases the shared network-only preparation when it settles', async () => {
   const fetchById = vi.fn().mockResolvedValue([
     {
       __typename: 'Post',
@@ -273,12 +273,12 @@ test('releases network-only requests on unmount', async () => {
   await flushAsync();
 
   expect(fetchById).toHaveBeenCalledTimes(1);
-  expect(releaseSpy).not.toHaveBeenCalled();
+  expect(releaseSpy).toHaveBeenCalledExactlyOnceWith(requestKey, 'network-only', expect.anything());
 
   app.unmount();
   await flushAsync();
 
-  expect(releaseSpy).toHaveBeenCalledWith(requestKey, 'network-only');
+  expect(releaseSpy).toHaveBeenCalledOnce();
 });
 
 test('stores rejected request errors on the resource', async () => {

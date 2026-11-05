@@ -2,7 +2,7 @@
 
 import { clientRoot, clientValueRoot, createClient, view } from '@nkzw/fate';
 import { expect, test, vi } from 'vite-plus/test';
-import { createApp, defineComponent, h, nextTick, shallowRef } from 'vue';
+import { createApp, defineComponent, h, nextTick, ref, shallowRef } from 'vue';
 import { FateClient, useRequest } from '../index.ts';
 
 type User = { __typename: 'User'; id: string; name: string };
@@ -99,6 +99,53 @@ test('observes background revalidation of opaque value roots', async () => {
     app.unmount();
   }
 });
+
+test.each(['network-only', 'stale-while-revalidate'] as const)(
+  'a new %s reader revalidates after the shared request settles',
+  async (mode) => {
+    const { client, fetchQuery, roots } = setup();
+    const first = Promise.withResolvers<User>();
+    fetchQuery.mockReturnValueOnce(first.promise);
+    const readers = ref(1);
+    const resources: Array<ReturnType<typeof useRequest<typeof request, typeof roots>>> = [];
+    const Reader = defineComponent({
+      setup() {
+        resources.push(useRequest<typeof request, typeof roots>(request, { mode }));
+        return () => null;
+      },
+    });
+    const app = createApp({
+      render: () =>
+        h(
+          FateClient,
+          { client },
+          {
+            default: () => Array.from({ length: readers.value }, (_, key) => h(Reader, { key })),
+          },
+        ),
+    });
+    app.mount(document.createElement('div'));
+    try {
+      readers.value = 2;
+      await nextTick();
+      expect(fetchQuery).toHaveBeenCalledOnce();
+      first.resolve({ __typename: 'User', id: '1', name: 'Ada' });
+      await Promise.all(resources.map((resource) => resource.ready()));
+
+      fetchQuery.mockResolvedValue({ __typename: 'User', id: '2', name: 'Grace' });
+      readers.value = 3;
+      await nextTick();
+      const result = await resources[2].ready();
+      expect(fetchQuery).toHaveBeenCalledTimes(2);
+      if (mode === 'network-only') {
+        expect(result.viewer?.id).toBe('2');
+      }
+      await vi.waitFor(() => expect(resources[0].data.value?.viewer?.id).toBe('2'));
+    } finally {
+      app.unmount();
+    }
+  },
+);
 
 test('switches observers with the provider and ignores late results from the previous client', async () => {
   const first = setup();
