@@ -338,11 +338,11 @@ const compactKeys = (values: Array<unknown>) => [
   ...new Set(values.filter((value) => value !== null && value !== undefined)),
 ];
 
-const reorderByIds = <T extends { id: string }>(ids: Array<string>, items: Array<T>) => {
-  const itemsById = mapByField(items, 'id');
+const reorderByIds = <T extends { id: string | number }>(ids: Array<string>, items: Array<T>) => {
+  const itemsById = new Map(items.map((item) => [String(item.id), item]));
   return ids.flatMap((id) => {
     const item = itemsById.get(id);
-    return item ? [item as T] : [];
+    return item ? [item] : [];
   });
 };
 
