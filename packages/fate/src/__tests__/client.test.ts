@@ -3933,6 +3933,26 @@ test(`'request' fetches root queries via the transport`, async () => {
   expect(user.name).toBe('Kiwi');
 });
 
+test('keeps requests for different ID lists separate when IDs contain delimiters', async () => {
+  type Note = { __typename: 'Note'; id: string };
+  const NoteView = view<Note>()({ id: true });
+  const fetchById = vi.fn(async (_type: string, ids: Array<string | number>) =>
+    ids.map((id) => ({ id })),
+  );
+  const client = createClient({
+    roots: { notes: clientRoot<Note, 'Note'>('Note') },
+    transport: { fetchById },
+    types: [{ type: 'Note' }],
+  });
+
+  const first = await client.request({ notes: { ids: ['a', 'b'], view: NoteView } });
+  const second = await client.request({ notes: { ids: ['a,string:b'], view: NoteView } });
+
+  expect(first.notes).toMatchObject([{ id: 'a' }, { id: 'b' }]);
+  expect(second.notes).toMatchObject([{ id: 'a,string:b' }]);
+  expect(fetchById).toHaveBeenCalledTimes(2);
+});
+
 test('preserves Date arguments and caches requests by timestamp', async () => {
   type User = { __typename: 'User'; id: string };
   const UserView = view<User>()({ id: true });

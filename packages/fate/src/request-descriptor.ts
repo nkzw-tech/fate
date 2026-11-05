@@ -152,45 +152,33 @@ export const getPaginationArgsInfo = (
 });
 
 const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): string => {
-  const parts: Array<string> = [];
   const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
-
-  for (const item of sorted) {
-    if (item.kind === 'node') {
-      const args = resolvedArgsFromPlan(item.plan);
-      parts.push(
-        `node:${item.name}:${item.viewSignature}:${item.ids[0]}${args ? `:${hashArgs(args)}` : ''}`,
-      );
-      continue;
-    }
-
-    if (item.kind === 'nodes') {
-      const args = resolvedArgsFromPlan(item.plan);
-      parts.push(
-        `node:${item.name}:${item.viewSignature}:${item.ids.map(serializeId).join(',')}${args ? `:${hashArgs(args)}` : ''}`,
-      );
-      continue;
-    }
-
-    if (item.kind === 'query' || item.kind === 'value') {
-      parts.push(
-        `${item.kind}:${item.name}:${item.kind === 'query' ? item.viewSignature : ''}:${
-          item.argsPayload ? hashArgs(item.argsPayload) : ''
-        }`,
-      );
-      continue;
-    }
-
-    if (item.kind === 'list') {
-      parts.push(
-        `list:${item.name}:${item.hasItems ? 'connection' : 'entity'}:${item.viewSignature}:${
-          item.argsPayload ? hashArgs(item.argsPayload) : ''
-        }`,
-      );
-    }
-  }
-
-  return `${parts.join('$')}|${JSON.stringify(sorted.map((item) => ['procedure' in item ? item.procedure : item.type, [...item.plan.paths].sort()]))}`;
+  return JSON.stringify(
+    sorted.map((item) => {
+      const paths = [...item.plan.paths].sort();
+      if ('ids' in item) {
+        const args = resolvedArgsFromPlan(item.plan);
+        return [
+          item.kind,
+          item.name,
+          item.type,
+          item.viewSignature,
+          item.ids.map(serializeId),
+          args ? hashArgs(args) : null,
+          paths,
+        ];
+      }
+      return [
+        item.kind,
+        item.name,
+        item.procedure,
+        item.kind === 'value' ? null : item.viewSignature,
+        item.kind === 'list' ? item.hasItems : null,
+        item.argsPayload ? hashArgs(item.argsPayload) : null,
+        paths,
+      ];
+    }),
+  );
 };
 
 export const createRequestDescriptor = (
