@@ -1680,3 +1680,37 @@ test('GraphQL previews and independently requested cursor pages keep separate wi
       .items.items.map(({ node }) => node.id),
   ).toEqual(['1', '2', '3', '4']);
 });
+
+test('selects shared union fields and ID aliases inside concrete fragments', async () => {
+  const schema = buildSchema(`
+    type Query { result: SearchResult! }
+    union SearchResult = Post | User
+    type Post { id: ID!, label: String! }
+    type User { id: ID!, label: String! }
+  `);
+  const transport = createGraphQLTransport({
+    fetch: async (_url, init) => {
+      const { query, variables } = JSON.parse(String(init?.body));
+      return jsonResponse(
+        await graphql({
+          rootValue: { result: { __typename: 'Post', id: 'post', label: 'A post' } },
+          schema,
+          source: query,
+          variableValues: variables,
+        }),
+      );
+    },
+    live: false,
+    roots: { result: { type: 'SearchResult' } },
+    schema: createGraphQLArgumentSchema(schema),
+    types: [],
+    url: '/graphql',
+  });
+
+  await expect(transport.fetchQuery!('result', ['identity:id', 'label'])).resolves.toMatchObject({
+    __typename: 'Post',
+    id: 'post',
+    'identity:id': 'post',
+    label: 'A post',
+  });
+});

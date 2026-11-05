@@ -512,65 +512,72 @@ const buildRecordSelection = ({
       if (needsConcreteIds && field === 'id') {
         continue;
       }
-      const fieldType = condition ?? currentType;
-      const selections = condition && condition !== currentType ? fragment(condition) : lines;
-      const descriptor = (condition && condition !== currentType ? types.get(condition) : config)
-        ?.fields?.[sourceField];
       const fieldPath = currentPath ? `${currentPath}.${field}` : field;
       const fieldName = field.includes(':')
         ? `${assertIdentifier(responseField(field), 'alias')}: ${assertIdentifier(sourceField, 'field')}`
         : assertIdentifier(field, 'field');
-      if (sourceField === '__typename') {
-        selections.push(fieldName);
-        continue;
-      }
-      const resultType =
-        descriptor && typeof descriptor === 'object'
-          ? 'type' in descriptor
-            ? descriptor.type
-            : 'embedded' in descriptor
-              ? descriptor.embedded
-              : descriptor.listOf
-          : undefined;
-      const fieldArguments = argumentsForField(
-        fieldType,
-        sourceField,
-        getArgsAtPath(args, fieldPath),
-        resultType,
-      );
+      const fieldTypes = condition
+        ? [condition]
+        : sourceField === '__typename'
+          ? [currentType]
+          : (schema?.unions?.[currentType] ??
+            (needsConcreteIds && sourceField === 'id' ? possibleTypes : [currentType]));
 
-      if (descriptor && typeof descriptor === 'object' && 'type' in descriptor) {
-        selections.push(
-          `${fieldName}${fieldArguments} { ${walk(descriptor.type, childTree, fieldPath)} }`,
+      for (const fieldType of fieldTypes) {
+        const selections = fieldType === currentType ? lines : fragment(fieldType);
+        const descriptor = types.get(fieldType)?.fields?.[sourceField];
+        if (sourceField === '__typename') {
+          selections.push(fieldName);
+          continue;
+        }
+        const resultType =
+          descriptor && typeof descriptor === 'object'
+            ? 'type' in descriptor
+              ? descriptor.type
+              : 'embedded' in descriptor
+                ? descriptor.embedded
+                : descriptor.listOf
+            : undefined;
+        const fieldArguments = argumentsForField(
+          fieldType,
+          sourceField,
+          getArgsAtPath(args, fieldPath),
+          resultType,
         );
-        continue;
-      }
 
-      if (descriptor && typeof descriptor === 'object' && 'embedded' in descriptor) {
-        selections.push(
-          `${fieldName}${fieldArguments} { ${walk(descriptor.embedded, childTree, fieldPath, true)} }`,
-        );
-        continue;
-      }
-
-      if (descriptor && typeof descriptor === 'object' && 'listOf' in descriptor) {
-        if (descriptor.array) {
+        if (descriptor && typeof descriptor === 'object' && 'type' in descriptor) {
           selections.push(
-            `${fieldName}${fieldArguments} { ${walk(descriptor.listOf, childTree, fieldPath)} }`,
+            `${fieldName}${fieldArguments} { ${walk(descriptor.type, childTree, fieldPath)} }`,
           );
           continue;
         }
-        selections.push(
-          `${fieldName}${fieldArguments} { edges { cursor node { ${walk(
-            descriptor.listOf,
-            childTree,
-            fieldPath,
-          )} } } pageInfo { endCursor hasNextPage hasPreviousPage startCursor } }`,
-        );
-        continue;
-      }
 
-      selections.push(`${fieldName}${fieldArguments}`);
+        if (descriptor && typeof descriptor === 'object' && 'embedded' in descriptor) {
+          selections.push(
+            `${fieldName}${fieldArguments} { ${walk(descriptor.embedded, childTree, fieldPath, true)} }`,
+          );
+          continue;
+        }
+
+        if (descriptor && typeof descriptor === 'object' && 'listOf' in descriptor) {
+          if (descriptor.array) {
+            selections.push(
+              `${fieldName}${fieldArguments} { ${walk(descriptor.listOf, childTree, fieldPath)} }`,
+            );
+            continue;
+          }
+          selections.push(
+            `${fieldName}${fieldArguments} { edges { cursor node { ${walk(
+              descriptor.listOf,
+              childTree,
+              fieldPath,
+            )} } } pageInfo { endCursor hasNextPage hasPreviousPage startCursor } }`,
+          );
+          continue;
+        }
+
+        selections.push(`${fieldName}${fieldArguments}`);
+      }
     }
 
     for (const concrete of possibleTypes) {
