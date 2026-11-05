@@ -183,6 +183,11 @@ type ScalarEntityRead = Readonly<{
   ids: ReadonlySet<string | number>;
 }>;
 type EntityResolution = { id: EntityId; next?: EntityResolution };
+type LiveConnectionTarget = {
+  connection: ConnectionMetadata;
+  pageLimit: number | null;
+  view: View<any, any>;
+};
 
 type FateClientOptions<
   Roots extends FateRoots,
@@ -799,7 +804,12 @@ export class FateClient<
   private readonly onLiveError: ((error: unknown) => void) | undefined;
   private readonly liveSubscriptions = new Map<
     string,
-    { count: number; releaseScheduled?: boolean; unsubscribe: () => void }
+    {
+      connections?: Set<LiveConnectionTarget>;
+      count: number;
+      releaseScheduled?: boolean;
+      unsubscribe: () => void;
+    }
   >();
   private readonly liveConnectionInvalidations = new Map<string, number>();
   private readonly stableRefs = new Map<EntityId, Map<string, ViewRef<string>>>();
@@ -2255,12 +2265,23 @@ export class FateClient<
     const selectionArgs = resolvedArgsFromPlan(plan);
     const key = this.liveConnectionSubscriptionKey(connection, plan, connectionArgs);
     const existing = this.liveSubscriptions.get(key);
+    const connections = existing?.connections ?? new Set<LiveConnectionTarget>();
+    const { direction } = getPaginationArgsInfo(connection.args);
+    const target = {
+      connection,
+      pageLimit: getConnectionPageLimit(connection.args, direction),
+      view,
+    };
+    connections.add(target);
+    const dispose = () => {
+      if (connections.delete(target)) {
+        this.releaseLiveSubscription(key);
+      }
+    };
     if (existing) {
       existing.count += 1;
       existing.releaseScheduled = false;
-      return () => {
-        this.releaseLiveSubscription(key);
-      };
+      return dispose;
     }
 
     let unsubscribe: () => void;
@@ -2281,7 +2302,28 @@ export class FateClient<
             if (this.persistenceDisposal?.signal.aborted) {
               return;
             }
-            this.applyLiveConnectionEvent(view, connection, plan, event);
+            // Page sizes share a cache entry. Compare explicit sizes since the
+            // server determines the size when no limit is provided.
+            let targets: Iterable<LiveConnectionTarget> = connections;
+            if (connections.size > 1) {
+              const widest = new Map<string, LiveConnectionTarget>();
+              for (const target of connections) {
+                const { key } = target.connection;
+                const current = widest.get(key);
+                if (
+                  !current ||
+                  (target.pageLimit !== null &&
+                    current.pageLimit !== null &&
+                    target.pageLimit > current.pageLimit)
+                ) {
+                  widest.set(key, target);
+                }
+              }
+              targets = widest.values();
+            }
+            for (const { connection, view } of targets) {
+              this.applyLiveConnectionEvent(view, connection, plan, event);
+            }
           },
         },
       );
@@ -2294,11 +2336,8 @@ export class FateClient<
       unsubscribe();
       return emptyDispose;
     }
-    this.liveSubscriptions.set(key, { count: 1, unsubscribe });
-
-    return () => {
-      this.releaseLiveSubscription(key);
-    };
+    this.liveSubscriptions.set(key, { connections, count: 1, unsubscribe });
+    return dispose;
   }
 
   private applyLiveConnectionEvent<V extends View<any, any>>(

@@ -37,7 +37,7 @@ export function useLiveListView<
     return client.subscribeLiveListView(nodeView, metadata);
   });
 
-  useEffect(() => subscribeLiveListView(), [client, metadata?.key, nodeView]);
+  useEffect(() => subscribeLiveListView(), [client, metadata?.key, metadata?.windowKey, nodeView]);
 
   return useListView(selection, resolvedConnection) as [
     ConnectionItems<ResolvedConnection<C>>,

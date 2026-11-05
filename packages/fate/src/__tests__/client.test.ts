@@ -10,6 +10,7 @@ import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
 import { arrayToConnection } from '../server/connection.ts';
 import { getListKey, List } from '../store.ts';
+import type { Transport } from '../transport.ts';
 import {
   AnyRecord,
   ConnectionMetadata,
@@ -496,6 +497,100 @@ test('passes mixed live list selections and their arguments to the transport', (
   );
   dispose();
 });
+
+test.each([false, true])(
+  'a shared mixed live subscription refreshes the widest mounted window (larger first: %s)',
+  async (largerFirst) => {
+    const FeedView = view<Post | User>()({
+      ...viewFor('Post', view<Post>()({ content: true })),
+      ...viewFor('User', view<User>()({ name: true })),
+    });
+    let head = 'old';
+    const fetchList = vi.fn<NonNullable<Transport['fetchList']>>(
+      async (_procedure, _selection, args) => {
+        const nodes = [
+          { __typename: 'Post', content: head, id: head },
+          { __typename: 'User', id: 'user', name: 'User' },
+          { __typename: 'Post', content: 'Last', id: 'last' },
+        ];
+        const first = args?.first as number;
+        return {
+          items: nodes.slice(0, first).map((node) => ({ cursor: node.id, node })),
+          pagination: { hasNext: first < nodes.length, hasPrevious: false },
+        };
+      },
+    );
+    const unsubscribe = vi.fn();
+    const subscribeConnection = vi.fn<NonNullable<Transport['subscribeConnection']>>(
+      () => unsubscribe,
+    );
+    const roots = {
+      feed: clientRoot<{ items: Array<{ node: Post | User }> }, 'FeedItem'>('FeedItem'),
+    };
+    const client = createClient<[typeof roots, Record<never, never>]>({
+      roots,
+      transport: {
+        fetchById: async () => [],
+        fetchList,
+        mixedLists: ['feed'],
+        subscribeConnection,
+      },
+      types: [
+        { type: 'Post' },
+        { type: 'User' },
+        { possibleTypes: ['Post', 'User'], type: 'FeedItem' },
+      ],
+    });
+    const request = (first: number) => ({
+      feed: { args: { first, query: 'visible' }, list: FeedView },
+    });
+    const small = await client.request(request(1));
+    const large = await client.request(request(3));
+    const subscribe = (feed: typeof small.feed) =>
+      client.subscribeLiveListView(
+        FeedView,
+        (feed as typeof feed & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+      );
+    const [first, second] = largerFirst ? [large, small] : [small, large];
+    const disposeFirst = subscribe(first.feed);
+    const disposeSecond = subscribe(second.feed);
+    const disposeLarge = largerFirst ? disposeFirst : disposeSecond;
+    const ids = (size: number) => client.getRequestResult(request(size)).feed.map(({ id }) => id);
+    try {
+      expect(subscribeConnection).toHaveBeenCalledTimes(1);
+      expect(ids(1)).toEqual(['old']);
+      expect(ids(3)).toEqual(['old', 'user', 'last']);
+      const handlers = subscribeConnection.mock.calls[0]![5];
+      fetchList.mockClear();
+
+      head = 'new';
+      handlers.onEvent({ type: 'invalidate' });
+      await vi.waitFor(() => expect(ids(1)).toEqual(['new']));
+      expect(ids(3)).toEqual(['new', 'user', 'last']);
+      expect(fetchList).toHaveBeenCalledExactlyOnceWith('feed', expect.any(Set), {
+        first: 3,
+        query: 'visible',
+      });
+
+      disposeLarge();
+      await Promise.resolve();
+      expect(unsubscribe).not.toHaveBeenCalled();
+      fetchList.mockClear();
+      head = 'latest';
+      handlers.onEvent({ type: 'invalidate' });
+      await vi.waitFor(() => expect(ids(1)).toEqual(['latest']));
+      expect(fetchList).toHaveBeenCalledExactlyOnceWith('feed', expect.any(Set), {
+        first: 1,
+        query: 'visible',
+      });
+    } finally {
+      disposeFirst();
+      disposeSecond();
+    }
+    await Promise.resolve();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  },
+);
 
 test('live list subscriptions connection events', () => {
   let handlers: any;

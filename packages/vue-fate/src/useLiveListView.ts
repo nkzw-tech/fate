@@ -27,6 +27,7 @@ export function useLiveListView<
     [
       clientSource,
       () => metadata.value?.key,
+      () => metadata.value?.windowKey,
       () => metadata.value?.live?.append,
       () => metadata.value?.live?.prepend,
     ],
