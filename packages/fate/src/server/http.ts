@@ -14,11 +14,18 @@ import { FateRequestError, toProtocolError } from '../protocol.ts';
 import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
 import { resolveConnection, type ConnectionResult } from './connection.ts';
-import { isDataView, type DataView, type DataViewResult } from './dataView.ts';
+import {
+  isDataView,
+  type DataView,
+  type DataViewResult,
+  type ListViews,
+  type PolymorphicList,
+} from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import type { MutationIdempotency } from './idempotency-types.ts';
 import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
+import { resolvePolymorphicList, type PolymorphicListResult } from './polymorphicList.ts';
 import { getDataViewSourceConfig, type SourceDefinition, type SourceOrder } from './source.ts';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -30,12 +37,8 @@ type SourceResolver<Context> = {
   registry: SourceRegistry<Context>;
 };
 
-type RootConfig =
-  | DataView<AnyRecord>
-  | {
-      procedure?: string;
-      view: DataView<AnyRecord>;
-    };
+type ServerRootView = DataView<AnyRecord> | PolymorphicList<any>;
+type RootConfig = ServerRootView | { procedure?: string; view: ServerRootView };
 
 type RootMap = Record<string, RootConfig>;
 
@@ -156,20 +159,23 @@ type FateServerOptions<
   sources: SourceResolver<Context>;
 };
 
-type RootView<Root> =
-  Root extends DataView<AnyRecord>
-    ? Root
-    : Root extends { view: infer View extends DataView<AnyRecord> }
-      ? View
-      : never;
+type RootView<Root> = Root extends ServerRootView
+  ? Root
+  : Root extends { view: infer View extends ServerRootView }
+    ? View
+    : never;
 
 type RootProcedure<_Root, Name extends string> = Name;
 
 type RootOutput<Root> =
-  RootView<Root> extends infer View extends DataView<AnyRecord>
-    ? View['kind'] extends 'list'
-      ? ConnectionResult<DataViewResult<View>>
-      : DataViewResult<View> | null
+  RootView<Root> extends infer View
+    ? View extends { views: infer Views extends ListViews }
+      ? PolymorphicListResult<Views>
+      : View extends DataView<AnyRecord>
+        ? View['kind'] extends 'list'
+          ? ConnectionResult<DataViewResult<View>>
+          : DataViewResult<View> | null
+        : never
     : never;
 
 type RootLists<Roots extends RootMap> = {
@@ -257,8 +263,8 @@ const sseHeaders = {
   'content-type': 'text/event-stream; charset=utf-8',
 } as const;
 
-const normalizeRootConfig = (root: RootConfig): { procedure?: string; view: DataView<AnyRecord> } =>
-  isDataView(root) ? { view: root } : root;
+const normalizeRootConfig = (root: RootConfig): { procedure?: string; view: ServerRootView } =>
+  'view' in root ? root : { view: root };
 
 const rootProcedureName = (name: string, _root: RootConfig): string => {
   return name;
@@ -650,7 +656,8 @@ export function createFateServer<
 > {
   const rootLists = new Map<
     string,
-    { orderBy?: SourceOrder; source: SourceDefinition<AnyRecord>; view: DataView<AnyRecord> }
+    | { orderBy?: SourceOrder; source: SourceDefinition<AnyRecord>; typeName: string }
+    | PolymorphicList
   >();
   const rootQueries = new Map<
     string,
@@ -683,6 +690,13 @@ export function createFateServer<
   for (const [name, root] of Object.entries(roots)) {
     const config = normalizeRootConfig(root);
     const procedure = rootProcedureName(name, root);
+    if ('views' in config.view) {
+      rootLists.set(procedure, config.view);
+      for (const member of Object.values<DataView<AnyRecord>>(config.view.views)) {
+        visit(member);
+      }
+      continue;
+    }
     const source = sources.getSource(config.view);
     visit(config.view);
 
@@ -690,7 +704,7 @@ export function createFateServer<
       rootLists.set(procedure, {
         orderBy: getDataViewSourceConfig(config.view).orderBy,
         source,
-        view: config.view,
+        typeName: config.view.typeName,
       });
     } else {
       rootQueries.set(procedure, { source, view: config.view });
@@ -764,6 +778,13 @@ export function createFateServer<
         const root = rootLists.get(operation.name);
         if (!root) {
           throw new FateRequestError('NOT_FOUND', `No list registered for '${operation.name}'.`);
+        }
+        if ('views' in root) {
+          return {
+            data: await resolvePolymorphicList({ ctx, input, list: root, sources }),
+            id: operation.id,
+            ok: true,
+          };
         }
 
         return {
@@ -849,11 +870,16 @@ export function createFateServer<
     lists: Object.fromEntries(
       [
         ...[...rootLists.entries()].map(
-          ([name, entry]) => [name, { type: entry.view.typeName }] as const,
+          ([name, entry]) => [name, { type: entry.typeName }] as const,
         ),
         ...Object.entries(lists ?? {}).map(
           ([name, list]) =>
-            [name, { type: list.type ?? rootLists.get(name)?.view.typeName ?? 'Unknown' }] as const,
+            [
+              name,
+              {
+                type: list.type ?? rootLists.get(name)?.typeName ?? 'Unknown',
+              },
+            ] as const,
         ),
       ].sort(([a], [b]) => a.localeCompare(b)),
     ),

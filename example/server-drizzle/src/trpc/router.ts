@@ -1,16 +1,18 @@
-import { router } from './init.ts';
+import { fate, router } from './init.ts';
 import { categoryRouter } from './routers/category.ts';
 import { commentRouter } from './routers/comment.ts';
 import { eventRouter } from './routers/event.ts';
 import { postRouter } from './routers/post.ts';
 import { tagRouter } from './routers/tag.ts';
 import { userRouter } from './routers/user.ts';
+import { Root } from './views.ts';
 
 export const appRouter = router({
   category: categoryRouter,
   comment: commentRouter,
   event: eventRouter,
   post: postRouter,
+  search: router(fate.procedures({ view: Root.search.view })),
   tags: tagRouter,
   user: userRouter,
 });

@@ -1,4 +1,5 @@
 import { computed, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
+import getMixedSearchPage from '../../../mixedSearch.ts';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,
@@ -8,7 +9,7 @@ import type {
   Tag as PrismaTag,
   User as PrismaUser,
 } from '../prisma/prisma-client/client.ts';
-import { AppContext } from './context.ts';
+import type { AppContext } from './context.ts';
 
 export type CommentItem = PrismaComment & {
   author?: PrismaUser | null;
@@ -181,6 +182,34 @@ export type Event = Entity<
   }
 >;
 
+const searchMembers = { Post: postDataView, User: userDataView };
+const search = list<typeof searchMembers, AppContext>(searchMembers, {
+  async query({ args, ctx, cursor, direction, take }) {
+    const query = typeof args?.query === 'string' ? args.query.trim() : '';
+    if (!query) {
+      return [];
+    }
+
+    const contains = { contains: query, mode: 'insensitive' } as const;
+    const [posts, users] = await Promise.all([
+      ctx.prisma.post.findMany({
+        orderBy: { id: 'asc' },
+        select: { id: true },
+        take: 20,
+        where: { OR: [{ title: contains }, { content: contains }] },
+      }),
+      ctx.prisma.user.findMany({
+        orderBy: { id: 'asc' },
+        select: { id: true },
+        take: 20,
+        where: { name: contains },
+      }),
+    ]);
+    return getMixedSearchPage(posts, users, cursor, direction, take);
+  },
+  typeName: 'SearchResult',
+});
+
 export const Root = {
   categories: list(categoryDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   commentSearch: {
@@ -189,5 +218,6 @@ export const Root = {
   },
   events: list(eventDataView, { orderBy: [{ startAt: 'asc' }, { id: 'asc' }] }),
   posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  search: { router: 'search', view: search },
   viewer: userDataView,
 };

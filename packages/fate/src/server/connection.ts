@@ -4,7 +4,7 @@ import { isRecord } from '../record.ts';
 import type { DataView } from './dataView.ts';
 import { getScopedArgs } from './queryArgs.ts';
 
-type ConnectionInput = z.infer<typeof connectionInput>;
+export type ConnectionInput = z.infer<typeof connectionInput>;
 
 type AdditionalInputSchema = z.ZodObject<Record<string, z.ZodTypeAny>>;
 
@@ -68,7 +68,7 @@ type ProcedureContext<TProcedure> = TProcedure extends {
   ? TContext
   : unknown;
 
-type ConnectionProcedure<TInput, TOutput> = TRPCQueryProcedure<{
+export type ConnectionProcedure<TInput, TOutput> = TRPCQueryProcedure<{
   input: TInput;
   meta: unknown;
   output: TOutput;
@@ -105,7 +105,7 @@ const args: z.ZodType<Record<string, unknown>> = z
  */
 export const connectionArgs = args.optional();
 
-const connectionInput = z.strictObject({
+export const connectionInput = z.strictObject({
   args: connectionArgs,
   select: z.array(z.string()),
 });

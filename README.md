@@ -2687,7 +2687,7 @@ export const Root = {
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. If you omit `list(...)`, fate treats the entry as a standard query.
+Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. fate treats a plain data view as a standard query.
 
 Each `list(...)` can have its own ordering. For example, the feed can show newest posts first while comments use oldest first. Without `orderBy`, fate sorts by `id asc`. It also adds `id asc` as a tie-breaker when your ordering doesn't include `id`. Use an array when ordering by several fields.
 
@@ -2709,6 +2709,34 @@ const { posts, categories, viewer } = useRequest({
   comment: { ids: ['6', '7'], view: commentView },
 });
 ```
+
+#### Lists with Several Types
+
+A root list can contain several entity types, such as an activity feed with posts and users. Pass the data views to `list` along with a query that returns the page's identities in display order.
+
+```tsx
+import { list } from '@nkzw/fate/server';
+
+export const Root = {
+  activity: list(
+    { Post: postDataView, User: userDataView },
+    {
+      query: queryActivity,
+      typeName: 'ActivityItem',
+    },
+  ),
+};
+```
+
+The query receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries after or before the cursor in display order. Each entry has a `__typename`, an `id`, and a unique `cursor`. fate uses the extra entry to tell whether another page is available. It loads the selected fields in batches by type and applies the permissions defined on each data view.
+
+Pass `Root` to `createFateServer` for native HTTP. With tRPC, register the list using the adapter's `procedures` helper:
+
+```tsx
+const activityItemRouter = router(fate.procedures({ view: Root.activity }));
+```
+
+Register this router as `activityItem` in `appRouter`, or set a different `router` name in `Root`. On the client, compose the views for each type with `forType` and render them by checking `__typename`. [See an example of the client selection](/docs/integrations/graphql.md#views-on-unions-and-interfaces).
 
 ### Native fate protocol
 

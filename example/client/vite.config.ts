@@ -32,6 +32,7 @@ export default defineConfig({
     ...(lazyPlugins(lazyClientPlugins) ?? []),
     fate({
       module: '@nkzw/fate-server/src/trpc/router.ts',
+      transport: process.env.VITE_FATE_TRANSPORT === 'native' ? 'native' : 'trpc',
     }),
   ],
   resolve: { conditions: ['@nkzw/source'] },

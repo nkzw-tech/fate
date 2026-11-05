@@ -1,4 +1,6 @@
 import { computed, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
+import { ilike, or } from 'drizzle-orm';
+import getMixedSearchPage from '../../../mixedSearch.ts';
 import type {
   CategoryItem,
   CommentItem,
@@ -6,7 +8,7 @@ import type {
   EventItem,
   PostItem,
 } from '../drizzle/queries.ts';
-import type { CategoryRow, TagRow, UserRow } from '../drizzle/schema.ts';
+import { post, user, type CategoryRow, type TagRow, type UserRow } from '../drizzle/schema.ts';
 import type { AppContext } from './context.ts';
 
 export const userDataView = dataView<UserRow>('User')({
@@ -152,6 +154,34 @@ export type Event = Entity<
   }
 >;
 
+const searchMembers = { Post: postDataView, User: userDataView };
+const search = list<typeof searchMembers, AppContext>(searchMembers, {
+  async query({ args, ctx, cursor, direction, take }) {
+    const query = typeof args?.query === 'string' ? args.query.trim() : '';
+    if (!query) {
+      return [];
+    }
+
+    const contains = `%${query}%`;
+    const [posts, users] = await Promise.all([
+      ctx.db
+        .select({ id: post.id })
+        .from(post)
+        .where(or(ilike(post.title, contains), ilike(post.content, contains)))
+        .orderBy(post.id)
+        .limit(20),
+      ctx.db
+        .select({ id: user.id })
+        .from(user)
+        .where(ilike(user.name, contains))
+        .orderBy(user.id)
+        .limit(20),
+    ]);
+    return getMixedSearchPage(posts, users, cursor, direction, take);
+  },
+  typeName: 'SearchResult',
+});
+
 export const Root = {
   categories: list(categoryDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
   commentSearch: {
@@ -160,5 +190,6 @@ export const Root = {
   },
   events: list(eventDataView, { orderBy: [{ startAt: 'asc' }, { id: 'asc' }] }),
   posts: list(postDataView, { orderBy: { createdAt: 'desc', id: 'desc' } }),
+  search: { router: 'search', view: search },
   viewer: userDataView,
 };

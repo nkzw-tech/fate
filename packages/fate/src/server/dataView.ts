@@ -173,21 +173,78 @@ export function dataView<Item extends AnyRecord>(typeName: string) {
   };
 }
 
-/**
- * Marks a data view as a list resolver so the server can respond with
- * connection information.
- */
-export const list = <Item extends AnyRecord>(
+export type ListViews = Record<string, DataView<AnyRecord>>;
+
+export type ListEntry<Name extends string> = {
+  __typename: Name;
+  cursor: string;
+  id: string;
+};
+
+type ListQueryOptions<Context> = {
+  args?: AnyRecord;
+  ctx: Context;
+  cursor?: string;
+  direction: 'backward' | 'forward';
+  take: number;
+};
+
+type PolymorphicListOptions<Views extends ListViews, Context> = {
+  query: (
+    options: ListQueryOptions<Context>,
+  ) => Promise<Array<ListEntry<Extract<keyof Views, string>>>>;
+  typeName: string;
+};
+
+export type PolymorphicList<
+  Views extends ListViews = ListViews,
+  Context = any,
+> = PolymorphicListOptions<Views, Context> & { kind: 'list'; views: Views };
+
+/** Marks a data view as a list so the server can respond with connection information. */
+export function list<Item extends AnyRecord>(
   view: DataView<Item>,
   options?: DataViewListOptions,
-) => {
-  return {
-    ...view,
-    [dataViewBaseKey]: getBaseDataView(view),
-    ...(options ? { [dataViewListOptionsKey]: options } : null),
-    kind: 'list' as const,
-  } as DataView<Item> & DataViewInternals<Item> & { kind: 'list' };
-};
+): DataView<Item> & DataViewInternals<Item> & { kind: 'list' };
+/** Declares a root list whose page query can return entries from several data views. */
+export function list<const Views extends ListViews, Context>(
+  views: Views,
+  options: PolymorphicListOptions<Views, Context>,
+): PolymorphicList<Views, Context>;
+export function list(
+  view: DataView<any> | ListViews,
+  options?: DataViewListOptions | PolymorphicListOptions<any, any>,
+): (DataView<any> & DataViewInternals<any> & { kind: 'list' }) | PolymorphicList<any> {
+  if (isDataView(view)) {
+    return {
+      ...view,
+      [dataViewBaseKey]: getBaseDataView(view),
+      ...(options && !('query' in options) ? { [dataViewListOptionsKey]: options } : null),
+      kind: 'list' as const,
+    };
+  }
+
+  const entries = Object.entries(view);
+  if (
+    !options ||
+    !('query' in options) ||
+    typeof options.query !== 'function' ||
+    !options.typeName ||
+    !entries.length ||
+    Object.hasOwn(view, options.typeName)
+  ) {
+    throw new Error(
+      'fate: A list of multiple types needs a type name, a page query, and data views.',
+    );
+  }
+  for (const [type, member] of entries) {
+    if (member.typeName !== type || member.fields.id !== true) {
+      throw new Error(`fate: List type '${type}' needs a matching data view with id selected.`);
+    }
+  }
+
+  return { kind: 'list' as const, query: options.query, typeName: options.typeName, views: view };
+}
 
 /**
  * Declares a resolver field inside a data view, optionally providing a

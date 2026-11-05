@@ -7,12 +7,12 @@ import type { AnyRecord, MutationShape } from './types.ts';
 type Tree = Map<string, Tree>;
 type Group = { paths: Set<string>; sources: Map<string, string>; tree: Tree };
 
-const groupsFor = (select: Iterable<string>): Array<Group> => {
+const groupsFor = (select: Iterable<string>, allowTypeConditions = false): Array<Group> => {
   const groups: Array<Group> = [];
   for (const path of select) {
     const parts = path.split('.');
-    if (parts.some(typeCondition)) {
-      throw new Error('fate: forType requires a GraphQL query or mutation selection.');
+    if (!allowTypeConditions && parts.some(typeCondition)) {
+      throw new Error('fate: forType requires a GraphQL selection or a list with multiple types.');
     }
     const sources = parts.map(
       (_, index) =>
@@ -123,16 +123,17 @@ const merge = (left: unknown, right: unknown): unknown => {
   return right;
 };
 
-const readAliases = (
+export const readAliases = (
   select: Iterable<string>,
   args: AnyRecord | undefined,
   fetch: (select: Set<string>, args?: AnyRecord) => Promise<unknown>,
+  allowTypeConditions = false,
 ) => {
   const paths = new Set(select);
   if (![...paths].some((path) => path.includes(':'))) {
     return fetch(paths, args);
   }
-  const groups = groupsFor(paths);
+  const groups = groupsFor(paths, allowTypeConditions);
   return Promise.all(
     groups.map(async (group) =>
       project(await fetch(group.paths, scopedArgs(args, group)), group.tree),
@@ -143,6 +144,7 @@ const readAliases = (
 /** Lower read aliases for existing native/custom transports without changing their protocol. */
 export const withAliasSupport = <M extends Record<string, MutationShape>>(
   transport: Transport<M>,
+  acceptsListTypeConditions?: (name: string) => boolean,
 ): Transport<M> => {
   if (transport.supportsAliases) {
     return transport;
@@ -182,12 +184,18 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
           : transport.fetchById(type, ids, fields, scoped),
       ) as ReturnType<Transport<M>['fetchById']>,
     fetchList: transport.fetchList
-      ? (name, select, args, context) =>
-          readAliases(select, args, (fields, scoped) =>
+      ? (name, select, args, context) => {
+          if (acceptsListTypeConditions?.(name)) {
+            return context
+              ? transport.fetchList!(name, select, args, context)
+              : transport.fetchList!(name, select, args);
+          }
+          return readAliases(select, args, (fields, scoped) =>
             context
               ? transport.fetchList!(name, fields, scoped, context)
               : transport.fetchList!(name, fields, scoped),
-          ) as ReturnType<NonNullable<Transport<M>['fetchList']>>
+          ) as ReturnType<NonNullable<Transport<M>['fetchList']>>;
+        }
       : undefined,
     fetchQuery: transport.fetchQuery
       ? (name, select, args, context) =>

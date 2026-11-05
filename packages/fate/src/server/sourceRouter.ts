@@ -1,8 +1,11 @@
 import type { AnyTRPCProcedure } from '@trpc/server';
 import type { AnyRecord } from '../types.ts';
+import { connectionInput, type ConnectionInput, type ConnectionProcedure } from './connection.ts';
+import type { DataView, ListViews, PolymorphicList } from './dataView.ts';
 import type { SourceRegistry } from './executor.ts';
 import { resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import { byIdInput } from './input.ts';
+import { resolvePolymorphicList, type PolymorphicListResult } from './polymorphicList.ts';
 import type { SourceDefinition } from './source.ts';
 
 type ProcedureLike = {
@@ -198,4 +201,54 @@ export function bindSourceProcedures<
       ...defaults,
       ...normalizeSourceOptions(input),
     });
+}
+
+type ViewProcedureInput<
+  Item extends AnyRecord,
+  ById extends boolean | undefined,
+  List extends boolean | ListConfig | undefined,
+> = DataView<Item> | { byId?: ById; list?: List; view: DataView<Item> };
+
+export function bindViewProcedures<
+  Context,
+  Procedure extends ProcedureLike,
+  Connection extends ConnectionProcedureLike,
+>(
+  defaults: SourceProcedureFactoryDefaults<Context, Procedure, Connection> & {
+    getSource: <Item extends AnyRecord>(view: DataView<Item>) => SourceDefinition<Item>;
+  },
+) {
+  const procedures = bindSourceProcedures(defaults);
+
+  function create<Views extends ListViews>(
+    input: PolymorphicList<Views, Context> | { view: PolymorphicList<Views, Context> },
+  ): { list: ConnectionProcedure<ConnectionInput, PolymorphicListResult<Views>> };
+  function create<
+    Item extends AnyRecord,
+    ById extends boolean | undefined = undefined,
+    List extends boolean | ListConfig | undefined = undefined,
+  >(
+    input: ViewProcedureInput<Item, ById, List>,
+  ): SourceProcedureResult<ById, List, Procedure, Connection>;
+  function create(
+    input:
+      | ViewProcedureInput<AnyRecord, boolean | undefined, boolean | ListConfig | undefined>
+      | PolymorphicList<any, Context>
+      | { view: PolymorphicList<any, Context> },
+  ) {
+    const { view, ...options } = 'view' in input ? input : { view: input };
+    if ('views' in view) {
+      return {
+        list: defaults.procedure
+          .input(connectionInput)
+          .query(({ ctx, input }: { ctx: Context; input: ConnectionInput }) =>
+            resolvePolymorphicList({ ctx, input, list: view, sources: defaults }),
+          ),
+      };
+    }
+
+    return procedures({ ...options, source: defaults.getSource(view) });
+  }
+
+  return create;
 }

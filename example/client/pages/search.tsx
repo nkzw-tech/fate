@@ -2,8 +2,10 @@ import type { Comment, Post, User } from '@nkzw/fate-server/src/trpc/views.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { Suspense, useDeferredValue, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { clientRoot, forType, useRequest, useView, view, ViewRef } from 'react-fate';
+import { forType, useRequest, useView, view, ViewRef } from 'react-fate';
+import type { GeneratedClientRoots } from '../.fate/client.generated.ts';
 import cx from '../src/lib/cx.tsx';
+import { Button } from '../src/ui/Button.tsx';
 import Card from '../src/ui/Card.tsx';
 import CommentCard, { CommentView } from '../src/ui/CommentCard.tsx';
 import Error from '../src/ui/Error.tsx';
@@ -23,7 +25,8 @@ const CommentSearchView = view<Comment>()({
 });
 
 const isDevelopment = import.meta.env.DEV;
-const isGraphQL = import.meta.env.VITE_FATE_TRANSPORT === 'graphql';
+const transport = import.meta.env.VITE_FATE_TRANSPORT;
+const supportsCommentSearch = !transport || transport === 'trpc';
 
 const PostResultView = view<Post>()({ content: true, title: true });
 const UserResultView = view<User>()({ name: true });
@@ -31,13 +34,6 @@ const MixedResultView = view<Post | User>()({
   ...forType('Post', PostResultView),
   ...forType('User', UserResultView),
 });
-
-// The example client is generated from either the tRPC or GraphQL server.
-type GraphQLSearchRoots = {
-  search: ReturnType<
-    typeof clientRoot<{ items: Array<{ node: Post | User }> }, 'SearchResult', { query: string }>
-  >;
-};
 
 const PostResult = ({ result }: { result: ViewRef<'Post'> }) => {
   const post = useView(PostResultView, result);
@@ -56,7 +52,7 @@ const UserResult = ({ result }: { result: ViewRef<'User'> }) => {
 
 const MixedSearchResults = ({ isStale, query }: { isStale: boolean; query: string }) => {
   const request = { search: { args: { query }, list: MixedResultView } };
-  const { search } = useRequest<typeof request, GraphQLSearchRoots>(request);
+  const { search } = useRequest<typeof request, GeneratedClientRoots>(request);
 
   return (
     <VStack className={cx(isStale && 'opacity-50')} gap={12}>
@@ -110,9 +106,10 @@ const SearchResults = ({ isStale, query }: { isStale: boolean; query: string }) 
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
+  const [comments, setComments] = useState(false);
   const deferredQuery = useDeferredValue(query);
   const isStale = query !== deferredQuery;
-  const Results = isGraphQL ? MixedSearchResults : SearchResults;
+  const Results = comments ? SearchResults : MixedSearchResults;
 
   return (
     <Section>
@@ -121,11 +118,16 @@ export default function SearchPage() {
           <Input
             className="w-64"
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={isGraphQL ? 'Search posts and users...' : 'Search comments...'}
+            placeholder={comments ? 'Search comments...' : 'Search posts and users...'}
             ref={(ref) => ref?.focus()}
             value={query}
           />
-          {isDevelopment && !isGraphQL ? (
+          {supportsCommentSearch ? (
+            <Button onClick={() => setComments(!comments)} size="sm" variant="secondary">
+              {comments ? 'Search posts and users' : 'Search comments'}
+            </Button>
+          ) : null}
+          {isDevelopment && comments ? (
             <div className="text-xs text-muted-foreground">500ms artificial slowdown</div>
           ) : null}
         </Stack>

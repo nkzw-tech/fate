@@ -58,7 +58,7 @@ import {
   type SourceDefinition,
   type SourceRelation,
 } from './source.ts';
-import { bindSourceProcedures } from './sourceRouter.ts';
+import { bindViewProcedures } from './sourceRouter.ts';
 
 type Source = SourceDefinition<AnyRecord, unknown>;
 type Relation = SourceRelation<AnyRecord, unknown>;
@@ -66,20 +66,6 @@ type SourceTarget<Item extends AnyRecord = AnyRecord> =
   | DataView<Item>
   | SourceDefinition<Item, unknown>;
 type ViewTarget<Item extends AnyRecord = AnyRecord> = DataView<Item>;
-type ListConfig = {
-  defaultSize?: number;
-};
-type ViewProcedureInput<
-  Item extends AnyRecord,
-  ById extends boolean | undefined,
-  List extends boolean | ListConfig | undefined,
-> =
-  | ViewTarget<Item>
-  | {
-      byId?: ById;
-      list?: List;
-      view: ViewTarget<Item>;
-    };
 type ColumnMap = Record<string, AnyColumn>;
 type DrizzleTable = Table;
 
@@ -1722,8 +1708,9 @@ export function createDrizzleFate<Context, Procedure extends ProcedureLike>({
 }) {
   const adapter = createDrizzleSourceAdapter<Context>(options);
   const connection = withConnection(procedure);
-  const procedures = bindSourceProcedures<Context, Procedure, typeof connection>({
+  const procedures = bindViewProcedures<Context, Procedure, typeof connection>({
     createConnectionProcedure: connection,
+    getSource: adapter.getSource,
     procedure,
     registry: adapter.registry,
   });
@@ -1746,20 +1733,7 @@ export function createDrizzleFate<Context, Procedure extends ProcedureLike>({
         select,
         source: adapter.getSource(view),
       }),
-    procedures: <
-      Item extends AnyRecord,
-      ById extends boolean | undefined = undefined,
-      List extends boolean | ListConfig | undefined = undefined,
-    >(
-      input: ViewProcedureInput<Item, ById, List>,
-    ) => {
-      const procedureInput = input as any;
-      const options =
-        procedureInput && typeof procedureInput === 'object' && 'view' in procedureInput
-          ? { ...procedureInput, source: adapter.getSource(procedureInput.view) }
-          : adapter.getSource(input as ViewTarget<Item>);
-      return procedures<Item, ById, List>(options);
-    },
+    procedures,
     resolveById: <Item extends AnyRecord = AnyRecord>({
       ctx,
       extra,

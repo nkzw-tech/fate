@@ -12,7 +12,7 @@ import Header from '../src/ui/Header.tsx';
 import Section from '../src/ui/Section.tsx';
 import AuthClient from '../src/user/AuthClient.tsx';
 
-const isGraphQLTransport = import.meta.env.VITE_FATE_TRANSPORT === 'graphql';
+const transport = import.meta.env.VITE_FATE_TRANSPORT;
 
 const Thinking = () => (
   <Section>
@@ -35,27 +35,34 @@ export default function Layout({ children }: { children: ReactNode }) {
           })
       : undefined;
 
+    const serverUrl = env('SERVER_URL');
     return createFateClient(
-      (isGraphQLTransport
+      (transport === 'graphql'
         ? {
             fetch: credentialFetch,
             streaming: true,
-            url: `${env('SERVER_URL')}/graphql`,
+            url: `${serverUrl}/graphql`,
           }
-        : {
-            ...(credentialFetch ? { fetch: credentialFetch } : null),
-            links: [
-              httpBatchLink({
-                fetch: (input, init) =>
-                  fetch(input, {
-                    ...init,
-                    credentials: userId ? 'include' : undefined,
-                  }),
-                url: `${env('SERVER_URL')}/trpc`,
-              }),
-            ],
-            liveUrl: `${env('SERVER_URL')}/fate`,
-          }) as never,
+        : transport === 'native'
+          ? {
+              fetch: credentialFetch,
+              liveUrl: `${serverUrl}/fate/live`,
+              url: `${serverUrl}/fate/rpc`,
+            }
+          : {
+              ...(credentialFetch ? { fetch: credentialFetch } : null),
+              links: [
+                httpBatchLink({
+                  fetch: (input, init) =>
+                    fetch(input, {
+                      ...init,
+                      credentials: userId ? 'include' : undefined,
+                    }),
+                  url: `${serverUrl}/trpc`,
+                }),
+              ],
+              liveUrl: `${serverUrl}/fate`,
+            }) as never,
     );
   }, [userId]);
 

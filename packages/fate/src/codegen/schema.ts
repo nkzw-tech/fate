@@ -1,4 +1,4 @@
-import type { DataView } from '../server/dataView.ts';
+import type { DataView, PolymorphicList } from '../server/dataView.ts';
 
 type AnyRecord = Record<string, unknown>;
 type AnyDataView = DataView<any>;
@@ -7,6 +7,7 @@ type RelationDescriptor = { listOf: string } | { type: string };
 
 type FateTypeConfig = {
   fields?: Record<string, RelationDescriptor>;
+  possibleTypes?: ReadonlyArray<string>;
   type: string;
 };
 
@@ -19,10 +20,11 @@ export const isDataView = (value: unknown): value is AnyDataView =>
 
 type RootConfig =
   | DataView<AnyRecord>
+  | PolymorphicList
   | {
       procedure?: string;
       router?: string;
-      view: DataView<AnyRecord>;
+      view: DataView<AnyRecord> | PolymorphicList;
     };
 
 /**
@@ -90,14 +92,19 @@ export const createSchema = (
   }
 
   for (const [name, root] of Object.entries(roots)) {
-    const config = 'fields' in root ? { view: root } : root;
+    const config = 'view' in root ? root : { view: root };
     const view = config.view;
 
     if (!view.typeName) {
       throw new Error(`Root "${name}" is missing a data view.`);
     }
 
-    const type = ensureType(view);
+    const type = 'views' in view ? view.typeName : ensureType(view);
+    if ('views' in view) {
+      const possibleTypes = Object.values(view.views).map(ensureType);
+      fateTypes.set(type, { possibleTypes, type });
+    }
+    const isList = view.kind === 'list';
 
     const router = config.router ?? view.typeName[0]?.toLowerCase() + view.typeName.slice(1);
 
@@ -106,8 +113,8 @@ export const createSchema = (
     }
 
     rootSchema[name] = {
-      kind: view.kind === 'list' ? 'list' : 'query',
-      procedure: config.procedure ?? (view.kind === 'list' ? 'list' : name),
+      kind: isList ? 'list' : 'query',
+      procedure: config.procedure ?? (isList ? 'list' : name),
       router,
       type,
     };
