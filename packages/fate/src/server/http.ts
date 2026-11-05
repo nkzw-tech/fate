@@ -693,7 +693,7 @@ export function createFateServer<
     if ('views' in config.view) {
       rootLists.set(procedure, config.view);
       for (const member of Object.values<DataView<AnyRecord>>(config.view.views)) {
-        visit(member);
+        sources.getSource(member);
       }
       continue;
     }

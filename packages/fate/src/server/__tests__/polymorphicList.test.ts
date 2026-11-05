@@ -189,3 +189,56 @@ test.each(['native', 'trpc'] as const)(
     ]);
   },
 );
+
+test('keeps mixed-list-only sources out of native by-ID reads', async () => {
+  const document = dataView<{ body: string; id: string }>('Document')({ body: true, id: true });
+  const publicPost = dataView<{ id: string }>('Post')({ id: true });
+  const documentSource = { id: 'id', view: document };
+  const postSource = { id: 'id', view: publicPost };
+  const documents = vi.fn(async () => [{ body: 'Private document', id: 'secret' }]);
+  const server = createFateServer({
+    roots: {
+      feed: list(
+        { Document: document, Post: publicPost },
+        { query: async () => [], typeName: 'FeedItem' },
+      ),
+      posts: list(publicPost),
+    },
+    sources: {
+      getSource: <Item extends AnyRecord>(target: DataView<Item> | SourceDefinition<Item>) =>
+        ('view' in target
+          ? target
+          : target.typeName === 'Document'
+            ? documentSource
+            : postSource) as SourceDefinition<Item>,
+      registry: createSourceRegistry([
+        [documentSource, { byIds: documents }],
+        [postSource, { byIds: async () => [{ id: 'public' }] }],
+      ]),
+    },
+  });
+  const response = await server.handleRequest(
+    new Request('http://test.local/fate', {
+      body: JSON.stringify({
+        operations: [
+          { id: '1', kind: 'list', name: 'feed', select: ['body'] },
+          { id: '2', ids: ['secret'], kind: 'byId', select: ['body'], type: 'Document' },
+          { id: '3', ids: ['public'], kind: 'byId', select: ['id'], type: 'Post' },
+        ],
+        version: 1,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    }),
+  );
+
+  expect(await response.json()).toMatchObject({
+    results: [
+      { data: { items: [] }, ok: true },
+      { error: { code: 'NOT_FOUND' }, ok: false },
+      { data: [{ id: 'public' }], ok: true },
+    ],
+  });
+  expect(documents).not.toHaveBeenCalled();
+  expect(server.manifest.types).toEqual({ Post: true });
+});

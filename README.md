@@ -2718,6 +2718,8 @@ const { posts, categories, viewer } = useRequest({
 
 Let's add a `search` list that returns both posts and users. Pass a data view for each type to `list`, along with a query that finds the results for each page. The data view keys match the type names, and each view selects `id`. The `typeName` gives the combined type its own name in the generated client.
 
+Mixed-list membership grants access through the list query. Register an authorized standalone read for members that need direct by-ID lookups, including deferred reads.
+
 ```tsx
 import { list } from '@nkzw/fate/server';
 
