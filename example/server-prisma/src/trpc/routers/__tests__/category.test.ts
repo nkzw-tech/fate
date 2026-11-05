@@ -3,9 +3,10 @@ import { router } from '../../init.ts';
 import { categoryRouter } from '../category.ts';
 
 test('returns backward Prisma pages in canonical connection order', async () => {
+  // Prisma returns negative-take results in the requested order.
   const findMany = vi
     .fn()
-    .mockResolvedValue([{ id: 'category-3' }, { id: 'category-2' }, { id: 'category-1' }]);
+    .mockResolvedValue([{ id: 'category-1' }, { id: 'category-2' }, { id: 'category-3' }]);
 
   const appRouter = router({ category: categoryRouter });
   const caller = appRouter.createCaller({

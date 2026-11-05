@@ -612,7 +612,7 @@ export function createPrismaSourceAdapter<Context>({
       throw new Error(`Source ${plan.source.view.typeName} does not support connection execution.`);
     }
 
-    const hydrated = await hydrateComputedCounts({
+    return hydrateComputedCounts({
       ctx,
       items: await delegate.findMany({
         ...extra,
@@ -620,9 +620,7 @@ export function createPrismaSourceAdapter<Context>({
         select: toPrismaSelect(plan),
       }),
       plan,
-    });
-
-    return (direction === 'backward' ? [...hydrated].reverse() : hydrated) as Array<Item>;
+    }) as Promise<Array<Item>>;
   };
 
   const registry = createSourceRegistry<Context>(
