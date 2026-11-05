@@ -1805,9 +1805,10 @@ export class FateClient<
     view: View<T, S>,
     ref: ViewRef<T['__typename']>,
     work: () => Promise<unknown>,
-    resolve: () => ViewSnapshot<T, S> | PromiseLike<ViewSnapshot<T, S>>,
+    resolve: (joined: boolean) => ViewSnapshot<T, S> | PromiseLike<ViewSnapshot<T, S>>,
   ): FateThenable<ViewSnapshot<T, S>> {
     let pending = this.pendingViews.get(key);
+    const joined = pending !== undefined;
     if (!pending) {
       pending = {
         snapshots: new WeakMap(),
@@ -1822,7 +1823,7 @@ export class FateClient<
     }
     let snapshot = snapshots.get(ref);
     if (!snapshot) {
-      snapshot = pending.work.then(resolve);
+      snapshot = pending.work.then(() => resolve(joined));
       snapshots.set(ref, snapshot);
     }
     return snapshot as unknown as FateThenable<ViewSnapshot<T, S>>;
@@ -1937,8 +1938,11 @@ export class FateClient<
         entityId,
         new Set([...missing].map((path) => getStoragePath(path, plan))),
       );
+      const args = resolvedArgsFromPlan(plan);
+      // Views can share list storage while requesting different page sizes.
+      const stalledKey = args ? `${key}|${hashArgs(args)}` : key;
 
-      return this.renderReadErrors.read(view, ref, renderScope, key, () => {
+      return this.renderReadErrors.read(view, ref, renderScope, stalledKey, () => {
         const pendingOptimistic = this.getPendingOptimisticMutations(entityId);
         if (pendingOptimistic) {
           return this.pendingViewSnapshot(
@@ -1949,7 +1953,7 @@ export class FateClient<
             () => this.readView<T, S, V>(view, ref),
           );
         }
-        if (this.stalledRequests.has(key)) {
+        if (this.stalledRequests.has(stalledKey)) {
           return resolveSnapshot();
         }
 
@@ -1992,12 +1996,12 @@ export class FateClient<
                 await this.fetchByIdAndNormalize(type, [id], missing, plan);
               }
             }),
-          () => {
-            if (this.missingForSelection(entityId, selectedPaths, plan).size > 0) {
-              this.stalledRequests.add(key);
+          (joined) => {
+            if (!joined && this.missingForSelection(entityId, selectedPaths, plan).size > 0) {
+              this.stalledRequests.add(stalledKey);
               return resolveSnapshot().value;
             }
-            return this.readView<T, S, V>(view, ref);
+            return this.readViewInternal<T, S, V>(view, ref, renderScope);
           },
         );
       }) as FateThenable<ViewSnapshot<T, S>>;
