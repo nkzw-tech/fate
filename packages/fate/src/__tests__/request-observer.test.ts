@@ -315,6 +315,39 @@ test('does not expose an incomplete cache selection or fetch missing view fields
   dispose();
 });
 
+test('reports a missing by-ID result after fetching and can recover on refetch', async () => {
+  const fetchById = vi
+    .fn()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ id: '1', name: 'Ada' }]);
+  const client = createClient({
+    roots: { viewer: clientRoot('User') },
+    transport: { fetchById },
+    types: [{ type: 'User' }],
+  });
+  const observer = client.observeRequest({ viewer: { id: '1', view: UserView } });
+  const dispose = observer.subscribe(() => {});
+  try {
+    expect(observer.getSnapshot()).toMatchObject({ isFetching: true, status: 'pending' });
+    await observer.getSnapshot().refetch();
+    expect(observer.getSnapshot()).toMatchObject({
+      data: undefined,
+      error: undefined,
+      isFetching: false,
+      status: 'missing',
+    });
+
+    await observer.getSnapshot().refetch();
+    expect(observer.getSnapshot()).toMatchObject({
+      data: { viewer: { id: '1' } },
+      isFetching: false,
+      status: 'ready',
+    });
+  } finally {
+    dispose();
+  }
+});
+
 test('reports initial failures without suspending or losing the original error', async () => {
   const { client, fetchQuery } = setup();
   const error = new Error('Offline');

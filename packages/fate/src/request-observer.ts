@@ -57,7 +57,7 @@ export const createRequestObserver = <T>({
           ? 'ready'
           : requestError !== undefined
             ? 'error'
-            : cacheOnly
+            : cacheOnly || (completed && !fetching)
               ? 'missing'
               : 'pending',
     };

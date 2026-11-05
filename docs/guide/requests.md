@@ -246,13 +246,13 @@ The snapshot contains `data`, `error`, `isFetching`, `status`, and `refetch`. Da
 
 Reading a snapshot does not start a request. The first subscription starts an enabled request and retains its data; the last unsubscribe releases it. Use `enabled: false` to disable fetching, or `mode: 'cache-only'` to observe cached data without fetching missing fields. The possible statuses are:
 
-| Status     | Meaning                                            |
-| ---------- | -------------------------------------------------- |
-| `disabled` | The request is not enabled.                        |
-| `missing`  | A cache-only request needs data that isn't cached. |
-| `pending`  | The initial request is loading.                    |
-| `ready`    | Data is available.                                 |
-| `error`    | The initial request failed.                        |
+| Status     | Meaning                                                       |
+| ---------- | ------------------------------------------------------------- |
+| `disabled` | The request is not enabled.                                   |
+| `missing`  | A cache-only read or a completed request has incomplete data. |
+| `pending`  | The initial request is loading.                               |
+| `ready`    | Data is available.                                            |
+| `error`    | The initial request failed.                                   |
 
 `observer.getSnapshot().refetch()` returns a promise and requires an enabled request that isn't cache-only. Handle its rejected promise in the calling code.
 
