@@ -4,7 +4,7 @@ import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
 import { graphQLOutputRelations } from '../graphqlSchema.ts';
-import { createGraphQLTransport } from '../graphqlTransport.ts';
+import { createGraphQLTransport, graphqlValueRoot } from '../graphqlTransport.ts';
 import { mutation, valueMutation } from '../mutation.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
 import { view } from '../view.ts';
@@ -148,6 +148,34 @@ test('fetches and caches scalar query roots without entity identities', async ()
   expect(query).not.toContain('origin {');
   expect(query).not.toContain('stars {');
   expect(query).not.toContain('fetchReplay {');
+});
+
+test('fetches custom scalar roots declared in the GraphQL schema', async () => {
+  const schema = buildSchema('scalar Date\n type Query { today: Date! }');
+  const fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const { query } = JSON.parse(String(init?.body)) as { query: string };
+    return jsonResponse(
+      await graphql({ rootValue: { today: '2026-11-05' }, schema, source: query }),
+    );
+  });
+  const transport = createGraphQLTransport({
+    fetch,
+    live: false,
+    roots: { today: graphqlValueRoot<string>({ type: 'Date' }) },
+    schema: createGraphQLArgumentSchema(schema),
+    types: [],
+    url: '/graphql',
+  });
+  const client = createClient({
+    roots: { today: clientValueRoot<string>() },
+    transport,
+    types: [],
+  });
+
+  await expect(client.request({ today: { value: true } })).resolves.toEqual({
+    today: '2026-11-05',
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
 
 test('returns scalar mutation results without requiring an entity record', async () => {

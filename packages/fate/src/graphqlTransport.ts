@@ -1169,7 +1169,9 @@ export function createGraphQLTransport<
       const { argumentsForField, variables } = operationArguments();
       const field = assertIdentifier(root.field ?? name, 'field');
       const selection =
-        root.type === '__value__' || ['Boolean', 'Int', 'Float', 'String', 'ID'].includes(root.type)
+        root.type === '__value__' ||
+        ['Boolean', 'Int', 'Float', 'String', 'ID'].includes(root.type) ||
+        schema?.scalars?.includes(root.type)
           ? ''
           : buildRecordSelection({
               args,
