@@ -1515,6 +1515,18 @@ export class FateClient<
     return this.writeEntity(type, data, select, plan, null, insert);
   }
 
+  /** @internal Normalize an optimistic patch identified by its mutation input. */
+  writeOptimistic(
+    type: string,
+    id: string | number,
+    data: AnyRecord,
+    select: ReadonlySet<string>,
+    plan: SelectionPlan | undefined,
+    insert: InsertPosition,
+  ) {
+    return this.writeEntity(type, data, select, plan, null, insert, undefined, undefined, id);
+  }
+
   /** @internal Normalize mutation snapshots while retaining unrelated loaded pages. */
   writeMutationResult(
     type: string,
@@ -4649,11 +4661,22 @@ export class FateClient<
     insert?: InsertPosition,
     normalization: NormalizationContext = createNormalizationContext(),
     input = normalizationInput(record),
+    knownId?: string | number,
   ): EntityId {
     const { selections, windows } = normalization;
     if (this.store.hasOptimisticUpdates && !this.store.isRebasing) {
       return this.store.update(() =>
-        this.writeEntity(type, record, select, plan, pathPrefix, insert, normalization, input),
+        this.writeEntity(
+          type,
+          record,
+          select,
+          plan,
+          pathPrefix,
+          insert,
+          normalization,
+          input,
+          knownId,
+        ),
       );
     }
     type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
@@ -4666,7 +4689,7 @@ export class FateClient<
       record = input.materialize(record) as AnyRecord;
       input = undefined;
     }
-    const id = normalizationId(config, record, input);
+    const id = knownId ?? normalizationId(config, record, input);
     const entityId = toEntityId(type, id);
     const generation = this.applyingGeneration ?? ++this.writeGeneration;
     if (

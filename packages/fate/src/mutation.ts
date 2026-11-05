@@ -373,12 +373,14 @@ export function prepareMutation(
     };
   }
   const id = maybeGetId(config.getId, input);
-  const optimisticRecord = optimistic
+  const optimisticWithId = optimistic
     ? id != null
       ? { id, ...optimistic }
       : optimistic
     : undefined;
-  const optimisticRecordId = optimisticRecord ? maybeGetId(config.getId, optimisticRecord) : null;
+  const optimisticId = optimisticWithId ? maybeGetId(config.getId, optimisticWithId) : null;
+  const optimisticRecord = optimisticId == null ? optimistic : optimisticWithId;
+  const optimisticRecordId = optimisticRecord ? (optimisticId ?? id) : null;
   const optimisticEntityId =
     id != null
       ? toEntityId(entity, id)
@@ -396,8 +398,20 @@ export function prepareMutation(
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
   try {
     settle = client.store.optimisticUpdate(() => {
-      if (optimisticRecord && optimisticEntityId) {
-        client.write(entity, optimisticRecord, optimisticSelection ?? emptySet, plan, position);
+      if (optimisticRecord && optimisticEntityId && optimisticRecordId != null) {
+        const paths = optimisticSelection ?? emptySet;
+        if (optimisticId == null) {
+          client.writeOptimistic(
+            entity,
+            optimisticRecordId,
+            optimisticRecord,
+            paths,
+            plan,
+            position,
+          );
+        } else {
+          client.write(entity, optimisticRecord, paths, plan, position);
+        }
         if (!deleteRecord && typeof insert !== 'string') {
           client.insertMutationTargets(optimisticEntityId, insert);
         }
