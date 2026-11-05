@@ -768,7 +768,11 @@ export function createHTTPTransport<
         selectionArgs,
         type,
       };
-      const handleEvent = (event: VoidLiveClientEvent) => {
+      const isActive = () => liveSubscriptions.has(liveId);
+      const deliverEvent = (event: VoidLiveClientEvent) => {
+        if (!isActive()) {
+          return;
+        }
         const data = isRecord(event.data) ? event.data : {};
         if (event.type === 'invalidate') {
           handlers.onEvent({ type: 'invalidate' });
@@ -828,9 +832,33 @@ export function createHTTPTransport<
           return;
         }
 
-        void resolveConnectionNode(subscription, id, nodeType)
-          .then(sendNode)
-          .catch((error) => reportSubscriptionError(subscription, error));
+        return resolveConnectionNode(subscription, id, nodeType).then((node) => {
+          if (isActive()) {
+            sendNode(node);
+          }
+        });
+      };
+      let pendingEvent: Promise<void> | undefined;
+      const handleEvent = (event: VoidLiveClientEvent) => {
+        // A fetch for an insert must settle before a later event can update
+        // the same connection, including events on its global topic.
+        const result = pendingEvent
+          ? pendingEvent.then(() => deliverEvent(event))
+          : deliverEvent(event);
+        if (result) {
+          const next = result
+            .catch((error: unknown) => {
+              if (isActive()) {
+                reportSubscriptionError(subscription, error);
+              }
+            })
+            .finally(() => {
+              if (pendingEvent === next) {
+                pendingEvent = undefined;
+              }
+            });
+          pendingEvent = next;
+        }
       };
 
       liveSubscriptions.set(liveId, subscription);

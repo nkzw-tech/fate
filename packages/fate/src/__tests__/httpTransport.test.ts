@@ -741,6 +741,59 @@ test('subscribes to live connector connection topics', async () => {
   dispose?.();
 });
 
+test.each(['delete', 'dispose'] as const)(
+  'handles %s while fetching the record for a live connection insert',
+  async (action) => {
+    const pending = Promise.withResolvers<Response>();
+    const fetch = liveControlFetch();
+    const onEvent = vi.fn();
+    const transport = createHTTPTransport({
+      eventSource: resetMockEventSource(),
+      fetch,
+      live: liveConnector(),
+      url: 'http://local/fate',
+    });
+    const dispose = transport.subscribeConnection!(
+      'posts',
+      'Post',
+      undefined,
+      new Set(['id']),
+      undefined,
+      { onEvent },
+    );
+    const source = await openLiveStream();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const topic = liveConnectionTopic('posts');
+    const event = { data: { id: 'post-1', nodeType: 'Post' }, subscriptionId: '1', topic };
+
+    try {
+      fetch.mockReturnValueOnce(pending.promise);
+      source.message({ ...event, type: 'appendNode' });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+      if (action === 'delete') {
+        source.message({ ...event, type: 'deleteEdge' });
+      } else {
+        dispose();
+      }
+      pending.resolve(
+        jsonResponse({ results: [{ data: [{ id: 'post-1' }], id: '1', ok: true }], version: 1 }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      if (action === 'delete') {
+        expect(onEvent.mock.calls).toEqual([
+          [{ edge: { node: { id: 'post-1' } }, nodeType: 'Post', type: 'appendNode' }],
+          [{ id: 'post-1', nodeType: 'Post', type: 'deleteEdge' }],
+        ]);
+      } else {
+        expect(onEvent).not.toHaveBeenCalled();
+      }
+    } finally {
+      dispose();
+    }
+  },
+);
+
 test('uses the live event node type to fetch connection records without data', async () => {
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}'));
