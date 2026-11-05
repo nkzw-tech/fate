@@ -22,7 +22,6 @@ import {
   isDeferredSelection,
 } from './defer.ts';
 import { argumentFieldKey, getFieldKey, getStoragePath } from './field-key.ts';
-import { isTypeBranch } from './forType.ts';
 import {
   decodeClientHydrationState,
   encodeHydrationValue,
@@ -145,6 +144,7 @@ import {
   getViewPayloads,
   resolveView,
 } from './view.ts';
+import { isTypeBranch } from './viewFor.ts';
 import { resolveConditionalSelection } from './when.ts';
 
 /**

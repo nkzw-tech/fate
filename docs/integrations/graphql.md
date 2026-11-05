@@ -130,17 +130,17 @@ Use `import type` for generated types. After updating the schema, run `fate gene
 
 ## Views on Unions and Interfaces
 
-Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `forType`.
+Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `viewFor`.
 
 ```tsx
-import { forType, useRequest, view } from 'react-fate';
+import { viewFor, useRequest, view } from 'react-fate';
 import type { GraphQLEntities } from '../../.fate/client.generated.ts';
 import { PostCard, PostView } from './PostCard.tsx';
 import { UserCard, UserView } from './UserCard.tsx';
 
 const SearchResultView = view<GraphQLEntities['SearchResult']>()({
-  ...forType('Post', PostView),
-  ...forType('User', UserView),
+  ...viewFor('Post', PostView),
+  ...viewFor('User', UserView),
 });
 
 export function Search({ query }: { query: string }) {

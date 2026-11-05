@@ -6,12 +6,12 @@ import { alias } from '../../alias.ts';
 import { createClient } from '../../client.ts';
 import { createClientSource } from '../../codegen/client.ts';
 import { createSchema } from '../../codegen/schema.ts';
-import { forType } from '../../forType.ts';
 import { createHTTPTransport } from '../../httpTransport.ts';
 import { clientRoot } from '../../root.ts';
 import { createTRPCTransport } from '../../transport.ts';
 import type { AnyRecord, ViewRef } from '../../types.ts';
 import { view } from '../../view.ts';
+import { viewFor } from '../../viewFor.ts';
 import { withConnection } from '../connection.ts';
 import { computed, dataView, list, type DataView } from '../dataView.ts';
 import { createSourceRegistry } from '../executor.ts';
@@ -128,8 +128,8 @@ test.each(['native', 'trpc'] as const)(
       privateLabel: true,
     });
     const FeedView = view<PostResult | UserResult>()({
-      ...forType('Post', PostView),
-      ...forType('User', UserView),
+      ...viewFor('Post', PostView),
+      ...viewFor('User', UserView),
     });
     const request = { feed: { args: { first: 3 }, list: FeedView } };
     const result = await client.request(request);

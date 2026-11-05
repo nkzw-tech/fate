@@ -12,7 +12,7 @@ const groupsFor = (select: Iterable<string>, allowTypeConditions = false): Array
   for (const path of select) {
     const parts = path.split('.');
     if (!allowTypeConditions && parts.some(typeCondition)) {
-      throw new Error('fate: forType requires a GraphQL selection or a list with multiple types.');
+      throw new Error('fate: viewFor requires a GraphQL selection or a list with multiple types.');
     }
     const sources = parts.map(
       (_, index) =>

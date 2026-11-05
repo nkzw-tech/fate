@@ -162,7 +162,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         path.join(directory, 'usage.ts'),
         `
       import '${clientModule}/client';
-      import { alias, forType, when, view, type ViewData, type ViewRef, type RefetchArguments } from '@nkzw/fate';
+      import { alias, viewFor, when, view, type ViewData, type ViewRef, type RefetchArguments } from '@nkzw/fate';
       import type { GraphQLEntities, GraphQLInputs, GraphQLResponses, GraphQLTypes } from './client.ts';
       const biome: GraphQLInputs['Biome'] = 'Grassland';
       const response: GraphQLResponses['Price'] = { __typename: 'Price', amount: 1 };
@@ -198,15 +198,15 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       const ReplayView = view<GraphQLEntities['Replay']>()({ content: true });
       client.request({ replay: { id: 'Replay-1', view: ReplayView } });
       const SearchView = view<GraphQLEntities['SearchResult']>()({
-        ...forType('Map', MapView),
-        ...forType('Replay', ReplayView),
+        ...viewFor('Map', MapView),
+        ...viewFor('Replay', ReplayView),
       });
       // @ts-expect-error The branch typename must match the view.
-      forType('Replay', MapView);
+      viewFor('Replay', MapView);
       // @ts-expect-error The typename must be a possible result of the parent view.
-      view<Map>()({ ...forType('Replay', ReplayView) });
+      view<Map>()({ ...viewFor('Replay', ReplayView) });
       // @ts-expect-error A branch composes a view of one concrete type.
-      forType('Map', SearchView);
+      viewFor('Map', SearchView);
       const searchRequest = { search: { list: SearchView } };
       client.request(searchRequest).then(({ search }) => {
         for (const result of search) {

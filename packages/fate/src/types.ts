@@ -1,8 +1,8 @@
 import type { AliasedSelection, AliasedView } from './alias.ts';
-import type { TypeBranchKey, TypeBranchSelection } from './forType.ts';
 import type { SelectedGraphQLResult, GraphQLSelectedResult } from './graphql-types.ts';
 import { FateMutations } from './mutation.ts';
 import type { RefetchConfig } from './refetch.ts';
+import type { TypeBranchKey, TypeBranchSelection } from './viewFor.ts';
 import type { ConditionalSelection } from './when.ts';
 
 /** Canonical runtime name for an entity type as returned by the server. */

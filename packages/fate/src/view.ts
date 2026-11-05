@@ -1,5 +1,4 @@
 import { cloneArgs, hashArgs } from './args.ts';
-import { isTypeBranch, typeBranchPrefix } from './forType.ts';
 import type {
   AnyRecord,
   Entity,
@@ -11,6 +10,7 @@ import type {
   ViewTag,
 } from './types.ts';
 import { getViewTag, isViewTag, ViewKind, ViewsTag } from './types.ts';
+import { isTypeBranch, typeBranchPrefix } from './viewFor.ts';
 
 type MutableSelection<T extends Entity, S extends Selection<T>> = {
   -readonly [K in keyof S]: S[K];

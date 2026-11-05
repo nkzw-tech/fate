@@ -94,7 +94,7 @@ export { isRecord } from './record.ts';
 export { mutation, valueMutation } from './mutation.ts';
 export { clientRoot, clientValueRoot } from './root.ts';
 export { toEntityId } from './ref.ts';
-export { forType } from './forType.ts';
+export { viewFor } from './viewFor.ts';
 export { view, resolveView, type ParameterizedView } from './view.ts';
 
 export type {

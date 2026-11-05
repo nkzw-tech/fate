@@ -160,7 +160,7 @@ For native HTTP, pass `Root` to `createFateServer`. For tRPC, use `fate.procedur
 const searchResultRouter = router(fate.procedures({ view: Root.search }));
 ```
 
-To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`forType` to compose the views](/integrations/graphql#views-on-unions-and-interfaces) for the search results.
+To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`viewFor` to compose the views](/integrations/graphql#views-on-unions-and-interfaces) for the search results.
 
 ## Native fate protocol
 

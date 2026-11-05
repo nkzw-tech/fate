@@ -15,7 +15,7 @@ export const isTypeBranch = (value: unknown): value is TypeBranchSelection =>
   Boolean(value && typeof value === 'object' && TypeBranch in value);
 
 /** Compose a view when a GraphQL result has the given concrete typename. */
-export function forType<V extends View<any, any>, const Type extends ViewEntityName<V>>(
+export function viewFor<V extends View<any, any>, const Type extends ViewEntityName<V>>(
   type: Type,
   view: V & (ViewEntityName<V> extends NoInfer<Type> ? unknown : never),
 ): Readonly<Record<TypeBranchKey, TypeBranchSelection<Type>>> {
@@ -24,7 +24,7 @@ export function forType<V extends View<any, any>, const Type extends ViewEntityN
   }
   const names = Object.keys(view).filter(isViewTag);
   if (typeof view === 'function' || !names.length) {
-    throw new Error('fate: forType requires a view with its parameters bound.');
+    throw new Error('fate: viewFor requires a view with its parameters bound.');
   }
   return {
     [`${typeBranchPrefix}${type}:${names.join(',')}`]: Object.freeze({

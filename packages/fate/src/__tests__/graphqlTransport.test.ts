@@ -3,13 +3,13 @@ import { beforeEach, expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
-import { forType } from '../forType.ts';
 import { graphQLOutputRelations } from '../graphqlSchema.ts';
 import { createGraphQLTransport, graphqlValueRoot } from '../graphqlTransport.ts';
 import { mutation, valueMutation } from '../mutation.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
 import type { ViewRef, ViewSelection } from '../types.ts';
 import { view } from '../view.ts';
+import { viewFor } from '../viewFor.ts';
 
 const graphQLSSE = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -453,7 +453,7 @@ test('normalizes interface relations and arrays under their concrete GraphQL typ
     id: string;
   }>()({ friend: { name: true } });
   const NodeView = view<{ __typename: 'User'; id: string; name: string }>()({
-    ...forType('User', FriendView),
+    ...viewFor('User', FriendView),
     name: true,
   });
   await client.request({ node: { view: NodeView } });
@@ -539,8 +539,8 @@ test('requests mixed GraphQL connection results with masked concrete views', asy
     title: true,
   });
   const ResultView = view<Result>()({
-    ...forType('User', UserView),
-    ...forType('Post', PostView),
+    ...viewFor('User', UserView),
+    ...viewFor('Post', PostView),
   });
   const FeedView = view<Feed>()({ results: ResultView });
   const request = {

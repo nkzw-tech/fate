@@ -7,7 +7,6 @@ import {
 } from './alias.ts';
 import { cloneArgs, getConnectionWindowIgnoreKeys, hashArgs, hashConnectionArgs } from './args.ts';
 import { isDeferredSelection } from './defer.ts';
-import { isTypeBranch } from './forType.ts';
 import { isRecord } from './record.ts';
 import {
   AnyRecord,
@@ -20,6 +19,7 @@ import {
   type View,
 } from './types.ts';
 import { getViewPayloads } from './view.ts';
+import { isTypeBranch } from './viewFor.ts';
 import { resolveConditionalSelection } from './when.ts';
 
 type WalkContext = 'default' | 'connection';

@@ -2,7 +2,7 @@ import type { Comment, Post, User } from '@nkzw/fate-server/src/trpc/views.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { Suspense, useDeferredValue, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { forType, useRequest, useView, view, ViewRef } from 'react-fate';
+import { viewFor, useRequest, useView, view, ViewRef } from 'react-fate';
 import type { GeneratedClientRoots } from '../.fate/client.generated.ts';
 import cx from '../src/lib/cx.tsx';
 import { Button } from '../src/ui/Button.tsx';
@@ -31,8 +31,8 @@ const supportsCommentSearch = !transport || transport === 'trpc';
 const PostResultView = view<Post>()({ content: true, title: true });
 const UserResultView = view<User>()({ name: true });
 const MixedResultView = view<Post | User>()({
-  ...forType('Post', PostResultView),
-  ...forType('User', UserResultView),
+  ...viewFor('Post', PostResultView),
+  ...viewFor('User', UserResultView),
 });
 
 const PostResult = ({ result }: { result: ViewRef<'Post'> }) => {

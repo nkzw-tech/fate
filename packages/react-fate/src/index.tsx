@@ -49,7 +49,7 @@ export {
   type PersistenceSnapshot,
   type ViewRef,
   type InferFateAPI,
-  forType,
+  viewFor,
   view,
   when,
   type ConditionalSelection,

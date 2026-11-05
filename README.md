@@ -2218,17 +2218,17 @@ Use `import type` for generated types. After updating the schema, run `fate gene
 
 ### Views on Unions and Interfaces
 
-Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `forType`.
+Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `viewFor`.
 
 ```tsx
-import { forType, useRequest, view } from 'react-fate';
+import { viewFor, useRequest, view } from 'react-fate';
 import type { GraphQLEntities } from '../../.fate/client.generated.ts';
 import { PostCard, PostView } from './PostCard.tsx';
 import { UserCard, UserView } from './UserCard.tsx';
 
 const SearchResultView = view<GraphQLEntities['SearchResult']>()({
-  ...forType('Post', PostView),
-  ...forType('User', UserView),
+  ...viewFor('Post', PostView),
+  ...viewFor('User', UserView),
 });
 
 export function Search({ query }: { query: string }) {
@@ -2740,7 +2740,7 @@ For native HTTP, pass `Root` to `createFateServer`. For tRPC, use `fate.procedur
 const searchResultRouter = router(fate.procedures({ view: Root.search }));
 ```
 
-To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`forType` to compose the views](/docs/integrations/graphql.md#views-on-unions-and-interfaces) for the search results.
+To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`viewFor` to compose the views](/docs/integrations/graphql.md#views-on-unions-and-interfaces) for the search results.
 
 ### Native fate protocol
 
