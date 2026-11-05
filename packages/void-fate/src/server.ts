@@ -35,14 +35,12 @@ type FateLiveContext = {
 
 type EntityPayload = Readonly<{
   changed?: ReadonlyArray<string>;
-  data?: unknown;
   id: string | number;
 }>;
 
 type ConnectionPayload = Readonly<{
   cursor?: string;
   id?: string | number;
-  node?: unknown;
   nodeType?: string;
   targetCursor?: string;
 }>;
@@ -69,6 +67,8 @@ const isPromiseLike = (value: unknown): value is MaybePromiseLike =>
 export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFateLive {
   const contextStore = new AsyncLocalStorage<FateLiveContext>();
 
+  // Topics broadcast to multiple subscribers. Send metadata so each client
+  // fetches records with its own authorization.
   const publish = (
     topic: string,
     data: EntityPayload | ConnectionPayload,
@@ -92,7 +92,6 @@ export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFate
     id: string | number,
     options: {
       changed?: ReadonlyArray<string>;
-      data?: unknown;
       eventId?: string;
       type?: LiveEventType;
     } = {},
@@ -101,7 +100,6 @@ export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFate
       liveEntityTopic(type, id),
       {
         changed: options.changed,
-        data: options.data,
         id,
       },
       {
@@ -119,7 +117,6 @@ export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFate
       cursor?: string;
       eventId?: string;
       id?: string | number;
-      node?: unknown;
       nodeType?: string;
       targetCursor?: string;
     } = {},
@@ -133,7 +130,6 @@ export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFate
       {
         cursor: options.cursor,
         id: options.id,
-        node: options.node,
         nodeType: options.nodeType,
         targetCursor: options.targetCursor,
       },
@@ -172,6 +168,10 @@ export function createVoidFateLive(_options: VoidFateLiveOptions = {}): VoidFate
             publishConnection(procedure, args, 'deleteEdge', { ...options, id, nodeType });
           },
           emit(type, options) {
+            if (options?.id === undefined && options?.node !== undefined) {
+              publishConnection(procedure, args, 'invalidate', { eventId: options.eventId });
+              return;
+            }
             publishConnection(procedure, args, type, options);
           },
           insertEdgeAfter(nodeType, id, targetCursor, options) {

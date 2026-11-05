@@ -152,15 +152,6 @@ export const fateServer = createFateServer({
           throw new Error('Comment not found.');
         }
 
-        const liveComment = await source.resolveById({
-          ctx,
-          id: commentId,
-          input: {
-            select: ['author.id', 'author.name', 'author.username', 'content', 'id'],
-          },
-          view: commentDataView,
-        });
-
         if (hasNestedSelection(select, 'post')) {
           created.post = (await source.resolveById<PostItem>({
             ctx,
@@ -173,9 +164,7 @@ export const fateServer = createFateServer({
           })) as PostItem | null;
         }
 
-        live
-          .connection('Post.comments', { id: input.postId })
-          .appendNode('Comment', commentId, { node: liveComment ?? created });
+        live.connection('Post.comments', { id: input.postId }).appendNode('Comment', commentId);
         live.update('Post', input.postId, { changed: ['commentCount', 'comments'] });
 
         return created as CommentItem & { post?: { commentCount: number } };
@@ -317,7 +306,7 @@ export const fateServer = createFateServer({
           throw new Error('Post not found.');
         }
 
-        live.update('Post', input.id, { changed: ['likes'], data: post });
+        live.update('Post', input.id, { changed: ['likes'] });
 
         return post as Post;
       },
@@ -344,7 +333,7 @@ export const fateServer = createFateServer({
           throw new Error('Post not found.');
         }
 
-        live.update('Post', input.id, { changed: ['likes'], data: post });
+        live.update('Post', input.id, { changed: ['likes'] });
 
         return post as Post;
       },

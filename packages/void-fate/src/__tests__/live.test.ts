@@ -34,34 +34,58 @@ test('does not fail requests when live publishing is unavailable', async () => {
   ).resolves.toBe('ok');
 });
 
-test('publishes changed paths with entity live events', async () => {
+test('publishes changed paths without broadcasting entity records', async () => {
   const publish = vi.fn(() => Promise.resolve());
   const stream = createTestStream(publish);
   const { live, withContext } = createVoidFateLive();
 
   await withContext({ env: {}, stream }, async () => {
-    live.update('Post', 'post-1', { changed: ['likes'], eventId: 'event-1' });
+    live.update('Post', 'post-1', {
+      changed: ['likes'],
+      data: { author: { email: 'private@example.com' }, id: 'post-1', likes: 2 },
+      eventId: 'event-1',
+    });
   });
 
   expect(publish).toHaveBeenCalledWith(
     'entity:Post:post-1',
-    { changed: ['likes'], data: undefined, id: 'post-1' },
+    { changed: ['likes'], id: 'post-1' },
     { eventId: 'event-1', type: 'update' },
   );
 });
 
-test('publishes connection events through the live facade without failing requests', async () => {
+test('publishes connection metadata without broadcasting node records', async () => {
   const publish = vi.fn(() => Promise.resolve());
   const stream = createTestStream(publish);
   const { live, withContext } = createVoidFateLive();
 
   await expect(
     withContext({ env: {}, stream }, async () => {
-      live.connection('posts').prependNode('Post', 'post-1');
+      live.connection('posts').insertEdgeAfter('Post', 'post-1', 'previous', {
+        cursor: 'cursor',
+        eventId: 'event-1',
+        node: { author: { email: 'private@example.com' }, id: 'post-1' },
+      });
       return 'ok';
     }),
   ).resolves.toBe('ok');
-  expect(publish).toHaveBeenCalledOnce();
+  expect(publish).toHaveBeenCalledExactlyOnceWith(
+    'connection:posts:*',
+    { cursor: 'cursor', id: 'post-1', nodeType: 'Post', targetCursor: 'previous' },
+    { eventId: 'event-1', type: 'insertEdgeAfter' },
+  );
+});
+
+test('invalidates the connection when a node event has no ID to refetch', async () => {
+  const publish = vi.fn(() => Promise.resolve());
+  const stream = createTestStream(publish);
+  const { live, withContext } = createVoidFateLive();
+
+  await withContext({ env: {}, stream }, async () => {
+    live.connection('posts').emit('appendNode', { node: { id: 'post-1' } });
+  });
+
+  expect(publish).toHaveBeenCalledExactlyOnceWith('connection:posts:*', {}, { type: 'invalidate' });
 });
 
 test('routes live endpoint requests to void/live', async () => {
