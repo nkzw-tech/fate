@@ -181,14 +181,20 @@ const applyRecordUpdate = (
     const diskStale = expandStalePaths(before.record, diskOnly).filter(
       (path) => !after.paths.some((cached) => isWithinPath(path, cached)),
     );
+    const paths = [...after.paths, ...diskOnly];
+    // Older receipts may omit the field mask. New invalidation-only updates use an empty mask.
+    const record = patchRecord(
+      before.record,
+      after.record,
+      fields ?? new Set(['__typename', 'id', ...after.paths]),
+    );
     return {
-      paths: [...after.paths, ...diskOnly],
-      record: patchRecord(
-        before.record,
-        after.record,
-        new Set(['__typename', 'id', ...after.paths]),
-      ),
-      stale: [...new Set([...(after.stale ?? []), ...diskStale])],
+      paths,
+      record,
+      stale:
+        fields?.size === 0
+          ? expandStalePaths(record, paths)
+          : [...new Set([...(after.stale ?? []), ...diskStale])],
     };
   }
   if (!fields) {
@@ -621,16 +627,19 @@ export class PersistenceCache {
 
   changedNode(change?: StoreChange) {
     if (!this.suppressed && change) {
-      const selected =
-        change.kind === 'record' && change.paths
-          ? new Set(change.patchPaths ?? change.paths)
-          : undefined;
+      let selected: Set<string> | undefined;
       if (change.kind === 'record') {
+        if (change.invalidated) {
+          selected = new Set();
+        } else if (change.paths) {
+          const fields = new Set(change.patchPaths ?? change.paths);
+          selected = fields.size ? fields : undefined;
+        }
         const id = recordKey(change.key);
         const previous = this.pendingNodes.recordFields.get(id);
         this.pendingNodes.recordFields.set(
           id,
-          selected?.size && (!this.pendingNodes.recordFields.has(id) || previous)
+          selected && (!this.pendingNodes.recordFields.has(id) || previous)
             ? new Set([...(previous ?? []), ...selected])
             : undefined,
         );
@@ -657,7 +666,7 @@ export class PersistenceCache {
         const previous = this.capturing.get(id);
         this.capturing.set(id, {
           fields:
-            selected?.size && (!previous || previous.fields)
+            selected && (!previous || previous.fields)
               ? [...new Set([...(previous?.fields ?? []), ...selected])]
               : undefined,
           previousList: previous

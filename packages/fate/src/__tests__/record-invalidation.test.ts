@@ -97,6 +97,55 @@ test('record staleness survives hydration', async () => {
   expect(next.fetchById).toHaveBeenCalledTimes(1);
 });
 
+test.each([false, true])(
+  'persisted invalidation preserves newer fields from another tab (pending edit: %s)',
+  async (pendingEdit) => {
+    const storage = memoryStorage();
+    const create = () => setup(createPersistence({ key: 'invalidation-race', storage }));
+    const first = create();
+    const second = create();
+    const next = create();
+    const response = Promise.withResolvers<Awaited<ReturnType<typeof next.fetchById>>>();
+    const refreshed = { content: 'Server content', id: '1', title: 'Latest title' };
+    try {
+      await first.client.request(post);
+      await first.client.persistence!.flush();
+      const { post: staleRef } = await second.client.request(post);
+      await second.client.persistence!.flush();
+
+      first.client.write('Post', { id: '1', title: 'Latest title' }, new Set(['title']));
+      await first.client.persistence!.flush();
+      expect(second.client.store.read('Post:1')?.title).toBe('Title');
+      if (pendingEdit) {
+        second.client.write('Post', { content: 'Local edit', id: '1' }, new Set(['content']));
+      }
+      await second.client.mutations.addComment({
+        input: { postId: '1' },
+        invalidate: [staleRef],
+        persist: false,
+      });
+      await second.client.persistence!.flush();
+
+      next.fetchById.mockReturnValueOnce(response.promise);
+      const refresh = next.client.request(post);
+      try {
+        await vi.waitFor(() => expect(next.fetchById).toHaveBeenCalledOnce());
+        expect(next.client.store.read('Post:1')).toMatchObject({
+          content: pendingEdit ? 'Local edit' : 'Content',
+          title: 'Latest title',
+        });
+      } finally {
+        response.resolve([refreshed]);
+        await refresh;
+      }
+    } finally {
+      for (const { client } of [first, second, next]) {
+        client.persistence!.dispose();
+      }
+    }
+  },
+);
+
 test('a replayed offline mutation invalidates its parent record on disk', async () => {
   const storage = memoryStorage();
   const create = (online: boolean) =>
