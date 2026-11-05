@@ -1681,36 +1681,76 @@ test('GraphQL previews and independently requested cursor pages keep separate wi
   ).toEqual(['1', '2', '3', '4']);
 });
 
-test('selects shared union fields and ID aliases inside concrete fragments', async () => {
-  const schema = buildSchema(`
-    type Query { result: SearchResult! }
+test.each(['!', ''])(
+  'selects shared union fields and ID aliases when the User fields use nullability suffix %j',
+  async (required) => {
+    const schema = buildSchema(`
+    type Query { result: SearchResult! post(id: ID, slug: String): Post user(id: ID, slug: String): User }
     union SearchResult = Post | User
-    type Post { id: ID!, label: String! }
-    type User { id: ID!, label: String! }
+    type Post { id: ID!, label: String! slug: String! }
+    type User { id: ID${required}, label: String${required} slug: String${required} }
   `);
-  const transport = createGraphQLTransport({
-    fetch: async (_url, init) => {
-      const { query, variables } = JSON.parse(String(init?.body));
-      return jsonResponse(
-        await graphql({
-          rootValue: { result: { __typename: 'Post', id: 'post', label: 'A post' } },
-          schema,
-          source: query,
-          variableValues: variables,
-        }),
-      );
-    },
-    live: false,
-    roots: { result: { type: 'SearchResult' } },
-    schema: createGraphQLArgumentSchema(schema),
-    types: [],
-    url: '/graphql',
-  });
+    const metadata = createGraphQLArgumentSchema(schema);
+    let result = {
+      __typename: 'Post',
+      id: 'Post-post',
+      label: 'A post' as string | null,
+      slug: 'post-slug',
+    };
+    const transport = createGraphQLTransport({
+      fetch: async (_url, init) => {
+        const { query, variables } = JSON.parse(String(init?.body));
+        return jsonResponse(
+          await graphql({
+            rootValue: { result },
+            schema,
+            source: query,
+            variableValues: variables,
+          }),
+        );
+      },
+      live: false,
+      roots: { post: { type: 'Post' }, result: { type: 'SearchResult' }, user: { type: 'User' } },
+      schema: metadata,
+      types: ['Post', 'User'].map((type) => ({
+        refetch: {
+          args: { id: { field: 'id' }, slug: { field: 'slug' } },
+          root: type.toLowerCase(),
+        },
+        type,
+      })),
+      url: '/graphql',
+    });
 
-  await expect(transport.fetchQuery!('result', ['identity:id', 'label'])).resolves.toMatchObject({
-    __typename: 'Post',
-    id: 'post',
-    'identity:id': 'post',
-    label: 'A post',
-  });
-});
+    await expect(transport.fetchQuery!('result', ['identity:id', 'label'])).resolves.toMatchObject({
+      __typename: 'Post',
+      id: 'post',
+      'identity:id': 'post',
+      label: 'A post',
+    });
+    result = {
+      __typename: 'User',
+      id: 'User-user',
+      label: required ? 'A user' : null,
+      slug: 'user-slug',
+    };
+    await expect(transport.fetchQuery!('result', ['identity:id', 'label'])).resolves.toMatchObject({
+      __typename: 'User',
+      id: 'user',
+      'identity:id': 'user',
+      label: result.label,
+      slug: 'user-slug',
+    });
+
+    const client = createClient({
+      roots: { result: clientRoot('SearchResult') },
+      transport,
+      types: graphQLOutputRelations(metadata),
+    });
+    const ResultView = view<{ __typename: 'Post' | 'User'; label: string | null }>()({
+      label: true,
+    });
+    await client.request({ result: { view: ResultView } });
+    expect(client.store.read('User:user')).toMatchObject({ id: 'user', label: result.label });
+  },
+);

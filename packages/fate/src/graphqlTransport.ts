@@ -145,6 +145,10 @@ type PendingOperation = {
 type SelectionTree = {
   fields: Map<string, SelectionTree>;
   responseFields: Map<string, { field: string; key: string; selection: SelectionTree }>;
+  wireAliases?: {
+    byField: Map<string, Set<string>>;
+    fieldsByAlias: Map<string, string>;
+  };
 };
 
 const createSelectionTree = (): SelectionTree => ({
@@ -439,6 +443,25 @@ const buildSelectionTree = (select: Iterable<string>): SelectionTree => {
   return root;
 };
 
+const concreteFieldName = (tree: SelectionTree, field: string, type: string): string => {
+  let alias = `fate_union_${type.length}_${type}_${responseField(field)}`;
+  while (tree.responseFields.has(alias)) {
+    alias = `_${alias}`;
+  }
+  const { byField, fieldsByAlias } = (tree.wireAliases ??= {
+    byField: new Map(),
+    fieldsByAlias: new Map(),
+  });
+  let aliases = byField.get(field);
+  if (!aliases) {
+    aliases = new Set();
+    byField.set(field, aliases);
+  }
+  aliases.add(alias);
+  fieldsByAlias.set(alias, field);
+  return `${assertIdentifier(alias, 'alias')}: ${assertIdentifier(schemaField(field), 'field')}`;
+};
+
 type ArgumentsForField = (
   type: string,
   field: string,
@@ -452,7 +475,7 @@ const buildRecordSelection = ({
   embedded,
   path,
   schema,
-  select,
+  tree,
   type,
   types,
 }: {
@@ -461,11 +484,15 @@ const buildRecordSelection = ({
   embedded?: boolean;
   path: string;
   schema?: GraphQLArgumentSchema;
-  select: Iterable<string>;
+  tree: SelectionTree;
   type: string;
   types: ReadonlyMap<string, TypeConfig>;
 }): string => {
-  const tree = buildSelectionTree(select);
+  const hasConflictingTypes = (field: string, concreteTypes: ReadonlyArray<string>) =>
+    concreteTypes.length > 1 &&
+    concreteTypes.some(
+      (type) => schema?.outputs?.[type]?.[field] !== schema?.outputs?.[concreteTypes[0]]?.[field],
+    );
 
   const walk = (
     currentType: string,
@@ -513,7 +540,7 @@ const buildRecordSelection = ({
         continue;
       }
       const fieldPath = currentPath ? `${currentPath}.${field}` : field;
-      const fieldName = field.includes(':')
+      const responseName = field.includes(':')
         ? `${assertIdentifier(responseField(field), 'alias')}: ${assertIdentifier(sourceField, 'field')}`
         : assertIdentifier(field, 'field');
       const fieldTypes = condition
@@ -523,7 +550,11 @@ const buildRecordSelection = ({
           : (schema?.unions?.[currentType] ??
             (needsConcreteIds && sourceField === 'id' ? possibleTypes : [currentType]));
 
+      const needsAlias = hasConflictingTypes(sourceField, fieldTypes);
       for (const fieldType of fieldTypes) {
+        const fieldName = needsAlias
+          ? concreteFieldName(currentTree, field, fieldType)
+          : responseName;
         const selections = fieldType === currentType ? lines : fragment(fieldType);
         const descriptor = types.get(fieldType)?.fields?.[sourceField];
         if (sourceField === '__typename') {
@@ -580,13 +611,17 @@ const buildRecordSelection = ({
       }
     }
 
+    const aliasIds = needsConcreteIds && hasConflictingTypes('id', possibleTypes);
     for (const concrete of possibleTypes) {
       if (needsConcreteIds) {
-        fragment(concrete).push('id');
+        fragment(concrete).push(aliasIds ? concreteFieldName(currentTree, 'id', concrete) : 'id');
       }
       for (const field of getRefetchFields(types.get(concrete)?.refetch)) {
-        if (!currentTree.fields.has(field)) {
-          fragment(concrete).push(`${field}${argumentsForField(concrete, field)}`);
+        if (!currentTree.fields.has(field) && (embedded || field !== 'id')) {
+          const fieldName = hasConflictingTypes(field, possibleTypes)
+            ? concreteFieldName(currentTree, field, concrete)
+            : field;
+          fragment(concrete).push(`${fieldName}${argumentsForField(concrete, field)}`);
         }
       }
     }
@@ -621,20 +656,37 @@ class GraphQLInput implements NormalizationInput {
 
   keys(record: AnyRecord): Array<string> {
     const keys = Object.keys(record);
-    if (this.responseKeys.size) {
+    const wireAliases = this.selection?.wireAliases;
+    if (this.responseKeys.size || wireAliases) {
       for (let index = 0; index < keys.length; index++) {
-        keys[index] = this.selection?.responseFields.get(keys[index])?.key ?? keys[index];
+        const key = keys[index];
+        keys[index] =
+          wireAliases?.fieldsByAlias.get(key) ??
+          this.selection?.responseFields.get(key)?.key ??
+          key;
       }
     }
     return keys;
   }
 
+  private responseKey(record: AnyRecord, key: string): string {
+    const aliases = this.selection?.wireAliases?.byField.get(key);
+    if (aliases) {
+      for (const alias of aliases) {
+        if (Object.hasOwn(record, alias)) {
+          return alias;
+        }
+      }
+    }
+    return this.responseKeys.get(key) ?? key;
+  }
+
   has(record: AnyRecord, key: string): boolean {
-    return Object.hasOwn(record, this.responseKeys.get(key) ?? key);
+    return Object.hasOwn(record, this.responseKey(record, key));
   }
 
   get(record: AnyRecord, key: string): unknown {
-    const value = record[this.responseKeys.get(key) ?? key];
+    const value = record[this.responseKey(record, key)];
     if (key !== 'id' && (!key.includes(':') || schemaField(key) !== 'id')) {
       return value;
     }
@@ -1094,8 +1146,8 @@ export function createGraphQLTransport<
       if (!ids.length) {
         return Promise.resolve([]);
       }
-      const paths = new Set(select);
-      const input = new GraphQLInput(decodeNodeId, types, buildSelectionTree(paths), type);
+      const tree = buildSelectionTree(select);
+      const input = new GraphQLInput(decodeNodeId, types, tree, type);
       const normalize = (value: unknown) =>
         isNormalizationRead(context) ? input.read(value) : input.materialize(value);
       const mapping = byId?.[type];
@@ -1110,7 +1162,7 @@ export function createGraphQLTransport<
             argumentsForField,
             path: '',
             schema,
-            select: paths,
+            tree,
             type,
             types,
           });
@@ -1138,7 +1190,7 @@ export function createGraphQLTransport<
         argumentsForField,
         path: '',
         schema,
-        select: paths,
+        tree,
         type,
         types,
       });
@@ -1161,12 +1213,13 @@ export function createGraphQLTransport<
 
       const { argumentsForField, variables } = operationArguments();
       const field = assertIdentifier(root.field ?? name, 'field');
+      const tree = buildSelectionTree(select);
       const selection = buildRecordSelection({
         args,
         argumentsForField,
         path: '',
         schema,
-        select,
+        tree,
         type: root.type,
         types,
       });
@@ -1186,7 +1239,7 @@ export function createGraphQLTransport<
           normalizeGraphQLValue({
             context,
             decodeNodeId,
-            selection: buildSelectionTree(select),
+            selection: tree,
             shape: 'connection',
             type: root.type,
             types,
@@ -1214,6 +1267,7 @@ export function createGraphQLTransport<
 
       const { argumentsForField, variables } = operationArguments();
       const field = assertIdentifier(root.field ?? name, 'field');
+      const tree = buildSelectionTree(select);
       const selection =
         root.type === '__value__' ||
         ['Boolean', 'Int', 'Float', 'String', 'ID'].includes(root.type) ||
@@ -1225,7 +1279,7 @@ export function createGraphQLTransport<
               embedded: root.embedded,
               path: '',
               schema,
-              select,
+              tree,
               type: root.type,
               types,
             });
@@ -1245,7 +1299,7 @@ export function createGraphQLTransport<
           normalizeGraphQLValue({
             context,
             decodeNodeId,
-            selection: buildSelectionTree(select),
+            selection: tree,
             shape: selection ? 'record' : 'scalar',
             type: root.type,
             types,
@@ -1262,6 +1316,7 @@ export function createGraphQLTransport<
 
       const { argumentsForField, variables } = operationArguments();
       const field = assertIdentifier(mutation.field, 'mutation');
+      const tree = buildSelectionTree(select);
       const args =
         mutation.inputArg === false
           ? ((input ?? {}) as Record<string, unknown>)
@@ -1275,7 +1330,7 @@ export function createGraphQLTransport<
               embedded: mutation.entity === '__value__',
               path: '',
               schema,
-              select,
+              tree,
               type: mutation.type ?? mutation.entity,
               types,
             });
@@ -1286,7 +1341,7 @@ export function createGraphQLTransport<
         transform: (value) =>
           normalizeGraphQLValue({
             decodeNodeId,
-            selection: buildSelectionTree(select),
+            selection: tree,
             shape: selection ? 'record' : 'scalar',
             type: mutation.type ?? mutation.entity,
             types,
