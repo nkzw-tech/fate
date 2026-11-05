@@ -1,6 +1,8 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
+import { defer } from '../defer.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
+import type { ViewSelection } from '../types.ts';
 import { view } from '../view.ts';
 
 test('publishes new value-query results by identity without inspecting their properties', async () => {
@@ -41,6 +43,36 @@ test('keeps opaque cyclic values intact in cache-only snapshots', async () => {
   const snapshot = observer.getSnapshot();
   expect(snapshot.data?.value).toBe(value);
   expect(observer.getSnapshot()).toBe(snapshot);
+});
+
+test('cache-only requests resolve deferred fields without fetching missing data', async () => {
+  type User = { __typename: 'User'; friend: User; id: string; name: string };
+  const Friend = view<User>()({ name: true });
+  const UserView = view<User>()({ friend: defer(Friend), id: true });
+  const fetchById = vi.fn(async () => [{ friend: { id: '2', name: 'Ada' }, id: '1' }]);
+  const client = createClient({
+    roots: { user: clientRoot<User, 'User'>('User') },
+    transport: { fetchById },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  client.write('User', { id: '1' }, new Set(['id']));
+  const observer = client.observeRequest(
+    { user: { id: '1', view: UserView } },
+    { mode: 'cache-only' },
+  );
+  const user = observer.getSnapshot().data!.user;
+  const { friend } = (
+    await client.readView<User, ViewSelection<typeof UserView>, typeof UserView>(UserView, user)
+  ).data;
+
+  await expect(Promise.resolve().then(() => client.readDeferred(friend))).rejects.toThrow(
+    'Cache-only view is missing selected fields',
+  );
+  expect(fetchById).not.toHaveBeenCalled();
+
+  client.write('User', { friend: { id: '2', name: 'Ada' }, id: '1' }, new Set(['friend.name']));
+  expect((await client.readDeferred(friend)).data).toMatchObject({ id: '2' });
+  expect(fetchById).not.toHaveBeenCalled();
 });
 
 test('reuses request containers and only replaces the connection whose list changes', async () => {

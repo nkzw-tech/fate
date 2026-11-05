@@ -1944,12 +1944,14 @@ export class FateClient<
       this.hasMissingDeferredList(resolvedOwner, ownerType, metadata.field, plan);
     const listMissing = hasMissingList();
     const fetchPaths = listMissing ? selectedPaths : missing;
+    const cacheOnly = this.cacheOnlyRefs.has(deferred);
 
     const resolveSnapshot = () => {
       this.renderReadErrors.clear(deferred, deferred);
+      const ownerRef = this.stableRefWithViewNames(ownerType, rawOwnerId, new Set());
       const snapshot = this.readViewSelection(
         { [metadata.field]: metadata.selection } as View<any, any>,
-        this.stableRefWithViewNames(ownerType, rawOwnerId, new Set()),
+        cacheOnly ? this.cacheOnlyResult(ownerRef) : ownerRef,
         resolvedOwner,
         plan,
         null,
@@ -1959,6 +1961,9 @@ export class FateClient<
         coverage: snapshot.coverage,
         data: (snapshot.data as AnyRecord)[metadata.field] as T,
       };
+      if (cacheOnly) {
+        this.markCacheOnly(resolved.data);
+      }
 
       return {
         status: 'fulfilled',
@@ -1974,6 +1979,9 @@ export class FateClient<
     if (missing.size === 0 && !listMissing) {
       this.clearStalledRequestsForEntity(resolvedOwner);
       return resolveSnapshot();
+    }
+    if (cacheOnly) {
+      throw new Error('fate: Cache-only view is missing selected fields.');
     }
 
     const key = this.deferredPendingKey(
