@@ -2,7 +2,7 @@ import type { Comment, Post, User } from '@nkzw/fate-server/src/trpc/views.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { Suspense, useDeferredValue, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { viewFor, useRequest, useView, view, ViewRef } from 'react-fate';
+import { useListView, useRequest, useView, view, viewFor, ViewRef } from 'react-fate';
 import type { GeneratedClientRoots } from '../.fate/client.generated.ts';
 import cx from '../src/lib/cx.tsx';
 import { Button } from '../src/ui/Button.tsx';
@@ -34,6 +34,10 @@ const MixedResultView = view<Post | User>()({
   ...viewFor('Post', PostResultView),
   ...viewFor('User', UserResultView),
 });
+const MixedResultConnection = {
+  items: { node: MixedResultView },
+  pagination: { hasNext: true, nextCursor: true },
+} as const;
 
 const PostResult = ({ result }: { result: ViewRef<'Post'> }) => {
   const post = useView(PostResultView, result);
@@ -51,17 +55,18 @@ const UserResult = ({ result }: { result: ViewRef<'User'> }) => {
 };
 
 const MixedSearchResults = ({ isStale, query }: { isStale: boolean; query: string }) => {
-  const request = { search: { args: { query }, list: MixedResultView } };
+  const request = { search: { args: { first: 20, query }, list: MixedResultConnection } };
   const { search } = useRequest<typeof request, GeneratedClientRoots>(request);
+  const [items, loadNext] = useListView(MixedResultConnection, search);
 
   return (
     <VStack className={cx(isStale && 'opacity-50')} gap={12}>
-      {search.length === 0 ? (
+      {items.length === 0 ? (
         <p>
           No matches for <i>&quot;{query}&quot;</i>
         </p>
       ) : null}
-      {search.map((result) => {
+      {items.map(({ node: result }) => {
         const key = `${result.__typename}:${result.id}`;
         switch (result.__typename) {
           case 'Post':
@@ -71,6 +76,11 @@ const MixedSearchResults = ({ isStale, query }: { isStale: boolean; query: strin
         }
         return null;
       })}
+      {loadNext ? (
+        <Button onClick={loadNext} variant="ghost">
+          Load more results
+        </Button>
+      ) : null}
     </VStack>
   );
 };

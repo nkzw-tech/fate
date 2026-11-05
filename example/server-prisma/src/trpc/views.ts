@@ -195,13 +195,11 @@ const search = list<typeof searchMembers, AppContext>(searchMembers, {
       ctx.prisma.post.findMany({
         orderBy: { id: 'asc' },
         select: { id: true },
-        take: 20,
         where: { OR: [{ title: contains }, { content: contains }] },
       }),
       ctx.prisma.user.findMany({
         orderBy: { id: 'asc' },
         select: { id: true },
-        take: 20,
         where: { name: contains },
       }),
     ]);

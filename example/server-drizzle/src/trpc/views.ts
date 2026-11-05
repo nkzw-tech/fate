@@ -168,14 +168,8 @@ const search = list<typeof searchMembers, AppContext>(searchMembers, {
         .select({ id: post.id })
         .from(post)
         .where(or(ilike(post.title, contains), ilike(post.content, contains)))
-        .orderBy(post.id)
-        .limit(20),
-      ctx.db
-        .select({ id: user.id })
-        .from(user)
-        .where(ilike(user.name, contains))
-        .orderBy(user.id)
-        .limit(20),
+        .orderBy(post.id),
+      ctx.db.select({ id: user.id }).from(user).where(ilike(user.name, contains)).orderBy(user.id),
     ]);
     return getMixedSearchPage(posts, users, cursor, direction, take);
   },

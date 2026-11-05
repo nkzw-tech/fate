@@ -22,12 +22,10 @@ builder.queryFields((t) => ({
       const [posts, users] = await Promise.all([
         prisma.post.findMany({
           orderBy: { id: 'asc' },
-          take: 20,
           where: { OR: [{ title: contains }, { content: contains }] },
         }),
         prisma.user.findMany({
           orderBy: { id: 'asc' },
-          take: 20,
           where: { name: contains },
         }),
       ]);
