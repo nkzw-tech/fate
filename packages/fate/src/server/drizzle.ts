@@ -301,7 +301,7 @@ const mapWithConcurrency = async <Input, Output>(
   return results;
 };
 
-const buildConnection = <TNode extends { id: string }>({
+const buildConnection = <TNode extends { id: string | number }>({
   cursor,
   direction,
   items,
@@ -315,7 +315,7 @@ const buildConnection = <TNode extends { id: string }>({
   const hasMore = items.length > pageSize;
   const limitedItems = direction === 'forward' ? items.slice(0, pageSize) : items.slice(-pageSize);
   const connectionItems = limitedItems.map((node) => ({
-    cursor: node.id,
+    cursor: String(node.id),
     node,
   }));
   const firstItem = connectionItems[0];
@@ -1224,7 +1224,7 @@ export function createDrizzleSourceAdapter<Context>({
     return buildConnection({
       cursor,
       direction,
-      items: hydrated as Array<AnyRecord & { id: string }>,
+      items: hydrated as Array<AnyRecord & { id: string | number }>,
       pageSize,
     });
   };
@@ -1336,7 +1336,7 @@ export function createDrizzleSourceAdapter<Context>({
     return buildConnection({
       cursor,
       direction,
-      items: hydrated as Array<AnyRecord & { id: string }>,
+      items: hydrated as Array<AnyRecord & { id: string | number }>,
       pageSize,
     });
   };

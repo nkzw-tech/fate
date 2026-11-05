@@ -70,3 +70,58 @@ test('native Drizzle lists can paginate using cursors from numeric primary keys'
     sqlite.close();
   }
 });
+
+test('nested Drizzle lists can paginate using cursors from numeric primary keys', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE Post (id TEXT PRIMARY KEY);
+    CREATE TABLE Comment (id INTEGER PRIMARY KEY, postId TEXT);
+    INSERT INTO Post VALUES ('post');
+    INSERT INTO Comment VALUES (1, 'post'), (2, 'post');
+  `);
+  try {
+    const db = drizzle(async (sql, params) => {
+      const statement = sqlite.prepare(sql);
+      statement.setReturnArrays(true);
+      return { rows: statement.all(...params) };
+    });
+    const posts = sqliteTable('Post', { id: text('id').primaryKey() });
+    const comments = sqliteTable('Comment', {
+      id: integer('id').primaryKey(),
+      postId: text('postId'),
+    });
+    type Comment = { id: number; postId: string };
+    const commentView = dataView<Comment>('Comment')({ id: true });
+    const postView = dataView<{ comments: Array<Comment>; id: string }>('Post')({
+      comments: list(commentView),
+      id: true,
+    });
+    const adapter = createDrizzleSourceAdapter({
+      db,
+      views: [
+        { table: comments, view: commentView },
+        {
+          relations: { comments: { foreignKey: 'postId', localKey: 'id' } },
+          table: posts,
+          view: postView,
+        },
+      ],
+    });
+    const page = async (args: Record<string, unknown>) =>
+      (
+        await adapter.resolveById({
+          ctx: {},
+          id: 'post',
+          input: { args: { comments: args }, select: ['comments.id'] },
+          view: postView,
+        })
+      )?.comments as ConnectionResult<Comment>;
+
+    const first = await page({ first: 1 });
+    const second = await page({ after: first.pagination.nextCursor, first: 1 });
+    expect(second.items).toEqual([{ cursor: '2', node: { id: 2 } }]);
+    expect(first.pagination.nextCursor).toBe('1');
+  } finally {
+    sqlite.close();
+  }
+});
