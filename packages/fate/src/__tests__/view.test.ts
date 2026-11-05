@@ -304,6 +304,9 @@ test('preserves distinct view ids across reloads with remapped paths', async () 
     vi.resetModules();
     const viewTags = await loadViewTags();
     expect(new Set(viewTags).size).toBe(2);
+    for (const tag of viewTags) {
+      expect(tag).toMatch(/view\.test\.ts:\d+:\d+$/);
+    }
 
     vi.resetModules();
     expect(viewTags).toEqual(await loadViewTags());
