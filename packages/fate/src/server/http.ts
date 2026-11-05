@@ -251,6 +251,7 @@ export type InferFateAPI<Server> = Server extends { readonly __api?: infer API }
 export type FateServerManifest = Readonly<{
   lists: Record<string, { type: string }>;
   live: Record<string, true>;
+  liveConnections?: true;
   mutations: Record<string, { type: string }>;
   queries: Record<string, { type: string }>;
   types: Record<string, true>;
@@ -886,6 +887,7 @@ export function createFateServer<
     live: liveBus
       ? Object.fromEntries([...sourcesByType.keys()].sort().map((type) => [type, true] as const))
       : {},
+    ...(liveBus ? { liveConnections: true as const } : null),
     mutations: Object.fromEntries(
       Object.entries(mutations ?? {})
         .map(([name, mutation]) => [name, { type: mutation.type }] as const)

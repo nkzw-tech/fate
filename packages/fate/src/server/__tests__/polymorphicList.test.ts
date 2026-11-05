@@ -82,7 +82,7 @@ test.each(['native', 'trpc'] as const)(
       },
     );
     const Root = { feed };
-    const fateServer = createFateServer({ roots: Root, sources });
+    const fateServer = createFateServer({ live: createLiveEventBus(), roots: Root, sources });
     const t = initTRPC.create();
     const procedures = bindViewProcedures({
       ...sources,
@@ -122,6 +122,12 @@ test.each(['native', 'trpc'] as const)(
     });
     expect(generated).toContain('possibleTypes: ["Post","User"]');
     expect(generated).toContain('mixedLists: ["feed"]');
+    expect(generated).toContain(
+      kind === 'native'
+        ? 'live: true'
+        : 'transport.subscribeConnection = liveTransport.subscribeConnection',
+    );
+    expect(fateServer.manifest.live).toEqual({});
 
     const client = createClient<[typeof roots, Record<never, never>]>({ roots, transport, types });
     type PostResult = Post & { __typename: 'Post' };

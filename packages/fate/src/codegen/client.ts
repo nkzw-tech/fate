@@ -310,7 +310,9 @@ export const createClientSource = ({
     ? `      queries: {\n${indentBlock(queriesBlockContent, 8)}\n      },\n`
     : '';
   const trpcFateServer = moduleExports.fateServer?.manifest ? moduleExports.fateServer : null;
-  const hasLive = Object.keys(trpcFateServer?.manifest.live ?? {}).length > 0;
+  const hasLive =
+    trpcFateServer?.manifest.liveConnections === true ||
+    Object.keys(trpcFateServer?.manifest.live ?? {}).length > 0;
   const liveOptions = hasLive
     ? `fetch?: typeof fetch;
 headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
@@ -939,10 +941,11 @@ const createNativeClientSource = ({
   );
   const manifest = fateServer.manifest as {
     live?: Record<string, true>;
+    liveConnections?: true;
     mutations?: Record<string, { type: string }>;
     types?: Record<string, true>;
   };
-  const hasLive = Object.keys(manifest.live ?? {}).length > 0;
+  const hasLive = manifest.liveConnections === true || Object.keys(manifest.live ?? {}).length > 0;
   const mixedLists = indentBlock(formatMixedLists({ roots, types }), 2);
 
   const byIdEntries = Object.keys(manifest.types ?? {})

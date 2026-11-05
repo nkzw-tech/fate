@@ -1043,6 +1043,7 @@ test('exposes a manifest for code generation', () => {
   expect(fate.manifest).toEqual({
     lists: { posts: { type: 'Post' } },
     live: { Post: true, User: true },
+    liveConnections: true,
     mutations: {
       'post.explode': { type: 'Post' },
       'post.like': { type: 'Post' },
