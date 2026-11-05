@@ -42,7 +42,11 @@ export function useListView<
   );
   const getSnapshot = useCallback(() => reader?.getSnapshot(), [reader]);
 
-  const listState = useDeferredValue(useSyncExternalStore(subscribe, getSnapshot, getSnapshot));
+  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const snapshot = useMemo(() => ({ reader, state: current }), [reader, current]);
+  const deferred = useDeferredValue(snapshot);
+  // Defer updates within a connection. A different reader needs its own items and cursors.
+  const listState = deferred.reader === reader ? deferred.state : current;
   const pagination = listState?.pagination ?? resolvedConnection?.pagination;
   const hasNext = Boolean(pagination?.hasNext);
   const hasPrevious = Boolean(pagination?.hasPrevious);
