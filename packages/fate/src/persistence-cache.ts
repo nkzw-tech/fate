@@ -19,7 +19,7 @@ import {
   yieldPersistenceTask,
 } from './persistence-utils.ts';
 import type { PersistenceStorage } from './persistence.ts';
-import { isRecord } from './record.ts';
+import { isRecord, setRecordValue } from './record.ts';
 import { parseEntityId } from './ref.ts';
 import { toEntityId } from './ref.ts';
 import { getRefetchFields } from './refetch.ts';
@@ -121,24 +121,62 @@ const projectRecord = (value: RecordValue, paths: Array<string>): RecordValue =>
   };
 };
 
+const isWithinPath = (path: string, field: string) =>
+  path === field || path.startsWith(`${field}.`);
+
+const patchRecord = (before: AnyRecord, after: AnyRecord, fields: Set<string>): AnyRecord => {
+  const record = { ...before };
+  const nested = new Map<string, Set<string>>();
+  for (const path of fields) {
+    if (Object.hasOwn(after, path)) {
+      setRecordValue(record, path, after[path]);
+      continue;
+    }
+    const dot = path.indexOf('.');
+    if (dot !== -1) {
+      const field = path.slice(0, dot);
+      let paths = nested.get(field);
+      if (!paths) {
+        paths = new Set();
+        nested.set(field, paths);
+      }
+      paths.add(path.slice(dot + 1));
+    }
+  }
+  for (const [field, paths] of nested) {
+    if (!fields.has(field) && Object.hasOwn(after, field)) {
+      const oldValue = Object.hasOwn(before, field) ? before[field] : undefined;
+      const value = after[field];
+      setRecordValue(
+        record,
+        field,
+        isRecord(oldValue) && isRecord(value) ? patchRecord(oldValue, value, paths) : value,
+      );
+    }
+  }
+  return record;
+};
+
 const applyRecordUpdate = (
   before: RecordValue,
   after: RecordValue,
   fields?: Set<string>,
-): RecordValue => ({
-  paths: [
-    ...new Set([
-      ...before.paths.filter((path) => fields && !fields.has(path.split('.')[0])),
-      ...after.paths.filter((path) => !fields || fields.has(path.split('.')[0])),
-    ]),
-  ],
-  record: {
-    ...before.record,
-    ...Object.fromEntries(
-      Object.entries(after.record).filter(([key]) => !fields || fields.has(key)),
-    ),
-  },
-});
+): RecordValue => {
+  if (!fields) {
+    return { paths: after.paths, record: { ...before.record, ...after.record } };
+  }
+  const changed = [...fields];
+  return {
+    paths: [
+      ...new Set([
+        ...before.paths.filter((path) => !changed.some((field) => isWithinPath(path, field))),
+        ...after.paths.filter((path) => changed.some((field) => isWithinPath(path, field))),
+        ...changed.filter((field) => after.paths.some((path) => isWithinPath(field, path))),
+      ]),
+    ],
+    record: patchRecord(before.record, after.record, fields),
+  };
+};
 
 // Apply this tab's membership changes to the latest saved list. Common IDs
 // missing from disk were removed by another tab and must not be resurrected.
@@ -522,7 +560,7 @@ export class PersistenceCache {
     if (!this.suppressed && change) {
       const selected =
         change.kind === 'record' && change.paths
-          ? new Set([...change.paths].map((path) => path.split('.')[0]))
+          ? new Set(change.patchPaths ?? change.paths)
           : undefined;
       if (change.kind === 'record') {
         const id = recordKey(change.key);

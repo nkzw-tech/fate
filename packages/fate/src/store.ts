@@ -78,6 +78,7 @@ export type StoreChange =
   | Readonly<{
       key: EntityId;
       kind: 'record';
+      patchPaths?: ReadonlySet<string>;
       paths?: Iterable<string>;
       referencesChanged: boolean;
     }>;
@@ -132,6 +133,33 @@ const isPlainRecord = (value: unknown): value is AnyRecord => {
 
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+};
+
+// Confirmed writes can carry a merged embedded object. Record which leaves
+// actually changed so persistence can apply the write to another tab's value.
+const collectRecordPatchPaths = (
+  paths: Set<string>,
+  before: unknown,
+  after: unknown,
+  path: string,
+  selected: ReadonlyArray<string>,
+  replaced: ReadonlyArray<string>,
+) => {
+  if (Object.is(before, after)) {
+    return;
+  }
+  if (
+    isPlainRecord(before) &&
+    isPlainRecord(after) &&
+    !replaced.includes(path) &&
+    selected.some((entry) => entry.startsWith(`${path}.`))
+  ) {
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      collectRecordPatchPaths(paths, before[key], after[key], `${path}.${key}`, selected, replaced);
+    }
+  } else {
+    paths.add(path);
+  }
 };
 
 export const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
@@ -676,7 +704,7 @@ export class Store {
     }
     const change = this.mergeInternal(id, partial, paths, replacedPaths);
     if (change) {
-      this.notify(id, change.paths, true, change.referencesChanged);
+      this.notify(id, change.paths, true, change.referencesChanged, change.patchPaths);
     }
   }
 
@@ -685,7 +713,11 @@ export class Store {
     partial: AnyRecord,
     paths: Iterable<string>,
     replacedPaths: Iterable<string> = [],
-  ): { paths: ReadonlySet<string>; referencesChanged: boolean } | null {
+  ): {
+    patchPaths?: ReadonlySet<string>;
+    paths: ReadonlySet<string>;
+    referencesChanged: boolean;
+  } | null {
     this.captureRecord(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
     const selection = isCoverageSelection(selectedPaths) ? selectedPaths : undefined;
@@ -757,10 +789,23 @@ export class Store {
 
     if (previous) {
       let hasChanges = changedPaths.size > 0;
+      const patchPaths = coveragePaths.some((path) => path.includes('.'))
+        ? new Set(changedPaths)
+        : undefined;
       for (const [key, value] of Object.entries(partial)) {
         if (previous[key] !== value) {
           hasChanges = true;
           changedPaths.add(key);
+          if (patchPaths) {
+            collectRecordPatchPaths(
+              patchPaths,
+              previous[key],
+              value,
+              key,
+              coveragePaths,
+              replacements,
+            );
+          }
         }
       }
 
@@ -772,7 +817,7 @@ export class Store {
       const referencesChanged = this.recordReferencesChanged(previous, nextRecord, changedPaths);
       this.records.set(id, nextRecord);
       this.updateRecordReferenceIndexes(id, previous, nextRecord, changedPaths);
-      return { paths: changedPaths, referencesChanged };
+      return { patchPaths, paths: changedPaths, referencesChanged };
     } else {
       const nextRecord = { ...partial };
       this.records.set(id, nextRecord);
@@ -862,9 +907,10 @@ export class Store {
     paths?: Iterable<string>,
     confirmed = true,
     referencesChanged = false,
+    patchPaths?: ReadonlySet<string>,
   ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.({ key: id, kind: 'record', paths, referencesChanged });
+      this.onChange?.({ key: id, kind: 'record', patchPaths, paths, referencesChanged });
     }
     if (this.rebase) {
       return;
