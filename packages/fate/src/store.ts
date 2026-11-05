@@ -72,6 +72,7 @@ export type StoreHydrationState = Readonly<{
   coverage: ReadonlyArray<readonly [EntityId, ReadonlyArray<string>]>;
   lists: ReadonlyArray<readonly [string, List]>;
   records: ReadonlyArray<readonly [EntityId, AnyRecord]>;
+  stale?: ReadonlyArray<readonly [EntityId, ReadonlyArray<string>]>;
 }>;
 
 export type StoreChange =
@@ -252,6 +253,7 @@ const areListIdsEqual = (
 
 export class Store {
   private coverage = new Map<EntityId, FieldMask>();
+  private readonly stalePaths = new Map<EntityId, ReadonlyArray<string>>();
   private readonly sharedCoverage = new WeakMap<FieldMask, ReadonlyArray<string>>();
   private listKeysByOwnerField: ReferenceIndex = new Map();
   private listKeysByReferencedEntity: ReferenceIndex = new Map();
@@ -547,7 +549,10 @@ export class Store {
     const snapshot = this.optimisticBase.records.get(id);
     const record = snapshot ? snapshot.record : this.records.get(id);
     const mask = snapshot ? snapshot.mask : this.coverage.get(id);
-    return record ? { paths: mask ? toPaths(mask) : [], record } : undefined;
+    const stale = this.stalePaths.get(id);
+    return record
+      ? { paths: mask ? toPaths(mask) : [], record, ...(stale && { stale }) }
+      : undefined;
   }
 
   /** @internal */
@@ -584,6 +589,7 @@ export class Store {
       coverage: [...coverage].map(([id, mask]) => [id, toPaths(mask)]),
       lists: [...lists],
       records: [...records],
+      ...(this.stalePaths.size && { stale: [...this.stalePaths] }),
     };
   }
 
@@ -592,6 +598,7 @@ export class Store {
       coverage: [...this.coverage].map(([id, mask]) => [id, toPaths(mask)]),
       lists: [...this.lists],
       records: [...this.records],
+      ...(this.stalePaths.size && { stale: [...this.stalePaths] }),
     };
   }
 
@@ -636,6 +643,12 @@ export class Store {
       }
     }
 
+    if (mode === 'replace') {
+      this.stalePaths.clear();
+    }
+    for (const [id, paths] of state.stale ?? []) {
+      this.restoreRecordStaleness(id, paths, mode === 'replace');
+    }
     this.coverage = coverage;
     this.lists = lists;
     this.records = records;
@@ -699,11 +712,33 @@ export class Store {
     partial: AnyRecord,
     paths: Iterable<string>,
     replacedPaths: Iterable<string> = [],
+    refresh = false,
   ): void {
     if (!this.rebase && this.optimisticLayers.size) {
-      return this.update(() => this.merge(id, partial, paths, replacedPaths));
+      return this.update(() => this.merge(id, partial, paths, replacedPaths, refresh));
     }
+    const stale = refresh && !this.recordingLayer ? this.stalePaths.get(id) : undefined;
+    const refreshed = stale ? new Set([...paths, ...replacedPaths]) : undefined;
     const change = this.mergeInternal(id, partial, paths, replacedPaths);
+    if (stale && refreshed) {
+      const mask = fromPaths(refreshed);
+      const remaining = stale.filter((path) => !isCovered(mask, path));
+      if (remaining.length !== stale.length) {
+        if (remaining.length) {
+          this.stalePaths.set(id, remaining);
+        } else {
+          this.stalePaths.delete(id);
+        }
+        this.notify(
+          id,
+          new Set([...refreshed, ...(change?.paths ?? [])]),
+          true,
+          change?.referencesChanged,
+          new Set([...refreshed, ...(change?.patchPaths ?? change?.paths ?? [])]),
+        );
+        return;
+      }
+    }
     if (change) {
       this.notify(id, change.paths, true, change.referencesChanged, change.patchPaths);
     }
@@ -840,9 +875,39 @@ export class Store {
       this.records.delete(id);
       this.coverage.delete(id);
       if (!this.recordingLayer) {
+        this.stalePaths.delete(id);
         this.onChange?.({ key: id, kind: 'record', referencesChanged: true });
       }
     });
+  }
+
+  invalidateRecord(id: EntityId) {
+    const mask = this.coverage.get(id);
+    const paths = mask && toPaths(mask);
+    if (paths?.length) {
+      this.stalePaths.set(id, paths);
+      this.notify(id);
+    }
+  }
+
+  /** @internal Only restore staleness for fields supplied by the incoming cache. */
+  restoreRecordStaleness(id: EntityId, paths?: ReadonlyArray<string>, replace = false) {
+    const incoming = paths?.filter((path) => replace || !this.hasCoverage(id, path));
+    if (incoming?.length) {
+      this.stalePaths.set(id, [...new Set([...(this.stalePaths.get(id) ?? []), ...incoming])]);
+    }
+  }
+
+  hasStaleRecord(id: EntityId) {
+    return this.stalePaths.has(id);
+  }
+
+  hasStalePath(id: EntityId, path: string) {
+    return this.stalePaths
+      .get(id)
+      ?.some(
+        (stale) => stale === path || stale.startsWith(`${path}.`) || path.startsWith(`${stale}.`),
+      );
   }
 
   missingForSelection(id: EntityId, paths: Iterable<string>): Set<string> {
@@ -1141,6 +1206,7 @@ export class Store {
       }
       this.records.delete(id);
       this.coverage.delete(id);
+      this.stalePaths.delete(id);
       options.onRecordDeleted?.(id);
     }
 

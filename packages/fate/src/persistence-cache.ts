@@ -40,7 +40,7 @@ type Root = {
 };
 type StoredValue<T> = { bytes: number; value: T };
 type PutEntry = readonly [key: string, value: unknown, previousBytes?: number];
-type RecordValue = { paths: Array<string>; record: AnyRecord };
+type RecordValue = { paths: Array<string>; record: AnyRecord; stale?: ReadonlyArray<string> };
 type CacheUpdate = {
   fields?: Array<string>;
   previousList?: List;
@@ -115,7 +115,11 @@ const pathsOverlap = (path: string, selected: string) =>
   path === selected || path.startsWith(`${selected}.`) || selected.startsWith(`${path}.`);
 const projectRecord = (value: RecordValue, paths: Array<string>): RecordValue => {
   const fields = new Set(['id', '__typename', ...paths.map((path) => path.split('.')[0])]);
+  const stale = value.stale?.filter((path) =>
+    paths.some((selected) => pathsOverlap(path, selected)),
+  );
   return {
+    ...(stale?.length && { stale }),
     paths: value.paths.filter((path) => paths.some((selected) => pathsOverlap(path, selected))),
     record: Object.fromEntries(Object.entries(value.record).filter(([field]) => fields.has(field))),
   };
@@ -163,10 +167,19 @@ const applyRecordUpdate = (
   fields?: Set<string>,
 ): RecordValue => {
   if (!fields) {
-    return { paths: after.paths, record: { ...before.record, ...after.record } };
+    return {
+      paths: after.paths,
+      record: { ...before.record, ...after.record },
+      stale: after.stale,
+    };
   }
   const changed = [...fields];
+  const stale = [
+    ...(before.stale ?? []).filter((path) => !changed.some((field) => isWithinPath(path, field))),
+    ...(after.stale ?? []).filter((path) => changed.some((field) => isWithinPath(path, field))),
+  ];
   return {
+    ...(stale.length && { stale }),
     paths: [
       ...new Set([
         ...before.paths.filter((path) => !changed.some((field) => isWithinPath(path, field))),
@@ -375,7 +388,8 @@ export class PersistenceCache {
     const previousRecords = new Map(previous?.records);
     const previousCoverage = new Map(previous?.coverage);
     const previousLists = new Map(previous?.lists);
-    const ids = new Set<string>(previousRecords.keys());
+    const previousStale = new Map(previous?.stale);
+    const ids = new Set<string>([...previousRecords.keys(), ...(command.invalidateRecords ?? [])]);
     const config =
       command.entity === '__value__' ? undefined : this.client.getTypeConfig(command.entity);
     for (const input of [command.input, command.optimistic]) {
@@ -423,6 +437,7 @@ export class PersistenceCache {
     }
     const records: Array<readonly [string, AnyRecord]> = [];
     const coverage: Array<readonly [string, Array<string>]> = [];
+    const stale: Array<readonly [string, ReadonlyArray<string>]> = [];
     const visit = (value: unknown) => {
       if (isNodeRef(value)) {
         ids.add(getNodeRefId(value));
@@ -440,7 +455,11 @@ export class PersistenceCache {
       const key = recordKey(id);
       const saved = previousRecords.get(id);
       const before = saved
-        ? { paths: [...(previousCoverage.get(id) ?? [])], record: saved }
+        ? {
+            paths: [...(previousCoverage.get(id) ?? [])],
+            record: saved,
+            stale: previousStale.get(id),
+          }
         : undefined;
       const memory = this.client.store.readConfirmed(id);
       const disk = memory || before ? undefined : await this.node(key);
@@ -470,6 +489,9 @@ export class PersistenceCache {
       if (value) {
         records.push([id, value.record]);
         coverage.push([id, value.paths]);
+        if (value.stale) {
+          stale.push([id, value.stale]);
+        }
         visit(value.record);
         for (const [field, entry] of Object.entries(value.record)) {
           if (Array.isArray(entry)) {
@@ -504,7 +526,7 @@ export class PersistenceCache {
           ],
         ],
         rootRequests: [],
-        store: { coverage, lists: listValues, records },
+        store: { coverage, lists: listValues, records, ...(stale.length && { stale }) },
       }),
       scope: this.client.getPersistenceScope(),
       version: 1,
@@ -982,12 +1004,15 @@ export class PersistenceCache {
             rootLists: [],
             rootRequests: [],
             rootValues: [],
-            store: { coverage: [], lists: [], records: [] },
+            store: { coverage: [], lists: [], records: [], stale: [] },
           };
           if (key.startsWith('r:')) {
             const value = node.value as RecordValue;
             (state.store.records as Array<unknown>).push([id, value.record]);
             (state.store.coverage as Array<unknown>).push([id, value.paths]);
+            if (value.stale) {
+              (state.store.stale as Array<unknown>).push([id, value.stale]);
+            }
           } else if (key.startsWith('l:')) {
             (state.store.lists as Array<unknown>).push([id, node.value]);
             for (const item of request.items) {

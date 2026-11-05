@@ -420,7 +420,7 @@ const listKeys = new Set([
 ]);
 const paginationKeys = new Set(['hasNext', 'hasPrevious', 'nextCursor', 'previousCursor']);
 const clientStateKeys = new Set(['rootLists', 'rootRequests', 'rootValues', 'store']);
-const storeStateKeys = new Set(['coverage', 'lists', 'records']);
+const storeStateKeys = new Set(['coverage', 'lists', 'records', 'stale']);
 
 const isEntry = (value: unknown): value is [string, unknown] =>
   Array.isArray(value) && value.length === 2 && typeof value[0] === 'string';
@@ -506,7 +506,8 @@ export const decodeClientHydrationState = (
     !hasOnlyKeys(decoded.store, storeStateKeys) ||
     !Array.isArray(decoded.store.coverage) ||
     !Array.isArray(decoded.store.lists) ||
-    !Array.isArray(decoded.store.records)
+    !Array.isArray(decoded.store.records) ||
+    (decoded.store.stale !== undefined && !Array.isArray(decoded.store.stale))
   ) {
     throw invalidPayload('data');
   }
@@ -517,6 +518,9 @@ export const decodeClientHydrationState = (
       (entry) => !isEntry(entry) || (entry[1] !== null && typeof entry[1] !== 'string'),
     ) ||
     (decoded.rootValues as Array<unknown> | undefined)?.some((entry) => !isEntry(entry)) ||
+    (decoded.store.stale as Array<unknown> | undefined)?.some(
+      (entry) => !isEntry(entry) || !isFieldPathArray(entry[1]),
+    ) ||
     decoded.store.coverage.some((entry) => !isEntry(entry) || !isFieldPathArray(entry[1])) ||
     decoded.store.lists.some((entry) => !isEntry(entry) || !isList(entry[1])) ||
     decoded.store.records.some((entry) => !isEntry(entry) || !isRecord(entry[1]))
@@ -528,6 +532,7 @@ export const decodeClientHydrationState = (
     hasDuplicateEntries(decoded.rootLists) ||
     hasDuplicateEntries(decoded.rootRequests) ||
     (decoded.rootValues && hasDuplicateEntries(decoded.rootValues as Array<unknown>)) ||
+    (decoded.store.stale && hasDuplicateEntries(decoded.store.stale as Array<unknown>)) ||
     hasDuplicateEntries(decoded.store.coverage) ||
     hasDuplicateEntries(decoded.store.lists) ||
     hasDuplicateEntries(decoded.store.records) ||

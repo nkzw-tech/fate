@@ -75,7 +75,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
 
-- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Lists marked stale by a [mutation](/guide/actions#invalidating-lists) are fetched again.
+- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Data marked stale by a mutation is fetched again. See [invalidating lists](/guide/actions#invalidating-lists) and [invalidating records](/guide/actions#invalidating-records).
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
 - `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.

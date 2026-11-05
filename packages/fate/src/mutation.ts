@@ -18,6 +18,7 @@ import type {
   ConnectionMetadata,
   Deferred,
   Entity,
+  EntityId,
   MutationDefinition,
   MutationEntity,
   MutationIdentifier,
@@ -29,6 +30,7 @@ import type {
   TypeConfig,
   ValidateSelection,
   View,
+  ViewRef,
   __FateEntityBrand,
   __FateSelectionBrand,
 } from './types.ts';
@@ -60,11 +62,13 @@ export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__va
 /** Where (or if) to insert the resulting record into relevant lists. */
 export type InsertPosition = 'after' | 'before' | 'none';
 
-export type ResolvedInsertionTarget<TName extends string> =
+type ResolvedInsertionTarget<TName extends string> =
   | ReadonlyArray<Readonly<{ __typename: TName }> | null>
   | Readonly<{
       items: ReadonlyArray<Readonly<{ node: Readonly<{ __typename: TName }> | null }>>;
     }>;
+
+export type InvalidationTarget = ResolvedInsertionTarget<string> | ViewRef<string>;
 
 /** A list, connection, or deferred list reference returned by this client. */
 export type InsertionTarget<TName extends string = string> =
@@ -135,8 +139,8 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   /** Input data for the mutation. */
   input: Omit<MutationInput<Identifier>, 'select'>;
   insert?: MutationInsertion<MutationEntity<Identifier>['__typename']>;
-  /** Mark these lists stale after the server confirms the mutation. */
-  invalidate?: ReadonlyArray<ResolvedInsertionTarget<string>>;
+  /** Mark these lists or records stale after the server confirms the mutation. */
+  invalidate?: ReadonlyArray<InvalidationTarget>;
   /** Optional optimistic update to apply immediately. */
   optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
   /** Skip durable delivery for this call, even when persistence is configured. */
@@ -349,6 +353,7 @@ export type MutationCommand = {
   input: AnyRecord;
   insert: ResolvedMutationInsertion;
   invalidate?: ReadonlyArray<string>;
+  invalidateRecords?: ReadonlyArray<EntityId>;
   key: string;
   optimistic?: AnyRecord;
   plan?: SelectionPlan;
@@ -361,27 +366,17 @@ export function prepareMutation(
   config: TypeConfig | undefined,
   durable = false,
 ) {
-  const {
-    args,
-    delete: deleteRecord,
-    entity,
-    input,
-    insert,
-    invalidate,
-    key,
-    optimistic,
-    plan,
-  } = command;
+  const { args, delete: deleteRecord, entity, input, insert, key, optimistic, plan } = command;
   const position = typeof insert === 'string' ? insert : 'none';
   if (!config) {
     if (deleteRecord || optimistic) {
       throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
     }
-    const release = client.retainMutationLists(insert, invalidate);
+    const release = client.retainMutationTargets(command);
     return {
       commit: (_result: unknown) => {
         try {
-          client.invalidateMutationLists(invalidate);
+          client.invalidateMutationTargets(command);
         } finally {
           release();
         }
@@ -414,7 +409,7 @@ export function prepareMutation(
   if (deleteRecord && id == null) {
     throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
   }
-  const release = client.retainMutationLists(insert, invalidate);
+  const release = client.retainMutationTargets(command);
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
   try {
     settle = client.store.optimisticUpdate(() => {
@@ -470,7 +465,7 @@ export function prepareMutation(
           if (deleteRecord && id != null) {
             client.deleteRecord(entity, id);
           }
-          client.invalidateMutationLists(invalidate);
+          client.invalidateMutationTargets(command);
         });
       } finally {
         release();
@@ -514,7 +509,7 @@ export function wrapMutation<
       entity: identifier.entity,
       input,
       insert: client.resolveMutationInsertion(identifier.entity, insert),
-      ...(invalidate && { invalidate: client.resolveMutationInvalidation(invalidate) }),
+      ...(invalidate && client.resolveMutationInvalidation(invalidate)),
       key: identifier.key,
       optimistic: optimistic as AnyRecord | undefined,
       plan: view
@@ -525,9 +520,7 @@ export function wrapMutation<
     };
     // Durable admission can await restoration and disk writes before preparation
     // acquires its own pins. Keep the caller's targets alive throughout that gap.
-    const release = client.persistence
-      ? client.retainMutationLists(command.insert, command.invalidate)
-      : undefined;
+    const release = client.persistence ? client.retainMutationTargets(command) : undefined;
     try {
       if (client.persistence && persist !== false) {
         try {

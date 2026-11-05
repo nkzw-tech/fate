@@ -105,7 +105,10 @@ const decodeCommand = (value: Encoded): MutationCommand => {
     !isResolvedMutationInsertion(command.insert) ||
     (command.invalidate !== undefined &&
       (!Array.isArray(command.invalidate) ||
-        !command.invalidate.every((key) => typeof key === 'string')))
+        !command.invalidate.every((key) => typeof key === 'string'))) ||
+    (command.invalidateRecords !== undefined &&
+      (!Array.isArray(command.invalidateRecords) ||
+        !command.invalidateRecords.every((id) => typeof id === 'string')))
   ) {
     throw new Error('fate: Invalid persisted mutation.');
   }

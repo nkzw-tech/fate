@@ -42,7 +42,7 @@ import {
   type MutationInsertion,
   type ResolvedInsertion,
   type ResolvedMutationInsertion,
-  type ResolvedInsertionTarget,
+  type InvalidationTarget,
   type MutationCommand,
   wrapAction,
   wrapMutation,
@@ -224,6 +224,21 @@ const normalizationId = (config: TypeConfig, record: AnyRecord, input?: Normaliz
 
 const emptySet = new Set<string>();
 const emptyDispose = () => undefined;
+const retainTargets = (targets: Map<string, number>, keys: Iterable<string>) => {
+  for (const key of keys) {
+    targets.set(key, (targets.get(key) ?? 0) + 1);
+  }
+  return () => {
+    for (const key of keys) {
+      const count = targets.get(key)!;
+      if (count === 1) {
+        targets.delete(key);
+      } else {
+        targets.set(key, count - 1);
+      }
+    }
+  };
+};
 const compareStrings = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
 const getDefaultHydrationScope = (
@@ -753,6 +768,7 @@ export class FateClient<
   private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
   private readonly deferredTargets = new WeakMap<object, string>();
   private readonly mutationLists = new Map<string, number>();
+  private readonly mutationRecords = new Map<EntityId, number>();
   private readonly pendingViews = new Map<
     string,
     {
@@ -1105,7 +1121,9 @@ export class FateClient<
   restorePersistenceData(state: ClientHydrationState) {
     this.store.update(() => {
       const coverage = new Map(state.store.coverage);
+      const stale = new Map(state.store.stale);
       for (const [id, record] of state.store.records) {
+        this.store.restoreRecordStaleness(id, stale.get(id));
         const existing = this.store.read(id);
         const paths = coverage.get(id) ?? [];
         this.store.merge(
@@ -1286,27 +1304,50 @@ export class FateClient<
   }
 
   /** @internal Resolve invalidation targets before starting the mutation. */
-  resolveMutationInvalidation(targets: ReadonlyArray<ResolvedInsertionTarget<string>>) {
-    return [
-      ...new Set(
-        targets.map((target) => {
-          const metadata = this.listTargets.get(target);
-          if (!metadata) {
-            throw new Error('fate: Invalidation requires a list returned by this client.');
-          }
-          return metadata.key;
-        }),
-      ),
-    ];
+  resolveMutationInvalidation(targets: ReadonlyArray<InvalidationTarget>) {
+    const lists = new Set<string>();
+    const records = new Set<EntityId>();
+    for (const target of targets) {
+      const metadata = this.listTargets.get(target);
+      if (metadata) {
+        lists.add(metadata.key);
+      } else if (
+        isRecord(target) &&
+        ViewsTag in target &&
+        typeof target.__typename === 'string' &&
+        this.types.has(target.__typename)
+      ) {
+        const entityId = toEntityId(target.__typename, validateId(target.id));
+        records.add(this.resolveEntityId(entityId, target));
+      } else {
+        throw new Error(
+          'fate: Invalidation requires a view ref or a list returned by this client.',
+        );
+      }
+    }
+    return {
+      ...(lists.size && { invalidate: [...lists] }),
+      ...(records.size && { invalidateRecords: [...records] }),
+    };
   }
 
-  /** @internal Mark confirmed list membership stale without evicting the snapshot. */
-  invalidateMutationLists(keys: ReadonlyArray<string> | undefined) {
-    for (const key of keys ?? []) {
-      const list = this.store.getListState(key);
-      if (list) {
-        this.store.setList(key, { ...list, stale: true });
-      }
+  /** @internal Mark confirmed data stale without evicting its snapshot. */
+  invalidateMutationTargets({ invalidate, invalidateRecords }: MutationCommand) {
+    if (invalidate || invalidateRecords) {
+      this.store.update(() => {
+        for (const key of invalidate ?? []) {
+          const list = this.store.getListState(key);
+          if (list) {
+            this.store.setList(key, { ...list, stale: true });
+          }
+        }
+        for (const id of invalidateRecords ?? []) {
+          const entityId = this.resolveEntityId(id);
+          const generation = ++this.writeGeneration;
+          this.acceptWrite(`record:${entityId}`, generation);
+          this.withWriteGeneration(generation, () => this.store.invalidateRecord(entityId));
+        }
+      });
     }
   }
 
@@ -1376,9 +1417,9 @@ export class FateClient<
     return targets;
   }
 
-  /** @internal Keep targeted lists alive until an optimistic or durable operation settles. */
-  retainMutationLists(insert: ResolvedMutationInsertion, invalidate: ReadonlyArray<string> = []) {
-    if (typeof insert === 'string' && invalidate.length === 0) {
+  /** @internal Keep mutation targets alive until an optimistic or durable operation settles. */
+  retainMutationTargets({ insert, invalidate = [], invalidateRecords = [] }: MutationCommand) {
+    if (typeof insert === 'string' && !invalidate.length && !invalidateRecords.length) {
       return () => {};
     }
     const keys = new Set(invalidate);
@@ -1387,19 +1428,15 @@ export class FateClient<
         keys.add(list.key);
       }
     }
-    for (const key of keys) {
-      this.mutationLists.set(key, (this.mutationLists.get(key) ?? 0) + 1);
-    }
+    const releaseLists = retainTargets(this.mutationLists, keys);
+    const releaseRecords = retainTargets(this.mutationRecords, invalidateRecords);
+    let released = false;
     return () => {
-      for (const key of keys) {
-        const count = this.mutationLists.get(key)!;
-        if (count === 1) {
-          this.mutationLists.delete(key);
-        } else {
-          this.mutationLists.set(key, count - 1);
-        }
+      if (!released) {
+        released = true;
+        releaseLists();
+        releaseRecords();
       }
-      keys.clear();
     };
   }
 
@@ -2811,10 +2848,10 @@ export class FateClient<
     return resolution;
   }
 
-  private resolveEntityId(entityId: EntityId, reference: object): EntityId {
-    const owner = this.optimisticRefOwners.get(reference) ?? reference;
+  private resolveEntityId(entityId: EntityId, reference?: object): EntityId {
+    const owner = reference && (this.optimisticRefOwners.get(reference) ?? reference);
     let resolution =
-      this.optimisticRefResolutions.get(owner) ??
+      (owner && this.optimisticRefResolutions.get(owner)) ??
       this.optimisticEntityResolutions.get(entityId)?.deref();
     while (resolution?.next) {
       resolution = resolution.next;
@@ -3601,6 +3638,7 @@ export class FateClient<
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
     optimisticRoots.records.forEach(markRecord);
     optimisticRoots.lists.forEach(markList);
+    this.mutationRecords.forEach((_count, id) => markRecord(this.resolveEntityId(id)));
     for (const key of this.mutationLists.keys()) {
       markList(key);
       const owner = parseListKey(key)?.ownerId;
@@ -3931,6 +3969,13 @@ export class FateClient<
       const field = parts[0];
       const path = prefix ? `${prefix}.${field}` : field;
       const storageKey = getFieldKey(path, plan);
+      if (
+        revalidate &&
+        this.store.hasStaleRecord(id) &&
+        this.store.hasStalePath(id, getStoragePath(parts.join('.'), plan, prefix))
+      ) {
+        return false;
+      }
       const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
       const relation = this.types.get(parseEntityId(id).type)?.fields?.[schemaField(field)];
       if (
@@ -4532,7 +4577,9 @@ export class FateClient<
           signal?.throwIfAborted();
           if (
             completed &&
-            [...read.ids].every((id) => !this.missingForSelection(id, select, plan).size)
+            [...read.ids].every(
+              (id) => !this.missingForSelection(id, select, plan, undefined, true).size,
+            )
           ) {
             return;
           }
@@ -5261,7 +5308,7 @@ export class FateClient<
       normalized.coverage.set(prefix, coverage);
     }
     if (this.applyingGeneration === generation) {
-      this.store.merge(entityId, result, coverage, replacedPaths);
+      this.store.merge(entityId, result, coverage, replacedPaths, !this.mutationWrite);
     } else {
       this.withWriteGeneration(generation, () =>
         this.store.merge(entityId, result, coverage, replacedPaths),

@@ -604,7 +604,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
 
-- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Lists marked stale by a [mutation](/docs/guide/actions.md#invalidating-lists) are fetched again.
+- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Data marked stale by a mutation is fetched again. See [invalidating lists](/docs/guide/actions.md#invalidating-lists) and [invalidating records](/docs/guide/actions.md#invalidating-records).
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
 - `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.
@@ -1473,6 +1473,21 @@ Use the original list or connection returned by the same client. When the mutati
 A successful first-page refresh replaces the old page and its cached continuation pages. You can load more pages again from the new result.
 
 Try this in the regular example. Open **Pagination**, sign in, and choose **Create a post and invalidate this feed**. Then choose **Request this feed (cache-first)** to load the new post.
+
+### Invalidating Records
+
+You can also pass a view ref to `invalidate`. For example, adding a comment can change fields on its parent post that the comment mutation doesn't return:
+
+```tsx
+await fate.mutations.comment.add({
+  input: { content, postId: postRef.id },
+  invalidate: [postRef],
+});
+```
+
+fate marks the post's cached fields stale after the mutation succeeds. The next cache-first request that selects those fields fetches them again. If one request fetches just the title, a later request for the post's content still refreshes it. You can pass both view refs and lists in the same call.
+
+The regular example invalidates the parent post when you add a comment. Sign in, open a post, add a comment, and navigate away and back to see the post request in the Network tab.
 
 ## Persistence
 

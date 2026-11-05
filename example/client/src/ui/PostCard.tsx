@@ -92,6 +92,7 @@ const PostComments = ({
 const CommentInput = ({
   error,
   post,
+  postRef,
 }: {
   error?: unknown;
   post: {
@@ -99,6 +100,7 @@ const CommentInput = ({
     comments: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'Comment'> }> }>;
     id: string;
   };
+  postRef: ViewRef<'Post'>;
 }) => {
   const fate = useFateClient();
   const { data: session } = AuthClient.useSession();
@@ -115,6 +117,7 @@ const CommentInput = ({
     const result = await fate.mutations.comment.add({
       input: { content, postId: post.id },
       insert: { into: post.comments, position: 'after' },
+      invalidate: [postRef],
       optimistic: {
         author: user ? { id: user.id, name: user.name } : null,
         content,
@@ -315,8 +318,12 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
           <Suspense fallback={null}>
             <PostComments comments={post.comments} post={post} />
           </Suspense>
-          <ErrorBoundary fallbackRender={({ error }) => <CommentInput error={error} post={post} />}>
-            <CommentInput post={post} />
+          <ErrorBoundary
+            fallbackRender={({ error }) => (
+              <CommentInput error={error} post={post} postRef={postRef} />
+            )}
+          >
+            <CommentInput post={post} postRef={postRef} />
           </ErrorBoundary>
         </VStack>
       </VStack>
