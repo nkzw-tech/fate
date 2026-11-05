@@ -4,6 +4,23 @@ import { CoverageSelection } from '../mask.ts';
 import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
 
+test('notifies field subscribers when their record is deleted', async () => {
+  const store = new Store();
+  store.merge('Post:1', { title: 'Current' }, ['title']);
+  const listener = vi.fn();
+  const dispose = store.subscribe('Post:1', new Set(['title']), () =>
+    listener(store.read('Post:1')),
+  );
+
+  store.deleteRecord('Post:1');
+  store.deleteRecord('Post:1');
+  await Promise.resolve();
+
+  expect(listener).toHaveBeenCalledOnce();
+  expect(listener).toHaveBeenCalledWith(undefined);
+  dispose();
+});
+
 test('preserves references as index memberships shrink, grow, roll back, and are collected', () => {
   const store = new Store();
   const cache = new ViewDataCache();

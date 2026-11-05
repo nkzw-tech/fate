@@ -906,6 +906,10 @@ export class Store {
       if (!this.recordingLayer) {
         this.stalePaths.delete(id);
         this.onChange?.({ key: id, kind: 'record', referencesChanged: true });
+        if (record && !this.rebase && this.subscriptions.has(id)) {
+          // Let synchronous reference removal or replacement finish before readers refetch.
+          queueMicrotask(() => this.notify(id, undefined, false));
+        }
       }
     });
   }
