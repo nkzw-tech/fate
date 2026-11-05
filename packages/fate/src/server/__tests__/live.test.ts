@@ -106,6 +106,30 @@ test('live event bus yields scoped and global connection events', async () => {
   await otherIterator.return?.();
 });
 
+test('live connection iterators settle concurrent reads in order and release them on return', async () => {
+  const live = createLiveEventBus();
+  const iterator = live.subscribeConnection({ procedure: 'posts' })[Symbol.asyncIterator]();
+  const first = iterator.next();
+  const second = iterator.next();
+
+  live.connection('posts').invalidate({ eventId: 'first' });
+  live.connection('posts', {}).invalidate({ eventId: 'second' });
+
+  try {
+    await expect(second).resolves.toMatchObject({ value: [{ eventId: 'second' }] });
+    await expect(first).resolves.toMatchObject({ value: [{ eventId: 'first' }] });
+
+    const pending = [iterator.next(), iterator.next()];
+    await iterator.return?.();
+    await expect(Promise.all(pending)).resolves.toEqual([
+      { done: true, value: undefined },
+      { done: true, value: undefined },
+    ]);
+  } finally {
+    await iterator.return?.();
+  }
+});
+
 test('live event bus matches numeric and string connection id args', async () => {
   const live = createLiveEventBus();
   const subscription = live.subscribeConnection({

@@ -132,7 +132,7 @@ const mergeEvents = <T>(
 ): AsyncIterable<readonly [T]> => ({
   [Symbol.asyncIterator]() {
     const queue: Array<T> = [];
-    let pending: ((value: IteratorResult<readonly [T]>) => void) | null = null;
+    const pending: Array<(value: IteratorResult<readonly [T]>) => void> = [];
     let done = false;
 
     const cleanup = () => {
@@ -141,14 +141,15 @@ const mergeEvents = <T>(
         emitter.off(name, listener);
       }
       signal?.removeEventListener('abort', onAbort);
-      pending?.({ done: true, value: undefined });
-      pending = null;
+      for (const resolve of pending) {
+        resolve({ done: true, value: undefined });
+      }
+      pending.length = 0;
     };
 
     const listener = (value: T) => {
-      if (pending) {
-        const resolve = pending;
-        pending = null;
+      const resolve = pending.shift();
+      if (resolve) {
         resolve({ done: false, value: [value] as const });
         return;
       }
@@ -172,11 +173,12 @@ const mergeEvents = <T>(
           return { done: true, value: undefined };
         }
         return await new Promise<IteratorResult<readonly [T]>>((resolve) => {
-          pending = resolve;
+          pending.push(resolve);
         });
       },
       async return() {
         cleanup();
+        queue.length = 0;
         return { done: true, value: undefined };
       },
     };
