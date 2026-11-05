@@ -1,9 +1,13 @@
+import { DatabaseSync } from 'node:sqlite';
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { drizzle } from 'drizzle-orm/sqlite-proxy';
 import { expect, test } from 'vite-plus/test';
 import { z } from 'zod';
 import { FateRequestError } from '../../protocol.ts';
 import type { AnyRecord } from '../../types.ts';
 import { dataView, list } from '../dataView.ts';
 import type { DataView } from '../dataView.ts';
+import { createDrizzleSourceAdapter } from '../drizzle.ts';
 import { createSourceRegistry, type SourceByIdsHandler } from '../executor.ts';
 import { createFateFetchHandler, createFateServer, createHonoFateHandler } from '../http.ts';
 import { createLiveEventBus } from '../live.ts';
@@ -52,6 +56,54 @@ const userSource: SourceDefinition<User> = {
   id: 'id',
   view: userView,
 };
+
+test('native root lists sharing a view use their own ordering', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE Post (id TEXT PRIMARY KEY, rank INTEGER);
+    INSERT INTO Post VALUES ('a', 2), ('b', 1), ('c', 3);
+  `);
+  try {
+    const db = drizzle(async (sql, params) => {
+      const statement = sqlite.prepare(sql);
+      statement.setReturnArrays(true);
+      return { rows: statement.all(...params) };
+    });
+    const post = sqliteTable('Post', { id: text('id').primaryKey(), rank: integer('rank') });
+    const view = dataView<{ id: string; rank: number }>('Post')({ id: true, rank: true });
+    const roots = {
+      ascending: list(view, { orderBy: { rank: 'asc' } }),
+      byId: list(view),
+      descending: list(view, { orderBy: { rank: 'desc' } }),
+    };
+    const sources = createDrizzleSourceAdapter({ db, schema: { post }, views: roots });
+    const server = createFateServer({ roots, sources });
+    const response = await server.handleRequest(
+      new Request('http://local/fate', {
+        body: JSON.stringify({
+          operations: Object.keys(roots).map((name) => ({
+            id: name,
+            kind: 'list',
+            name,
+            select: ['id'],
+          })),
+          version: 1,
+        }),
+        method: 'POST',
+      }),
+    );
+
+    expect(await response.json()).toMatchObject({
+      results: [
+        { data: { items: ['b', 'a', 'c'].map((id) => ({ node: { id } })) }, id: 'ascending' },
+        { data: { items: ['a', 'b', 'c'].map((id) => ({ node: { id } })) }, id: 'byId' },
+        { data: { items: ['c', 'a', 'b'].map((id) => ({ node: { id } })) }, id: 'descending' },
+      ],
+    });
+  } finally {
+    sqlite.close();
+  }
+});
 
 const createServer = (
   options: {

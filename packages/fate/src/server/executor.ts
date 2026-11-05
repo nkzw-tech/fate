@@ -1,5 +1,10 @@
 import type { AnyRecord } from '../types.ts';
-import { createSourcePlan, type SourcePlan, type SourceDefinition } from './source.ts';
+import {
+  createSourcePlan,
+  type SourceOrder,
+  type SourcePlan,
+  type SourceDefinition,
+} from './source.ts';
 
 export type SourceConnectionHandler<
   Context,
@@ -166,6 +171,7 @@ export const resolveSourceConnection = async <Context, Item extends AnyRecord>({
   direction,
   extra,
   input,
+  orderBy,
   registry,
   skip,
   source,
@@ -179,12 +185,13 @@ export const resolveSourceConnection = async <Context, Item extends AnyRecord>({
     args?: Record<string, unknown>;
     select: Iterable<string>;
   };
+  orderBy?: SourceOrder;
   registry: SourceRegistry<Context>;
   skip?: number;
   source: SourceDefinition<Item, unknown>;
   take: number;
 }) => {
-  const plan = createPlan({ ctx, input, source });
+  const plan = createSourcePlan({ ...input, ctx, orderBy, source });
   const executor = getSourceExecutor({ plan, registry });
   const planRecord = plan as SourcePlan<AnyRecord, Context>;
 

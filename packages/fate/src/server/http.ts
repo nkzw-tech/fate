@@ -19,7 +19,7 @@ import type { SourceRegistry } from './executor.ts';
 import { resolveSourceById, resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import type { MutationIdempotency } from './idempotency-types.ts';
 import type { LiveConnectionSourceEvent, LiveEventBus, LiveSourceEvent } from './live.ts';
-import type { SourceDefinition } from './source.ts';
+import { getDataViewSourceConfig, type SourceDefinition, type SourceOrder } from './source.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -650,7 +650,7 @@ export function createFateServer<
 > {
   const rootLists = new Map<
     string,
-    { source: SourceDefinition<AnyRecord>; view: DataView<AnyRecord> }
+    { orderBy?: SourceOrder; source: SourceDefinition<AnyRecord>; view: DataView<AnyRecord> }
   >();
   const rootQueries = new Map<
     string,
@@ -687,7 +687,11 @@ export function createFateServer<
     visit(config.view);
 
     if (config.view.kind === 'list') {
-      rootLists.set(procedure, { source, view: config.view });
+      rootLists.set(procedure, {
+        orderBy: getDataViewSourceConfig(config.view).orderBy,
+        source,
+        view: config.view,
+      });
     } else {
       rootQueries.set(procedure, { source, view: config.view });
     }
@@ -772,6 +776,7 @@ export function createFateServer<
                 cursor,
                 direction,
                 input,
+                orderBy: root.orderBy,
                 registry: sources.registry,
                 skip,
                 source: root.source,

@@ -130,6 +130,7 @@ export type DataViewModule = Record<string, unknown>;
 
 export const collectDataViewConfigs = (input: DataViewModule): Array<SourceConfig<AnyRecord>> => {
   const configsByFields = new Map<DataView<AnyRecord>['fields'], SourceConfig<AnyRecord>>();
+  const listOrders = new Map<DataView<AnyRecord>['fields'], SourceOrder | null>();
   const seenValues = new Set<unknown>();
 
   const visit = (value: unknown) => {
@@ -140,18 +141,29 @@ export const collectDataViewConfigs = (input: DataViewModule): Array<SourceConfi
     seenValues.add(value);
 
     if (isDataView(value)) {
-      const config = getDataViewSourceConfig(value);
-      const existingConfig = configsByFields.get(config.view.fields);
-
-      if (existingConfig) {
-        if (config.orderBy) {
-          existingConfig.orderBy = config.orderBy;
+      const { orderBy, view } = getDataViewSourceConfig(value);
+      if (!configsByFields.has(view.fields)) {
+        configsByFields.set(view.fields, { view });
+      }
+      if (value.kind === 'list') {
+        const order = orderBy ?? [];
+        const previous = listOrders.get(view.fields);
+        // Only share a default when all wrappers for this view agree.
+        if (previous === undefined) {
+          listOrders.set(view.fields, order);
+        } else if (
+          previous &&
+          (previous.length !== order.length ||
+            previous.some(
+              ({ direction, field }, index) =>
+                field !== order[index].field || direction !== order[index].direction,
+            ))
+        ) {
+          listOrders.set(view.fields, null);
         }
-      } else {
-        configsByFields.set(config.view.fields, config);
       }
 
-      for (const field of Object.values(config.view.fields)) {
+      for (const field of Object.values(view.fields)) {
         visit(field);
       }
       return;
@@ -174,7 +186,10 @@ export const collectDataViewConfigs = (input: DataViewModule): Array<SourceConfi
 
   visit(input);
 
-  return [...configsByFields.values()];
+  return [...configsByFields.values()].map((config) => {
+    const orderBy = listOrders.get(config.view.fields);
+    return orderBy?.length ? { ...config, orderBy } : config;
+  });
 };
 
 export function createSourceDefinition<Item extends AnyRecord, Adapter = unknown>(
@@ -382,11 +397,13 @@ const attachSourceNode = <Context, Adapter = unknown>(
 export function createSourcePlan<Item extends AnyRecord, Context = unknown, Adapter = unknown>({
   args,
   ctx,
+  orderBy,
   select,
   source,
 }: {
   args?: Record<string, unknown>;
   ctx?: Context;
+  orderBy?: SourceOrder;
   select: Iterable<string>;
   source: SourceDefinition<Item, Adapter>;
 }) {
@@ -400,7 +417,7 @@ export function createSourcePlan<Item extends AnyRecord, Context = unknown, Adap
 
   return {
     ...plan,
-    root: attachSourceNode(plan.root, source),
+    root: attachSourceNode(plan.root, source, orderBy),
     source,
   } satisfies SourcePlan<Item, Context, Adapter>;
 }
