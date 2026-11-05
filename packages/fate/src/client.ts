@@ -4219,9 +4219,11 @@ export class FateClient<
     }
     if (item.kind === 'query') {
       const entityId = this.rootRequests.get(this.queryResultKey(item));
-      return entityId && this.store.read(entityId)
-        ? this.stableRefWithViewNames(item.type, parseEntityId(entityId).id, item.refViewNames)
-        : null;
+      if (!entityId || !this.store.read(entityId)) {
+        return null;
+      }
+      const { id, type } = parseEntityId(entityId);
+      return this.stableRefWithViewNames(type, id, item.refViewNames);
     }
     if (item.kind === 'value') {
       return this.rootValues.get(item.queryKey);
