@@ -19,6 +19,7 @@ import {
   type ResolvedConnection,
   type LoadMoreFn,
 } from './listView.ts';
+import { isFulfilledThenable } from './thenable.ts';
 
 export type ListViewState<C> = [
   ShallowRef<ConnectionItems<ResolvedConnection<C>>>,
@@ -38,6 +39,13 @@ export type ListViewState<C> = [
 export function useListView<
   C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
+  return useListViewResource(selection, connection).resource;
+}
+
+/** @internal Shares the resolved connection with the live list wrapper. */
+export function useListViewResource<
+  C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
+>(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>) {
   const clientSource = getFateClientSource(useFateClient());
   const initialConnection = toValue(connection);
   const items = shallowRef<ConnectionItems<ResolvedConnection<C>>>(
@@ -51,9 +59,10 @@ export function useListView<
   const pending = shallowRef(false);
   const nodeView = getNodeView(selection);
   let activeClient = clientSource.value;
-  let currentConnection: ConnectionValue | null | undefined;
+  const resolvedConnection = shallowRef<ConnectionValue | null | undefined>();
   let disposed = false;
   let listUnsubscribe: (() => void) | null = null;
+  let deferredSubscriptions: Array<() => void> = [];
   let reader: ReturnType<typeof createConnectionReader> | null = null;
   let readerIdentity = '';
   let token = 0;
@@ -67,7 +76,7 @@ export function useListView<
   };
 
   const setLoadMore = () => {
-    const pagination = reader?.getSnapshot()?.pagination ?? currentConnection?.pagination;
+    const pagination = reader?.getSnapshot()?.pagination ?? resolvedConnection.value?.pagination;
     const currentReader = reader;
     loadNext.value =
       currentReader && pagination?.hasNext && pagination.nextCursor
@@ -80,7 +89,7 @@ export function useListView<
   };
 
   const updateItemsFromStore = () => {
-    const metadata = getConnectionMetadata(currentConnection);
+    const metadata = getConnectionMetadata(resolvedConnection.value);
     const listState = reader?.getSnapshot();
 
     if (metadata && listState) {
@@ -91,7 +100,7 @@ export function useListView<
         })),
       ) as unknown as ConnectionItems<ResolvedConnection<C>>;
     } else {
-      const currentItems = currentConnection?.items;
+      const currentItems = resolvedConnection.value?.items;
       items.value = (currentItems ? markRaw(currentItems) : undefined) as ConnectionItems<
         ResolvedConnection<C>
       >;
@@ -102,7 +111,7 @@ export function useListView<
 
   const updateListSubscription = () => {
     cleanupListSubscription();
-    const metadata = getConnectionMetadata(currentConnection);
+    const metadata = getConnectionMetadata(resolvedConnection.value);
     const identity = metadata
       ? `${metadata.key}|${metadata.windowKey ?? getListWindowKey(metadata.args)}`
       : '';
@@ -113,16 +122,9 @@ export function useListView<
     listUnsubscribe = reader?.subscribe(updateItemsFromStore) ?? null;
   };
 
-  const resolveConnection = async (): Promise<ConnectionValue | null | undefined> => {
-    const value = toValue(connection);
-    if (!isDeferred(value)) {
-      return value as ConnectionValue | null | undefined;
-    }
-
-    const snapshot = await activeClient.readDeferred(
-      value as Deferred<ConnectionValue | null | undefined>,
-    );
-    return (snapshot as DeferredSnapshot<ConnectionValue | null | undefined>).data;
+  const cleanupDeferredSubscriptions = () => {
+    deferredSubscriptions.forEach((unsubscribe) => unsubscribe());
+    deferredSubscriptions = [];
   };
 
   const refresh = () => {
@@ -130,33 +132,57 @@ export function useListView<
     const nextClient = clientSource.value;
     if (nextClient !== activeClient) {
       cleanupListSubscription();
+      cleanupDeferredSubscriptions();
       activeClient = nextClient;
+      resolvedConnection.value = undefined;
       reader = null;
       readerIdentity = '';
     }
     pending.value = true;
     errorState.value = null;
 
-    currentPromise = Promise.resolve(resolveConnection()).then(
-      (resolvedConnection) => {
-        if (!disposed && currentToken === token) {
-          currentConnection = resolvedConnection;
-          pending.value = false;
-          updateListSubscription();
-          updateItemsFromStore();
-        }
-        return items.value;
-      },
-      (error) => {
-        if (!disposed && currentToken === token) {
-          currentConnection = null;
-          errorState.value = error;
-          pending.value = false;
-          cleanupListSubscription();
-        }
-        throw error;
-      },
-    );
+    const publish = (
+      value: ConnectionValue | null | undefined,
+      coverage: DeferredSnapshot<unknown>['coverage'] = [],
+    ) => {
+      if (!disposed && currentToken === token) {
+        cleanupDeferredSubscriptions();
+        deferredSubscriptions = coverage.map(([id, paths]) =>
+          nextClient.store.subscribe(id, paths, () => {
+            queueMicrotask(() => {
+              if (!disposed && token === currentToken) {
+                void refresh();
+              }
+            });
+          }),
+        );
+        resolvedConnection.value = value;
+        pending.value = false;
+        updateListSubscription();
+        updateItemsFromStore();
+      }
+      return items.value;
+    };
+    const fail = (error: unknown) => {
+      if (!disposed && currentToken === token) {
+        resolvedConnection.value = null;
+        errorState.value = error;
+        pending.value = false;
+        cleanupListSubscription();
+      }
+      throw error;
+    };
+
+    const resolve = async () => {
+      const value = toValue(connection);
+      if (!isDeferred(value)) {
+        return publish(value as ConnectionValue | null | undefined);
+      }
+      const read = nextClient.readDeferred(value as Deferred<ConnectionValue | null | undefined>);
+      const snapshot = isFulfilledThenable(read) ? read.value : await read;
+      return publish(snapshot.data, snapshot.coverage);
+    };
+    currentPromise = resolve().catch(fail);
     void currentPromise.catch(() => {});
 
     return currentPromise;
@@ -165,6 +191,7 @@ export function useListView<
   const stop = watch(
     () => [clientSource.value, toValue(connection)] as const,
     () => {
+      cleanupDeferredSubscriptions();
       void refresh();
     },
     {
@@ -178,16 +205,18 @@ export function useListView<
     }
     disposed = true;
     stop();
+    cleanupDeferredSubscriptions();
     cleanupListSubscription();
   };
 
   onScopeDispose(dispose);
 
-  return Object.assign([items, loadNext, loadPrevious], {
+  const resource = Object.assign([items, loadNext, loadPrevious], {
     dispose,
     error: errorState,
     pending,
     ready: () => currentPromise ?? refresh(),
     refresh,
   }) as ListViewState<C>;
+  return { resolvedConnection, resource };
 }

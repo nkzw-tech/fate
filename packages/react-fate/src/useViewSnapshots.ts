@@ -303,6 +303,40 @@ export function useReadScope() {
   return scope;
 }
 
+const createDeferredReader = <T>(
+  client: FateClient<any, any>,
+  input: Deferred<T>,
+  scope: ReadScope,
+): ReadSnapshot => {
+  let cached: { records: Array<unknown>; snapshot: PromiseLike<Snapshot> } | undefined;
+  return cacheReadError(() => {
+    if (cached && isFulfilledThenable(cached.snapshot)) {
+      const { coverage } = cached.snapshot.value;
+      if (coverage.every(([id], index) => client.store.read(id) === cached?.records[index])) {
+        return cached.snapshot;
+      }
+    }
+    const snapshot = client.readDeferredForRender(input, scope.current);
+    cached = isFulfilledThenable(snapshot)
+      ? { records: snapshot.value.coverage.map(([id]) => client.store.read(id)), snapshot }
+      : undefined;
+    return snapshot;
+  });
+};
+
+export function useDeferredValueSnapshot<T>(input: T | Deferred<T>): T {
+  const client = useFateClient();
+  const scope = useReadScope();
+  const getSnapshot = useMemo(() => {
+    if (!isDeferred(input)) {
+      const snapshot = fulfilledThenable({ coverage: [], data: input });
+      return () => snapshot;
+    }
+    return createDeferredReader(client, input, scope);
+  }, [client, input, scope]);
+  return useSnapshot(client, getSnapshot, true) as T;
+}
+
 export function useViewSnapshots<V extends View<any, any>>(
   view: V,
   refs: ReadonlyArray<ViewInput<V>>,

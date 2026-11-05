@@ -1,6 +1,6 @@
-import { isDeferred, type Deferred, type DeferredSnapshot } from '@nkzw/fate';
+import { type Deferred } from '@nkzw/fate';
 import { createConnectionReader, getListEntries, getListWindowKey } from '@nkzw/fate/list';
-import { use, useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
 import { useFateClient } from './context.tsx';
 import {
   useListViewInfo,
@@ -10,7 +10,7 @@ import {
   type ResolvedConnection,
   type LoadMoreFn,
 } from './listView.ts';
-import { useReadScope } from './useViewSnapshots.ts';
+import { useDeferredValueSnapshot } from './useViewSnapshots.ts';
 
 /**
  * Subscribes to a connection field, returning the current items and pagination
@@ -23,19 +23,9 @@ export function useListView<
   connection: C,
 ): [ConnectionItems<ResolvedConnection<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
-  const scope = useReadScope();
-  const resolvedConnection = (
-    isDeferred(connection)
-      ? (
-          use(
-            client.readDeferredForRender(
-              connection as Deferred<ConnectionValue | null | undefined>,
-              scope.current,
-            ),
-          ) as DeferredSnapshot<ConnectionValue | null | undefined>
-        ).data
-      : (connection as ConnectionValue | null | undefined)
-  ) as ConnectionValue | null | undefined;
+  const resolvedConnection = useDeferredValueSnapshot<ConnectionValue | null | undefined>(
+    connection,
+  );
   const { metadata, nodeView } = useListViewInfo(selection, resolvedConnection);
 
   const identity = metadata

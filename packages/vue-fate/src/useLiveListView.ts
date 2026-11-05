@@ -1,5 +1,5 @@
-import { type Deferred, type DeferredSnapshot, isDeferred } from '@nkzw/fate';
-import { onScopeDispose, toValue, watch, type MaybeRefOrGetter } from 'vue';
+import { type Deferred } from '@nkzw/fate';
+import { onScopeDispose, watch, type MaybeRefOrGetter } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
 import {
   getConnectionMetadata,
@@ -7,7 +7,7 @@ import {
   type ConnectionSelection,
   type ConnectionValue,
 } from './listView.ts';
-import { useListView, type ListViewState } from './useListView.ts';
+import { useListViewResource, type ListViewState } from './useListView.ts';
 
 /**
  * Subscribes to a connection field, returning live-updating items and pagination helpers.
@@ -16,70 +16,38 @@ export function useLiveListView<
   C extends ConnectionValue | Deferred<ConnectionValue | null | undefined> | null | undefined,
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
   const clientSource = getFateClientSource(useFateClient());
-  const listResource = useListView(selection, connection);
+  const { resolvedConnection, resource: listResource } = useListViewResource(selection, connection);
   const disposeResource = listResource.dispose;
   const nodeView = getNodeView(selection);
   let liveUnsubscribe: (() => void) | undefined;
   let disposed = false;
-  let token = 0;
 
-  const cleanupLiveSubscription = () => {
-    liveUnsubscribe?.();
-    liveUnsubscribe = undefined;
-  };
-
-  const resolveConnection = async (): Promise<ConnectionValue | null | undefined> => {
-    const value = toValue(connection);
-    if (!isDeferred(value)) {
-      return value as ConnectionValue | null | undefined;
-    }
-
-    return (
-      (await clientSource.value.readDeferred(
-        value as Deferred<ConnectionValue | null | undefined>,
-      )) as DeferredSnapshot<ConnectionValue | null | undefined>
-    ).data;
-  };
-
-  const subscribe = () => {
-    const currentToken = ++token;
-    cleanupLiveSubscription();
-
-    void resolveConnection()
-      .then((resolvedConnection) => {
-        if (disposed || currentToken !== token) {
-          return;
-        }
-
-        const metadata = getConnectionMetadata(resolvedConnection);
-        if (!metadata) {
-          return;
-        }
-
-        const client = clientSource.value;
-        client.assertLiveConnectionSupport();
-        liveUnsubscribe = client.subscribeLiveListView(nodeView, metadata);
-      })
-      .catch((error: unknown) => {
-        if (!disposed && currentToken === token) {
+  const stop = watch(
+    [clientSource, () => getConnectionMetadata(resolvedConnection.value)?.key],
+    ([client]) => {
+      liveUnsubscribe?.();
+      liveUnsubscribe = undefined;
+      const metadata = getConnectionMetadata(resolvedConnection.value);
+      if (metadata) {
+        try {
+          client.assertLiveConnectionSupport();
+          liveUnsubscribe = client.subscribeLiveListView(nodeView, metadata);
+        } catch (error) {
           listResource.error.value = error;
           listResource.pending.value = false;
         }
-      });
-  };
-
-  const stop = watch(() => [clientSource.value, toValue(connection)] as const, subscribe, {
-    immediate: true,
-  });
+      }
+    },
+    { immediate: true },
+  );
 
   const dispose = () => {
     if (disposed) {
       return;
     }
     disposed = true;
-    token++;
     stop();
-    cleanupLiveSubscription();
+    liveUnsubscribe?.();
     disposeResource();
   };
 

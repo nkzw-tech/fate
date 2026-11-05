@@ -1,5 +1,5 @@
-import { isDeferred, type Deferred, type DeferredSnapshot } from '@nkzw/fate';
-import { use, useEffect, useEffectEvent } from 'react';
+import { type Deferred } from '@nkzw/fate';
+import { useEffect, useEffectEvent } from 'react';
 import { useFateClient } from './context.tsx';
 import {
   useListViewInfo,
@@ -10,7 +10,7 @@ import {
   type LoadMoreFn,
 } from './listView.ts';
 import { useListView } from './useListView.tsx';
-import { useReadScope } from './useViewSnapshots.ts';
+import { useDeferredValueSnapshot } from './useViewSnapshots.ts';
 
 /**
  * Subscribes to a connection field, returning live-updating items and pagination
@@ -23,19 +23,9 @@ export function useLiveListView<
   connection: C,
 ): [ConnectionItems<ResolvedConnection<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
-  const scope = useReadScope();
-  const resolvedConnection = (
-    isDeferred(connection)
-      ? (
-          use(
-            client.readDeferredForRender(
-              connection as Deferred<ConnectionValue | null | undefined>,
-              scope.current,
-            ),
-          ) as DeferredSnapshot<ConnectionValue | null | undefined>
-        ).data
-      : (connection as ConnectionValue | null | undefined)
-  ) as ConnectionValue | null | undefined;
+  const resolvedConnection = useDeferredValueSnapshot<ConnectionValue | null | undefined>(
+    connection,
+  );
   const { metadata, nodeView } = useListViewInfo(selection, resolvedConnection);
 
   const subscribeLiveListView = useEffectEvent(() => {
