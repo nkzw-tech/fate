@@ -714,7 +714,7 @@ test('stores missing live-list support errors on the resource', async () => {
   expect(currentResource.pending.value).toBe(false);
 });
 
-test('manual dispose releases live-view subscriptions', async () => {
+test('manual dispose releases live-view and cache subscriptions', async () => {
   const unsubscribe = vi.fn();
   const subscribeById = vi.fn(() => unsubscribe);
   const client = createClient({
@@ -750,18 +750,26 @@ test('manual dispose releases live-view subscriptions', async () => {
     },
   });
 
-  mount(Component, client);
-  await flushAsync();
+  const { app, container } = mount(Component, client);
+  try {
+    await flushAsync();
 
-  expect(subscribeById).toHaveBeenCalledTimes(1);
+    expect(subscribeById).toHaveBeenCalledTimes(1);
 
-  expectDefined(resource as { dispose: () => void } | null).dispose();
-  await flushAsync();
+    expectDefined(resource as { dispose: () => void } | null).dispose();
+    await flushAsync();
 
-  expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+    client.write('Post', { content: 'Pear', id: 'post-1' }, new Set(['content', 'id']));
+    await flushAsync();
+    expect(container.textContent).toBe('Apple');
+  } finally {
+    app.unmount();
+  }
 });
 
-test('manual dispose releases live-list subscriptions', async () => {
+test('manual dispose releases live-list and cache subscriptions', async () => {
   const unsubscribe = vi.fn();
   const subscribeConnection = vi.fn(() => unsubscribe);
   const client = createClient({
@@ -803,15 +811,23 @@ test('manual dispose releases live-list subscriptions', async () => {
     },
   });
 
-  mount(Component, client);
-  await flushAsync();
+  const { app, container } = mount(Component, client);
+  try {
+    await flushAsync();
 
-  expect(subscribeConnection).toHaveBeenCalledTimes(1);
+    expect(subscribeConnection).toHaveBeenCalledTimes(1);
 
-  expectDefined(resource as { dispose: () => void } | null).dispose();
-  await flushAsync();
+    expectDefined(resource as { dispose: () => void } | null).dispose();
+    await flushAsync();
 
-  expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+    client.store.setList('projects', { ids: [toEntityId('Project', 'project-1')] });
+    await flushAsync();
+    expect(container.textContent).toBe('0');
+  } finally {
+    app.unmount();
+  }
 });
 
 test('exposes the fate CLI bin from the Vue package', () => {

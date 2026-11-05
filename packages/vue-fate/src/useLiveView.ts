@@ -53,6 +53,7 @@ export function useLiveView<V extends View<any, any>>(
 ): ViewResource<ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null | undefined> {
   const clientSource = getFateClientSource(useFateClient());
   const viewResource = useView(view, ref);
+  const disposeResource = viewResource.dispose;
   let liveUnsubscribe: (() => void) | undefined;
   let disposed = false;
   let token = 0;
@@ -111,7 +112,7 @@ export function useLiveView<V extends View<any, any>>(
     token++;
     stop();
     cleanupLiveSubscription();
-    viewResource.dispose();
+    disposeResource();
   };
 
   onScopeDispose(dispose);

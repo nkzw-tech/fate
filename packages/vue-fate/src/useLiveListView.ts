@@ -17,6 +17,7 @@ export function useLiveListView<
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
   const clientSource = getFateClientSource(useFateClient());
   const listResource = useListView(selection, connection);
+  const disposeResource = listResource.dispose;
   const nodeView = getNodeView(selection);
   let liveUnsubscribe: (() => void) | undefined;
   let disposed = false;
@@ -79,7 +80,7 @@ export function useLiveListView<
     token++;
     stop();
     cleanupLiveSubscription();
-    listResource.dispose();
+    disposeResource();
   };
 
   onScopeDispose(dispose);
