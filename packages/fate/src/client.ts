@@ -393,42 +393,35 @@ const hasConnectionCursorCoverage = (
   );
 };
 
+const hasConnectionPageSize = (
+  listState: List,
+  args: AnyRecord | undefined,
+  direction: 'forward' | 'backward',
+  cursorPage = false,
+) => {
+  const limit = getConnectionPageLimit(args, direction);
+  if (limit == null) {
+    return true;
+  }
+  const forward = direction === 'forward';
+  const fetchedLimit = forward ? listState.forwardPageLimit : listState.backwardPageLimit;
+  if (!cursorPage && fetchedLimit != null && fetchedLimit >= limit) {
+    return true;
+  }
+  const page = cursorPage ? getListWindow(listState, args) : listState;
+  const hasMore = forward ? page?.pagination?.hasNext : page?.pagination?.hasPrevious;
+  return hasMore === false || (page !== undefined && getListPageSize(page) >= limit);
+};
+
 const hasConnectionPageCoverage = (
   listState: List,
   args: AnyRecord | undefined,
   direction: 'forward' | 'backward',
-) => {
-  if (listState.unloaded || !hasConnectionCursorCoverage(listState, args, direction)) {
-    return false;
-  }
-  const limit = getConnectionPageLimit(args, direction);
-  const pagination = listState.pagination;
-  const size = getListPageSize(listState);
-
-  if (direction === 'forward') {
-    if (pagination?.hasPrevious) {
-      return false;
-    }
-
-    return (
-      limit == null ||
-      size >= limit ||
-      (listState.forwardPageLimit != null && listState.forwardPageLimit >= limit) ||
-      pagination?.hasNext === false
-    );
-  }
-
-  if (pagination?.hasNext) {
-    return false;
-  }
-
-  return (
-    limit == null ||
-    size >= limit ||
-    (listState.backwardPageLimit != null && listState.backwardPageLimit >= limit) ||
-    pagination?.hasPrevious === false
-  );
-};
+) =>
+  !listState.unloaded &&
+  !(direction === 'forward' ? listState.pagination?.hasPrevious : listState.pagination?.hasNext) &&
+  hasConnectionCursorCoverage(listState, args, direction) &&
+  hasConnectionPageSize(listState, args, direction);
 
 const getPaginationMergeInfo = (args: AnyRecord | undefined) => {
   const paginationArgs = getPaginationArgsInfo(args);
@@ -4046,13 +4039,12 @@ export class FateClient<
           if (revalidate && list?.stale) {
             return false;
           }
+          const { direction, hasCursorArg } = getPaginationArgsInfo(args?.value);
           let childrenCovered =
             !list ||
-            hasConnectionCursorCoverage(
-              list,
-              args?.value,
-              getPaginationArgsInfo(args?.value).direction,
-            );
+            (hasConnectionCursorCoverage(list, args?.value, direction) &&
+              (!args?.ignoreKeys ||
+                hasConnectionPageSize(list, args.value, direction, hasCursorArg)));
           if (!childrenCovered && !dependencies) {
             return false;
           }
@@ -4181,20 +4173,22 @@ export class FateClient<
 
     const promises: Array<Promise<void>> = [];
     const fetchedItems: Array<RequestDescriptor['items'][number]> = [];
+    let argumentGroups = 0;
     let fetchedAll = true;
     for (const item of request.items) {
       if (item.kind === 'node' || item.kind === 'nodes') {
         const fields = item.plan.paths;
-        const fieldsSignature = [...fields].slice().sort().join(',');
-        const argsSignature = [...item.plan.args.entries()]
-          .map(([path, entry]) => `${path}:${entry.hash}`)
-          .sort()
-          .join(',');
-        const groupKey = `${item.type}#${fieldsSignature}|${argsSignature}`;
+        const groupKey =
+          request.items.length === 1
+            ? item.type
+            : JSON.stringify([item.type, item.argsKey, [...fields].sort()]);
         let group = groups.get(groupKey);
         if (!group) {
           group = { fields, ids: [], plan: item.plan, type: item.type };
           groups.set(groupKey, group);
+          if (item.argsKey !== undefined) {
+            argumentGroups++;
+          }
         }
 
         const fetchedIds: Array<string | number> = [];
@@ -4252,6 +4246,11 @@ export class FateClient<
       }
     }
 
+    // Argument variants from one request can fill overlapping windows on the same entity.
+    const batch =
+      argumentGroups > 1
+        ? { generation: ++this.writeGeneration, normalization: createNormalizationContext() }
+        : undefined;
     await Promise.all([
       ...promises,
       ...Array.from(groups.values()).map((group) =>
@@ -4263,6 +4262,7 @@ export class FateClient<
               group.plan,
               null,
               signal,
+              group.plan?.args.size ? batch : undefined,
             )
           : Promise.resolve(),
       ),
@@ -4583,8 +4583,12 @@ export class FateClient<
     plan?: SelectionPlan,
     prefix: string | null = null,
     signal?: AbortSignal,
+    batch?: { generation: number; normalization: NormalizationContext },
   ) {
-    const fetch = async (sharedSignal?: AbortSignal, generation = ++this.writeGeneration) => {
+    const fetch = async (
+      sharedSignal?: AbortSignal,
+      generation = batch?.generation ?? ++this.writeGeneration,
+    ) => {
       const resolvedArgs = resolvedArgsFromPlan(plan);
       await this.trackPendingRequest(async () => {
         const records = await this.fetchEntities(
@@ -4597,7 +4601,7 @@ export class FateClient<
         );
         sharedSignal?.throwIfAborted();
         this.assertPersistenceActive();
-        const normalization = createNormalizationContext();
+        const normalization = batch?.normalization ?? createNormalizationContext();
         for (const { generation, record } of records) {
           this.withResponseWrite(generation, () =>
             this.writeEntity(

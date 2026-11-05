@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vite-plus/test';
+import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { defer, isDeferred } from '../defer.ts';
 import { createConnectionReader } from '../list.ts';
@@ -169,6 +170,67 @@ test('nested views keep bounded windows while sharing entity updates', async () 
   ).toBe('Updated');
   expect(fetchById).toHaveBeenCalledTimes(1);
 });
+
+test.each(['cached preview', 'separate owners', 'shared owner'] as const)(
+  'nested requests fetch the larger window with a %s',
+  async (scenario) => {
+    type Owner = { __typename: 'Owner'; children: Array<Item>; id: string };
+    const OwnerView = view<Owner>()(({ first }: { first: number }) => ({
+      children: {
+        args: { first },
+        items: { node: { id: true, name: true } },
+        pagination: { hasNext: true, nextCursor: true },
+      },
+    }));
+    const fetchById = vi.fn<Transport['fetchById']>(async (_type, ids, _select, args) => {
+      const first = (args?.children as { first: number } | undefined)?.first ?? 0;
+      // Exercise a larger response that arrives after the smaller one.
+      if (first === 3) {
+        await Promise.resolve();
+      }
+      return ids.map((id) => ({
+        children: page(['1', '2', '3'].slice(0, first)),
+        id,
+      }));
+    });
+    const client = createClient({
+      roots: { owner: clientRoot<Owner, 'Owner'>('Owner') },
+      transport: { fetchById },
+      types: [{ fields: { children: { listOf: 'Item' } }, type: 'Owner' }, { type: 'Item' }],
+    });
+    const small = { id: 'owner', view: OwnerView({ first: 1 }) };
+    const large = {
+      id: scenario === 'separate owners' ? 'other' : 'owner',
+      view: OwnerView({ first: 3 }),
+    };
+    const largerRequest = { owner: large };
+    if (scenario === 'cached preview') {
+      await client.request({ owner: small });
+      await client.request(largerRequest);
+    } else {
+      const preview = alias('owner', small);
+      const expanded = alias('owner', large);
+      await client.request(
+        scenario === 'shared owner' ? { expanded, preview } : { expanded, preview },
+      );
+    }
+
+    const ref = client.getRequestResult(largerRequest).owner;
+    const snapshot = client.readView<Owner, ViewSelection<typeof OwnerView>, typeof OwnerView>(
+      OwnerView,
+      ref,
+    );
+    expect(snapshot.status).toBe('fulfilled');
+    expect((await snapshot).data.children.items.map(({ node }) => node.id)).toEqual([
+      '1',
+      '2',
+      '3',
+    ]);
+    if (scenario !== 'shared owner') {
+      expect(fetchById).toHaveBeenCalledTimes(2);
+    }
+  },
+);
 
 test.each([
   [false, false],

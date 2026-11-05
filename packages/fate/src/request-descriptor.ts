@@ -85,6 +85,7 @@ export const hasCursorArgs = (argsPayload: ResolvedArgsPayload | undefined): boo
   );
 
 export type NodeRequestDescriptor = Readonly<{
+  argsKey?: string;
   ids: ReadonlyArray<string | number>;
   kind: 'node' | 'nodes';
   name: string;
@@ -161,14 +162,13 @@ const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): s
     sorted.map((item) => {
       const paths = [...item.plan.paths].sort();
       if ('ids' in item) {
-        const args = resolvedArgsFromPlan(item.plan);
         return [
           item.kind,
           item.name,
           item.type,
           item.viewSignature,
           serializeIds(item.ids),
-          args ? hashArgs(args) : null,
+          item.argsKey ?? null,
           paths,
         ];
       }
@@ -217,25 +217,16 @@ export const createRequestDescriptor = (
       continue;
     }
 
-    if (isNodeItem(item)) {
+    const node = isNodeItem(item);
+    if (node || isNodesItem(item)) {
+      const plan = getSelectionPlan(item.view, null);
+      const args = resolvedArgsFromPlan(plan);
       items.push({
-        ids: [item.id],
-        kind: 'node',
+        ...(args ? { argsKey: hashArgs(args) } : {}),
+        ids: node ? [item.id] : item.ids,
+        kind: node ? 'node' : 'nodes',
         name,
-        plan: getSelectionPlan(item.view, null),
-        refViewNames: getViewNames(item.view),
-        type,
-        viewSignature: getViewSignature(item.view),
-      });
-      continue;
-    }
-
-    if (isNodesItem(item)) {
-      items.push({
-        ids: item.ids,
-        kind: 'nodes',
-        name,
-        plan: getSelectionPlan(item.view, null),
+        plan,
         refViewNames: getViewNames(item.view),
         type,
         viewSignature: getViewSignature(item.view),
