@@ -16,6 +16,7 @@ import { withConnection } from '../connection.ts';
 import { computed, dataView, list, type DataView } from '../dataView.ts';
 import { createSourceRegistry } from '../executor.ts';
 import { createFateServer, type InferFateAPI } from '../http.ts';
+import { createLiveEventBus } from '../live.ts';
 import { createPrismaSourceAdapter } from '../prisma.ts';
 import type { SourceDefinition } from '../source.ts';
 import { bindViewProcedures } from '../sourceRouter.ts';
@@ -101,8 +102,8 @@ test.each(['native', 'trpc'] as const)(
         ? createHTTPTransport<API>({
             fetch,
             live: false,
-            url: 'http://test.local/fate',
             mixedLists: ['feed'],
+            url: 'http://test.local/fate',
           })
         : createTRPCTransport<typeof appRouter>({
             byId: {},
@@ -110,8 +111,8 @@ test.each(['native', 'trpc'] as const)(
               links: [httpBatchLink({ fetch, url: 'http://test.local/trpc' })],
             }),
             lists: { feed: (client) => client.feedItem.list.query },
-          });
             mixedLists: ['feed'],
+          });
     const roots = { feed: clientRoot<API['lists']['feed']['output'], 'FeedItem'>('FeedItem') };
     const { types } = createSchema([], Root);
     const generated = createClientSource({
@@ -288,4 +289,71 @@ test('rejects a repeated member even when the second occurrence is the lookahead
   await expect(transport.fetchList!('feed', ['id'], { first: 1 })).rejects.toThrow(
     /repeated member/,
   );
+});
+
+test('refreshes mixed live lists through the subscriber’s scoped list query', async () => {
+  const post = dataView<{ id: string; title: string }>('Post')({ id: true, title: true });
+  const live = createLiveEventBus();
+  const sources = createPrismaSourceAdapter({ views: { post } });
+  let visible = false;
+  const findMany = vi.fn(async () => [{ id: 'post', title: 'Selected title' }]);
+  const server = createFateServer({
+    context: () => ({ prisma: { post: { findMany } } }),
+    live,
+    roots: {
+      feed: list(
+        { Post: post },
+        {
+          query: async () =>
+            visible ? [{ __typename: 'Post' as const, cursor: 'post', id: 'post' }] : [],
+          typeName: 'FeedItem',
+        },
+      ),
+    },
+    sources,
+  });
+  const url = 'http://test.local/fate/live';
+  const stream = await server.handleLiveRequest(new Request(`${url}?connectionId=feed`));
+  const reader = stream.body!.getReader();
+  const select = ['fate_type_4_Post_title:title:Post'];
+  try {
+    await reader.read();
+    await server.handleLiveRequest(
+      new Request(url, {
+        body: JSON.stringify({
+          connectionId: 'feed',
+          operations: [
+            { id: 'sub', kind: 'subscribeConnection', procedure: 'feed', select, type: 'FeedItem' },
+          ],
+          version: 1,
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+    live.connection('feed').appendNode('Post', 'post', { eventId: 'update' });
+    const message = new TextDecoder().decode((await reader.read()).value);
+    expect(message).toContain('id: update');
+    expect(message).toContain('"event":{"type":"invalidate"}');
+    expect(findMany).not.toHaveBeenCalled();
+
+    const transport = createHTTPTransport({
+      fetch: (input, init) => server.handleRequest(new Request(input, init)),
+      live: false,
+      url: 'http://test.local/fate',
+    });
+    expect((await transport.fetchList!('feed', select))?.items).toEqual([]);
+    visible = true;
+    expect((await transport.fetchList!('feed', select))?.items).toMatchObject([
+      {
+        node: {
+          __typename: 'Post',
+          'fate_type_4_Post_title:title:Post': 'Selected title',
+          id: 'post',
+        },
+      },
+    ]);
+  } finally {
+    await reader.cancel();
+  }
 });

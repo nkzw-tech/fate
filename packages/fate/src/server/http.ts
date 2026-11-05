@@ -1070,6 +1070,16 @@ export function createFateServer<
           }
 
           const { event, operation } = item;
+          const root = rootLists.get(operation.procedure);
+          if (root && 'views' in root) {
+            // Membership is decided by the list query in the subscriber's context.
+            sendLiveMessage(
+              connection,
+              { event: { type: 'invalidate' }, id: operation.id, kind: 'connection' },
+              event.eventId,
+            );
+            continue;
+          }
           const nodeType = event.nodeType ?? operation.type;
           const source = nodeType ? sourcesByType.get(nodeType) : null;
           const node =

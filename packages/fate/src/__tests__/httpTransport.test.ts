@@ -1110,3 +1110,38 @@ test('passes live URL query params to the live connector EventSource', async () 
   );
   expect(MockEventSource.instances[0]?.options).toEqual({ withCredentials: true });
 });
+
+test('invalidates mixed lists on live connector membership events', async () => {
+  const fetch = liveControlFetch();
+  const onEvent = vi.fn();
+  const transport = createHTTPTransport({
+    eventSource: resetMockEventSource(),
+    fetch,
+    live: liveConnector(),
+    mixedLists: ['feed'],
+    url: 'http://local/fate',
+  });
+  const dispose = transport.subscribeConnection!(
+    'feed',
+    'FeedItem',
+    undefined,
+    ['fate_type_4_Post_title:title:Post'],
+    undefined,
+    { onEvent },
+  );
+  try {
+    const source = await openLiveStream();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    source.message({
+      data: { id: 'post', nodeType: 'Post' },
+      subscriptionId: '1:global',
+      topic: liveGlobalConnectionTopic('feed'),
+      type: 'appendNode',
+    });
+
+    expect(onEvent).toHaveBeenCalledExactlyOnceWith({ type: 'invalidate' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    dispose();
+  }
+});

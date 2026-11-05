@@ -164,6 +164,8 @@ const searchResultRouter = router(fate.procedures({ view: Root.search }));
 
 To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`viewFor` to compose the views](/integrations/graphql#views-on-unions-and-interfaces) for the search results.
 
+Live membership events refresh mixed lists through the same scoped query. This applies the subscriber’s access rules and reloads the fields selected by each view.
+
 ## Native fate protocol
 
 Create a source adapter for your ORM, pass it to `createFateServer`, and add a route for the HTTP handler:

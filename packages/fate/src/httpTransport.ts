@@ -808,7 +808,7 @@ export function createHTTPTransport<
           return;
         }
         const data = isRecord(event.data) ? event.data : {};
-        if (event.type === 'invalidate') {
+        if (event.type === 'invalidate' || mixedLists?.includes(procedure)) {
           handlers.onEvent({ type: 'invalidate' });
           return;
         }
