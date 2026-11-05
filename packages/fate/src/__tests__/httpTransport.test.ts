@@ -935,6 +935,57 @@ test('fetches entity records for live connector events without data', async () =
   dispose?.();
 });
 
+test.each(['delete', 'dispose'] as const)(
+  'ignores a pending live entity fetch after %s',
+  async (action) => {
+    const pending = Promise.withResolvers<Response>();
+    const fetch = liveControlFetch();
+    const onData = vi.fn();
+    const onDelete = vi.fn();
+    const transport = createHTTPTransport({
+      eventSource: resetMockEventSource(),
+      fetch,
+      live: liveConnector(),
+      url: 'http://local/fate',
+    });
+    const dispose = transport.subscribeById!('Post', '1', ['title'], undefined, {
+      onData,
+      onDelete,
+    });
+    const source = await openLiveStream();
+    const event = { data: { id: '1' }, subscriptionId: '1', topic: liveEntityTopic('Post', '1') };
+
+    try {
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      fetch.mockReturnValueOnce(pending.promise);
+      source.message({ ...event, type: 'update' });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+      if (action === 'delete') {
+        source.message({ ...event, type: 'delete' });
+        expect(onDelete).toHaveBeenCalledExactlyOnceWith('1');
+      } else {
+        dispose();
+      }
+
+      pending.resolve(
+        jsonResponse({
+          results: [{ data: [{ id: '1', title: 'Old' }], id: '1', ok: true }],
+          version: 1,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onData).not.toHaveBeenCalled();
+
+      if (action === 'delete') {
+        source.message({ ...event, data: { data: { id: '1', title: 'New' } }, type: 'update' });
+        expect(onData).toHaveBeenCalledExactlyOnceWith({ id: '1', title: 'New' });
+      }
+    } finally {
+      dispose();
+    }
+  },
+);
+
 test('fetches only changed selected paths for live connector events', async () => {
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}'));

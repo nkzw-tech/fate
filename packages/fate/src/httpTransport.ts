@@ -708,11 +708,16 @@ export function createHTTPTransport<
         };
       }
 
+      let deletionGeneration = 0;
       const unsubscribePromise = getLiveClient()
         .subscribe<LiveEntityPayload>({
           id: liveId,
           onEvent(event) {
+            if (!liveSubscriptions.has(liveId)) {
+              return;
+            }
             if (event.type === 'delete') {
+              deletionGeneration++;
               handlers.onDelete?.(event.data.id ?? id);
               return;
             }
@@ -731,15 +736,23 @@ export function createHTTPTransport<
               }
             }
 
+            const generation = deletionGeneration;
             void fetchLiveRecord(subscription, liveSelect ?? subscription.select)
               .then((record) => {
+                if (generation !== deletionGeneration || !liveSubscriptions.has(liveId)) {
+                  return;
+                }
                 if (record == null) {
                   handlers.onDelete?.(id);
                 } else {
                   notifyLiveData(handlers, record, liveSelect ?? undefined);
                 }
               })
-              .catch((error) => reportSubscriptionError(subscription, error));
+              .catch((error: unknown) => {
+                if (generation === deletionGeneration && liveSubscriptions.has(liveId)) {
+                  reportSubscriptionError(subscription, error);
+                }
+              });
           },
           topic: liveEntityTopic(type, id),
         })
