@@ -16,6 +16,7 @@ import { withConnection } from '../connection.ts';
 import { computed, dataView, list, type DataView } from '../dataView.ts';
 import { createSourceRegistry } from '../executor.ts';
 import { createFateServer, type InferFateAPI } from '../http.ts';
+import { createPrismaSourceAdapter } from '../prisma.ts';
 import type { SourceDefinition } from '../source.ts';
 import { bindViewProcedures } from '../sourceRouter.ts';
 
@@ -241,4 +242,17 @@ test('keeps mixed-list-only sources out of native by-ID reads', async () => {
   });
   expect(documents).not.toHaveBeenCalled();
   expect(server.manifest.types).toEqual({ Post: true });
+});
+
+test('discovers mixed list member views from the root declaration', () => {
+  const article = dataView<{ id: string }>('Article')({ id: true });
+  const Root = {
+    feed: { view: list({ Article: article }, { query: async () => [], typeName: 'FeedItem' }) },
+  };
+  const sources = createPrismaSourceAdapter({ views: { Root } });
+
+  expect(sources.getSource(article).view).toBe(article);
+  expect(createFateServer({ roots: Root, sources }).manifest.lists).toEqual({
+    feed: { type: 'FeedItem' },
+  });
 });

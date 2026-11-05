@@ -1,3 +1,4 @@
+import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
 import {
   createViewPlan,
@@ -178,6 +179,14 @@ export const collectDataViewConfigs = (input: DataViewModule): Array<SourceConfi
 
     for (const [key, entry] of Object.entries(value)) {
       if (key === 'Root') {
+        if (isRecord(entry)) {
+          for (const root of Object.values(entry)) {
+            const view = isRecord(root) && 'view' in root ? root.view : root;
+            if (isRecord(view) && view.kind === 'list' && isRecord(view.views)) {
+              visit(view.views);
+            }
+          }
+        }
         continue;
       }
       visit(entry);
