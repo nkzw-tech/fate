@@ -71,6 +71,8 @@ export type SourceRelationConfig = Partial<SourceRelationKeyConfig> & {
 export type SourceDefinition<Item extends AnyRecord = AnyRecord, Adapter = unknown> = {
   adapter?: Adapter;
   id: string;
+  /** Whether the adapter applies cursors before returning nested list rows. */
+  nestedCursorApplied?: boolean;
   orderBy?: SourceOrder;
   relations?: Record<string, SourceRelation<AnyRecord, Adapter>>;
   view: DataView<Item>;
@@ -218,6 +220,7 @@ type SourceRelationContext<Adapter = unknown> = {
 export function createSourceDefinitions<Adapter = unknown>(
   configs: Array<SourceConfig<AnyRecord, Adapter>>,
   options?: {
+    nestedCursorApplied?: boolean;
     resolveRelation?: (context: SourceRelationContext<Adapter>) => SourceRelationConfig | undefined;
   },
 ): Array<SourceDefinition<AnyRecord, Adapter>> {
@@ -225,6 +228,7 @@ export function createSourceDefinitions<Adapter = unknown>(
     createSourceDefinition(config.view, {
       adapter: config.adapter,
       id: config.id ?? 'id',
+      nestedCursorApplied: options?.nestedCursorApplied,
       orderBy: config.orderBy,
     }),
   );
@@ -389,6 +393,7 @@ export function createSourcePlan<Item extends AnyRecord, Context = unknown, Adap
   const plan = createViewPlan({
     args,
     ctx,
+    nestedCursorApplied: source.nestedCursorApplied,
     select,
     view: source.view,
   });

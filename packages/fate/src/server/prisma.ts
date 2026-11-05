@@ -339,6 +339,7 @@ export function createPrismaSourceAdapter<Context>({
 }: PrismaSourceAdapterOptions<Context>): PrismaSourceAdapter<Context> {
   const viewConfigs = createPrismaViewConfigs({ prisma, views });
   const sourceDefinitions = createSourceDefinitions(viewConfigs, {
+    nestedCursorApplied: true,
     resolveRelation: inferPrismaRelation,
   });
   const sourcesByView = new Map<DataView<AnyRecord>, Source>(

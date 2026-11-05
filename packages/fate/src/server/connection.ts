@@ -47,6 +47,7 @@ type AnyRecord = Record<string, unknown>;
 
 type ArrayToConnectionOptions<TNode> = {
   args?: Record<string, unknown>;
+  cursorApplied?: boolean;
   getCursor?: (node: TNode) => ConnectionCursor;
 };
 
@@ -195,6 +196,7 @@ export function arrayToConnection<TNode extends { id: string | number }>(
   nodes?: Array<TNode>,
   {
     args,
+    cursorApplied = false,
     getCursor = (node: TNode) => String((node as { id: string | number }).id),
   }: ArrayToConnectionOptions<TNode> = {},
 ): ConnectionResult<TNode> | undefined {
@@ -223,7 +225,9 @@ export function arrayToConnection<TNode extends { id: string | number }>(
   const cursor = isBackward ? paginationArgs.before : paginationArgs.after;
   const pageSize = paginationArgs.first ?? paginationArgs.last ?? nodes.length;
   const cursorIndex =
-    cursor === undefined ? -1 : nodes.findIndex((node) => getCursor(node) === cursor);
+    cursorApplied || cursor === undefined
+      ? -1
+      : nodes.findIndex((node) => getCursor(node) === cursor);
 
   const selectedNodes =
     cursorIndex < 0
@@ -232,7 +236,7 @@ export function arrayToConnection<TNode extends { id: string | number }>(
         ? nodes.slice(0, cursorIndex)
         : nodes.slice(cursorIndex + 1);
   const hasNext = selectedNodes.length > pageSize;
-  const hasPrevious = nodes.length > selectedNodes.length;
+  const hasPrevious = cursorApplied ? cursor !== undefined : cursorIndex >= 0;
 
   const items = (
     isBackward
@@ -277,11 +281,13 @@ const assignIfChanged = <Value>(
 
 export function toConnectionResult<Item extends AnyRecord>({
   args,
+  cursorApplied,
   item,
   path,
   view,
 }: {
   args?: Record<string, unknown>;
+  cursorApplied?: boolean;
   item: Item;
   path?: string;
   view: DataView<Item>;
@@ -308,6 +314,7 @@ export function toConnectionResult<Item extends AnyRecord>({
           ...entry,
           node: toConnectionResult({
             args,
+            cursorApplied,
             item: entry.node as AnyRecord,
             path: nextPath,
             view: config,
@@ -329,6 +336,7 @@ export function toConnectionResult<Item extends AnyRecord>({
       const wrappedItems = current.map((item) =>
         toConnectionResult({
           args,
+          cursorApplied,
           item,
           path: nextPath,
           view: config,
@@ -336,6 +344,7 @@ export function toConnectionResult<Item extends AnyRecord>({
       );
       const connection = arrayToConnection(wrappedItems, {
         args: getScopedArgs(args, nextPath),
+        cursorApplied,
       });
       result = assignIfChanged(result, field, connection, current);
       continue;
@@ -343,14 +352,26 @@ export function toConnectionResult<Item extends AnyRecord>({
 
     if (Array.isArray(current)) {
       const wrapped = current.map((entry) =>
-        toConnectionResult({ args, item: entry as AnyRecord, path: nextPath, view: config }),
+        toConnectionResult({
+          args,
+          cursorApplied,
+          item: entry as AnyRecord,
+          path: nextPath,
+          view: config,
+        }),
       );
       result = assignIfChanged(result, field, wrapped, current);
       continue;
     }
 
     if (isRecord(current)) {
-      const wrapped = toConnectionResult({ args, item: current, path: nextPath, view: config });
+      const wrapped = toConnectionResult({
+        args,
+        cursorApplied,
+        item: current,
+        path: nextPath,
+        view: config,
+      });
       result = assignIfChanged(result, field, wrapped, current);
     }
   }

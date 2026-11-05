@@ -703,11 +703,13 @@ const resolveNode = async <Item extends AnyRecord, Context>({
 export function createViewPlan<Item extends AnyRecord, Context = unknown>({
   args,
   ctx,
+  nestedCursorApplied,
   select: initialSelect,
   view,
 }: {
   args?: AnyRecord;
   ctx?: Context;
+  nestedCursorApplied?: boolean;
   select: Iterable<string>;
   view: DataView<Item>;
 }) {
@@ -727,6 +729,7 @@ export function createViewPlan<Item extends AnyRecord, Context = unknown>({
   const resolve = async (item: Item): Promise<AnyRecord> =>
     toConnectionResult({
       args,
+      cursorApplied: nestedCursorApplied,
       item: filterToViewFields(
         await resolveNode({
           item,
