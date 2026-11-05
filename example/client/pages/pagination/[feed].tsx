@@ -9,6 +9,7 @@ import Section from '../../src/ui/Section.tsx';
 import AuthClient from '../../src/user/AuthClient.tsx';
 
 const PaginationPostView = view<Post>()({ content: true, id: true, title: true });
+const PostTitleView = view<Post>()({ title: true });
 const PreviewPostView = view<Post>()({ ...PaginationPostView });
 const OtherPostView = view<Post>()({ ...PaginationPostView });
 const pagination = { hasNext: true, nextCursor: true } as const;
@@ -52,7 +53,7 @@ function Feed({ name }: { name: keyof typeof feeds }) {
   const [error, act, isPending] = useActionState(
     async (
       _error: string | null,
-      action: 'load' | 'refresh' | 'insert' | 'fail' | 'invalidate' | 'revisit',
+      action: 'load' | 'refresh' | 'insert' | 'fail' | 'invalidate' | 'revisit' | 'read',
     ) => {
       try {
         if (action === 'load') {
@@ -61,6 +62,14 @@ function Feed({ name }: { name: keyof typeof feeds }) {
           await fate.request(request, { mode: 'network-only' });
         } else if (action === 'revisit') {
           await fate.request(request);
+        } else if (action === 'read') {
+          const id = items[0]?.node.id;
+          if (id != null) {
+            await Promise.all([
+              fate.request({ post: { id, view: PaginationPostView } }, { mode: 'network-only' }),
+              fate.request({ post: { id, view: PostTitleView } }, { mode: 'network-only' }),
+            ]);
+          }
         } else {
           const result = await fate.mutations.post.add({
             input: {
@@ -71,7 +80,6 @@ function Feed({ name }: { name: keyof typeof feeds }) {
               ? { invalidate: [posts] }
               : {
                   insert: { into: posts, position: 'before' },
-
                   optimistic: {
                     content: 'Created from the pagination demo.',
                     id: `optimistic:${crypto.randomUUID()}`,
@@ -107,6 +115,9 @@ function Feed({ name }: { name: keyof typeof feeds }) {
         </Button>
         <Button action={() => act('revisit')} disabled={isPending} variant="outline">
           Request this feed (cache-first)
+        </Button>
+        <Button action={() => act('read')} disabled={isPending || !items.length} variant="outline">
+          Read the first post twice
         </Button>
         <Button action={() => act('fail')} disabled={isPending || !session} variant="outline">
           Fail an optimistic insertion
@@ -178,6 +189,10 @@ export default function PaginationPage() {
           <li>
             Create a post and invalidate this feed. The feed stays as it is until you request it
             again. Use the cache-first button to fetch the new first page.
+          </li>
+          <li>
+            With the Network tab open, read the first post twice. The request for just its title
+            shares the fetch for its title and content.
           </li>
           <li>
             Sign in to insert a real post or reject an optimistic insertion using an invalid title.

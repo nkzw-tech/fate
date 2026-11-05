@@ -78,14 +78,10 @@ type SharedRead<T> = {
 };
 
 /** Pending work is shared; only the final departing reader may abort its execution. */
-export class SharedReads<T> {
-  private readonly pending = new Map<string, SharedRead<T>>();
+export class SharedReads<T, Key = string> {
+  private readonly pending = new Map<Key, SharedRead<T>>();
 
-  run(
-    key: string,
-    execute: (signal?: AbortSignal) => Promise<T>,
-    signal?: AbortSignal,
-  ): Promise<T> {
+  run(key: Key, execute: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) {
       return Promise.reject(signal.reason);
     }
@@ -114,17 +110,27 @@ export class SharedReads<T> {
         current.controller?.abort(error);
       });
     }
-    const current = entry;
-    current.readers++;
+    return this.wait(key, entry, signal);
+  }
+
+  join(key: Key, signal?: AbortSignal): Promise<T> | undefined {
+    const entry = this.pending.get(key);
+    if (entry) {
+      return this.wait(key, entry, signal);
+    }
+  }
+
+  private wait(key: Key, entry: SharedRead<T>, signal?: AbortSignal) {
+    entry.readers++;
     const release = () => {
-      if (--current.readers === 0 && !current.settled) {
-        if (this.pending.get(key) === current) {
+      if (--entry.readers === 0 && !entry.settled) {
+        if (this.pending.get(key) === entry) {
           this.pending.delete(key);
         }
-        current.controller?.abort(signal?.reason);
+        entry.controller?.abort(signal?.reason);
       }
     };
-    return abortable(current.promise, signal).then(
+    return abortable(entry.promise, signal).then(
       (value) => {
         release();
         return value;

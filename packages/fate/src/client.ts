@@ -162,6 +162,10 @@ export type DeferredSnapshot<T> = Readonly<{
 }>;
 
 type EntityFetchResult = Readonly<{ generation: number; record: unknown }>;
+type ScalarEntityRead = Readonly<{
+  fields: ReadonlySet<string>;
+  ids: ReadonlySet<EntityId>;
+}>;
 type EntityResolution = { id: EntityId; next?: EntityResolution };
 
 type FateClientOptions<
@@ -4359,6 +4363,8 @@ export class FateClient<
   }
 
   private readonly entityRefetches = new SharedReads<EntityFetchResult>();
+  private readonly scalarEntityReads = new SharedReads<void, ScalarEntityRead>();
+  private readonly scalarEntityReadsById = new Map<EntityId, Set<ScalarEntityRead>>();
 
   private async fetchEntities(
     type: string,
@@ -4448,6 +4454,29 @@ export class FateClient<
     );
   }
 
+  private getScalarRead(
+    type: string,
+    ids: Array<string | number>,
+    select: Set<string>,
+    plan: SelectionPlan,
+  ) {
+    const config = this.getTypeConfig(type);
+    if (!ids.length || !select.size || config.refetch || config.possibleTypes) {
+      return undefined;
+    }
+    const fields = new Set<string>();
+    for (const path of select) {
+      const field = config.fields?.[schemaField(path)];
+      // Generated native clients only describe relations. Unconfigured leaf
+      // fields are stored directly on the normalized record.
+      if (path.includes('.') || (field && field !== 'scalar')) {
+        return undefined;
+      }
+      fields.add(getStoragePath(path, plan));
+    }
+    return { fields, ids: new Set(ids.map((id) => toEntityId(type, id))) };
+  }
+
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
@@ -4456,27 +4485,87 @@ export class FateClient<
     prefix: string | null = null,
     signal?: AbortSignal,
   ) {
-    const resolvedArgs = resolvedArgsFromPlan(plan);
-    const generation = ++this.writeGeneration;
-    await this.trackPendingRequest(async () => {
-      const records = await this.fetchEntities(type, ids, select, generation, resolvedArgs, signal);
-      signal?.throwIfAborted();
-      this.assertPersistenceActive();
-      const normalization = createNormalizationContext();
-      for (const { generation, record } of records) {
-        this.withResponseWrite(generation, () =>
-          this.writeEntity(
-            type,
-            record as AnyRecord,
-            select,
-            plan,
-            prefix,
-            undefined,
-            normalization,
-          ),
+    const fetch = async (sharedSignal?: AbortSignal) => {
+      const resolvedArgs = resolvedArgsFromPlan(plan);
+      const generation = ++this.writeGeneration;
+      await this.trackPendingRequest(async () => {
+        const records = await this.fetchEntities(
+          type,
+          ids,
+          select,
+          generation,
+          resolvedArgs,
+          sharedSignal,
         );
+        sharedSignal?.throwIfAborted();
+        this.assertPersistenceActive();
+        const normalization = createNormalizationContext();
+        for (const { generation, record } of records) {
+          this.withResponseWrite(generation, () =>
+            this.writeEntity(
+              type,
+              record as AnyRecord,
+              select,
+              plan,
+              prefix,
+              undefined,
+              normalization,
+            ),
+          );
+        }
+      });
+    };
+    const read = plan && !prefix ? this.getScalarRead(type, ids, select, plan) : undefined;
+    if (!plan || !read) {
+      return fetch(signal);
+    }
+
+    const firstId = toEntityId(type, ids[0]);
+    for (const candidate of this.scalarEntityReadsById.get(firstId) ?? []) {
+      if (read.ids.isSubsetOf(candidate.ids) && read.fields.isSubsetOf(candidate.fields)) {
+        const pending = this.scalarEntityReads.join(candidate, signal);
+        if (pending) {
+          const completed = await pending.then(
+            () => true,
+            () => false,
+          );
+          signal?.throwIfAborted();
+          if (
+            completed &&
+            [...read.ids].every((id) => !this.missingForSelection(id, select, plan).size)
+          ) {
+            return;
+          }
+          break;
+        }
       }
-    });
+    }
+
+    return this.scalarEntityReads.run(
+      read,
+      async (sharedSignal) => {
+        for (const id of read.ids) {
+          let reads = this.scalarEntityReadsById.get(id);
+          if (!reads) {
+            reads = new Set();
+            this.scalarEntityReadsById.set(id, reads);
+          }
+          reads.add(read);
+        }
+        try {
+          await fetch(sharedSignal);
+        } finally {
+          for (const id of read.ids) {
+            const reads = this.scalarEntityReadsById.get(id)!;
+            reads.delete(read);
+            if (!reads.size) {
+              this.scalarEntityReadsById.delete(id);
+            }
+          }
+        }
+      },
+      signal,
+    );
   }
 
   private async fetchQueryAndNormalize(item: QueryRequestDescriptor, signal?: AbortSignal) {

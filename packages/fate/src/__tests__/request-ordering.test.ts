@@ -125,20 +125,22 @@ test('requests update the confirmed base beneath optimistic writes and rollback 
 });
 
 test('orders overlapping by-ID reads independently of the requesting view', async () => {
+  type ProfileUser = User & { avatar: string };
+  const NameAndAvatar = view<ProfileUser>()({ avatar: true, id: true, name: true });
   const pending: Array<(records: Array<Record<string, unknown>>) => void> = [];
   const client = createClient({
-    roots: { viewer: clientRoot<User, 'User'>('User') },
+    roots: { viewer: clientRoot<ProfileUser, 'User'>('User') },
     transport: { fetchById: () => new Promise((resolve) => pending.push(resolve)) },
     types: [{ type: 'User' }],
   });
   const older = client.request({ viewer: { id: '1', view: Profile } });
-  const newer = client.request({ viewer: { id: '1', view: Name } });
+  const newer = client.request({ viewer: { id: '1', view: NameAndAvatar } });
   await vi.waitFor(() => expect(pending).toHaveLength(2));
-  pending[1]([{ id: '1', name: 'New' }]);
+  pending[1]([{ avatar: 'Avatar', id: '1', name: 'New' }]);
   await newer;
   pending[0]([{ bio: 'Bio', id: '1', name: 'Old' }]);
   await older;
-  expect(client.store.read('User:1')).toMatchObject({ bio: 'Bio', name: 'New' });
+  expect(client.store.read('User:1')).toMatchObject({ avatar: 'Avatar', bio: 'Bio', name: 'New' });
 });
 
 test('an older relation response fills disjoint child fields without replacing its newer link', async () => {
