@@ -233,6 +233,29 @@ test('lowers aliased reads for transports that only understand schema field name
   });
 });
 
+test('preserves Date and JSON scalars when lowering aliases for native transports', async () => {
+  type Item = {
+    __typename: 'Item';
+    createdAt: Date;
+    id: string;
+    payload: { items: Array<{ name: string }> };
+  };
+  const Selected = view<Item>()({
+    date: alias('createdAt', true),
+    value: alias('payload', true),
+  });
+  const date = new Date('2026-10-01T00:00:00Z');
+  const payload = { items: [{ name: 'one' }] };
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [{ createdAt: date, id: '1', payload }] },
+    types: [{ fields: { createdAt: 'scalar', payload: 'scalar' }, type: 'Item' }],
+  });
+
+  const { data } = await client.readView(Selected, client.ref('Item', '1', Selected));
+  expect(data).toStrictEqual({ __typename: 'Item', date, value: payload });
+});
+
 test('supports root aliases without changing root cache identity', async () => {
   const { client, fetch } = setup();
   const Name = view<User>()({ name: true });

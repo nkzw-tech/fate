@@ -46,6 +46,9 @@ const groupsFor = (select: Iterable<string>): Array<Group> => {
 };
 
 const project = (value: unknown, tree: Tree): unknown => {
+  if (tree.size === 0) {
+    return value;
+  }
   if (Array.isArray(value)) {
     return value.map((item) => project(item, tree));
   }
