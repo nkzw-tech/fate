@@ -5371,13 +5371,18 @@ export class FateClient<
       if (!select.has(path)) {
         continue;
       }
-      // JSON omits selected undefined fields; they still have coverage unless
-      // a newer write has superseded this response.
-      if (
-        Object.hasOwn(result, storageKey) ||
-        (!(input ? input.has(record, recordKey) : Object.hasOwn(record, recordKey)) &&
-          this.acceptFieldWrite(entityId, storageKey, generation))
+      if (Object.hasOwn(result, storageKey)) {
+        selectedPaths.push(storagePath);
+      } else if (
+        !(input ? input.has(record, recordKey) : Object.hasOwn(record, recordKey)) &&
+        this.acceptFieldWrite(entityId, storageKey, generation)
       ) {
+        // JSON omits selected undefined fields. Clear any previous value.
+        const previous = this.store.read(entityId);
+        if (previous && Object.hasOwn(previous, storageKey) && previous[storageKey] !== undefined) {
+          setRecordValue(result, storageKey, undefined);
+          (replacedPaths ??= new Set()).add(storageKey);
+        }
         selectedPaths.push(storagePath);
       }
     }

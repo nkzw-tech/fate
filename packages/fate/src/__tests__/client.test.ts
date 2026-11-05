@@ -64,6 +64,29 @@ const createCommentConnectionItems = (count: number) =>
     node: { __typename: 'Comment', id: `comment-${index + 1}` },
   }));
 
+test('clears previously cached selected fields omitted by a refresh', async () => {
+  type Profile = { __typename: 'Profile'; bio: string; id: string; name?: string };
+  const FullProfile = view<Profile>()({ bio: true, id: true, name: true });
+  const ProfileName = view<Profile>()({ id: true, name: true });
+  const fetchQuery = vi
+    .fn<() => Promise<{ bio?: string; id: string; name?: string }>>()
+    .mockResolvedValueOnce({ bio: 'Bio', id: '1', name: 'Old name' })
+    .mockResolvedValueOnce({ id: '1' });
+  const client = createClient({
+    roots: { profile: clientRoot<Profile, 'Profile'>('Profile') },
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [{ type: 'Profile' }],
+  });
+
+  const { profile } = await client.request({ profile: { view: FullProfile } });
+  await client.request({ profile: { view: ProfileName } }, { mode: 'network-only' });
+
+  expect((await client.readView(FullProfile, profile)).data).toMatchObject({
+    bio: 'Bio',
+    name: undefined,
+  });
+});
+
 test('keeps refs stable by entity and view tags', () => {
   const client = createClient({
     roots: {},
