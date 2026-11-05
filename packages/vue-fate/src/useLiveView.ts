@@ -12,6 +12,7 @@ import {
 } from '@nkzw/fate';
 import { onScopeDispose, toValue, watch, type MaybeRefOrGetter } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
+import { isFulfilledThenable } from './thenable.ts';
 import { useView, type ViewResource } from './useView.ts';
 
 type ViewEntityWithTypename<V extends View<any, any>> = ViewEntity<V> & {
@@ -55,6 +56,9 @@ export function useLiveView<V extends View<any, any>>(
   const viewResource = useView(view, ref);
   const disposeResource = viewResource.dispose;
   let liveUnsubscribe: (() => void) | undefined;
+  let deferredSubscriptions: Array<() => void> = [];
+  let subscribedClient: typeof clientSource.value | undefined;
+  let subscribedRef: ViewRef<ViewEntityName<V>> | undefined;
   let disposed = false;
   let token = 0;
 
@@ -63,46 +67,82 @@ export function useLiveView<V extends View<any, any>>(
     liveUnsubscribe = undefined;
   };
 
-  const resolveRef = async () => {
-    const currentRef = toValue(ref);
-    if (!isDeferred(currentRef)) {
-      return currentRef as ViewRef<ViewEntityName<V>> | null | undefined;
-    }
-
-    return (
-      (await clientSource.value.readDeferred(
-        currentRef as Deferred<ViewRef<ViewEntityName<V>>>,
-      )) as DeferredSnapshot<ViewRef<ViewEntityName<V>> | null | undefined>
-    ).data;
+  const cleanupDeferredSubscriptions = () => {
+    deferredSubscriptions.forEach((unsubscribe) => unsubscribe());
+    deferredSubscriptions = [];
   };
 
   const subscribe = () => {
     const currentToken = ++token;
-    cleanupLiveSubscription();
+    const client = clientSource.value;
+    const currentRef = toValue(ref);
+    const update = (
+      resolvedRef: ViewRef<ViewEntityName<V>> | null | undefined,
+      coverage: DeferredSnapshot<unknown>['coverage'] = [],
+    ) => {
+      if (disposed || currentToken !== token) {
+        return;
+      }
+      cleanupDeferredSubscriptions();
+      deferredSubscriptions = coverage.map(([id, paths]) =>
+        client.store.subscribe(id, paths, () => {
+          queueMicrotask(() => {
+            if (!disposed && token === currentToken) {
+              subscribe();
+            }
+          });
+        }),
+      );
 
-    void resolveRef()
-      .then((resolvedRef) => {
-        if (disposed || currentToken !== token || !resolvedRef) {
-          return;
-        }
+      const liveRef = resolvedRef
+        ? client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef))
+        : undefined;
+      if (client === subscribedClient && liveRef === subscribedRef) {
+        return;
+      }
+      cleanupLiveSubscription();
+      liveUnsubscribe = liveRef ? client.subscribeLiveView(view, liveRef) : undefined;
+      subscribedClient = client;
+      subscribedRef = liveRef;
+    };
+    const fail = (error: unknown) => {
+      if (!disposed && currentToken === token) {
+        viewResource.error.value = error;
+        viewResource.pending.value = false;
+      }
+    };
 
-        const client = clientSource.value;
-        liveUnsubscribe = client.subscribeLiveView(
-          view,
-          client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
-        );
-      })
-      .catch((error: unknown) => {
-        if (!disposed && currentToken === token) {
-          viewResource.error.value = error;
-          viewResource.pending.value = false;
-        }
-      });
+    try {
+      if (!isDeferred(currentRef)) {
+        update(currentRef as ViewRef<ViewEntityName<V>> | null | undefined);
+        return;
+      }
+      const snapshot = client.readDeferred(
+        currentRef as Deferred<ViewRef<ViewEntityName<V>> | null | undefined>,
+      );
+      if (isFulfilledThenable(snapshot)) {
+        update(snapshot.value.data, snapshot.value.coverage);
+      } else {
+        void Promise.resolve(snapshot)
+          .then(({ data, coverage }) => update(data, coverage))
+          .catch(fail);
+      }
+    } catch (error) {
+      fail(error);
+    }
   };
 
-  const stop = watch(() => [clientSource.value, toValue(ref)] as const, subscribe, {
-    immediate: true,
-  });
+  const stop = watch(
+    () => [clientSource.value, toValue(ref)] as const,
+    () => {
+      cleanupDeferredSubscriptions();
+      cleanupLiveSubscription();
+      subscribedClient = undefined;
+      subscribedRef = undefined;
+      subscribe();
+    },
+    { immediate: true },
+  );
 
   const dispose = () => {
     if (disposed) {
@@ -111,6 +151,7 @@ export function useLiveView<V extends View<any, any>>(
     disposed = true;
     token++;
     stop();
+    cleanupDeferredSubscriptions();
     cleanupLiveSubscription();
     disposeResource();
   };
