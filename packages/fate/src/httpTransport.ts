@@ -709,6 +709,7 @@ export function createHTTPTransport<
       }
 
       let deletionGeneration = 0;
+      let pendingUpdate: Promise<void> | undefined;
       const unsubscribePromise = getLiveClient()
         .subscribe<LiveEntityPayload>({
           id: liveId,
@@ -718,6 +719,7 @@ export function createHTTPTransport<
             }
             if (event.type === 'delete') {
               deletionGeneration++;
+              pendingUpdate = undefined;
               handlers.onDelete?.(event.data.id ?? id);
               return;
             }
@@ -729,30 +731,46 @@ export function createHTTPTransport<
               return;
             }
 
-            if ('data' in event.data && event.data.data !== undefined) {
-              if (!liveSelect || canUseLivePayloadData(event.data.data, liveSelect)) {
-                notifyLiveData(handlers, event.data.data, liveSelect ?? undefined);
+            const generation = deletionGeneration;
+            const isCurrent = () =>
+              generation === deletionGeneration && liveSubscriptions.has(liveId);
+            const deliver = () => {
+              if (!isCurrent()) {
                 return;
               }
-            }
-
-            const generation = deletionGeneration;
-            void fetchLiveRecord(subscription, liveSelect ?? subscription.select)
-              .then((record) => {
-                if (generation !== deletionGeneration || !liveSubscriptions.has(liveId)) {
+              if ('data' in event.data && event.data.data !== undefined) {
+                if (!liveSelect || canUseLivePayloadData(event.data.data, liveSelect)) {
+                  notifyLiveData(handlers, event.data.data, liveSelect ?? undefined);
                   return;
                 }
-                if (record == null) {
-                  handlers.onDelete?.(id);
-                } else {
-                  notifyLiveData(handlers, record, liveSelect ?? undefined);
-                }
-              })
-              .catch((error: unknown) => {
-                if (generation === deletionGeneration && liveSubscriptions.has(liveId)) {
-                  reportSubscriptionError(subscription, error);
-                }
-              });
+              }
+              return fetchLiveRecord(subscription, liveSelect ?? subscription.select).then(
+                (record) => {
+                  if (isCurrent()) {
+                    if (record == null) {
+                      handlers.onDelete?.(id);
+                    } else {
+                      notifyLiveData(handlers, record, liveSelect ?? undefined);
+                    }
+                  }
+                },
+              );
+            };
+            const result = pendingUpdate ? pendingUpdate.then(deliver) : deliver();
+            if (result) {
+              const next = result
+                .catch((error: unknown) => {
+                  if (isCurrent()) {
+                    reportSubscriptionError(subscription, error);
+                  }
+                })
+                .finally(() => {
+                  if (pendingUpdate === next) {
+                    pendingUpdate = undefined;
+                  }
+                });
+              pendingUpdate = next;
+            }
           },
           topic: liveEntityTopic(type, id),
         })

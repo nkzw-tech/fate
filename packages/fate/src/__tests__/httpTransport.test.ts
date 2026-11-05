@@ -935,6 +935,48 @@ test('fetches entity records for live connector events without data', async () =
   dispose?.();
 });
 
+test('delivers live entity updates in event order when a read is delayed', async () => {
+  const older = Promise.withResolvers<Response>();
+  const fetch = liveControlFetch();
+  const onData = vi.fn();
+  const transport = createHTTPTransport({
+    eventSource: resetMockEventSource(),
+    fetch,
+    live: liveConnector(),
+    url: 'http://local/fate',
+  });
+  const dispose = transport.subscribeById!('Post', '1', ['title'], undefined, { onData });
+  const source = await openLiveStream();
+  const event = {
+    data: { changed: ['title'], id: '1' },
+    subscriptionId: '1',
+    topic: liveEntityTopic('Post', '1'),
+    type: 'update',
+  };
+  const reply = (id: string, title: string) =>
+    jsonResponse({
+      results: [{ data: [{ id: event.data.id, title }], id, ok: true }],
+      version: 1,
+    });
+
+  try {
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    fetch.mockReturnValueOnce(older.promise).mockResolvedValueOnce(reply('2', 'Newer'));
+    source.message(event);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    source.message(event);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    older.resolve(reply('1', 'Older'));
+    await vi.waitFor(() => expect(onData).toHaveBeenCalledTimes(2));
+    expect(onData.mock.calls).toEqual([
+      [{ id: '1', title: 'Older' }, ['title', 'id']],
+      [{ id: '1', title: 'Newer' }, ['title', 'id']],
+    ]);
+  } finally {
+    dispose();
+  }
+});
+
 test.each(['delete', 'dispose'] as const)(
   'ignores a pending live entity fetch after %s',
   async (action) => {
