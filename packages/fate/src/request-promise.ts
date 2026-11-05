@@ -1,6 +1,7 @@
 export default class FateRequestPromise<T, TDescriptor = unknown> implements Promise<T> {
   readonly [Symbol.toStringTag] = 'Promise';
 
+  generation = 0;
   reason?: unknown;
   status: 'fulfilled' | 'pending' | 'rejected' = 'pending';
 

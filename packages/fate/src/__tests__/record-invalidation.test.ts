@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { mutation } from '../mutation.ts';
+import { isNodeRef } from '../node-ref.ts';
 import { createPersistence } from '../persistence.ts';
 import { clientRoot } from '../root.ts';
 import { view } from '../view.ts';
@@ -25,14 +26,18 @@ const setup = (persistence?: ReturnType<typeof createPersistence>) => {
     ): Promise<Array<Partial<Omit<Post, 'id'>> & { id: string | number }>> =>
       ids.map((id) => ({ content: 'Content', id, title: 'Title' })),
   );
+  const fetchQuery = vi.fn(async (): Promise<Partial<Post> | null> => ({
+    id: '1',
+    title: 'Title',
+  }));
   const client = createClient<[typeof roots, typeof mutations]>({
     mutations,
     persistence,
     roots,
-    transport: { fetchById, mutate, mutateDurably: mutate },
+    transport: { fetchById, fetchQuery, mutate, mutateDurably: mutate },
     types: [{ type: 'Post' }, { type: 'Comment' }],
   });
-  return { client, fetchById, mutate };
+  return { client, fetchById, fetchQuery, mutate };
 };
 
 test('a view ref invalidates the record across views and only refreshes fetched fields', async () => {
@@ -129,6 +134,163 @@ test('a replayed offline mutation invalidates its parent record on disk', async 
     expect(next.fetchById).toHaveBeenCalledTimes(1);
     await next.client.request(content);
     expect(next.fetchById).toHaveBeenCalledTimes(2);
+  } finally {
+    next.client.persistence!.dispose();
+  }
+});
+
+test('a narrower read after invalidation does not wait for an older scalar fetch', async () => {
+  const { client, fetchById } = setup();
+  const { post: postRef } = await client.request(post);
+  const older = Promise.withResolvers<Awaited<ReturnType<typeof fetchById>>>();
+  fetchById.mockReturnValueOnce(older.promise);
+  const pending = client.request(post, { mode: 'network-only' });
+  await client.mutations.addComment({ input: { postId: '1' }, invalidate: [postRef] });
+  fetchById.mockResolvedValueOnce([{ id: '1', title: 'Fresh' }]);
+  const latest = client.request(title);
+  expect(fetchById).toHaveBeenCalledTimes(3);
+  await latest;
+  older.resolve([{ id: '1', title: 'Older' }]);
+  await pending;
+  expect(client.store.read('Post:1')?.title).toBe('Fresh');
+});
+
+test('invalidating a partially restored record keeps other saved fields readable', async () => {
+  const storage = memoryStorage();
+  const create = () => setup(createPersistence({ key: 'posts', online: () => true, storage }));
+  const first = create();
+  try {
+    await first.client.request(post);
+    await first.client.persistence!.flush();
+  } finally {
+    first.client.persistence!.dispose();
+  }
+
+  const second = create();
+  try {
+    const { post: postRef } = await second.client.request(title);
+    expect(second.fetchById).not.toHaveBeenCalled();
+    expect(second.client.store.read('Post:1')?.content).toBeUndefined();
+    await second.client.mutations.addComment({
+      input: { postId: '1' },
+      invalidate: [postRef],
+      persist: false,
+    });
+    await second.client.persistence!.flush();
+  } finally {
+    second.client.persistence!.dispose();
+  }
+
+  const next = create();
+  try {
+    const response = Promise.withResolvers<Awaited<ReturnType<typeof next.fetchById>>>();
+    next.fetchById.mockReturnValueOnce(response.promise);
+    const refresh = next.client.request(content);
+    await vi.waitFor(() => expect(next.fetchById).toHaveBeenCalledTimes(1));
+    expect(
+      next.client.observeRequest(content, { mode: 'cache-only' }).getSnapshot().data?.post.id,
+    ).toBe('1');
+    expect(next.client.store.read('Post:1')?.content).toBe('Content');
+    response.resolve([{ content: 'Fresh content', id: '1' }]);
+    await refresh;
+  } finally {
+    next.client.persistence!.dispose();
+  }
+});
+
+test('an older nullable query cannot hide a record invalidated while the query was pending', async () => {
+  const { client, fetchQuery } = setup();
+  const query = { post: { view: Title } };
+  const { post: postRef } = await client.request(query);
+  const older = Promise.withResolvers<null>();
+  fetchQuery.mockReturnValueOnce(older.promise);
+  const pending = client.request(query, { mode: 'network-only' });
+  await client.mutations.addComment({ input: { postId: '1' }, invalidate: [postRef!] });
+  older.resolve(null);
+  await pending;
+
+  expect(client.getRequestResult(query).post?.id).toBe('1');
+  await client.request(query);
+  expect(fetchQuery).toHaveBeenCalledTimes(3);
+});
+
+test('a partial refresh clears its part of an invalidated embedded object', async () => {
+  type PostWithDetails = Post & { details: { count: number; summary: string } };
+  const Summary = view<PostWithDetails>()({ details: { summary: true } });
+  const Count = view<PostWithDetails>()({ details: { count: true } });
+  const fetchById = vi.fn().mockResolvedValue([{ details: { count: 1, summary: 'Old' }, id: '1' }]);
+  const client = createClient<[typeof roots, typeof mutations]>({
+    mutations,
+    roots,
+    transport: { fetchById, mutate: vi.fn().mockResolvedValue({ id: 'comment' }) },
+    types: [{ fields: { details: { embedded: 'Details' } }, type: 'Post' }, { type: 'Comment' }],
+  });
+  client.write('Post', { details: { count: 1, summary: 'Old' }, id: '1' }, new Set(['details']));
+  const postRef = client.ref('Post', '1', Summary);
+  await client.mutations.addComment({ input: { postId: '1' }, invalidate: [postRef] });
+
+  const summary = { post: { id: '1', view: Summary } };
+  fetchById.mockResolvedValueOnce([{ details: { summary: 'Fresh' }, id: '1' }]);
+  await client.request(summary);
+  await client.request(summary);
+  expect(fetchById).toHaveBeenCalledTimes(1);
+  expect(client.store.read('Post:1')?.details).toEqual({ count: 1, summary: 'Fresh' });
+
+  fetchById.mockResolvedValueOnce([{ details: { count: 2 }, id: '1' }]);
+  await client.request({ post: { id: '1', view: Count } });
+  expect(fetchById).toHaveBeenCalledTimes(2);
+  expect(client.store.read('Post:1')?.details).toEqual({ count: 2, summary: 'Fresh' });
+});
+
+test('saving a record invalidation preserves its normalized links', async () => {
+  type Author = { __typename: 'Author'; id: string; name: string };
+  type PostWithAuthor = Post & { author: Author };
+  const Byline = view<PostWithAuthor>()({ author: { name: true } });
+  const request = { post: { id: '1', view: Byline } };
+  const record = { author: { id: 'a', name: 'Ada' }, id: '1' };
+  const storage = memoryStorage();
+  const create = () => {
+    const fetchById = vi.fn(async () => [record]);
+    const client = createClient<[typeof roots, typeof mutations]>({
+      mutations,
+      persistence: createPersistence({ key: 'byline', storage }),
+      roots,
+      transport: { fetchById, mutate: vi.fn().mockResolvedValue({ id: 'comment' }) },
+      types: [
+        { fields: { author: { type: 'Author' } }, type: 'Post' },
+        { type: 'Author' },
+        { type: 'Comment' },
+      ],
+    });
+    return { client, fetchById };
+  };
+
+  const first = create();
+  try {
+    const { post: postRef } = await first.client.request(request);
+    await first.client.persistence!.flush();
+    await first.client.mutations.addComment({
+      input: { postId: '1' },
+      invalidate: [postRef],
+      persist: false,
+    });
+    await first.client.persistence!.flush();
+  } finally {
+    first.client.persistence!.dispose();
+  }
+
+  const next = create();
+  try {
+    const response = Promise.withResolvers<Array<typeof record>>();
+    next.fetchById.mockReturnValueOnce(response.promise);
+    const refresh = next.client.request(request);
+    await vi.waitFor(() => expect(next.fetchById).toHaveBeenCalledTimes(1));
+    expect(
+      next.client.observeRequest(request, { mode: 'cache-only' }).getSnapshot().data?.post.id,
+    ).toBe('1');
+    expect(isNodeRef(next.client.store.read('Post:1')?.author)).toBe(true);
+    response.resolve([record]);
+    await refresh;
   } finally {
     next.client.persistence!.dispose();
   }

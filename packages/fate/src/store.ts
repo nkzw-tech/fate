@@ -78,6 +78,7 @@ export type StoreHydrationState = Readonly<{
 export type StoreChange =
   | Readonly<{ key: string; kind: 'list'; previousList?: List }>
   | Readonly<{
+      invalidated?: true;
       key: EntityId;
       kind: 'record';
       patchPaths?: ReadonlySet<string>;
@@ -135,6 +136,34 @@ const isPlainRecord = (value: unknown): value is AnyRecord => {
 
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+};
+
+/** Expand cached objects so a partial refresh can clear just the returned leaves. */
+export const expandStalePaths = (record: AnyRecord, paths: Iterable<string>) => {
+  const stale = new Set<string>();
+  const ancestors = new Set<object>();
+  const visit = (path: string, value: unknown) => {
+    if (isPlainRecord(value) && !ancestors.has(value)) {
+      const entries = Object.entries(value);
+      if (entries.length && entries.every(([key]) => key && !key.includes('.'))) {
+        ancestors.add(value);
+        for (const [key, child] of entries) {
+          visit(`${path}.${key}`, child);
+        }
+        ancestors.delete(value);
+        return;
+      }
+    }
+    stale.add(path);
+  };
+  for (const path of paths) {
+    let value: unknown = record;
+    for (const key of path.split('.')) {
+      value = isPlainRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+    }
+    visit(path, value);
+  }
+  return [...stale];
 };
 
 // Confirmed writes can carry a merged embedded object. Record which leaves
@@ -883,10 +912,11 @@ export class Store {
 
   invalidateRecord(id: EntityId) {
     const mask = this.coverage.get(id);
-    const paths = mask && toPaths(mask);
+    const record = this.records.get(id);
+    const paths = mask && record && expandStalePaths(record, toPaths(mask));
     if (paths?.length) {
       this.stalePaths.set(id, paths);
-      this.notify(id);
+      this.onChange?.({ invalidated: true, key: id, kind: 'record', referencesChanged: false });
     }
   }
 

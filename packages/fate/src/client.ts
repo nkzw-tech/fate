@@ -164,7 +164,8 @@ export type DeferredSnapshot<T> = Readonly<{
 type EntityFetchResult = Readonly<{ generation: number; record: unknown }>;
 type ScalarEntityRead = Readonly<{
   fields: ReadonlySet<string>;
-  ids: ReadonlySet<EntityId>;
+  generation: number;
+  ids: ReadonlySet<string | number>;
 }>;
 type EntityResolution = { id: EntityId; next?: EntityResolution };
 
@@ -636,6 +637,7 @@ export class FateClient<
   HydrationScope extends string = string,
 > {
   private writeGeneration = 0;
+  private lastInvalidation = 0;
   private mutationWrite: { fields?: ReadonlySet<string> } | undefined;
   private applyingGeneration: number | undefined;
   private applyingPaginationList: string | undefined;
@@ -808,6 +810,7 @@ export class FateClient<
   private gcPending = false;
   private gcScheduled = false;
   private pendingNetworkRequests = 0;
+  private pendingRequestHandles = 0;
   private readonly persistenceDisposal?: AbortController;
   private readonly persistenceRuntime?: PersistenceRuntime;
   readonly store = new Store(
@@ -1338,17 +1341,40 @@ export class FateClient<
         for (const key of invalidate ?? []) {
           const list = this.store.getListState(key);
           if (list) {
-            this.store.setList(key, { ...list, stale: true });
+            const generation = this.recordInvalidation(`list:${key}`);
+            this.withWriteGeneration(generation, () =>
+              this.store.setList(key, { ...list, stale: true }),
+            );
           }
         }
         for (const id of invalidateRecords ?? []) {
           const entityId = this.resolveEntityId(id);
-          const generation = ++this.writeGeneration;
+          const generation = this.recordInvalidation(`entity:${entityId}`);
           this.acceptWrite(`record:${entityId}`, generation);
           this.withWriteGeneration(generation, () => this.store.invalidateRecord(entityId));
         }
       });
     }
+  }
+
+  private recordInvalidation(dependency: string) {
+    const generation = ++this.writeGeneration;
+    if (this.pendingNetworkRequests || this.pendingRequestHandles) {
+      this.lastInvalidation = generation;
+      this.writeVersions.set(`invalidate:${dependency}`, generation);
+    }
+    return generation;
+  }
+
+  private requestInvalidation(request: RequestDescriptor, since = 0) {
+    if (this.lastInvalidation <= since) {
+      return 0;
+    }
+    let version = 0;
+    for (const dependency of this.requestDependencies(request, true)) {
+      version = Math.max(version, this.writeVersions.get(`invalidate:${dependency}`) ?? 0);
+    }
+    return version;
   }
 
   /** @internal Capture a mutation's list identities without retaining its result snapshots. */
@@ -2561,11 +2587,13 @@ export class FateClient<
   ): List {
     const isBackward = options.direction === 'backward';
     const refreshStale = previous?.stale && options.refreshStale && !options.hasCursorArg;
+    if (refreshStale) {
+      previous = undefined;
+    }
     const preserveTail = Boolean(
       options.replace &&
       !options.hasCursorArg &&
       !options.resetInsertions &&
-      !refreshStale &&
       previous &&
       options.pageLimit != null &&
       previous.ids.length > Math.min(options.pageLimit, incomingIds.length) &&
@@ -2788,8 +2816,8 @@ export class FateClient<
       pagination,
       pendingAfterIds: dropCanonicalListIds(previous?.pendingAfterIds, ids),
       pendingBeforeIds: dropCanonicalListIds(previous?.pendingBeforeIds, ids),
-      stale: refreshStale ? undefined : previous?.stale,
-      windows: refreshStale ? undefined : previous?.windows,
+      stale: previous?.stale,
+      windows: previous?.windows,
     };
   }
 
@@ -2886,9 +2914,11 @@ export class FateClient<
       return current;
     }
     const window = extendListWindow(
-      current.windows?.[key] === initialWindow
-        ? previous
-        : getListWindow(current, connection.args, key),
+      initial?.stale && !current.stale
+        ? undefined
+        : current.windows?.[key] === initialWindow
+          ? previous
+          : getListWindow(current, connection.args, key),
       response.page,
       connection.args,
       current.windows?.[key],
@@ -3278,8 +3308,12 @@ export class FateClient<
       this.optimisticRefOwners.set(copy, this.optimisticRefOwners.get(value) ?? value);
       return copy as T;
     }
+    const metadata = this.listTargets.get(value);
     if (Array.isArray(value)) {
       const copy = value.map((child) => this.cacheOnlyResult(child));
+      if (metadata) {
+        this.exposeListTarget(copy, metadata);
+      }
       this.cacheOnlyCopies.set(value, copy);
       return copy as T;
     }
@@ -3293,6 +3327,9 @@ export class FateClient<
       }
     }
     const copy = Object.create(Object.prototype, descriptors);
+    if (metadata) {
+      this.listTargets.set(copy, metadata);
+    }
     this.cacheOnlyCopies.set(value, copy);
     return copy;
   }
@@ -3444,7 +3481,10 @@ export class FateClient<
     const cacheHandle = !controlled || !revalidateExisting;
     const requestKey = this.requestCacheKey(descriptor, options);
     const existingRequest = cacheHandle ? this.requests.get(requestKey)?.get(mode) : undefined;
-    if (existingRequest) {
+    const superseded =
+      existingRequest?.status === 'pending' &&
+      this.requestInvalidation(descriptor, existingRequest.generation) > existingRequest.generation;
+    if (existingRequest && !superseded) {
       if (persistence && options?.persist) {
         const executionOptions = this.requestExecutionOptions.get(existingRequest.descriptor);
         if (executionOptions) {
@@ -3756,6 +3796,8 @@ export class FateClient<
     mode: RequestMode,
     options?: RequestOptions,
   ) {
+    handle.generation = this.writeGeneration;
+    this.pendingRequestHandles++;
     const persistence = this.persistenceRuntime;
     const control = readControl(options);
     let background = false;
@@ -3829,10 +3871,12 @@ export class FateClient<
         },
       ),
     );
-    void handle.then(
-      () => this.notifyRequests(this.requestDependencies(handle.descriptor)),
-      () => this.notifyRequests(this.requestDependencies(handle.descriptor)),
-    );
+    const settle = () => {
+      this.pendingRequestHandles--;
+      this.clearWriteVersionsIfIdle();
+      this.notifyRequests(this.requestDependencies(handle.descriptor));
+    };
+    void handle.then(settle, settle);
   }
 
   private markRecordReferences(record: AnyRecord, markRecord: (entityId: EntityId) => void) {
@@ -3916,13 +3960,18 @@ export class FateClient<
         return await this.withPersistenceLifecycle(request);
       } finally {
         this.pendingNetworkRequests -= 1;
-        if (!this.pendingNetworkRequests) {
-          this.writeVersions.clear();
-          this.fieldWriteVersions.clear();
-        }
+        this.clearWriteVersionsIfIdle();
         this.persistenceRuntime?.changed();
       }
     });
+  }
+
+  private clearWriteVersionsIfIdle() {
+    if (!this.pendingNetworkRequests && !this.pendingRequestHandles) {
+      this.lastInvalidation = 0;
+      this.writeVersions.clear();
+      this.fieldWriteVersions.clear();
+    }
   }
 
   private runPendingGarbageCollection() {
@@ -4102,7 +4151,12 @@ export class FateClient<
     options: { fetchAll?: boolean; persist?: { maxAge: number }; signal?: AbortSignal } = {},
   ) {
     return this.readRequests.run(
-      JSON.stringify([request.key, !!options.fetchAll, options.persist?.maxAge]),
+      JSON.stringify([
+        request.key,
+        !!options.fetchAll,
+        options.persist?.maxAge,
+        this.requestInvalidation(request),
+      ]),
       (signal) => this.executeRequestWork(request, options, signal),
       options.signal,
     );
@@ -4519,7 +4573,7 @@ export class FateClient<
       }
       fields.add(getStoragePath(path, plan));
     }
-    return { fields, ids: new Set(ids.map((id) => toEntityId(type, id))) };
+    return { fields, ids: new Set(ids) };
   }
 
   private async fetchByIdAndNormalize(
@@ -4530,9 +4584,8 @@ export class FateClient<
     prefix: string | null = null,
     signal?: AbortSignal,
   ) {
-    const fetch = async (sharedSignal?: AbortSignal) => {
+    const fetch = async (sharedSignal?: AbortSignal, generation = ++this.writeGeneration) => {
       const resolvedArgs = resolvedArgsFromPlan(plan);
-      const generation = ++this.writeGeneration;
       await this.trackPendingRequest(async () => {
         const records = await this.fetchEntities(
           type,
@@ -4567,7 +4620,21 @@ export class FateClient<
 
     const firstId = toEntityId(type, ids[0]);
     for (const candidate of this.scalarEntityReadsById.get(firstId) ?? []) {
-      if (read.ids.isSubsetOf(candidate.ids) && read.fields.isSubsetOf(candidate.fields)) {
+      if (
+        read.ids.isSubsetOf(candidate.ids) &&
+        read.fields.isSubsetOf(candidate.fields) &&
+        ids.every((id) => {
+          const entityId = toEntityId(type, id);
+          if ((this.writeVersions.get(`record:${entityId}`) ?? 0) > candidate.generation) {
+            return false;
+          }
+          const versions = this.fieldWriteVersions.get(entityId);
+          return (
+            !versions ||
+            [...read.fields].every((field) => (versions.get(field) ?? 0) <= candidate.generation)
+          );
+        })
+      ) {
         const pending = this.scalarEntityReads.join(candidate, signal);
         if (pending) {
           const completed = await pending.then(
@@ -4578,7 +4645,8 @@ export class FateClient<
           if (
             completed &&
             [...read.ids].every(
-              (id) => !this.missingForSelection(id, select, plan, undefined, true).size,
+              (id) =>
+                !this.missingForSelection(toEntityId(type, id), select, plan, undefined, true).size,
             )
           ) {
             return;
@@ -4588,24 +4656,26 @@ export class FateClient<
       }
     }
 
+    const pendingRead = { ...read, generation: ++this.writeGeneration };
+    const entityIds = ids.map((id) => toEntityId(type, id));
     return this.scalarEntityReads.run(
-      read,
+      pendingRead,
       async (sharedSignal) => {
-        for (const id of read.ids) {
+        for (const id of entityIds) {
           let reads = this.scalarEntityReadsById.get(id);
           if (!reads) {
             reads = new Set();
             this.scalarEntityReadsById.set(id, reads);
           }
-          reads.add(read);
+          reads.add(pendingRead);
         }
         try {
-          await fetch(sharedSignal);
+          await fetch(sharedSignal, pendingRead.generation);
         } finally {
-          for (const id of read.ids) {
-            const reads = this.scalarEntityReadsById.get(id)!;
-            reads.delete(read);
-            if (!reads.size) {
+          for (const id of entityIds) {
+            const reads = this.scalarEntityReadsById.get(id);
+            reads?.delete(pendingRead);
+            if (reads?.size === 0) {
               this.scalarEntityReadsById.delete(id);
             }
           }
@@ -4636,8 +4706,16 @@ export class FateClient<
       );
       signal?.throwIfAborted();
       this.assertPersistenceActive();
+      const acceptRoot = () => {
+        const previous = this.rootRequests.get(this.queryResultKey(item));
+        return (
+          (!previous ||
+            (this.writeVersions.get(`invalidate:entity:${previous}`) ?? 0) <= generation) &&
+          this.acceptWrite(`root:${item.queryKey}`, generation)
+        );
+      };
       if (!record || typeof record !== 'object') {
-        if (this.acceptWrite(`root:${item.queryKey}`, generation)) {
+        if (acceptRoot()) {
           this.rootRequests.set(item.queryKey, null);
         }
         return;
@@ -4646,7 +4724,7 @@ export class FateClient<
       const entityId = this.withResponseWrite(generation, () =>
         this.writeEntity(item.type, record as AnyRecord, item.plan.paths, item.plan),
       );
-      if (this.acceptWrite(`root:${item.queryKey}`, generation)) {
+      if (acceptRoot()) {
         this.rootRequests.set(item.queryKey, entityId);
       }
     });
@@ -4702,7 +4780,9 @@ export class FateClient<
         if (acceptList && !(stale && getPaginationArgsInfo(item.argsPayload).hasCursorArg)) {
           this.rootValues.set(`list:${item.listKey}`, null);
           if (stale) {
-            this.store.restoreList(item.listKey, undefined);
+            this.withWriteGeneration(generation, () =>
+              this.store.restoreList(item.listKey, undefined),
+            );
           }
         }
         return;

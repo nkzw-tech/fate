@@ -183,3 +183,64 @@ test('a replayed offline mutation invalidates its list on disk', async () => {
     next.client.persistence!.dispose();
   }
 });
+
+test('a cache-first request after a second invalidation does not join the older refresh', async () => {
+  const { client, fetchList } = setup();
+  const { posts } = await client.request(active);
+  await client.mutations.add({ input: { title: 'New' }, invalidate: [posts] });
+  const older = Promise.withResolvers<ReturnType<typeof page>>();
+  fetchList.mockReturnValueOnce(older.promise);
+  const pending = client.request(active);
+  await client.mutations.add({ input: { title: 'Newer' }, invalidate: [posts] });
+  fetchList.mockResolvedValueOnce(page('newest'));
+  const latest = client.request(active);
+  expect(fetchList).toHaveBeenCalledTimes(3);
+  expect((await latest).posts.items[0].node.id).toBe('newest');
+  older.resolve(page('older'));
+  await pending;
+  expect(client.getRequestResult(active).posts.items[0].node.id).toBe('newest');
+});
+
+test('a connection from a cache-only request is an invalidation target', async () => {
+  const { client, fetchList } = setup();
+  await client.request(active);
+  const { posts } = client.observeRequest(active, { mode: 'cache-only' }).getSnapshot().data!;
+  await client.mutations.add({ input: { title: 'New' }, invalidate: [posts] });
+  fetchList.mockResolvedValueOnce(page('new'));
+  expect((await client.request(active)).posts.items[0].node.id).toBe('new');
+});
+
+test('the first page after invalidation replaces earlier confirmed insertions', async () => {
+  const { client, fetchList } = setup();
+  const { posts } = await client.request(active);
+  await client.mutations.add({
+    input: { title: 'New' },
+    insert: { into: posts, position: 'before' },
+  });
+  expect(client.getRequestResult(active).posts.items.map(({ node }) => node.id)).toContain('new');
+  await client.mutations.add({ input: { title: 'New' }, invalidate: [posts] });
+  fetchList.mockResolvedValueOnce(page('replacement'));
+  expect((await client.request(active)).posts.items.map(({ node }) => node.id)).toEqual([
+    'replacement',
+  ]);
+});
+
+test('invalidation still fences a request whose transport has settled before its handle', async () => {
+  const { client, fetchList } = setup();
+  const { posts } = await client.request(active);
+  await client.mutations.add({ input: { title: 'New' }, invalidate: [posts] });
+  const older = Promise.withResolvers<ReturnType<typeof page>>();
+  fetchList.mockReturnValueOnce(older.promise);
+  const pending = client.request(active);
+  await client.mutations.add({ input: { title: 'Newer' }, invalidate: [posts] });
+
+  const runtime = client as unknown as { pendingNetworkRequests: number };
+  older.resolve(page('older'));
+  for (let step = 0; step < 30 && runtime.pendingNetworkRequests; step++) {
+    await Promise.resolve();
+  }
+  expect(runtime.pendingNetworkRequests).toBe(0);
+  fetchList.mockResolvedValueOnce(page('newest'));
+  expect((await client.request(active)).posts.items[0].node.id).toBe('newest');
+  await pending;
+});

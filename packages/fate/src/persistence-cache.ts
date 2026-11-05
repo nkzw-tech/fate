@@ -25,7 +25,7 @@ import { toEntityId } from './ref.ts';
 import { getRefetchFields } from './refetch.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
 import type { SelectionPlan } from './selection.ts';
-import { getListKey, type List, type StoreChange } from './store.ts';
+import { expandStalePaths, getListKey, type List, type StoreChange } from './store.ts';
 import type { AnyRecord } from './types.ts';
 
 type Encoded = ReturnType<typeof encodeHydrationValue>;
@@ -40,7 +40,13 @@ type Root = {
 };
 type StoredValue<T> = { bytes: number; value: T };
 type PutEntry = readonly [key: string, value: unknown, previousBytes?: number];
-type RecordValue = { paths: Array<string>; record: AnyRecord; stale?: ReadonlyArray<string> };
+type RecordValue = {
+  /** An invalidation still to be applied to fields held only on disk. */
+  invalidate?: true;
+  paths: Array<string>;
+  record: AnyRecord;
+  stale?: ReadonlyArray<string>;
+};
 type CacheUpdate = {
   fields?: Array<string>;
   previousList?: List;
@@ -87,7 +93,7 @@ const mergeCacheUpdate = (
   referencesChanged: before?.referencesChanged || after.referencesChanged,
   value:
     key.startsWith('r:') && before?.value && after.value
-      ? applyRecordUpdate(
+      ? mergeRecordUpdates(
           before.value as RecordValue,
           after.value as RecordValue,
           after.fields ? new Set(after.fields) : undefined,
@@ -154,7 +160,9 @@ const patchRecord = (before: AnyRecord, after: AnyRecord, fields: Set<string>): 
       setRecordValue(
         record,
         field,
-        isRecord(oldValue) && isRecord(value) ? patchRecord(oldValue, value, paths) : value,
+        isRecord(oldValue) && isRecord(value) && !isNodeRef(oldValue) && !isNodeRef(value)
+          ? patchRecord(oldValue, value, paths)
+          : value,
       );
     }
   }
@@ -166,11 +174,28 @@ const applyRecordUpdate = (
   after: RecordValue,
   fields?: Set<string>,
 ): RecordValue => {
+  if (after.invalidate) {
+    const diskOnly = before.paths.filter(
+      (path) => !after.paths.some((cached) => isWithinPath(path, cached)),
+    );
+    const diskStale = expandStalePaths(before.record, diskOnly).filter(
+      (path) => !after.paths.some((cached) => isWithinPath(path, cached)),
+    );
+    return {
+      paths: [...after.paths, ...diskOnly],
+      record: patchRecord(
+        before.record,
+        after.record,
+        new Set(['__typename', 'id', ...after.paths]),
+      ),
+      stale: [...new Set([...(after.stale ?? []), ...diskStale])],
+    };
+  }
   if (!fields) {
     return {
       paths: after.paths,
       record: { ...before.record, ...after.record },
-      stale: after.stale,
+      ...(after.stale && { stale: after.stale }),
     };
   }
   const changed = [...fields];
@@ -189,6 +214,11 @@ const applyRecordUpdate = (
     ],
     record: patchRecord(before.record, after.record, fields),
   };
+};
+
+const mergeRecordUpdates = (before: RecordValue, after: RecordValue, fields?: Set<string>) => {
+  const value = applyRecordUpdate(before, after, fields);
+  return before.invalidate || after.invalidate ? { ...value, invalidate: true } : value;
 };
 
 // Apply this tab's membership changes to the latest saved list. Common IDs
@@ -604,9 +634,15 @@ export class PersistenceCache {
         }
       }
       const id = change.kind === 'record' ? recordKey(change.key) : listKey(change.key);
+      const record =
+        change.kind === 'record' ? this.client.store.readConfirmed(change.key) : undefined;
       const value =
         change.kind === 'record'
-          ? this.client.store.readConfirmed(change.key)
+          ? record &&
+            (change.invalidated ||
+              (this.pendingNodes.values.get(id) as RecordValue | undefined)?.invalidate)
+            ? { ...record, invalidate: true }
+            : record
           : this.client.store.readConfirmedList(change.key);
       if (change.kind === 'list' && !this.pendingNodes.values.has(id)) {
         this.pendingNodes.listBases.set(id, change.previousList);
@@ -765,13 +801,18 @@ export class PersistenceCache {
               );
             }
           }
-          if (incoming && key.startsWith('r:') && this.flushingNodes.recordFields.get(key)) {
+          const fields = this.flushingNodes.recordFields.get(key);
+          if (
+            incoming &&
+            key.startsWith('r:') &&
+            (fields || (incoming as RecordValue).invalidate)
+          ) {
             const stored = await this.node(key);
             if (stored) {
               return applyRecordUpdate(
                 decodeHydrationValue(stored.value) as RecordValue,
                 incoming as RecordValue,
-                this.flushingNodes.recordFields.get(key),
+                fields,
               );
             }
           }
@@ -1171,10 +1212,18 @@ export class PersistenceCache {
             ? applyRecordUpdate(stored, incoming, this.flushingNodes.recordFields.get(key))
             : stored;
           const after = next?.value as RecordValue | undefined;
+          const stale = new Set([
+            ...(before.stale ?? []).filter(
+              (path) =>
+                !fromNetwork || !after?.paths.some((selected) => isWithinPath(path, selected)),
+            ),
+            ...(after?.stale ?? []),
+          ]);
           value = projectRecord(
             {
               paths: [...new Set([...before.paths, ...(after?.paths ?? [])])],
               record: { ...before.record, ...after?.record },
+              ...(stale.size && { stale: [...stale] }),
             },
             Object.values(claims).flatMap((claim) => claim.paths),
           );
@@ -1427,6 +1476,10 @@ export class PersistenceCache {
             this.pendingNodes.values.set(key, value);
             this.pendingNodes.recordFields.set(key, recordFields.get(key));
           } else if (key.startsWith('r:')) {
+            const newer = this.pendingNodes.values.get(key) as RecordValue | undefined;
+            if (newer && (value as RecordValue | undefined)?.invalidate) {
+              this.pendingNodes.values.set(key, { ...newer, invalidate: true });
+            }
             const before = recordFields.get(key);
             const after = this.pendingNodes.recordFields.get(key);
             this.pendingNodes.recordFields.set(

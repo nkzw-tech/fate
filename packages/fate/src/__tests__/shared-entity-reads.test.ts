@@ -102,3 +102,30 @@ test('cancelling the wider request keeps its fetch alive for the joined view', a
   expect((await narrow).data.avatar).toBe('/avatar.png');
   expect(fetchById).toHaveBeenCalledTimes(1);
 });
+
+test('a newer network-only read does not join a fetch that predates a confirmed write', async () => {
+  const { client, fetchById } = setup();
+  const older = Promise.withResolvers<Array<AnyRecord>>();
+  fetchById.mockReturnValueOnce(older.promise);
+  const broad = client.request(request, { mode: 'network-only' });
+  client.write('User', { avatar: '/local.png', id: '1' }, new Set(['avatar']));
+  fetchById.mockResolvedValueOnce([{ avatar: '/fresh.png', id: '1' }]);
+  const narrow = client.request({ user: { id: '1', view: Avatar } }, { mode: 'network-only' });
+  expect(fetchById).toHaveBeenCalledTimes(2);
+  await narrow;
+  older.resolve([record]);
+  await broad;
+  expect(client.store.read('User:1')?.avatar).toBe('/fresh.png');
+});
+
+test('different transport ID types do not share a pending entity fetch', async () => {
+  const { client, fetchById } = setup();
+  const older = Promise.withResolvers<Array<AnyRecord>>();
+  fetchById.mockReturnValueOnce(older.promise);
+  const numeric = client.request({ user: { id: 1, view: Profile } });
+  const text = client.request({ user: { id: '1', view: Avatar } });
+  expect(fetchById.mock.calls.map(([, ids]) => ids)).toEqual([[1], ['1']]);
+  await text;
+  older.resolve([record]);
+  await numeric;
+});
