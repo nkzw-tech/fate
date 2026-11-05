@@ -219,7 +219,8 @@ const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
 const importGraphQLSSE = async (): Promise<GraphQLSSEModule> => {
   try {
-    return (await import('graphql-sse')) as GraphQLSSEModule;
+    const { createClient } = await import('graphql-sse');
+    return { createClient } as GraphQLSSEModule;
   } catch (error) {
     throw new Error(
       "fate(graphql): GraphQL live queries require the optional 'graphql-sse' package. Install it or pass live: false.",
