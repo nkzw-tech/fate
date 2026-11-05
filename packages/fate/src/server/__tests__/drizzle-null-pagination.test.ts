@@ -20,15 +20,15 @@ for (const direction of ['asc', 'desc'] as const) {
     const view = dataView<{ id: string; rank: number | null }>('Post')({ id: true, rank: true });
     const adapter = createDrizzleSourceAdapter({
       db,
-      views: [{ table, view, orderBy: [{ field: 'rank', direction }] }],
+      views: [{ orderBy: [{ direction, field: 'rank' }], table, view }],
     });
     try {
       const options = {
         ctx: {},
-        input: { select: ['id', 'rank'] },
-        view,
         direction: 'forward' as const,
+        input: { select: ['id', 'rank'] },
         take: 2,
+        view,
       };
       expect(await adapter.resolveConnection(options)).toEqual(
         direction === 'asc'

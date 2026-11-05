@@ -750,8 +750,8 @@ export class FateClient<
   private readonly pendingViews = new Map<
     string,
     {
-      work: Promise<unknown>;
       snapshots: WeakMap<object, WeakMap<object, Promise<ViewSnapshot<any, any>>>>;
+      work: Promise<unknown>;
     }
   >();
   private readonly connectionRequests = new Map<
@@ -1633,7 +1633,7 @@ export class FateClient<
       snapshot = pending.work.then(resolve);
       snapshots.set(ref, snapshot);
     }
-    return snapshot as FateThenable<ViewSnapshot<T, S>>;
+    return snapshot as unknown as FateThenable<ViewSnapshot<T, S>>;
   }
 
   private readViewInternal<T extends Entity, S extends Selection<T>, V extends View<T, S>>(

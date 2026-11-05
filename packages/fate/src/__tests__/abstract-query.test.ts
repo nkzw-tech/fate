@@ -12,7 +12,7 @@ test('abstract query results retain their concrete reference identity', async ()
       fetchById: vi.fn(async () => []),
       fetchQuery: async () => ({ __typename: 'User', id: '1', name: 'Ada' }),
     },
-    types: [{ type: 'Node', possibleTypes: ['User'] }, { type: 'User' }],
+    types: [{ possibleTypes: ['User'], type: 'Node' }, { type: 'User' }],
   });
   const result = await client.request({ node: { view: UserView } });
   expect(client.store.read('User:1')).toMatchObject({ name: 'Ada' });

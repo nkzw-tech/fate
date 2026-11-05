@@ -3,9 +3,9 @@ import { createClient } from '../client.ts';
 import { view } from '../view.ts';
 
 test('concurrent view readers receive their own selected fields', async () => {
-  type User = { __typename: 'User'; id: string; name: string; age: number };
+  type User = { __typename: 'User'; age: number; id: string; name: string };
   const Name = view<User>()({ name: true });
-  const Profile = view<User>()({ name: true, age: true });
+  const Profile = view<User>()({ age: true, name: true });
   let resolve!: (records: Array<{ id: string; name: string }>) => void;
   const fetchById = vi.fn(
     () =>
@@ -14,11 +14,11 @@ test('concurrent view readers receive their own selected fields', async () => {
       }),
   );
   const client = createClient({ roots: {}, transport: { fetchById }, types: [{ type: 'User' }] });
-  client.write('User', { id: '1', age: 42 }, new Set(['id', 'age']));
+  client.write('User', { age: 42, id: '1' }, new Set(['id', 'age']));
   const first = client.readView(Name, client.ref('User', '1', Name));
   const second = client.readView(Profile, client.ref('User', '1', Profile));
   resolve([{ id: '1', name: 'Ada' }]);
   await first;
-  expect((await second).data).toMatchObject({ name: 'Ada', age: 42 });
+  expect((await second).data).toMatchObject({ age: 42, name: 'Ada' });
   expect(fetchById).toHaveBeenCalledTimes(1);
 });

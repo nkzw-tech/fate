@@ -124,7 +124,7 @@ export function useLiveView<V extends View<any, any>>(
         update(snapshot.value.data, snapshot.value.coverage);
       } else {
         void Promise.resolve(snapshot)
-          .then(({ data, coverage }) => update(data, coverage))
+          .then(({ coverage, data }) => update(data, coverage))
           .catch(fail);
       }
     } catch (error) {
