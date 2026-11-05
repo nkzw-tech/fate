@@ -6,12 +6,13 @@ export const toPrismaArgs = (args: AnyRecord): AnyRecord => {
 
   const isBackward = args.before !== undefined || typeof args.last === 'number';
 
-  if (typeof args.first === 'number') {
-    prismaArgs.take = args.first + 1;
-  }
-
-  if (typeof args.last === 'number') {
-    prismaArgs.take = -(args.last + 1);
+  const size = args.last ?? args.first;
+  if (typeof size === 'number') {
+    prismaArgs.take = (isBackward ? -1 : 1) * (size + 1);
+  } else if (isBackward) {
+    // Prisma requires a negative take to page backward. Use its maximum
+    // integer limit when the caller did not supply a page size.
+    prismaArgs.take = -(2 ** 31 - 1);
   }
 
   const cursor = isBackward ? args.before : args.after;

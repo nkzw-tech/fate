@@ -63,8 +63,22 @@ test.each([
     rows: ['post-2', 'post-3', 'post-4'],
     take: -3,
   },
+  {
+    args: { before: 'post-5', first: 2 },
+    cursor: 'post-5',
+    ids: ['post-3', 'post-4'],
+    rows: ['post-2', 'post-3', 'post-4'],
+    take: -3,
+  },
+  {
+    args: { before: 'post-5' },
+    cursor: 'post-5',
+    ids: ['post-1', 'post-2', 'post-3', 'post-4'],
+    rows: ['post-1', 'post-2', 'post-3', 'post-4'],
+    take: -(2 ** 31 - 1),
+  },
 ])(
-  'keeps both cursors for a nested Prisma page with args $args',
+  'queries and wraps a nested Prisma page with args $args',
   async ({ args, cursor, ids, rows, take }) => {
     const findMany = vi
       .fn()
@@ -95,9 +109,10 @@ test.each([
           items: ids.map((id) => ({ cursor: id, node: { id } })),
           pagination: {
             hasNext: true,
-            hasPrevious: true,
+            hasPrevious: args.first !== undefined || args.last !== undefined,
             nextCursor: ids.at(-1),
-            previousCursor: ids[0],
+            previousCursor:
+              args.first !== undefined || args.last !== undefined ? ids[0] : undefined,
           },
         },
       },
