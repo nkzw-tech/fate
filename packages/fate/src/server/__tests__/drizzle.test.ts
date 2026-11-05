@@ -1,5 +1,8 @@
+import { DatabaseSync } from 'node:sqlite';
 import { eq, relations } from 'drizzle-orm';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
+import { drizzle } from 'drizzle-orm/sqlite-proxy';
 import { expect, test } from 'vite-plus/test';
 import { computed, count, dataView, list } from '../dataView.ts';
 import { createDrizzleSourceAdapter } from '../drizzle.ts';
@@ -353,6 +356,60 @@ test('Drizzle nested paginated relations limit concurrent child queries', async 
   });
 
   expect(maxActiveChildQueries).toBeLessThanOrEqual(10);
+});
+
+test('Drizzle one relations can join on an unselected unique column', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE User (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT);
+    CREATE TABLE Post (id TEXT PRIMARY KEY, authorEmail TEXT);
+    INSERT INTO User VALUES ('user', 'ada@example.com', 'Ada');
+    INSERT INTO Post VALUES ('post', 'ada@example.com');
+  `);
+  try {
+    const db = drizzle(async (sql, params) => {
+      const statement = sqlite.prepare(sql);
+      statement.setReturnArrays(true);
+      return { rows: statement.all(...params) };
+    });
+    const users = sqliteTable('User', {
+      email: sqliteText('email').unique(),
+      id: sqliteText('id').primaryKey(),
+      name: sqliteText('name'),
+    });
+    const posts = sqliteTable('Post', {
+      authorEmail: sqliteText('authorEmail'),
+      id: sqliteText('id').primaryKey(),
+    });
+    type User = { email: string; id: string; name: string };
+    const userView = dataView<User>('User')({ id: true, name: true });
+    const postView = dataView<{ author: User; authorEmail: string; id: string }>('Post')({
+      author: userView,
+      id: true,
+    });
+    const adapter = createDrizzleSourceAdapter({
+      db,
+      views: [
+        { table: users, view: userView },
+        {
+          relations: { author: { foreignKey: 'email', localKey: 'authorEmail' } },
+          table: posts,
+          view: postView,
+        },
+      ],
+    });
+
+    expect(
+      await adapter.resolveById({
+        ctx: {},
+        id: 'post',
+        input: { select: ['author.name'] },
+        view: postView,
+      }),
+    ).toEqual({ author: { id: 'user', name: 'Ada' }, id: 'post' });
+  } finally {
+    sqlite.close();
+  }
 });
 
 test('Drizzle one relations preserve falsy relation keys', async () => {

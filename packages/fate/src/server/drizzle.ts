@@ -1424,6 +1424,7 @@ export function createDrizzleSourceAdapter<Context>({
         const childRows = childKeys.length
           ? await queryRows({
               ctx,
+              extraFields: [sourceRelation.foreignKey],
               node: relationNode,
               where: inArray(getColumn(childConfig.columns, sourceRelation.foreignKey), childKeys),
             })
