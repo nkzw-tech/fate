@@ -719,6 +719,7 @@ export function createPrismaSourceAdapter<Context>({
         direction,
         extra,
         input,
+        orderBy: getDataViewSourceConfig(view).orderBy,
         registry,
         skip,
         source: getSource(view),
@@ -818,36 +819,6 @@ export function createPrismaFate<Context, Procedure extends ProcedureLike>({
         input,
         registry: adapter.registry,
         source: adapter.getSource(view),
-      }),
-    resolveConnection: <Item extends AnyRecord = AnyRecord>({
-      ctx,
-      cursor,
-      direction,
-      extra,
-      input,
-      skip,
-      take,
-      view,
-    }: {
-      ctx: Context;
-      cursor?: string;
-      direction: 'backward' | 'forward';
-      extra?: PrismaQueryExtra;
-      input: SourceInput;
-      skip?: number;
-      take: number;
-      view: ViewTarget<Item>;
-    }) =>
-      resolveSourceConnection({
-        ctx,
-        cursor,
-        direction,
-        extra,
-        input,
-        registry: adapter.registry,
-        skip,
-        source: adapter.getSource(view),
-        take,
       }),
   };
 }
