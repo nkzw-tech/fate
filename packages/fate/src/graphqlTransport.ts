@@ -950,14 +950,21 @@ export function createGraphQLTransport<
                 if (Object.hasOwn(definitions, key) || !isRecord(value)) {
                   return true;
                 }
-                const childType = typeCondition(key) ?? resultType;
-                const nestedArguments = schema.fields[childType]?.[schemaField(key)];
-                const relation = types.get(childType)?.fields?.[schemaField(key)];
-                return !(
-                  nestedArguments &&
-                  (Object.keys(nestedArguments).length > 0 ||
-                    (relation && typeof relation === 'object'))
-                );
+                const sourceField = schemaField(key);
+                const acceptsNestedArgs = (childType: string) => {
+                  const nestedArguments = schema.fields[childType]?.[sourceField];
+                  const relation = types.get(childType)?.fields?.[sourceField];
+                  return (
+                    nestedArguments &&
+                    (Object.keys(nestedArguments).length > 0 ||
+                      (relation && typeof relation === 'object'))
+                  );
+                };
+                const condition = typeCondition(key);
+                const members = condition ? undefined : schema.unions?.[resultType];
+                return members?.length
+                  ? !members.every(acceptsNestedArgs)
+                  : !acceptsNestedArgs(condition ?? resultType);
               }),
             )
           : args;

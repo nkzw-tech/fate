@@ -1754,3 +1754,52 @@ test.each(['!', ''])(
     expect(client.store.read('User:user')).toMatchObject({ id: 'user', label: result.label });
   },
 );
+
+test('passes arguments to a shared union field without treating them as root arguments', async () => {
+  const schema = buildSchema(`
+    type Query { result(term: String!): SearchResult! }
+    union SearchResult = Post | User
+    type Post { id: ID!, label(prefix: String!): String! }
+    type User { id: ID!, label(prefix: String!): String! }
+  `);
+  const metadata = createGraphQLArgumentSchema(schema);
+  const transport = createGraphQLTransport({
+    fetch: async (_url, init) => {
+      const { query, variables } = JSON.parse(String(init?.body));
+      return jsonResponse(
+        await graphql({
+          rootValue: {
+            result: ({ term }: { term: string }) => ({
+              __typename: term === 'post' ? 'Post' : 'User',
+              id: term,
+              label: ({ prefix }: { prefix: string }) => prefix + term,
+            }),
+          },
+          schema,
+          source: query,
+          variableValues: variables,
+        }),
+      );
+    },
+    live: false,
+    roots: { result: { type: 'SearchResult' } },
+    schema: metadata,
+    types: [],
+    url: '/graphql',
+  });
+  const client = createClient({
+    roots: { result: clientRoot('SearchResult') },
+    transport,
+    types: graphQLOutputRelations(metadata),
+  });
+  const ResultView = view<{ __typename: 'Post' | 'User'; label: string }>()({
+    formatted: alias('label', { args: { prefix: '@' } }),
+  });
+
+  for (const term of ['post', 'user']) {
+    const { result } = await client.request({ result: { args: { term }, view: ResultView } });
+    expect((await client.readView(ResultView, result)).data).toMatchObject({
+      formatted: `@${term}`,
+    });
+  }
+});
