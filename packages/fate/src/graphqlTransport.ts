@@ -557,6 +557,8 @@ const buildRecordSelection = ({
   return walk(type, tree, path, embedded);
 };
 
+type GraphQLValueShape = 'connection' | 'record' | 'scalar';
+
 class GraphQLInput implements NormalizationInput {
   private readonly children = new Map<string, Map<string | undefined, GraphQLInput>>();
   private readonly responseKeys = new Map<string, string>();
@@ -566,6 +568,7 @@ class GraphQLInput implements NormalizationInput {
     private readonly types: ReadonlyMap<string, TypeConfig>,
     private readonly selection?: SelectionTree,
     private readonly type?: string,
+    private readonly shape: GraphQLValueShape = 'record',
   ) {
     for (const [responseKey, field] of selection?.responseFields ?? []) {
       if (field.key !== responseKey) {
@@ -613,12 +616,18 @@ class GraphQLInput implements NormalizationInput {
           ? descriptor.type
           : 'embedded' in descriptor
             ? descriptor.embedded
-            : undefined
+            : descriptor.listOf
         : undefined;
+    const shape =
+      !descriptor || descriptor === 'scalar'
+        ? 'scalar'
+        : 'listOf' in descriptor && !descriptor.array
+          ? 'connection'
+          : 'record';
     const responseKey = this.responseKeys.get(key) ?? key;
     const selection =
       this.selection?.responseFields.get(responseKey)?.selection ?? this.selection?.fields.get(key);
-    const child = new GraphQLInput(this.decodeNodeId, this.types, selection, childType);
+    const child = new GraphQLInput(this.decodeNodeId, this.types, selection, childType, shape);
     if (!byType) {
       byType = new Map();
       this.children.set(key, byType);
@@ -628,7 +637,11 @@ class GraphQLInput implements NormalizationInput {
   }
 
   connection(value: unknown, materialize = false): unknown {
-    if (!isRecord(value) || !(value.edges === null || Array.isArray(value.edges))) {
+    if (
+      this.shape !== 'connection' ||
+      !isRecord(value) ||
+      !(value.edges === null || Array.isArray(value.edges))
+    ) {
       return value;
     }
     const pageInfo = isRecord(value.pageInfo) ? value.pageInfo : {};
@@ -640,7 +653,7 @@ class GraphQLInput implements NormalizationInput {
             ? (edge as { cursor: string | undefined; node: unknown })
             : {
                 cursor: typeof edge.cursor === 'string' ? edge.cursor : undefined,
-                node: materialize ? this.materialize(edge.node) : edge.node,
+                node: materialize ? this.materializeRecord(edge.node) : edge.node,
               },
         );
       }
@@ -657,17 +670,21 @@ class GraphQLInput implements NormalizationInput {
   }
 
   materialize(value: unknown): unknown {
+    if (this.shape === 'scalar') {
+      return structuredClone(value);
+    }
+    const connection = this.connection(value, true);
+    return connection !== value ? connection : this.materializeRecord(value);
+  }
+
+  private materializeRecord(value: unknown): unknown {
     if (Array.isArray(value)) {
       return value.map((entry) =>
-        entry && typeof entry === 'object' ? this.materialize(entry) : entry,
+        entry && typeof entry === 'object' ? this.materializeRecord(entry) : entry,
       );
     }
     if (!isRecord(value)) {
       return value;
-    }
-    const connection = this.connection(value, true);
-    if (connection !== value) {
-      return connection;
     }
     const result: AnyRecord = {};
     for (const key of this.keys(value)) {
@@ -687,6 +704,7 @@ const normalizeGraphQLValue = ({
   context,
   decodeNodeId,
   selection,
+  shape,
   type,
   types,
   value,
@@ -694,11 +712,12 @@ const normalizeGraphQLValue = ({
   context?: ReadContext;
   decodeNodeId: (type: string, id: string | number) => string | number;
   selection?: SelectionTree;
+  shape?: GraphQLValueShape;
   type?: string;
   types: ReadonlyMap<string, TypeConfig>;
   value: unknown;
 }): unknown => {
-  const input = new GraphQLInput(decodeNodeId, types, selection, type);
+  const input = new GraphQLInput(decodeNodeId, types, selection, type, shape);
   return isNormalizationRead(context) ? input.read(value) : input.materialize(value);
 };
 
@@ -1122,6 +1141,7 @@ export function createGraphQLTransport<
             context,
             decodeNodeId,
             selection: buildSelectionTree(select),
+            shape: 'connection',
             type: root.type,
             types,
             value,
@@ -1177,6 +1197,7 @@ export function createGraphQLTransport<
             context,
             decodeNodeId,
             selection: buildSelectionTree(select),
+            shape: selection ? 'record' : 'scalar',
             type: root.type,
             types,
             value,
@@ -1216,7 +1237,8 @@ export function createGraphQLTransport<
           normalizeGraphQLValue({
             decodeNodeId,
             selection: buildSelectionTree(select),
-            type: mutation.entity,
+            shape: selection ? 'record' : 'scalar',
+            type: mutation.type ?? mutation.entity,
             types,
             value,
           }),

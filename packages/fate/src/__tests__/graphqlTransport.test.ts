@@ -65,6 +65,45 @@ test('normalizes frozen responses without sharing mutable records or scalar arra
   expect(record.label).toBe('Ada');
 });
 
+test('preserves JSON scalar fields containing connection-shaped data', async () => {
+  const layout = {
+    edges: [{ cursor: '1', node: { __typename: 'Note', id: 'Note-1' } }],
+    pageInfo: { hasNextPage: false },
+    viewport: { zoom: 2 },
+  };
+  const schema = buildSchema(
+    'scalar JSON\n type Query { note: Note } type Note { id: ID!, layout: JSON! }',
+  );
+  const types = [{ fields: { layout: 'scalar' }, type: 'Note' }] as const;
+  const transport = createGraphQLTransport({
+    fetch: async (_url, init) =>
+      jsonResponse(
+        await graphql({
+          rootValue: { note: { id: 'Note-1', layout } },
+          schema,
+          source: JSON.parse(String(init?.body)).query,
+        }),
+      ),
+    live: false,
+    roots: { note: { type: 'Note' } },
+    types,
+    url: '/graphql',
+  });
+  const client = createClient({
+    roots: { note: clientRoot('Note') },
+    transport,
+    types,
+  });
+  const NoteView = view<{ __typename: 'Note'; id: string; layout: typeof layout | string }>()({
+    layout: true,
+  });
+  const { note } = await client.request({ note: { view: NoteView } });
+  expect((await client.readView(NoteView, note)).data).toMatchObject({ layout });
+  await expect(transport.fetchQuery!('note', new Set(['layout']))).resolves.toMatchObject({
+    layout,
+  });
+});
+
 beforeEach(() => {
   graphQLSSE.createClient.mockReset();
   graphQLSSE.subscribe.mockReset();
