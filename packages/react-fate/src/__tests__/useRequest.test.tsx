@@ -77,9 +77,7 @@ const jsonRoundTrip = <T,>(value: T): T => {
   return JSON.parse(JSON.stringify(value)) as T;
 };
 
-// Known regression: the old component still owns the fulfilled handle when its
-// replacement renders. Remove `.fails` once freshness and retry sharing both pass.
-test.fails.each([
+test.each([
   { mode: 'network-only', timeout: undefined },
   { mode: 'network-only', timeout: 5000 },
   { mode: 'stale-while-revalidate', timeout: undefined },
@@ -139,9 +137,10 @@ test.fails.each([
   },
 );
 
-test('shares a network-only request with a consumer that commits after another boundary', async () => {
+test('shares a pending network-only request and refreshes a mount retried after commit', async () => {
   const blocker = Promise.withResolvers<void>();
-  const fetchById = vi.fn(async () => [{ __typename: 'Post', content: 'Shared', id: 'post-1' }]);
+  let content = 'Shared';
+  const fetchById = vi.fn(async () => [{ __typename: 'Post', content, id: 'post-1' }]);
   const client = createClient({
     roots: { post: clientRoot('Post') },
     transport: { fetchById },
@@ -178,18 +177,19 @@ test('shares a network-only request with a consumer that commits after another b
     expect(container.textContent).toBe('SharedSecond loading');
     expect(fetchById).toHaveBeenCalledTimes(1);
 
+    content = 'Fresh';
     await act(async () => {
       blocker.resolve();
       await flushAsync();
     });
-    expect(container.textContent).toBe('SharedShared');
-    expect(fetchById).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toBe('FreshFresh');
+    expect(fetchById).toHaveBeenCalledTimes(2);
   } finally {
     await act(async () => root.unmount());
   }
 });
 
-test('releases network-only requests on unmount', async () => {
+test('releases the shared network-only preparation after commit', async () => {
   const fetchById = vi.fn().mockResolvedValue([
     {
       __typename: 'Post',
@@ -234,15 +234,18 @@ test('releases network-only requests on unmount', async () => {
   });
 
   expect(fetchById).toHaveBeenCalledTimes(1);
-  expect(releaseSpy).not.toHaveBeenCalled();
-  const { promise } = client.prepareRequestForRender(request, { mode: 'network-only' });
+  expect(releaseSpy).toHaveBeenCalledExactlyOnceWith(
+    requestKey,
+    'network-only',
+    expect.any(Object),
+  );
 
   await act(async () => {
     reactRoot.unmount();
     await flushAsync();
   });
 
-  expect(releaseSpy).toHaveBeenCalledWith(requestKey, 'network-only', promise);
+  expect(releaseSpy).toHaveBeenCalledTimes(1);
 });
 
 test('retains cache-first requests while mounted and disposes them on unmount', async () => {
@@ -689,14 +692,16 @@ test.each([undefined, 5000])(
         await flushAsync();
       });
       expect(container.textContent).toBe('Banana:0');
-      expect(fetchById).toHaveBeenCalledTimes(2);
+      // A timed imperative read has its own deadline and preparation.
+      const fetches = timeout === undefined ? 2 : 3;
+      expect(fetchById).toHaveBeenCalledTimes(fetches);
 
       await act(async () => {
         root.render(render(1, 1));
         await flushAsync();
       });
       expect(container.textContent).toBe('Banana:1');
-      expect(fetchById).toHaveBeenCalledTimes(2);
+      expect(fetchById).toHaveBeenCalledTimes(fetches);
     } finally {
       await act(async () => root.unmount());
     }

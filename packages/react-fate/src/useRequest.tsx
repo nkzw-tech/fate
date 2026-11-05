@@ -93,13 +93,12 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     }
     const retained = active.retain();
 
-    return () => {
-      retained.dispose();
-
-      if (active.mode === 'network-only' || active.mode === 'stale-while-revalidate') {
-        active.client.releaseRequestKey(active.requestKey, active.mode, active.requestPromise);
-      }
-    };
+    // Render retries share the preparation until commit. After that this
+    // reader keeps its own gate, and a new mount can start a fresh request.
+    if (active.mode === 'network-only' || active.mode === 'stale-while-revalidate') {
+      active.client.releaseRequestKey(active.requestKey, active.mode, active.requestPromise);
+    }
+    return retained.dispose;
   }, [active]);
 
   use(active.promise);
