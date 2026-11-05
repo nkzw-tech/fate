@@ -19,6 +19,8 @@ import {
   inArray,
   is,
   isTable,
+  isNull,
+  isNotNull,
   lt,
   Many,
   normalizeRelation,
@@ -26,6 +28,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import type { AnyColumn, SQLWrapper, Table, TableRelationalConfig } from 'drizzle-orm';
+import { PgColumn } from 'drizzle-orm/pg-core';
 import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
 import { withConnection } from './connection.ts';
@@ -398,12 +401,18 @@ const getRequiredFields = (node: SourcePlanNode<any, any>, extraFields: Array<st
 const compareColumn = (
   direction: 'backward' | 'forward',
   naturalDirection: 'asc' | 'desc',
-  column: any,
+  column: AnyColumn,
   value: unknown,
 ) => {
-  const forward = naturalDirection === 'asc' ? gt(column, value) : lt(column, value);
-  const backward = naturalDirection === 'asc' ? lt(column, value) : gt(column, value);
-  return direction === 'forward' ? forward : backward;
+  const ascending =
+    direction === 'forward' ? naturalDirection === 'asc' : naturalDirection === 'desc';
+  // PostgreSQL sorts nulls last in ascending order; SQLite and MySQL sort them first.
+  const nullsFirst = ascending !== is(column, PgColumn);
+  if (value === null) {
+    return nullsFirst ? isNotNull(column) : sql`false`;
+  }
+  const compare = ascending ? gt(column, value) : lt(column, value);
+  return column.notNull || nullsFirst ? compare : or(compare, isNull(column));
 };
 
 const buildCursorWhere = ({
@@ -420,9 +429,11 @@ const buildCursorWhere = ({
   const branches = node.orderBy.map((entry, index) => {
     const column = getColumn(columns, entry.field);
     const compare = compareColumn(direction, entry.direction, column, cursorValues[entry.field]);
-    const equalities = node.orderBy
-      .slice(0, index)
-      .map((previous) => eq(getColumn(columns, previous.field), cursorValues[previous.field]));
+    const equalities = node.orderBy.slice(0, index).map(({ field }) => {
+      const previous = getColumn(columns, field);
+      const value = cursorValues[field];
+      return value === null ? isNull(previous) : eq(previous, value);
+    });
 
     return equalities.length ? and(...equalities, compare) : compare;
   });
