@@ -7,7 +7,12 @@ import { graphQLOutputRelations } from '../graphqlSchema.ts';
 import { createGraphQLTransport, graphqlValueRoot } from '../graphqlTransport.ts';
 import { mutation, valueMutation } from '../mutation.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
-import type { ViewRef, ViewSelection } from '../types.ts';
+import {
+  ConnectionTag,
+  type ConnectionMetadata,
+  type ViewRef,
+  type ViewSelection,
+} from '../types.ts';
 import { view } from '../view.ts';
 import { viewFor } from '../viewFor.ts';
 
@@ -1053,6 +1058,113 @@ test('multiplexes live GraphQL subscriptions over one SSE client', async () => {
   unsubscribeConnectionResult?.();
   expect(unsubscribeNode).toHaveBeenCalledTimes(1);
   expect(unsubscribeConnection).toHaveBeenCalledTimes(1);
+});
+
+test('subscribes to mixed GraphQL lists and refreshes their scoped selection on membership changes', async () => {
+  const schema = buildSchema(`
+    type Query { search(query: String!): SearchConnection! }
+    union SearchResult = Post | User
+    type Post { id: ID!, title: String! }
+    type User { id: ID!, name: String! }
+    type SearchConnection { edges: [SearchEdge!]!, pageInfo: PageInfo! }
+    type SearchEdge { cursor: String!, node: SearchResult! }
+    type PageInfo {
+      endCursor: String
+      startCursor: String
+      hasNextPage: Boolean!
+      hasPreviousPage: Boolean!
+    }
+  `);
+  const metadata = createGraphQLArgumentSchema(schema);
+  let node: { __typename: string; id: string; name?: string; title?: string } = {
+    __typename: 'Post',
+    id: 'Post-p1',
+    title: 'Original',
+  };
+  const scopedSearch = vi.fn((_args: { query: string }) => ({
+    edges: [{ cursor: node.id, node }],
+    pageInfo: { hasNextPage: false, hasPreviousPage: false },
+  }));
+  const fetch = vi.fn(async (_url, init) => {
+    const { query, variables } = JSON.parse(String(init?.body));
+    return jsonResponse(
+      await graphql({
+        rootValue: { search: scopedSearch },
+        schema,
+        source: query,
+        variableValues: variables,
+      }),
+    );
+  });
+  type Post = { __typename: 'Post'; title: string };
+  type User = { __typename: 'User'; name: string };
+  const roots = {
+    search: clientRoot<{ items: Array<{ node: Post | User }> }, 'SearchResult'>('SearchResult'),
+  };
+  const transport = createGraphQLTransport({
+    fetch,
+    roots: { search: { type: 'SearchResult' } },
+    schema: metadata,
+    types: [],
+    url: 'http://local/graphql',
+  });
+  const onLiveError = vi.fn();
+  const client = createClient<[typeof roots, Record<never, never>]>({
+    onLiveError,
+    roots,
+    transport,
+    types: graphQLOutputRelations(metadata),
+  });
+  const PostView = view<Post>()({ title: true });
+  const UserView = view<User>()({ name: true });
+  const SearchView = view<Post | User>()({
+    ...viewFor('Post', PostView),
+    ...viewFor('User', UserView),
+  });
+  const request = { search: { args: { query: 'visible' }, list: SearchView } };
+  const { search } = await client.request(request);
+  expect(search).toMatchObject([{ __typename: 'Post', id: 'p1' }]);
+  const connection = (search as typeof search & { [ConnectionTag]: ConnectionMetadata })[
+    ConnectionTag
+  ];
+
+  const dispose = client.subscribeLiveListView(SearchView, connection);
+  try {
+    await vi.waitFor(() => expect(graphQLSSE.subscribe).toHaveBeenCalledTimes(1));
+    const [operation, sink] = graphQLSSE.subscribe.mock.calls[0]!;
+    expect(operation.query).toContain('procedure: "search"');
+    expect(operation.query).toContain('args: { query: "visible" }');
+    expect(operation.query).toContain('select: []');
+
+    node = { __typename: 'User', id: 'User-u1', name: 'Updated' };
+    sink.next({
+      data: {
+        fateLiveConnection: {
+          cursor: 'outside',
+          node: { __typename: 'Post', id: 'Post-outside', title: 'Outside the scope' },
+          nodeType: 'Post',
+          type: 'appendEdge',
+        },
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(client.getRequestResult(request).search).toMatchObject([
+        { __typename: 'User', id: 'u1' },
+      ]),
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(scopedSearch.mock.calls.map(([args]) => args.query)).toEqual(['visible', 'visible']);
+    const [result] = client.getRequestResult(request).search;
+    if (result.__typename !== 'User') {
+      throw new Error('Expected a user after refreshing the list');
+    }
+    expect((await client.readView(UserView, result)).data).toMatchObject({ name: 'Updated' });
+    expect(client.store.read('Post:outside')).toBeUndefined();
+    expect(onLiveError).not.toHaveBeenCalled();
+  } finally {
+    dispose();
+  }
 });
 
 test('executes enum arguments as schema-typed variables', async () => {

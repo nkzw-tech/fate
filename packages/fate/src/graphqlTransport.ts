@@ -926,6 +926,7 @@ export function createGraphQLTransport<
       fields: { ...inferred?.fields, ...config.fields },
     } as TypeConfig);
   }
+  const isPolymorphic = (type: string) => Boolean(types.get(type)?.possibleTypes?.length);
   for (const config of types.values()) {
     if (config.refetch) {
       validateGraphQLQueryRefetch(config.type, config.refetch, roots, schema);
@@ -1458,6 +1459,8 @@ export function createGraphQLTransport<
     };
 
     transport.subscribeConnection = (procedure, type, args, select, selectionArgs, handlers) => {
+      // The connection query owns membership and applies the subscriber's scope.
+      const refreshMembership = isPolymorphic(type);
       const field = assertIdentifier(
         liveOptions.connectionField ?? 'fateLiveConnection',
         'subscription',
@@ -1466,8 +1469,8 @@ export function createGraphQLTransport<
         procedure,
       )}, type: ${graphQLLiteral(type)}, args: ${graphQLLiteral(
         args ?? null,
-      )}, select: ${graphQLLiteral([...select])}, selectionArgs: ${graphQLLiteral(
-        selectionArgs ?? null,
+      )}, select: ${graphQLLiteral(refreshMembership ? [] : [...select])}, selectionArgs: ${graphQLLiteral(
+        refreshMembership ? null : (selectionArgs ?? null),
       )}) { cursor id node nodeType targetCursor type } }`;
       const sink: GraphQLSSESink<GraphQLSSEExecutionResult<Record<string, LiveConnectionPayload>>> =
         {
@@ -1485,7 +1488,7 @@ export function createGraphQLTransport<
               }
 
               const eventPayload = value as LiveConnectionPayload;
-              if (eventPayload.type === 'invalidate') {
+              if (refreshMembership || eventPayload.type === 'invalidate') {
                 handlers.onEvent({ type: 'invalidate' });
                 return;
               }
@@ -1528,9 +1531,20 @@ export function createGraphQLTransport<
   // The live endpoint uses fate's selection protocol, so lower aliases there as
   // for other native transports. Ordinary GraphQL operations keep native aliases.
   const liveTransport = withAliasSupport({ ...transport, supportsAliases: false });
+  const subscribeConnection = transport.subscribeConnection;
   return registerNormalizationTransport({
     ...transport,
     subscribeById: liveTransport.subscribeById,
-    subscribeConnection: liveTransport.subscribeConnection,
+    subscribeConnection:
+      subscribeConnection &&
+      ((procedure, type, args, select, selectionArgs, handlers) =>
+        (isPolymorphic(type) ? subscribeConnection : liveTransport.subscribeConnection!)(
+          procedure,
+          type,
+          args,
+          select,
+          selectionArgs,
+          handlers,
+        )),
   });
 }

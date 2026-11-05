@@ -108,8 +108,8 @@ const resolveConnectionPayload = async ({
   selectionArgs?: Record<string, unknown>;
   type: string;
 }): Promise<LiveConnectionPayload> => {
-  if (event.type === 'invalidate') {
-    return { type: event.type };
+  if (type === 'SearchResult' || event.type === 'invalidate') {
+    return { type: 'invalidate' };
   }
 
   if (event.type === 'deleteEdge') {

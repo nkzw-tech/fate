@@ -445,6 +445,8 @@ const fate = createFateClient({
 
 Your server must implement these subscription fields. See the [GraphQL subscription example](https://github.com/nkzw-tech/fate/blob/main/example/server-graphql/src/graphql/live.tsx) for their event shapes and resolvers. For servers without these subscriptions, set `live: false`.
 
+For a list with several entity types, fate subscribes to membership events with an empty `select`. Return an event with `type: 'invalidate'` when membership changes. fate reruns the list query with the original arguments and view selection.
+
 ## Existing Servers
 
 Your GraphQL server continues to handle authorization, validation, pagination, and mutation side effects. You don't need fate's server or ORM adapters.
