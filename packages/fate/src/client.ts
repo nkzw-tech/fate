@@ -747,7 +747,13 @@ export class FateClient<
   private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
   private readonly deferredTargets = new WeakMap<object, string>();
   private readonly mutationLists = new Map<string, { count: number; list: ConnectionMetadata }>();
-  private readonly pending = new Map<string, PromiseLike<ViewSnapshot<any, any>>>();
+  private readonly pendingViews = new Map<
+    string,
+    {
+      work: Promise<unknown>;
+      snapshots: WeakMap<object, WeakMap<object, Promise<ViewSnapshot<any, any>>>>;
+    }
+  >();
   private readonly connectionRequests = new Map<
     string,
     Promise<{ list: List | undefined; page?: List }>
@@ -1602,6 +1608,34 @@ export class FateClient<
     return this.readViewInternal(view, ref, scope ?? null);
   }
 
+  private pendingViewSnapshot<T extends Entity, S extends Selection<T>>(
+    key: string,
+    view: View<T, S>,
+    ref: ViewRef<T['__typename']>,
+    work: () => Promise<unknown>,
+    resolve: () => ViewSnapshot<T, S> | PromiseLike<ViewSnapshot<T, S>>,
+  ): FateThenable<ViewSnapshot<T, S>> {
+    let pending = this.pendingViews.get(key);
+    if (!pending) {
+      pending = {
+        snapshots: new WeakMap(),
+        work: work().finally(() => this.pendingViews.delete(key)),
+      };
+      this.pendingViews.set(key, pending);
+    }
+    let snapshots = pending.snapshots.get(view);
+    if (!snapshots) {
+      snapshots = new WeakMap();
+      pending.snapshots.set(view, snapshots);
+    }
+    let snapshot = snapshots.get(ref);
+    if (!snapshot) {
+      snapshot = pending.work.then(resolve);
+      snapshots.set(ref, snapshot);
+    }
+    return snapshot as FateThenable<ViewSnapshot<T, S>>;
+  }
+
   private readViewInternal<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     view: V,
     ref: ViewRef<T['__typename']>,
@@ -1611,21 +1645,20 @@ export class FateClient<
     const persistence = this.persistence;
     if (persistence && persistence.getSnapshot().status !== 'ready') {
       const key = `restore:${ref.__typename}:${ref.id}:${[...getViewNames(view)].sort().join(',')}`;
-      return this.renderReadErrors.read(view, ref, renderScope, key, () => {
-        let pending = this.pending.get(key);
-        if (!pending) {
-          pending = persistence.ready
-            .then(() => {
-              if (this.persistence?.getSnapshot().status === 'disposed') {
-                throw new Error('fate: Persistence was disposed.');
-              }
-              return this.readViewInternal<T, S, V>(view, ref, renderScope);
-            })
-            .finally(() => this.pending.delete(key));
-          this.pending.set(key, pending);
-        }
-        return pending as FateThenable<ViewSnapshot<T, S>>;
-      }) as FateThenable<ViewSnapshot<T, S>>;
+      return this.renderReadErrors.read(view, ref, renderScope, key, () =>
+        this.pendingViewSnapshot(
+          key,
+          view,
+          ref,
+          () => persistence.ready,
+          () => {
+            if (this.persistence?.getSnapshot().status === 'disposed') {
+              throw new Error('fate: Persistence was disposed.');
+            }
+            return this.readViewInternal<T, S, V>(view, ref, renderScope);
+          },
+        ),
+      ) as FateThenable<ViewSnapshot<T, S>>;
     }
     const id = ref.id;
     const type = ref.__typename;
@@ -1712,78 +1745,65 @@ export class FateClient<
       return this.renderReadErrors.read(view, ref, renderScope, key, () => {
         const pendingOptimistic = this.getPendingOptimisticMutations(entityId);
         if (pendingOptimistic) {
-          const pending = this.pending.get(key);
-          if (pending) {
-            return pending as FateThenable<ViewSnapshot<T, S>>;
-          }
-
-          const promise = Promise.all(pendingOptimistic)
-            .then(() => this.readView<T, S, V>(view, ref))
-            .finally(() => this.pending.delete(key));
-
-          this.pending.set(key, promise);
-          return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
+          return this.pendingViewSnapshot(
+            key,
+            view,
+            ref,
+            () => Promise.all(pendingOptimistic),
+            () => this.readView<T, S, V>(view, ref),
+          );
         }
         if (this.stalledRequests.has(key)) {
           return resolveSnapshot();
         }
 
-        const pendingPromise = this.pending.get(key) || null;
-        if (pendingPromise) {
-          return pendingPromise as FateThenable<ViewSnapshot<T, S>>;
-        }
-
-        const promise = this.trackPendingRequest(async () => {
-          try {
-            const persistence = this.persistenceRuntime;
-            if (persistence) {
-              const persistedRequest: RequestDescriptor = {
-                items: [
-                  {
-                    ids: [id],
-                    kind: 'node',
-                    name: type,
-                    plan,
-                    refViewNames: new Set(),
-                    type,
-                    viewSignature: '',
-                  },
-                ],
-                key: `view:${key}`,
-              };
-              await persistence.restoreRequest(persistedRequest);
-              const remaining = this.missingForSelection(entityId, selectedPaths, plan);
-              if (remaining.size) {
-                await this.fetchByIdAndNormalize(type, [id], remaining, plan);
-                persistence.fetched({
-                  ...persistedRequest,
-                  items: persistedRequest.items.map((item) => ({
-                    ...item,
-                    plan: { ...item.plan, paths: remaining },
-                  })),
-                  key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
-                });
+        return this.pendingViewSnapshot(
+          key,
+          view,
+          ref,
+          () =>
+            this.trackPendingRequest(async () => {
+              const persistence = this.persistenceRuntime;
+              if (persistence) {
+                const persistedRequest: RequestDescriptor = {
+                  items: [
+                    {
+                      ids: [id],
+                      kind: 'node',
+                      name: type,
+                      plan,
+                      refViewNames: new Set(),
+                      type,
+                      viewSignature: '',
+                    },
+                  ],
+                  key: `view:${key}`,
+                };
+                await persistence.restoreRequest(persistedRequest);
+                const remaining = this.missingForSelection(entityId, selectedPaths, plan);
+                if (remaining.size) {
+                  await this.fetchByIdAndNormalize(type, [id], remaining, plan);
+                  persistence.fetched({
+                    ...persistedRequest,
+                    items: persistedRequest.items.map((item) => ({
+                      ...item,
+                      plan: { ...item.plan, paths: remaining },
+                    })),
+                    key: `${persistedRequest.key}:${JSON.stringify([...remaining].sort())}`,
+                  });
+                }
+              } else {
+                await this.fetchByIdAndNormalize(type, [id], missing, plan);
               }
-            } else {
-              await this.fetchByIdAndNormalize(type, [id], missing, plan);
-            }
-            const remainingMissing = this.missingForSelection(entityId, selectedPaths, plan);
-
-            if (remainingMissing.size > 0) {
+            }),
+          () => {
+            if (this.missingForSelection(entityId, selectedPaths, plan).size > 0) {
               this.stalledRequests.add(key);
-              return resolveSnapshot();
+              return resolveSnapshot().value;
             }
-
-            this.stalledRequests.delete(key);
             return this.readView<T, S, V>(view, ref);
-          } finally {
-            this.pending.delete(key);
-          }
-        });
-
-        this.pending.set(key, promise);
-
-        return promise as unknown as FateThenable<ViewSnapshot<T, S>>;
+          },
+        );
       }) as FateThenable<ViewSnapshot<T, S>>;
     }
     return resolveSnapshot();
