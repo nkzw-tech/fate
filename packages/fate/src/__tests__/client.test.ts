@@ -3953,6 +3953,16 @@ test('keeps requests for different ID lists separate when IDs contain delimiters
   expect(fetchById).toHaveBeenCalledTimes(2);
 });
 
+test('keeps numeric IDs separate from strings, including non-finite IDs', () => {
+  const NoteView = view<{ __typename: 'Note'; id: string | number }>()({ id: true });
+  const ids = [1, '1', Infinity, 'Infinity', -Infinity, '-Infinity', Number.NaN, 'NaN'];
+  const keys = ids.map(
+    (id) => createRequestDescriptor({ notes: { ids: [id], view: NoteView } }, () => 'Note').key,
+  );
+
+  expect(new Set(keys).size).toBe(ids.length);
+});
+
 test('preserves Date arguments and caches requests by timestamp', async () => {
   type User = { __typename: 'User'; id: string };
   const UserView = view<User>()({ id: true });

@@ -23,7 +23,11 @@ import {
 } from './types.ts';
 import { getViewNames } from './view.ts';
 
-const serializeId = (value: string | number): string => `${typeof value}:${String(value)}`;
+const isNonFiniteId = (id: string | number) => typeof id === 'number' && !Number.isFinite(id);
+
+// JSON preserves strings and finite numbers as-is, but maps NaN and infinities to null.
+const serializeIds = (ids: ReadonlyArray<string | number>) =>
+  ids.some(isNonFiniteId) ? ids.map((id) => (isNonFiniteId(id) ? [String(id)] : id)) : ids;
 
 export const getViewSignature = (view: unknown): string => {
   const viewNames = new Set<string>();
@@ -163,7 +167,7 @@ const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): s
           item.name,
           item.type,
           item.viewSignature,
-          item.ids.map(serializeId),
+          serializeIds(item.ids),
           args ? hashArgs(args) : null,
           paths,
         ];
