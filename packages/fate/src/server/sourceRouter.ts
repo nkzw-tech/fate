@@ -6,7 +6,7 @@ import type { SourceRegistry } from './executor.ts';
 import { resolveSourceByIds, resolveSourceConnection } from './executor.ts';
 import { byIdInput } from './input.ts';
 import { resolvePolymorphicList, type PolymorphicListResult } from './polymorphicList.ts';
-import type { SourceDefinition } from './source.ts';
+import { getDataViewSourceConfig, type SourceDefinition, type SourceOrder } from './source.ts';
 
 type ProcedureLike = {
   input: (schema: any) => {
@@ -44,6 +44,7 @@ type SourceProcedureOptions<
   byId?: boolean;
   createConnectionProcedure?: ConnectionProcedure;
   list?: boolean | ListConfig;
+  orderBy?: SourceOrder;
   procedure: Procedure;
   registry: SourceRegistry<Context>;
   source: SourceDefinition<Item, unknown>;
@@ -56,6 +57,7 @@ type SourceProcedureFactoryOptions<
 > = {
   byId?: ById;
   list?: List;
+  orderBy?: SourceOrder;
   source: SourceDefinition<Item, unknown>;
 };
 
@@ -120,6 +122,7 @@ export function createSourceProcedures<
   byId,
   createConnectionProcedure,
   list,
+  orderBy,
   procedure,
   registry,
   source,
@@ -168,6 +171,7 @@ export function createSourceProcedures<
           cursor,
           direction,
           input,
+          orderBy,
           registry,
           skip,
           source,
@@ -247,7 +251,11 @@ export function bindViewProcedures<
       };
     }
 
-    return procedures({ ...options, source: defaults.getSource(view) });
+    return procedures({
+      ...options,
+      orderBy: getDataViewSourceConfig(view).orderBy,
+      source: defaults.getSource(view),
+    });
   }
 
   return create;

@@ -69,3 +69,27 @@ test.each(['source adapter', 'tRPC helper'])(
     );
   },
 );
+
+test('generated tRPC procedures use each list wrapper’s order', async () => {
+  const t = initTRPC.create();
+  const findMany = vi.fn(async () => [{ id: 'post' }]);
+  const fate = createPrismaFate({ procedure: t.procedure, views });
+  const caller = t
+    .router({
+      ascending: fate.procedures(views.ascending).list,
+      descending: fate.procedures({ view: views.descending }).list,
+    })
+    .createCaller({ prisma: { post: { findMany } } });
+
+  await caller.ascending(input);
+  await caller.descending(input);
+
+  expect(findMany).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ orderBy: [{ rank: 'asc' }, { id: 'asc' }] }),
+  );
+  expect(findMany).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ orderBy: [{ rank: 'desc' }, { id: 'asc' }] }),
+  );
+});
