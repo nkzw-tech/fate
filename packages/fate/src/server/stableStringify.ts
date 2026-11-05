@@ -1,3 +1,5 @@
+import { isDate } from '../record.ts';
+
 /** Serializes values with sorted object keys, including undefined properties. */
 export const stableStringify = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -5,6 +7,9 @@ export const stableStringify = (value: unknown): string => {
   }
 
   if (value && typeof value === 'object') {
+    if (isDate(value)) {
+      return `date:${value.getTime()}`;
+    }
     const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
     return `{${entries
       .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)

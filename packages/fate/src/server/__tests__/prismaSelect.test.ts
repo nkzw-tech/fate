@@ -121,6 +121,35 @@ test('toPrismaSelect skips conflicting filtered counts on the same relation', ()
   });
 });
 
+test.each([true, false])(
+  'compares Date values in filtered count predicates (equal: %s)',
+  (equal) => {
+    type Post = { id: string };
+    const since = (date: string) =>
+      computed<Post, number>({
+        resolve: (_item, deps) => deps.count as number,
+        select: { count: count('comments', { where: { createdAt: { gte: new Date(date) } } }) },
+      });
+    const firstDate = '2026-01-01';
+    const view = dataView<Post>('Post')({
+      firstCount: since(firstDate),
+      id: true,
+      secondCount: since(equal ? firstDate : '2026-10-01'),
+    });
+
+    expect(toPrismaSelect(createViewPlan({ select: ['firstCount', 'secondCount'], view }))).toEqual(
+      equal
+        ? {
+            _count: {
+              select: { comments: { where: { createdAt: { gte: new Date(firstDate) } } } },
+            },
+            id: true,
+          }
+        : { id: true },
+    );
+  },
+);
+
 test('toPrismaSelect skips orderBy for singular relations', () => {
   const userView = dataView<{ id: string; name: string }>('User')({
     id: true,
