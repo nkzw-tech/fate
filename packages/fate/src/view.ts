@@ -111,11 +111,16 @@ let viewModulePath: string | null = null;
 const getStableId = () => {
   if (isDevelopment) {
     try {
-      if (viewModulePath == null) {
+      const error = new Error();
+      const capturesCaller = typeof Error.captureStackTrace === 'function';
+      if (capturesCaller) {
+        // Source-mapped stack paths can differ from import.meta.url.
+        Error.captureStackTrace(error, view);
+      } else if (viewModulePath == null) {
         viewModulePath = new URL(import.meta.url).pathname;
       }
 
-      const stack = new Error().stack?.split('\n');
+      const stack = error.stack?.split('\n');
       if (stack) {
         for (let i = 1; i < stack.length; i++) {
           const frame = stack[i].trim();
@@ -125,7 +130,7 @@ const getStableId = () => {
           }
 
           const [, source, line, column] = match;
-          if (!source.includes(viewModulePath)) {
+          if (capturesCaller || !source.includes(viewModulePath!)) {
             const file = source.startsWith('at ') ? source.slice(3) : source;
             return `${/^[A-Za-z][\d+.A-Za-z-]*:/.test(file) ? new URL(file).pathname : file}:${line}:${column}`;
           }

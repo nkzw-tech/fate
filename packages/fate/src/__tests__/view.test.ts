@@ -263,8 +263,17 @@ test('rejects selecting fields not defined on the entity', () => {
   });
 });
 
-test('preserves view ids across module reloads in development', async () => {
-  const originalDev = process.env.DEV;
+test('preserves distinct view ids across reloads with remapped paths', async () => {
+  const modulePath = new URL('../view.ts', import.meta.url).pathname;
+  // Model source maps reporting a different file from import.meta.url.
+  const prepareStackTrace = vi
+    .spyOn(Error, 'prepareStackTrace')
+    .mockImplementation((error, frames) =>
+      `${error.name}: ${error.message}\n${frames.map((frame) => `    at ${frame.toString()}`).join('\n')}`.replaceAll(
+        modulePath,
+        '/node_modules/@nkzw/fate/lib/index.mjs',
+      ),
+    );
 
   type Article = {
     __typename: 'Article';
@@ -290,15 +299,20 @@ test('preserves view ids across module reloads in development', async () => {
   };
 
   try {
-    process.env.DEV = '1';
+    vi.stubEnv('DEV', true);
 
     vi.resetModules();
     const viewTags = await loadViewTags();
+    expect(new Set(viewTags).size).toBe(2);
+    for (const tag of viewTags) {
+      expect(tag).toMatch(/view\.test\.ts:\d+:\d+$/);
+    }
 
     vi.resetModules();
     expect(viewTags).toEqual(await loadViewTags());
   } finally {
-    process.env.DEV = originalDev;
+    prepareStackTrace.mockRestore();
+    vi.unstubAllEnvs();
   }
 });
 
