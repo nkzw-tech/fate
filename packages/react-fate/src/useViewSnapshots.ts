@@ -297,7 +297,7 @@ const createReadScope = () => {
 };
 type ReadScope = ReturnType<typeof createReadScope>;
 
-function useReadScope() {
+export function useReadScope() {
   const [scope] = useState(createReadScope);
   useEffect(() => scope.commit(), [scope]);
   return scope;

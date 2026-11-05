@@ -10,6 +10,7 @@ import {
   type LoadMoreFn,
 } from './listView.ts';
 import { useListView } from './useListView.tsx';
+import { useReadScope } from './useViewSnapshots.ts';
 
 /**
  * Subscribes to a connection field, returning live-updating items and pagination
@@ -22,11 +23,15 @@ export function useLiveListView<
   connection: C,
 ): [ConnectionItems<ResolvedConnection<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
+  const scope = useReadScope();
   const resolvedConnection = (
     isDeferred(connection)
       ? (
           use(
-            client.readDeferred(connection as Deferred<ConnectionValue | null | undefined>),
+            client.readDeferredForRender(
+              connection as Deferred<ConnectionValue | null | undefined>,
+              scope.current,
+            ),
           ) as DeferredSnapshot<ConnectionValue | null | undefined>
         ).data
       : (connection as ConnectionValue | null | undefined)
