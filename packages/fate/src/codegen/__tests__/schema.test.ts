@@ -201,3 +201,30 @@ test('identifies data views among mixed runtime exports', () => {
   });
   expect(types).toEqual([{ type: 'User' }]);
 });
+
+test('rejects conflicting mixed list definitions with the same type name', () => {
+  const post = dataView<{ id: string }>('Post')({ id: true });
+  const user = dataView<{ id: string }>('User')({ id: true });
+  const options = { query: async () => [], typeName: 'SearchResult' };
+  const posts = list({ Post: post }, options);
+  const users = list({ User: user }, options);
+  const concrete = dataView<{ id: string }>('SearchResult')({ id: true });
+
+  expect(() => createSchema([], { posts, users })).toThrow(/conflicting.*SearchResult/i);
+  expect(() => createSchema([], { concrete, posts })).toThrow(/conflicting.*SearchResult/i);
+  expect(() => createSchema([], { first: posts, second: concrete })).toThrow(
+    /conflicting.*SearchResult/i,
+  );
+  expect(
+    createSchema([], {
+      first: list({ Post: post, User: user }, options),
+      second: list(
+        Object.fromEntries([
+          ['User', user],
+          ['Post', post],
+        ]),
+        options,
+      ),
+    }).types,
+  ).toContainEqual({ possibleTypes: ['Post', 'User'], type: 'SearchResult' });
+});

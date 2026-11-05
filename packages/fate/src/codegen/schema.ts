@@ -27,6 +27,9 @@ type RootConfig =
       view: DataView<AnyRecord> | PolymorphicList;
     };
 
+const conflictingType = (name: string) =>
+  new Error(`fate: Conflicting definitions for mixed list type '${name}'.`);
+
 /**
  * Builds the schema object used by the Vite plugin from your data views and
  * root resolver configs.
@@ -51,6 +54,9 @@ export const createSchema = (
     const typeName = view.typeName;
 
     const existing = fateTypes.get(typeName);
+    if (existing?.possibleTypes) {
+      throw conflictingType(typeName);
+    }
 
     if (processing.has(typeName)) {
       return typeName;
@@ -101,8 +107,18 @@ export const createSchema = (
 
     const type = 'views' in view ? view.typeName : ensureType(view);
     if ('views' in view) {
-      const possibleTypes = Object.values(view.views).map(ensureType);
-      fateTypes.set(type, { possibleTypes, type });
+      const possibleTypes = Object.values(view.views).map(ensureType).sort();
+      const existing = fateTypes.get(type);
+      if (existing) {
+        if (
+          existing.possibleTypes?.length !== possibleTypes.length ||
+          !existing.possibleTypes.every((member, index) => member === possibleTypes[index])
+        ) {
+          throw conflictingType(type);
+        }
+      } else {
+        fateTypes.set(type, { possibleTypes, type });
+      }
     }
     const isList = view.kind === 'list';
 
