@@ -1,5 +1,5 @@
 import { type Deferred } from '@nkzw/fate';
-import { onScopeDispose, watch, type MaybeRefOrGetter } from 'vue';
+import { computed, onScopeDispose, watch, type MaybeRefOrGetter } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
 import {
   getConnectionMetadata,
@@ -17,21 +17,26 @@ export function useLiveListView<
 >(selection: ConnectionSelection, connection: MaybeRefOrGetter<C>): ListViewState<C> {
   const clientSource = getFateClientSource(useFateClient());
   const { resolvedConnection, resource: listResource } = useListViewResource(selection, connection);
+  const metadata = computed(() => getConnectionMetadata(resolvedConnection.value));
   const disposeResource = listResource.dispose;
   const nodeView = getNodeView(selection);
   let liveUnsubscribe: (() => void) | undefined;
   let disposed = false;
 
   const stop = watch(
-    [clientSource, () => getConnectionMetadata(resolvedConnection.value)?.key],
+    [
+      clientSource,
+      () => metadata.value?.key,
+      () => metadata.value?.live?.append,
+      () => metadata.value?.live?.prepend,
+    ],
     ([client]) => {
       liveUnsubscribe?.();
       liveUnsubscribe = undefined;
-      const metadata = getConnectionMetadata(resolvedConnection.value);
-      if (metadata) {
+      if (metadata.value) {
         try {
           client.assertLiveConnectionSupport();
-          liveUnsubscribe = client.subscribeLiveListView(nodeView, metadata);
+          liveUnsubscribe = client.subscribeLiveListView(nodeView, metadata.value);
         } catch (error) {
           listResource.error.value = error;
           listResource.pending.value = false;

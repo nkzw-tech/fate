@@ -2,6 +2,7 @@
 
 import {
   createClient,
+  clientRoot,
   defer,
   view,
   type ConnectionRef,
@@ -196,6 +197,43 @@ test('list readers keep independent bounded ranges while sharing cached pages', 
     expect(ids(resource.feed[0].value)).toEqual(['1', '2', '3', '4']);
     expect(ids(resource.preview[0].value)).toEqual(['1', '2']);
     expect(fetchById).toHaveBeenCalledTimes(2);
+  } finally {
+    app.unmount();
+  }
+});
+
+const requestWithLivePolicy = (append: 'edge' | 'visible') => ({
+  comments: { list: { ...Selection, live: { append } } },
+});
+
+test('updates the live policy when the connection keeps the same cache key', async () => {
+  const subscribeConnection = vi.fn<NonNullable<Transport['subscribeConnection']>>(() => () => {});
+  const client = createClient({
+    roots: { comments: clientRoot('Comment') },
+    transport: {
+      fetchById: async () => [],
+      fetchList: async () => page(['first'], true),
+      subscribeConnection,
+    },
+    types: [{ type: 'Comment' }],
+  });
+  const initial = await client.request(requestWithLivePolicy('edge'));
+  const connection = shallowRef(initial.comments);
+  const { app, resource } = mount(client, () => useLiveListView(Selection, connection));
+  try {
+    await resource.ready();
+    expect(ids(resource[0].value)).toEqual(['first']);
+
+    connection.value = client.getRequestResult(requestWithLivePolicy('visible')).comments;
+    await nextTick();
+    await resource.ready();
+    subscribeConnection.mock.lastCall![5].onEvent({
+      edge: { cursor: 'new', node: { content: 'New', id: 'new' } },
+      nodeType: 'Comment',
+      type: 'appendNode',
+    });
+
+    expect(ids(resource[0].value)).toEqual(['first', 'new']);
   } finally {
     app.unmount();
   }

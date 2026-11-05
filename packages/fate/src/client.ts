@@ -6034,7 +6034,8 @@ export class FateClient<
       .map(([path, entry]) => `${path}:${entry.hash}`)
       .sort()
       .join('|');
-    return `connection|${connection.procedure}|${connection.type}|${hashArgs(args ?? {})}|${paths}|${selectionArgs}`;
+    const { append = 'edge', prepend = 'edge' } = connection.live ?? {};
+    return `connection|${connection.procedure}|${connection.type}|${append}|${prepend}|${hashArgs(args ?? {})}|${paths}|${selectionArgs}`;
   }
 
   private releaseLiveSubscription(key: string) {
