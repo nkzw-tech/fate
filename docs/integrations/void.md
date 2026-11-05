@@ -117,9 +117,8 @@ live.connection('Post.comments', { id: postId }).appendNode('Comment', commentId
 ```
 
 Pass `changed` to refresh only those fields, or omit it to refresh the whole selected view.
-Void live events carry identifiers and change metadata. Each subscriber fetches the selected
-records using its own credentials. Supply the record ID when publishing a connection event so
-subscribers can fetch just that record.
+
+Void sends IDs and change metadata with live events. Each subscriber fetches the selected fields using its own credentials.
 
 ## Routes
 

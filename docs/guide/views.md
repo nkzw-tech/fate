@@ -231,9 +231,7 @@ Vue provides the same API as a reactive resource. See [Resolving Arrays of Refs 
 
 We learned that `useRequest` is responsible for fetching data from the server and `useView` is used for reading data from the cache. In some situations data may not be available in the cache and `useView` might need to suspend the component to fetch only the missing data. Once that data is fetched and written to the cache, the component resumes rendering.
 
-If another request is already fetching the same object by ID, fate can reuse that request when it includes all the missing scalar fields with the same arguments. For example, a view that needs a post's title can wait for a request for its title and content. If data is still missing afterward, the view can fetch it as usual.
-
-To try this, open **Pagination** in the regular example and choose **Read the first post twice**. In the Network tab, look for one post read with both fields.
+Let's say `PostCard` needs a post's `title` while a request for the same post's `title` and `content` is already in flight. fate can share a request by ID when it selects all the missing scalar fields with the same arguments. `PostCard` waits for that request, then fetches any fields it still needs.
 
 _Tip: You can test this behavior in development mode with Fast Refresh (HMR) enabled in your bundler. When you edit the selection of a view, components using that view will suspend, fetch the missing data, and then resume rendering._
 

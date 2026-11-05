@@ -25,7 +25,7 @@ The GraphQL transport expects a schema with Relay-style object identity and pagi
 - Entity objects include `id` and `__typename`.
 - Object fetches use `nodes(ids:)` by default, or configured per-type query fields.
 - List fields return Relay connections with `edges`, `cursor`, `node`, and `pageInfo`.
-- Root queries and mutations return the entity type selected by the fate view.
+- Root queries and mutations that use a fate view return objects of the selected type.
 
 For example, a `Post` list can be exposed as a normal GraphQL connection:
 
@@ -130,19 +130,17 @@ Use `import type` for generated types. After updating the schema, run `fate gene
 
 ## Views on Unions and Interfaces
 
-A GraphQL search can return different kinds of results in the same list. Use `forType` to compose a view for each type you want to render. For example, if your `search` connection returns a `SearchResult` union of posts and users:
+Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `forType`.
 
 ```tsx
 import { forType, useRequest, view } from 'react-fate';
 import type { GraphQLEntities } from '../../.fate/client.generated.ts';
-import { PostResult, UserResult } from './SearchResults.tsx';
-
-export const PostResultView = view<GraphQLEntities['Post']>()({ title: true });
-export const UserResultView = view<GraphQLEntities['User']>()({ name: true });
+import { PostCard, PostView } from './PostCard.tsx';
+import { UserCard, UserView } from './UserCard.tsx';
 
 const SearchResultView = view<GraphQLEntities['SearchResult']>()({
-  ...forType('Post', PostResultView),
-  ...forType('User', UserResultView),
+  ...forType('Post', PostView),
+  ...forType('User', UserView),
 });
 
 export function Search({ query }: { query: string }) {
@@ -153,16 +151,16 @@ export function Search({ query }: { query: string }) {
 
     switch (result.__typename) {
       case 'Post':
-        return <PostResult key={key} post={result} />;
+        return <PostCard key={key} post={result} />;
       case 'User':
-        return <UserResult key={key} user={result} />;
+        return <UserCard key={key} user={result} />;
     }
     return null;
   });
 }
 ```
 
-fate fetches the fields from each view for results of that type. Check `result.__typename` to narrow the reference in TypeScript, then pass it to a component that resolves the matching view with `useView`. Each member of the union or interface needs an `id` so fate can identify it in the cache.
+fate fetches the fields from `PostView` for posts and from `UserView` for users. Checking `__typename` gives each card a ref of the right type to resolve with `useView`. The same composition works for interfaces. Each concrete type needs an `id` so fate can identify its objects in the cache.
 
 ## Creating a Client
 
@@ -352,6 +350,16 @@ const { posts } = useRequest({
 ```
 
 This produces a root `posts(first: 10)` field and a nested `comments(first: 3)` field in the generated GraphQL selection.
+
+### Requesting Scalars
+
+Let's say the schema defines `today: Date!` with a custom `Date` scalar. Add `today: { embedded: true, type: 'Date' }` to `fateGraphQL.roots`, then use `value: true` to request it.
+
+```tsx
+const { today } = useRequest({ today: { value: true } });
+```
+
+fate returns the value as sent by the server. This also applies to custom scalars that contain objects or arrays, such as `JSON`.
 
 ## Mutations
 

@@ -111,7 +111,7 @@ export const Root = {
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. fate treats a plain data view as a standard query.
+Use `list(...)` for a list resolver and a plain data view for a standard query. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure.
 
 Each `list(...)` can have its own ordering. For example, the feed can show newest posts first while comments use oldest first. Without `orderBy`, fate sorts by `id asc`. It also adds `id asc` as a tie-breaker when your ordering doesn't include `id`. Use an array when ordering by several fields.
 
@@ -136,31 +136,31 @@ const { posts, categories, viewer } = useRequest({
 
 ### Lists with Several Types
 
-A root list can contain several entity types, such as an activity feed with posts and users. Pass the data views to `list` along with a query that returns the page's identities in display order.
+Let's add a `search` list that returns both posts and users. Pass a data view for each type to `list`, along with a query that finds the results for each page. The data view keys match the type names, and each view selects `id`. The `typeName` gives the combined type its own name in the generated client.
 
 ```tsx
 import { list } from '@nkzw/fate/server';
 
 export const Root = {
-  activity: list(
+  search: list(
     { Post: postDataView, User: userDataView },
     {
-      query: queryActivity,
-      typeName: 'ActivityItem',
+      query: querySearch,
+      typeName: 'SearchResult',
     },
   ),
 };
 ```
 
-The query receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries after or before the cursor in display order. Each entry has a `__typename`, an `id`, and a unique `cursor`. fate uses the extra entry to tell whether another page is available. It loads the selected fields in batches by type and applies the permissions defined on each data view.
+Your `querySearch` function receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries in display order, starting after the cursor for forward pagination or ending before it for backward pagination. Each entry has a `__typename`, a string `id`, and a unique string `cursor`. `take` includes one extra entry so fate can tell whether there's another page. fate fetches the selected fields in batches for each type and applies the permissions from its data view.
 
-Pass `Root` to `createFateServer` for native HTTP. With tRPC, register the list using the adapter's `procedures` helper:
+For native HTTP, pass `Root` to `createFateServer`. For tRPC, use `fate.procedures` and register the router as `searchResult` in `appRouter`.
 
 ```tsx
-const activityItemRouter = router(fate.procedures({ view: Root.activity }));
+const searchResultRouter = router(fate.procedures({ view: Root.search }));
 ```
 
-Register this router as `activityItem` in `appRouter`, or set a different `router` name in `Root`. On the client, compose the views for each type with `forType` and render them by checking `__typename`. [See an example of the client selection](/integrations/graphql#views-on-unions-and-interfaces).
+To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`forType` to compose the views](/integrations/graphql#views-on-unions-and-interfaces) for the search results.
 
 ## Native fate protocol
 

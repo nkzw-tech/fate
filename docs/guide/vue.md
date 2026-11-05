@@ -281,7 +281,7 @@ const like = async () => {
 
 Expected mutation errors are returned in `result.error`; unexpected failures reject the promise. See [Action & Mutation Error Handling](/guide/actions#action--mutation-error-handling).
 
-The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `insert`, and `view` work the same way. Vue does not have React Actions or `useActionState`, so Vue components should model pending and error state with Vue refs or your application state library.
+Use Vue refs or your application state library to track pending and error state. The mutation options work the same way in both frameworks, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. See [Mutations](/guide/actions#mutations).
 
 ## API Differences from React
 

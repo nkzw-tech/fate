@@ -75,7 +75,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
 
-- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Data marked stale by a mutation is fetched again. See [invalidating lists](/guide/actions#invalidating-lists) and [invalidating records](/guide/actions#invalidating-records).
+- `cache-first` (_default_): Returns data from the cache when available and fresh. Fetches missing data and data marked stale by [list invalidation](/guide/actions#invalidating-lists) or [record invalidation](/guide/actions#invalidating-records).
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
 - `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.
@@ -93,6 +93,8 @@ const { posts } = useRequest(
 );
 ```
 
+When another component mounts with the same `network-only` or `stale-while-revalidate` request, it shares a request that's still in flight or starts a fresh one.
+
 For screens that also work offline, switch the same hook to `cache-only`:
 
 ```tsx
@@ -103,7 +105,7 @@ const result = useRequest(
 const viewer = useView(ViewerView, result?.viewer);
 ```
 
-Cache-only results stay subscribed to cache changes. Their references never fetch missing view fields. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
+Cache-only results stay subscribed to cache changes. Their refs read selected fields, including deferred fields, from the cache. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
 
 ## Refreshing Requests
 
@@ -246,13 +248,13 @@ The snapshot contains `data`, `error`, `isFetching`, `status`, and `refetch`. Da
 
 Reading a snapshot does not start a request. The first subscription starts an enabled request and retains its data; the last unsubscribe releases it. Use `enabled: false` to disable fetching, or `mode: 'cache-only'` to observe cached data without fetching missing fields. The possible statuses are:
 
-| Status     | Meaning                                                       |
-| ---------- | ------------------------------------------------------------- |
-| `disabled` | The request is not enabled.                                   |
-| `missing`  | A cache-only read or a completed request has incomplete data. |
-| `pending`  | The initial request is loading.                               |
-| `ready`    | Data is available.                                            |
-| `error`    | The initial request failed.                                   |
+| Status     | Meaning                                                          |
+| ---------- | ---------------------------------------------------------------- |
+| `disabled` | The request is not enabled.                                      |
+| `missing`  | Data is missing after a cache-only read or a successful request. |
+| `pending`  | The initial request is loading.                                  |
+| `ready`    | Data is available.                                               |
+| `error`    | The initial request failed.                                      |
 
 `observer.getSnapshot().refetch()` returns a promise and requires an enabled request that isn't cache-only. Handle its rejected promise in the calling code.
 

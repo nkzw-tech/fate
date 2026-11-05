@@ -380,9 +380,7 @@ Vue provides the same API as a reactive resource. See [Resolving Arrays of Refs 
 
 We learned that `useRequest` is responsible for fetching data from the server and `useView` is used for reading data from the cache. In some situations data may not be available in the cache and `useView` might need to suspend the component to fetch only the missing data. Once that data is fetched and written to the cache, the component resumes rendering.
 
-If another request is already fetching the same object by ID, fate can reuse that request when it includes all the missing scalar fields with the same arguments. For example, a view that needs a post's title can wait for a request for its title and content. If data is still missing afterward, the view can fetch it as usual.
-
-To try this, open **Pagination** in the regular example and choose **Read the first post twice**. In the Network tab, look for one post read with both fields.
+Let's say `PostCard` needs a post's `title` while a request for the same post's `title` and `content` is already in flight. fate can share a request by ID when it selects all the missing scalar fields with the same arguments. `PostCard` waits for that request, then fetches any fields it still needs.
 
 _Tip: You can test this behavior in development mode with Fast Refresh (HMR) enabled in your bundler. When you edit the selection of a view, components using that view will suspend, fetch the missing data, and then resume rendering._
 
@@ -604,7 +602,7 @@ Lists with different filters or sorting arguments stay separate. Loading another
 
 `useRequest` supports different request modes to control caching and data freshness. The available modes are:
 
-- `cache-first` (_default_): Returns data from the cache if available, otherwise fetches from the network. Data marked stale by a mutation is fetched again. See [invalidating lists](/docs/guide/actions.md#invalidating-lists) and [invalidating records](/docs/guide/actions.md#invalidating-records).
+- `cache-first` (_default_): Returns data from the cache when available and fresh. Fetches missing data and data marked stale by [list invalidation](/docs/guide/actions.md#invalidating-lists) or [record invalidation](/docs/guide/actions.md#invalidating-records).
 - `stale-while-revalidate`: Returns data from the cache and simultaneously fetches fresh data from the network.
 - `network-only`: Always fetches data from the network, bypassing the cache.
 - `cache-only` (React): Observes cached data without fetching or suspending. Returns `undefined` when the selection is missing.
@@ -622,6 +620,8 @@ const { posts } = useRequest(
 );
 ```
 
+When another component mounts with the same `network-only` or `stale-while-revalidate` request, it shares a request that's still in flight or starts a fresh one.
+
 For screens that also work offline, switch the same hook to `cache-only`:
 
 ```tsx
@@ -632,7 +632,7 @@ const result = useRequest(
 const viewer = useView(ViewerView, result?.viewer);
 ```
 
-Cache-only results stay subscribed to cache changes. Their references never fetch missing view fields. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
+Cache-only results stay subscribed to cache changes. Their refs read selected fields, including deferred fields, from the cache. Switching offline bypasses a pending Suspense gate immediately, so the component can keep its local state and render its offline UI. The existing network modes keep their required result type; modes that can be `cache-only` return an optional result.
 
 ### Refreshing Requests
 
@@ -775,13 +775,13 @@ The snapshot contains `data`, `error`, `isFetching`, `status`, and `refetch`. Da
 
 Reading a snapshot does not start a request. The first subscription starts an enabled request and retains its data; the last unsubscribe releases it. Use `enabled: false` to disable fetching, or `mode: 'cache-only'` to observe cached data without fetching missing fields. The possible statuses are:
 
-| Status     | Meaning                                                       |
-| ---------- | ------------------------------------------------------------- |
-| `disabled` | The request is not enabled.                                   |
-| `missing`  | A cache-only read or a completed request has incomplete data. |
-| `pending`  | The initial request is loading.                               |
-| `ready`    | Data is available.                                            |
-| `error`    | The initial request failed.                                   |
+| Status     | Meaning                                                          |
+| ---------- | ---------------------------------------------------------------- |
+| `disabled` | The request is not enabled.                                      |
+| `missing`  | Data is missing after a cache-only read or a successful request. |
+| `pending`  | The initial request is loading.                                  |
+| `ready`    | Data is available.                                               |
+| `error`    | The initial request failed.                                      |
 
 `observer.getSnapshot().refetch()` returns a promise and requires an enabled request that isn't cache-only. Handle its rejected promise in the calling code.
 
@@ -1351,7 +1351,7 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
+The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise. Handle pending state and errors in the calling code.
 
 ### Mutation Server Implementation
 
@@ -1459,7 +1459,7 @@ Earlier versions appended mutation results automatically. Add an `insert` option
 
 ### Removing Items from Lists
 
-To remove a post from the inbox when it is archived, pass the list as `from` and the post's view ref as `node`. You can move the same post into another list in the same call:
+Let's say we want to move a post from the inbox to an archive. Pass the inbox list as `remove.from` and the post's view ref as `remove.node`. Use `insert` in the same call to add the post to the archive.
 
 ```tsx
 await fate.mutations.post.archive({
@@ -1470,7 +1470,7 @@ await fate.mutations.post.archive({
 });
 ```
 
-fate removes the item immediately and restores it if the mutation fails. The record stays available to views and other lists. Pass an array of removal objects to remove more than one item or update several lists:
+The post disappears from the inbox immediately. If the mutation fails, fate rolls back both list changes. The post itself stays in the cache. Pass an array of removal objects to remove more than one item or update several lists.
 
 ```tsx
 await fate.mutations.post.archive({
@@ -1482,30 +1482,28 @@ await fate.mutations.post.archive({
 });
 ```
 
-Use the original list, connection, or deferred list from the same client. Passing a deferred list keeps it lazy. If the list loads while the mutation is pending, fate applies the removal to the loaded items. Removals also work with [offline mutations](/docs/guide/persistence.md).
+Use the original array, connection, or deferred list returned by the same client. A deferred list still loads when a component reads it. If it loads while the mutation is pending, fate applies the removal to the loaded items. Removals also work with [offline mutations](/docs/guide/persistence.md).
 
-If the server needs to fill the empty slot or recalculate pagination, add the list to `invalidate`. To try a scoped removal, open **Pagination** in the regular example and choose **Like and hide the first post** or **Fail a scoped removal**.
+If archiving the post changes which items the server would return on the first page, add the list to [`invalidate`](#invalidating-lists).
 
 ### Invalidating Lists
 
-Sometimes a mutation changes which objects belong in a list. For example, archiving a post can remove it from the active posts and bring the next post into the first page. Pass the list as an invalidation target so fate fetches its membership again:
+Archiving a post might bring the next post into the first page of the inbox. Pass the inbox list to `invalidate` to fetch the updated page on the next request.
 
 ```tsx
 await fate.mutations.post.archive({
-  input: { id: post.id },
-  invalidate: [activePosts],
+  input: { id: postRef.id },
+  invalidate: [inbox],
 });
 ```
 
-Use the original list or connection returned by the same client. When the mutation succeeds, fate marks that list stale and keeps its current items visible. The next cache-first request for the list fetches it again. Other filters keep their cached results. If you want to refresh the list right away, call [`useRefetch`](/docs/guide/requests.md#refreshing-requests).
+Use the original array or connection returned by the same client. When the mutation succeeds, fate marks the list stale and keeps its current items visible. The next `cache-first` request fetches the list again. Lists with other filters keep their cached results. To refresh the list immediately, use [`useRefetch`](/docs/guide/requests.md#refreshing-requests).
 
-A successful first-page refresh replaces the old page and its cached continuation pages. You can load more pages again from the new result.
-
-Try this in the regular example. Open **Pagination**, sign in, and choose **Create a post and invalidate this feed**. Then choose **Request this feed (cache-first)** to load the new post.
+Refreshing the first page replaces the previously loaded pages. You can load more pages from the refreshed list.
 
 ### Invalidating Records
 
-You can also pass a view ref to `invalidate`. For example, adding a comment can change fields on its parent post that the comment mutation doesn't return:
+Let's add a comment to a post. If the mutation doesn't return the post's updated comment count, pass the post's view ref to `invalidate`.
 
 ```tsx
 await fate.mutations.comment.add({
@@ -1514,9 +1512,7 @@ await fate.mutations.comment.add({
 });
 ```
 
-fate marks the post's cached fields stale after the mutation succeeds. The next cache-first request that selects those fields fetches them again. If one request fetches just the title, a later request for the post's content still refreshes it. You can pass both view refs and lists in the same call.
-
-The regular example invalidates the parent post when you add a comment. Sign in, open a post, add a comment, and navigate away and back to see the post request in the Network tab.
+When the mutation succeeds, fate marks the post's cached fields stale. A `cache-first` request refreshes the fields it selects. If it selects only the title, the comment count stays stale until a request selects it. You can pass both view refs and lists to `invalidate` in the same call.
 
 ## Persistence
 
@@ -2084,7 +2080,7 @@ const like = async () => {
 
 Expected mutation errors are returned in `result.error`; unexpected failures reject the promise. See [Action & Mutation Error Handling](/docs/guide/actions.md#action--mutation-error-handling).
 
-The mutation call shape is the same as `react-fate`: `input`, `optimistic`, `insert`, and `view` work the same way. Vue does not have React Actions or `useActionState`, so Vue components should model pending and error state with Vue refs or your application state library.
+Use Vue refs or your application state library to track pending and error state. The mutation options work the same way in both frameworks, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. See [Mutations](/docs/guide/actions.md#mutations).
 
 ### API Differences from React
 
@@ -2117,7 +2113,7 @@ The GraphQL transport expects a schema with Relay-style object identity and pagi
 - Entity objects include `id` and `__typename`.
 - Object fetches use `nodes(ids:)` by default, or configured per-type query fields.
 - List fields return Relay connections with `edges`, `cursor`, `node`, and `pageInfo`.
-- Root queries and mutations return the entity type selected by the fate view.
+- Root queries and mutations that use a fate view return objects of the selected type.
 
 For example, a `Post` list can be exposed as a normal GraphQL connection:
 
@@ -2222,19 +2218,17 @@ Use `import type` for generated types. After updating the schema, run `fate gene
 
 ### Views on Unions and Interfaces
 
-A GraphQL search can return different kinds of results in the same list. Use `forType` to compose a view for each type you want to render. For example, if your `search` connection returns a `SearchResult` union of posts and users:
+Let's say our `search` connection returns a `SearchResult` union of `Post` and `User`. We can compose `PostView` and `UserView` into a single view using `forType`.
 
 ```tsx
 import { forType, useRequest, view } from 'react-fate';
 import type { GraphQLEntities } from '../../.fate/client.generated.ts';
-import { PostResult, UserResult } from './SearchResults.tsx';
-
-export const PostResultView = view<GraphQLEntities['Post']>()({ title: true });
-export const UserResultView = view<GraphQLEntities['User']>()({ name: true });
+import { PostCard, PostView } from './PostCard.tsx';
+import { UserCard, UserView } from './UserCard.tsx';
 
 const SearchResultView = view<GraphQLEntities['SearchResult']>()({
-  ...forType('Post', PostResultView),
-  ...forType('User', UserResultView),
+  ...forType('Post', PostView),
+  ...forType('User', UserView),
 });
 
 export function Search({ query }: { query: string }) {
@@ -2245,16 +2239,16 @@ export function Search({ query }: { query: string }) {
 
     switch (result.__typename) {
       case 'Post':
-        return <PostResult key={key} post={result} />;
+        return <PostCard key={key} post={result} />;
       case 'User':
-        return <UserResult key={key} user={result} />;
+        return <UserCard key={key} user={result} />;
     }
     return null;
   });
 }
 ```
 
-fate fetches the fields from each view for results of that type. Check `result.__typename` to narrow the reference in TypeScript, then pass it to a component that resolves the matching view with `useView`. Each member of the union or interface needs an `id` so fate can identify it in the cache.
+fate fetches the fields from `PostView` for posts and from `UserView` for users. Checking `__typename` gives each card a ref of the right type to resolve with `useView`. The same composition works for interfaces. Each concrete type needs an `id` so fate can identify its objects in the cache.
 
 ### Creating a Client
 
@@ -2444,6 +2438,16 @@ const { posts } = useRequest({
 ```
 
 This produces a root `posts(first: 10)` field and a nested `comments(first: 3)` field in the generated GraphQL selection.
+
+#### Requesting Scalars
+
+Let's say the schema defines `today: Date!` with a custom `Date` scalar. Add `today: { embedded: true, type: 'Date' }` to `fateGraphQL.roots`, then use `value: true` to request it.
+
+```tsx
+const { today } = useRequest({ today: { value: true } });
+```
+
+fate returns the value as sent by the server. This also applies to custom scalars that contain objects or arrays, such as `JSON`.
 
 ### Mutations
 
@@ -2687,7 +2691,7 @@ export const Root = {
 };
 ```
 
-Entries that wrap their view in `list(...)` are treated as list resolvers. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure. fate treats a plain data view as a standard query.
+Use `list(...)` for a list resolver and a plain data view for a standard query. In the native protocol, the root key is the operation name used by the client. In the tRPC adapter, `procedure` can point that root at a specific router procedure.
 
 Each `list(...)` can have its own ordering. For example, the feed can show newest posts first while comments use oldest first. Without `orderBy`, fate sorts by `id asc`. It also adds `id asc` as a tie-breaker when your ordering doesn't include `id`. Use an array when ordering by several fields.
 
@@ -2712,31 +2716,31 @@ const { posts, categories, viewer } = useRequest({
 
 #### Lists with Several Types
 
-A root list can contain several entity types, such as an activity feed with posts and users. Pass the data views to `list` along with a query that returns the page's identities in display order.
+Let's add a `search` list that returns both posts and users. Pass a data view for each type to `list`, along with a query that finds the results for each page. The data view keys match the type names, and each view selects `id`. The `typeName` gives the combined type its own name in the generated client.
 
 ```tsx
 import { list } from '@nkzw/fate/server';
 
 export const Root = {
-  activity: list(
+  search: list(
     { Post: postDataView, User: userDataView },
     {
-      query: queryActivity,
-      typeName: 'ActivityItem',
+      query: querySearch,
+      typeName: 'SearchResult',
     },
   ),
 };
 ```
 
-The query receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries after or before the cursor in display order. Each entry has a `__typename`, an `id`, and a unique `cursor`. fate uses the extra entry to tell whether another page is available. It loads the selected fields in batches by type and applies the permissions defined on each data view.
+Your `querySearch` function receives `args`, `ctx`, `cursor`, `direction`, and `take`. Return up to `take` entries in display order, starting after the cursor for forward pagination or ending before it for backward pagination. Each entry has a `__typename`, a string `id`, and a unique string `cursor`. `take` includes one extra entry so fate can tell whether there's another page. fate fetches the selected fields in batches for each type and applies the permissions from its data view.
 
-Pass `Root` to `createFateServer` for native HTTP. With tRPC, register the list using the adapter's `procedures` helper:
+For native HTTP, pass `Root` to `createFateServer`. For tRPC, use `fate.procedures` and register the router as `searchResult` in `appRouter`.
 
 ```tsx
-const activityItemRouter = router(fate.procedures({ view: Root.activity }));
+const searchResultRouter = router(fate.procedures({ view: Root.search }));
 ```
 
-Register this router as `activityItem` in `appRouter`, or set a different `router` name in `Root`. On the client, compose the views for each type with `forType` and render them by checking `__typename`. [See an example of the client selection](/docs/integrations/graphql.md#views-on-unions-and-interfaces).
+To use a different router name, set `router` on the entry in `Root`, for example `search: { router: 'search', view: searchList }`. On the client, use [`forType` to compose the views](/docs/integrations/graphql.md#views-on-unions-and-interfaces) for the search results.
 
 ### Native fate protocol
 
@@ -3381,9 +3385,8 @@ live.connection('Post.comments', { id: postId }).appendNode('Comment', commentId
 ```
 
 Pass `changed` to refresh only those fields, or omit it to refresh the whole selected view.
-Void live events carry identifiers and change metadata. Each subscriber fetches the selected
-records using its own credentials. Supply the record ID when publishing a connection event so
-subscribers can fetch just that record.
+
+Void sends IDs and change metadata with live events. Each subscriber fetches the selected fields using its own credentials.
 
 ### Routes
 

@@ -119,7 +119,7 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
+The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise. Handle pending state and errors in the calling code.
 
 ## Mutation Server Implementation
 
@@ -227,7 +227,7 @@ Earlier versions appended mutation results automatically. Add an `insert` option
 
 ## Removing Items from Lists
 
-To remove a post from the inbox when it is archived, pass the list as `from` and the post's view ref as `node`. You can move the same post into another list in the same call:
+Let's say we want to move a post from the inbox to an archive. Pass the inbox list as `remove.from` and the post's view ref as `remove.node`. Use `insert` in the same call to add the post to the archive.
 
 ```tsx
 await fate.mutations.post.archive({
@@ -238,7 +238,7 @@ await fate.mutations.post.archive({
 });
 ```
 
-fate removes the item immediately and restores it if the mutation fails. The record stays available to views and other lists. Pass an array of removal objects to remove more than one item or update several lists:
+The post disappears from the inbox immediately. If the mutation fails, fate rolls back both list changes. The post itself stays in the cache. Pass an array of removal objects to remove more than one item or update several lists.
 
 ```tsx
 await fate.mutations.post.archive({
@@ -250,30 +250,28 @@ await fate.mutations.post.archive({
 });
 ```
 
-Use the original list, connection, or deferred list from the same client. Passing a deferred list keeps it lazy. If the list loads while the mutation is pending, fate applies the removal to the loaded items. Removals also work with [offline mutations](/guide/persistence).
+Use the original array, connection, or deferred list returned by the same client. A deferred list still loads when a component reads it. If it loads while the mutation is pending, fate applies the removal to the loaded items. Removals also work with [offline mutations](/guide/persistence).
 
-If the server needs to fill the empty slot or recalculate pagination, add the list to `invalidate`. To try a scoped removal, open **Pagination** in the regular example and choose **Like and hide the first post** or **Fail a scoped removal**.
+If archiving the post changes which items the server would return on the first page, add the list to [`invalidate`](#invalidating-lists).
 
 ## Invalidating Lists
 
-Sometimes a mutation changes which objects belong in a list. For example, archiving a post can remove it from the active posts and bring the next post into the first page. Pass the list as an invalidation target so fate fetches its membership again:
+Archiving a post might bring the next post into the first page of the inbox. Pass the inbox list to `invalidate` to fetch the updated page on the next request.
 
 ```tsx
 await fate.mutations.post.archive({
-  input: { id: post.id },
-  invalidate: [activePosts],
+  input: { id: postRef.id },
+  invalidate: [inbox],
 });
 ```
 
-Use the original list or connection returned by the same client. When the mutation succeeds, fate marks that list stale and keeps its current items visible. The next cache-first request for the list fetches it again. Other filters keep their cached results. If you want to refresh the list right away, call [`useRefetch`](/guide/requests#refreshing-requests).
+Use the original array or connection returned by the same client. When the mutation succeeds, fate marks the list stale and keeps its current items visible. The next `cache-first` request fetches the list again. Lists with other filters keep their cached results. To refresh the list immediately, use [`useRefetch`](/guide/requests#refreshing-requests).
 
-A successful first-page refresh replaces the old page and its cached continuation pages. You can load more pages again from the new result.
-
-Try this in the regular example. Open **Pagination**, sign in, and choose **Create a post and invalidate this feed**. Then choose **Request this feed (cache-first)** to load the new post.
+Refreshing the first page replaces the previously loaded pages. You can load more pages from the refreshed list.
 
 ## Invalidating Records
 
-You can also pass a view ref to `invalidate`. For example, adding a comment can change fields on its parent post that the comment mutation doesn't return:
+Let's add a comment to a post. If the mutation doesn't return the post's updated comment count, pass the post's view ref to `invalidate`.
 
 ```tsx
 await fate.mutations.comment.add({
@@ -282,6 +280,4 @@ await fate.mutations.comment.add({
 });
 ```
 
-fate marks the post's cached fields stale after the mutation succeeds. The next cache-first request that selects those fields fetches them again. If one request fetches just the title, a later request for the post's content still refreshes it. You can pass both view refs and lists in the same call.
-
-The regular example invalidates the parent post when you add a comment. Sign in, open a post, add a comment, and navigate away and back to see the post request in the Network tab.
+When the mutation succeeds, fate marks the post's cached fields stale. A `cache-first` request refreshes the fields it selects. If it selects only the title, the comment count stays stale until a request selects it. You can pass both view refs and lists to `invalidate` in the same call.
