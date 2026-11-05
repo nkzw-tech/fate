@@ -1490,6 +1490,42 @@ test('live connection inserts invalidate when the target cursor is not loaded', 
   });
 });
 
+test('keeps the cached list when overlapping live refreshes fail', async () => {
+  let invalidate: (() => void) | undefined;
+  const onLiveError = vi.fn();
+  const client = createClient({
+    onLiveError,
+    roots: {},
+    transport: {
+      fetchById: async () => [],
+      fetchList: async () => {
+        throw new Error('Unavailable');
+      },
+      subscribeConnection: (_procedure, _type, _args, _select, _selectionArgs, handlers) => {
+        invalidate = () => handlers.onEvent({ type: 'invalidate' });
+        return () => {};
+      },
+    },
+    types: [{ type: 'Post' }],
+  });
+  const ids = [toEntityId('Post', 'post-old')];
+  client.store.setList('posts', { ids });
+  const dispose = client.subscribeLiveListView(view<Post>()({ id: true }), {
+    field: 'posts',
+    key: 'posts',
+    owner: 'posts',
+    procedure: 'posts',
+    root: true,
+    type: 'Post',
+  });
+
+  invalidate!();
+  invalidate!();
+  await vi.waitFor(() => expect(onLiveError).toHaveBeenCalledTimes(2));
+  expect(client.store.getListState('posts')?.ids).toEqual(ids);
+  dispose();
+});
+
 test('older failed live connection invalidations do not restore over newer results', async () => {
   let handlers: any;
   const pending: Array<{

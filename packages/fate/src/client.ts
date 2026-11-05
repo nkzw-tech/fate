@@ -2353,20 +2353,12 @@ export class FateClient<
   ) {
     const token = ++this.liveConnectionInvalidationToken;
     this.liveConnectionInvalidations.set(connection.key, token);
-    const previous = this.store.getListState(connection.key);
-    this.store.restoreList(connection.key, undefined);
-    this.loadConnection(view, connection, connection.args ?? {})
-      .then(() => {
+    this.loadConnectionPage(view, connection, connection.args ?? {}, { invalidation: token })
+      .catch((error) => this.reportLiveError(error))
+      .finally(() => {
         if (this.liveConnectionInvalidations.get(connection.key) === token) {
           this.liveConnectionInvalidations.delete(connection.key);
         }
-      })
-      .catch((error) => {
-        if (this.liveConnectionInvalidations.get(connection.key) === token) {
-          this.store.restoreList(connection.key, previous);
-          this.liveConnectionInvalidations.delete(connection.key);
-        }
-        this.reportLiveError(error);
       });
   }
 
@@ -3039,7 +3031,7 @@ export class FateClient<
     view: V,
     connection: ConnectionMetadata,
     args: Record<string, unknown>,
-    options: { direction?: 'forward' | 'backward' } = {},
+    options: { direction?: 'forward' | 'backward'; invalidation?: number } = {},
   ) {
     const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
     const selection = resolveSelectionPlan(view, requestArgs);
@@ -3048,7 +3040,7 @@ export class FateClient<
       connection: connection.key,
       direction: options.direction ?? 'forward',
       field: connection.field,
-      invalidation: this.liveConnectionInvalidations.get(connection.key),
+      invalidation: options.invalidation,
       owner: connection.owner,
       refresh: this.writeVersions.get(`refresh:list:${connection.key}`),
       root: connection.root ?? false,
@@ -3074,20 +3066,23 @@ export class FateClient<
     connection: ConnectionMetadata,
     requestArgs: Record<string, unknown>,
     { argsPayload, plan }: ReturnType<typeof resolveSelectionPlan>,
-    options: { direction?: 'forward' | 'backward' } = {},
+    options: { direction?: 'forward' | 'backward'; invalidation?: number } = {},
   ) {
     let receivedPage: List | undefined;
     let generation = ++this.writeGeneration;
     const direction = options.direction ?? 'forward';
-    const isPage = getPaginationMergeInfo(requestArgs).hasCursorArg;
+    const { invalidation } = options;
+    const replacing = invalidation !== undefined;
+    const isPage = !replacing && getPaginationMergeInfo(requestArgs).hasCursorArg;
     const listVersionKey = `list:${connection.key}`;
     const refreshVersionKey = `refresh:${listVersionKey}`;
     const refreshVersion = this.writeVersions.get(refreshVersionKey);
     const acceptsList = () =>
-      isPage
+      (!replacing || this.liveConnectionInvalidations.get(connection.key) === invalidation) &&
+      (isPage
         ? this.writeVersions.get(refreshVersionKey) === refreshVersion &&
           (this.writeVersions.get(refreshVersionKey) ?? 0) <= generation
-        : (this.writeVersions.get(listVersionKey) ?? 0) <= generation;
+        : (this.writeVersions.get(listVersionKey) ?? 0) <= generation);
     const applyResponse = <T>(apply: () => T) =>
       isPage
         ? this.withPaginationWrite(connection.key, generation, apply)
@@ -3146,7 +3141,7 @@ export class FateClient<
             return;
           }
           receivedPage = { cursors: incomingCursors, ids: incomingIds, pagination };
-          const previous = this.store.getListState(connection.key);
+          const previous = replacing ? undefined : this.store.getListState(connection.key);
 
           const nextListState = this.mergeListState(
             previous,
@@ -3248,7 +3243,7 @@ export class FateClient<
           ids: incomingIds,
           pagination: connectionPayload.pagination,
         };
-        const previous = this.store.getListState(connection.key);
+        const previous = replacing ? undefined : this.store.getListState(connection.key);
         const nextListState = this.mergeListState(
           previous,
           incomingIds,
