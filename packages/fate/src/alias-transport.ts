@@ -251,7 +251,10 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
     subscribeConnection: transport.subscribeConnection
       ? (procedure, type, args, select, selectionArgs, handlers) => {
           const paths = new Set(select);
-          if (![...paths].some((path) => path.includes(':'))) {
+          if (
+            transport.mixedLists?.includes(procedure) ||
+            ![...paths].some((path) => path.includes(':'))
+          ) {
             return transport.subscribeConnection!(
               procedure,
               type,

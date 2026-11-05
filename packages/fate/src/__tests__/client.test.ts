@@ -22,6 +22,7 @@ import {
   ViewsTag,
 } from '../types.ts';
 import { getViewNames, view } from '../view.ts';
+import { viewFor } from '../viewFor.ts';
 
 type User = { __typename: 'User'; id: string; name: string };
 
@@ -459,6 +460,40 @@ test('live delete events remove records from lists', () => {
   expect(client.store.read(postId)).toBeUndefined();
   expect(client.store.getList('posts')).toEqual([]);
 
+  dispose();
+});
+
+test('passes mixed live list selections and their arguments to the transport', () => {
+  const PostView = view<Post>()({ content: true });
+  const FeedView = view<Post | User>()({
+    ...viewFor('Post', PostView),
+    ...viewFor('User', view<User>()({ name: { args: { locale: 'en' } } })),
+  });
+  const subscribeConnection = vi.fn(() => vi.fn());
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: async () => [], mixedLists: ['feed'], subscribeConnection },
+    types: [],
+  });
+
+  const dispose = client.subscribeLiveListView(FeedView, {
+    args: { first: 10, query: 'fate' },
+    field: 'feed',
+    key: 'feed',
+    owner: 'feed',
+    procedure: 'feed',
+    root: true,
+    type: 'FeedItem',
+  });
+
+  expect(subscribeConnection).toHaveBeenCalledExactlyOnceWith(
+    'feed',
+    'FeedItem',
+    { query: 'fate' },
+    getSelectionPlan(FeedView, null).paths,
+    { 'fate_type_4_User_name:name:User': { locale: 'en' } },
+    expect.objectContaining({ onEvent: expect.any(Function) }),
+  );
   dispose();
 });
 
