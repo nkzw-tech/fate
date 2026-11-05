@@ -136,13 +136,11 @@ export function useView<V extends View<any, any>>(
   };
 
   const readViewSnapshot = (
+    client: typeof activeClient,
     viewRef: ViewRef<ViewEntityName<V>>,
     coverage: ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']>['coverage'] = [],
   ) => {
-    const viewSnapshot = activeClient.readView<ViewEntity<V>, V[ViewTag]['select'], V>(
-      view,
-      viewRef,
-    );
+    const viewSnapshot = client.readView<ViewEntity<V>, V[ViewTag]['select'], V>(view, viewRef);
     const mergeCoverage = (
       value: ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']>,
     ): ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']> => ({
@@ -158,16 +156,17 @@ export function useView<V extends View<any, any>>(
   };
 
   const getSnapshot = () => {
+    const client = activeClient;
     const currentRef = toValue(ref);
     if (currentRef == null) {
       return currentRef === undefined ? undefinedSnapshot : nullSnapshot;
     }
 
     if (!isDeferred(currentRef)) {
-      return readViewSnapshot(currentRef as ViewRef<ViewEntityName<V>>);
+      return readViewSnapshot(client, currentRef as ViewRef<ViewEntityName<V>>);
     }
 
-    const deferredSnapshot = activeClient.readDeferred(
+    const deferredSnapshot = client.readDeferred(
       currentRef as Deferred<ViewRef<ViewEntityName<V>>>,
     );
     if (isFulfilledThenable(deferredSnapshot)) {
@@ -180,7 +179,8 @@ export function useView<V extends View<any, any>>(
       }
 
       return readViewSnapshot(
-        activeClient.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
+        client,
+        client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
         deferredSnapshot.value.coverage,
       );
     }
@@ -195,13 +195,14 @@ export function useView<V extends View<any, any>>(
       }
 
       return readViewSnapshot(
-        activeClient.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
+        client,
+        client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
         deferredValue.coverage,
       );
     });
   };
 
-  function refresh() {
+  function refresh(): Promise<typeof data.value> {
     const currentToken = ++token;
     const nextClient = clientSource.value;
     if (nextClient !== activeClient) {
@@ -212,7 +213,12 @@ export function useView<V extends View<any, any>>(
     pending.value = true;
     errorState.value = null;
 
-    const nextSnapshot = getSnapshot();
+    let nextSnapshot: ReturnType<typeof getSnapshot>;
+    try {
+      nextSnapshot = getSnapshot();
+    } catch (error) {
+      nextSnapshot = Promise.reject(error);
+    }
     const publish = (value: Awaited<typeof nextSnapshot>) => {
       if (!disposed && currentToken === token) {
         snapshot = value ?? null;
@@ -232,15 +238,19 @@ export function useView<V extends View<any, any>>(
       publish(nextSnapshot.value);
       return ready;
     }
-    currentPromise = Promise.resolve(nextSnapshot).then(publish, (error) => {
-      if (!disposed && currentToken === token) {
-        errorState.value = error;
-        pending.value = false;
-        snapshot = null;
-        updateSubscriptions();
-      }
-      throw error;
-    });
+    currentPromise = Promise.resolve(nextSnapshot).then(
+      // The selection may have changed before we could subscribe to its snapshot.
+      (value) => (!disposed && currentToken === token ? refresh() : publish(value)),
+      (error: unknown) => {
+        if (!disposed && currentToken === token) {
+          errorState.value = error;
+          pending.value = false;
+          snapshot = null;
+          updateSubscriptions();
+        }
+        throw error;
+      },
+    );
     void currentPromise.catch(() => {});
 
     return currentPromise;

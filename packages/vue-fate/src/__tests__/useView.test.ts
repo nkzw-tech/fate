@@ -1,11 +1,57 @@
 /** @vitest-environment happy-dom */
 
-import { createClient, getSelectionPlan, view, when } from '@nkzw/fate';
+import { createClient, defer, getSelectionPlan, type ViewSelection, view, when } from '@nkzw/fate';
 import { expect, test, vi } from 'vite-plus/test';
 import { createApp, defineComponent, h, nextTick, ref } from 'vue';
 import { FateClient, useView } from '../index.ts';
 
 type User = { __typename: 'User'; email: string; id: string; name: string };
+
+test('rereads a deferred relationship that changes before subscriptions attach', async () => {
+  type RelatedUser = User & { friend: User };
+  const Friend = view<User>()({ name: true });
+  const Parent = view<RelatedUser>()({ friend: defer(Friend) });
+  const response = Promise.withResolvers<Array<unknown>>();
+  const client = createClient({
+    roots: {},
+    transport: { fetchById: () => response.promise },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  client.write('User', { id: '1' }, new Set(['id']));
+  const { data } = await client.readView<RelatedUser, ViewSelection<typeof Parent>, typeof Parent>(
+    Parent,
+    client.ref('User', '1', Parent),
+  );
+  let resource!: ReturnType<typeof useView<typeof Friend>>;
+  const Component = defineComponent({
+    setup() {
+      resource = useView(Friend, data.friend);
+      return () => h('span', resource.value?.name);
+    },
+  });
+  const container = document.createElement('div');
+  const app = createApp({
+    render: () => h(FateClient, { client }, { default: () => h(Component) }),
+  });
+  app.mount(container);
+  try {
+    const ready = resource.ready();
+    const update = Promise.resolve(client.readDeferred(data.friend)).then(() => {
+      client.write(
+        'User',
+        { friend: { id: '3', name: 'Latest' }, id: '1' },
+        new Set(['friend.id', 'friend.name']),
+      );
+    });
+    response.resolve([{ friend: { id: '2', name: 'Stale' }, id: '1' }]);
+    await update;
+    expect(await ready).toMatchObject({ name: 'Latest' });
+    await nextTick();
+    expect(container.textContent).toBe('Latest');
+  } finally {
+    app.unmount();
+  }
+});
 
 test('replaces selected paths when conditional fields change on the same entity', async () => {
   const UserView = view<User>()(({ enabled }: { enabled: boolean }) => ({
