@@ -50,24 +50,34 @@ function Feed({ name }: { name: keyof typeof feeds }) {
   const { posts } = useRequest(request);
   const [items, loadNext] = useListView(selection, posts);
   const [error, act, isPending] = useActionState(
-    async (_error: string | null, action: 'load' | 'refresh' | 'insert' | 'fail') => {
+    async (
+      _error: string | null,
+      action: 'load' | 'refresh' | 'insert' | 'fail' | 'invalidate' | 'revisit',
+    ) => {
       try {
         if (action === 'load') {
           await loadNext?.();
         } else if (action === 'refresh') {
           await fate.request(request, { mode: 'network-only' });
+        } else if (action === 'revisit') {
+          await fate.request(request);
         } else {
           const result = await fate.mutations.post.add({
             input: {
               content: 'Created from the pagination demo.',
               title: action === 'fail' ? '' : 'A new pagination demo post',
             },
-            insert: { into: posts, position: 'before' },
-            optimistic: {
-              content: 'Created from the pagination demo.',
-              id: `optimistic:${crypto.randomUUID()}`,
-              title: 'Saving a new post…',
-            },
+            ...(action === 'invalidate'
+              ? { invalidate: [posts] }
+              : {
+                  insert: { into: posts, position: 'before' },
+
+                  optimistic: {
+                    content: 'Created from the pagination demo.',
+                    id: `optimistic:${crypto.randomUUID()}`,
+                    title: 'Saving a new post…',
+                  },
+                }),
             view: PaginationPostView,
           });
           return result.error?.message ?? null;
@@ -92,11 +102,17 @@ function Feed({ name }: { name: keyof typeof feeds }) {
         <Button action={() => act('insert')} disabled={isPending || !session} variant="outline">
           Insert a post
         </Button>
+        <Button action={() => act('invalidate')} disabled={isPending || !session} variant="outline">
+          Create a post and invalidate this feed
+        </Button>
+        <Button action={() => act('revisit')} disabled={isPending} variant="outline">
+          Request this feed (cache-first)
+        </Button>
         <Button action={() => act('fail')} disabled={isPending || !session} variant="outline">
           Fail an optimistic insertion
         </Button>
       </div>
-      {!session && <p className="text-sm text-muted-foreground">Sign in to test insertions.</p>}
+      {!session && <p className="text-sm text-muted-foreground">Sign in to create posts.</p>}
       {error && (
         <p className="text-destructive" role="alert">
           {error}
@@ -160,13 +176,16 @@ export default function PaginationPage() {
           </li>
           <li>Refresh a paginated feed: its cached continuation pages should remain visible.</li>
           <li>
+            Create a post and invalidate this feed. The feed stays as it is until you request it
+            again. Use the cache-first button to fetch the new first page.
+          </li>
+          <li>
             Sign in to insert a real post or reject an optimistic insertion using an invalid title.
           </li>
         </ol>
         <p className="text-sm text-muted-foreground">
           Use browser network throttling to inspect pending requests and optimistic rollback. Reload
-          to clear the client cache. Successful insertions create real posts in the example
-          database.
+          to clear the client cache. Successful mutations create real posts in the example database.
         </p>
       </Card>
       <Feed key={name} name={name} />

@@ -42,6 +42,7 @@ import {
   type MutationInsertion,
   type ResolvedInsertion,
   type ResolvedMutationInsertion,
+  type ResolvedInsertionTarget,
   type MutationCommand,
   wrapAction,
   wrapMutation,
@@ -285,6 +286,7 @@ const arePaginationStatesEqual = (left: Pagination | undefined, right: Paginatio
 
 const areListStatesEqual = (left: List | undefined, right: List) =>
   Boolean(left) &&
+  left?.stale === right.stale &&
   areArraysEqual(left?.ids, right.ids) &&
   areArraysEqual(left?.acknowledgedInsertions, right.acknowledgedInsertions) &&
   areArraysEqual(left?.cursors, right.cursors) &&
@@ -728,7 +730,7 @@ export class FateClient<
   private requestRevision = 0;
   private readonly requestCoverage = new WeakMap<
     RequestDescriptor,
-    { complete: boolean; revision: number }
+    { complete: boolean; revalidate: boolean; revision: number }
   >();
   private readonly cacheOnlyRefs = new WeakSet<object>();
   private readonly cacheOnlyCopies = new WeakMap<object, object>();
@@ -746,7 +748,7 @@ export class FateClient<
   private readonly rootLists = new Map<string, Set<string>>();
   private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
   private readonly deferredTargets = new WeakMap<object, string>();
-  private readonly mutationLists = new Map<string, { count: number; list: ConnectionMetadata }>();
+  private readonly mutationLists = new Map<string, number>();
   private readonly pendingViews = new Map<
     string,
     {
@@ -1279,6 +1281,31 @@ export class FateClient<
     } satisfies ConnectionMetadata;
   }
 
+  /** @internal Resolve invalidation targets before starting the mutation. */
+  resolveMutationInvalidation(targets: ReadonlyArray<ResolvedInsertionTarget<string>>) {
+    return [
+      ...new Set(
+        targets.map((target) => {
+          const metadata = this.listTargets.get(target);
+          if (!metadata) {
+            throw new Error('fate: Invalidation requires a list returned by this client.');
+          }
+          return metadata.key;
+        }),
+      ),
+    ];
+  }
+
+  /** @internal Mark confirmed list membership stale without evicting the snapshot. */
+  invalidateMutationLists(keys: ReadonlyArray<string> | undefined) {
+    for (const key of keys ?? []) {
+      const list = this.store.getListState(key);
+      if (list) {
+        this.store.setList(key, { ...list, stale: true });
+      }
+    }
+  }
+
   /** @internal Capture a mutation's list identities without retaining its result snapshots. */
   resolveMutationInsertion(type: string, insert: MutationInsertion): ResolvedMutationInsertion {
     if (typeof insert === 'string') {
@@ -1346,25 +1373,29 @@ export class FateClient<
   }
 
   /** @internal Keep targeted lists alive until an optimistic or durable operation settles. */
-  retainMutationLists(insert: ResolvedMutationInsertion): () => void {
-    if (typeof insert === 'string') {
+  retainMutationLists(insert: ResolvedMutationInsertion, invalidate: ReadonlyArray<string> = []) {
+    if (typeof insert === 'string' && invalidate.length === 0) {
       return () => {};
     }
-    for (const { list } of insert) {
-      const entry = this.mutationLists.get(list.key);
-      this.mutationLists.set(list.key, { count: (entry?.count ?? 0) + 1, list });
+    const keys = new Set(invalidate);
+    if (typeof insert !== 'string') {
+      for (const { list } of insert) {
+        keys.add(list.key);
+      }
     }
-    let released = false;
+    for (const key of keys) {
+      this.mutationLists.set(key, (this.mutationLists.get(key) ?? 0) + 1);
+    }
     return () => {
-      if (!released) {
-        released = true;
-        for (const { list } of insert) {
-          const entry = this.mutationLists.get(list.key);
-          if (entry && --entry.count === 0) {
-            this.mutationLists.delete(list.key);
-          }
+      for (const key of keys) {
+        const count = this.mutationLists.get(key)!;
+        if (count === 1) {
+          this.mutationLists.delete(key);
+        } else {
+          this.mutationLists.set(key, count - 1);
         }
       }
+      keys.clear();
     };
   }
 
@@ -2482,15 +2513,18 @@ export class FateClient<
       direction: 'forward' | 'backward';
       hasCursorArg: boolean;
       pageLimit?: number | null;
+      refreshStale?: boolean;
       replace?: boolean;
       resetInsertions?: boolean;
     },
   ): List {
     const isBackward = options.direction === 'backward';
+    const refreshStale = previous?.stale && options.refreshStale && !options.hasCursorArg;
     const preserveTail = Boolean(
       options.replace &&
       !options.hasCursorArg &&
       !options.resetInsertions &&
+      !refreshStale &&
       previous &&
       options.pageLimit != null &&
       previous.ids.length > Math.min(options.pageLimit, incomingIds.length) &&
@@ -2713,7 +2747,8 @@ export class FateClient<
       pagination,
       pendingAfterIds: dropCanonicalListIds(previous?.pendingAfterIds, ids),
       pendingBeforeIds: dropCanonicalListIds(previous?.pendingBeforeIds, ids),
-      windows: previous?.windows,
+      stale: refreshStale ? undefined : previous?.stale,
+      windows: refreshStale ? undefined : previous?.windows,
     };
   }
 
@@ -2949,7 +2984,7 @@ export class FateClient<
             incomingIds,
             incomingCursors,
             pagination,
-            { ...getPaginationMergeInfo(requestArgs), replace: true },
+            { ...getPaginationMergeInfo(requestArgs), refreshStale: true, replace: true },
           );
 
           if (!filterConnectionArgs(connection.args)) {
@@ -3378,14 +3413,14 @@ export class FateClient<
       if (persistence && options?.persist && existingRequest.status === 'fulfilled') {
         persistence.used(existingRequest.descriptor, options.persist);
       }
-      const isFulfilledCacheFirstWithMissingData =
+      const isFulfilledCacheFirstNeedingFetch =
         mode === 'cache-first' &&
         existingRequest.status === 'fulfilled' &&
-        !this.hasRequestData(existingRequest.descriptor);
+        !this.hasRequestData(existingRequest.descriptor, true);
 
       if (
         existingRequest.status !== 'pending' &&
-        (isFulfilledCacheFirstWithMissingData ||
+        (isFulfilledCacheFirstNeedingFetch ||
           (revalidateExisting &&
             (mode === 'network-only' ||
               mode === 'stale-while-revalidate' ||
@@ -3562,10 +3597,11 @@ export class FateClient<
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
     optimisticRoots.records.forEach(markRecord);
     optimisticRoots.lists.forEach(markList);
-    for (const { list } of this.mutationLists.values()) {
-      markList(list.key);
-      if (!list.root) {
-        markRecord(list.owner);
+    for (const key of this.mutationLists.keys()) {
+      markList(key);
+      const owner = parseListKey(key)?.ownerId;
+      if (owner !== '__root__') {
+        markRecord(owner);
       }
     }
 
@@ -3874,6 +3910,7 @@ export class FateClient<
     paths: Iterable<string>,
     plan: SelectionPlan,
     dependencies?: Set<string>,
+    revalidate = false,
   ): Set<string> {
     const selection = expandRefetchSelection(this.types, parseEntityId(entityId).type, paths);
     dependencies?.add(`entity:${entityId}`);
@@ -3908,6 +3945,9 @@ export class FateClient<
           const key = getListKey(id, schemaField(field), args?.hash);
           dependencies?.add(`list:${key}`);
           const list = this.store.getListState(key);
+          if (revalidate && list?.stale) {
+            return false;
+          }
           let childrenCovered =
             !list ||
             hasConnectionCursorCoverage(
@@ -3954,12 +3994,12 @@ export class FateClient<
     return missing;
   }
 
-  private hasRootListData(item: ListRequestDescriptor): boolean {
+  private hasRootListData(item: ListRequestDescriptor, revalidate = false): boolean {
     if (this.rootValues.has(`list:${item.listKey}`)) {
       return true;
     }
     const listState = this.store.getListState(item.listKey);
-    if (!listState) {
+    if (!listState || (revalidate && listState.stale)) {
       return false;
     }
 
@@ -3998,7 +4038,9 @@ export class FateClient<
     for (const { id } of getListEntries(
       getListWindow(listState, item.argsPayload, getRootListWindowKey(item)),
     )) {
-      if (this.missingForSelection(id, item.plan.paths, item.plan).size > 0) {
+      if (
+        this.missingForSelection(id, item.plan.paths, item.plan, undefined, revalidate).size > 0
+      ) {
         return false;
       }
     }
@@ -4055,7 +4097,10 @@ export class FateClient<
         const fetchedIds: Array<string | number> = [];
         for (const raw of item.ids) {
           const entityId = toEntityId(item.type, raw);
-          if (fetchAll || this.missingForSelection(entityId, fields, item.plan).size > 0) {
+          if (
+            fetchAll ||
+            this.missingForSelection(entityId, fields, item.plan, undefined, true).size > 0
+          ) {
             group.ids.push(raw);
             fetchedIds.push(raw);
           }
@@ -4080,7 +4125,7 @@ export class FateClient<
           const entityId = this.rootRequests.get(this.queryResultKey(item));
           const missing =
             !fetchAll && hasResult && entityId
-              ? this.missingForSelection(entityId, item.plan.paths, item.plan)
+              ? this.missingForSelection(entityId, item.plan.paths, item.plan, undefined, true)
               : item.plan.paths;
 
           if (fetchAll || !hasResult || (entityId && missing.size > 0)) {
@@ -4095,7 +4140,7 @@ export class FateClient<
           continue;
         }
 
-        if (!fetchAll && this.hasRootListData(item)) {
+        if (!fetchAll && this.hasRootListData(item, true)) {
           fetchedAll = false;
           continue;
         }
@@ -4142,25 +4187,35 @@ export class FateClient<
     }
   }
 
-  private hasRequestData(request: RequestDescriptor): boolean {
+  private hasRequestData(request: RequestDescriptor, revalidate = false): boolean {
     const cached = this.requestCoverage.get(request);
-    if (!this.store.isRebasing && cached?.revision === this.requestRevision) {
+    if (
+      !this.store.isRebasing &&
+      cached?.revision === this.requestRevision &&
+      cached.revalidate === revalidate
+    ) {
       return cached.complete;
     }
-    const complete = this.checkRequestData(request);
+    const complete = this.checkRequestData(request, revalidate);
     if (!this.store.isRebasing) {
-      this.requestCoverage.set(request, { complete, revision: this.requestRevision });
+      this.requestCoverage.set(request, { complete, revalidate, revision: this.requestRevision });
     }
     return complete;
   }
 
-  private checkRequestData(request: RequestDescriptor): boolean {
+  private checkRequestData(request: RequestDescriptor, revalidate: boolean): boolean {
     for (const item of request.items) {
       if (item.kind === 'node' || item.kind === 'nodes') {
         const fields = item.plan.paths;
         for (const raw of item.ids) {
           const entityId = toEntityId(item.type, raw);
-          const missing = this.missingForSelection(entityId, fields, item.plan);
+          const missing = this.missingForSelection(
+            entityId,
+            fields,
+            item.plan,
+            undefined,
+            revalidate,
+          );
           if (missing.size > 0) {
             return false;
           }
@@ -4173,7 +4228,7 @@ export class FateClient<
         const entityId = this.rootRequests.get(this.queryResultKey(item));
         const missing =
           hasResult && entityId
-            ? this.missingForSelection(entityId, item.plan.paths, item.plan)
+            ? this.missingForSelection(entityId, item.plan.paths, item.plan, undefined, revalidate)
             : item.plan.paths;
         if (!hasResult || (entityId && missing.size > 0)) {
           return false;
@@ -4192,7 +4247,7 @@ export class FateClient<
         continue;
       }
 
-      if (!this.hasRootListData(item)) {
+      if (!this.hasRootListData(item, revalidate)) {
         return false;
       }
     }
@@ -4507,8 +4562,12 @@ export class FateClient<
       this.assertPersistenceActive();
       const acceptList = this.acceptWrite(`list:${item.listKey}`, generation);
       if (connection === null) {
-        if (acceptList) {
+        const stale = this.store.getListState(item.listKey)?.stale;
+        if (acceptList && !(stale && getPaginationArgsInfo(item.argsPayload).hasCursorArg)) {
           this.rootValues.set(`list:${item.listKey}`, null);
+          if (stale) {
+            this.store.restoreList(item.listKey, undefined);
+          }
         }
         return;
       }
@@ -4548,6 +4607,7 @@ export class FateClient<
             item.listKey,
             this.mergeListState(previous, ids, cursors, pagination, {
               ...getPaginationMergeInfo(item.argsPayload),
+              refreshStale: true,
               replace: true,
             }),
           );
@@ -4827,9 +4887,27 @@ export class FateClient<
         'listOf' in relationDescriptor
       ) {
         const childPaths = selectionTree.get(key) ?? emptySet;
+        const listKey = (field.listKey ??= compileListKey(field.name, fieldArgs?.hash))(entityId);
+        const previousList = this.store.getListState(listKey);
+        const acceptList =
+          acceptField &&
+          (!previousList?.stale ||
+            this.store.isRecordingOptimistic ||
+            (this.writeVersions.get(`list:${listKey}`) ?? 0) <= generation);
+        const refreshStale =
+          previousList?.stale &&
+          !this.mutationWrite &&
+          !this.store.isRecordingOptimistic &&
+          this.applyingGeneration !== undefined;
         if (value === null) {
-          if (acceptField) {
+          if (
+            acceptList &&
+            !(refreshStale && getPaginationArgsInfo(fieldArgs?.value).hasCursorArg)
+          ) {
             setRecordValue(result, storageKey, null);
+            if (refreshStale) {
+              this.store.restoreList(listKey, undefined);
+            }
           }
           continue;
         }
@@ -4926,12 +5004,9 @@ export class FateClient<
             continue;
           }
 
-          if (!acceptField) {
+          if (!acceptList) {
             continue;
           }
-
-          const listKey = (field.listKey ??= compileListKey(field.name, fieldArgs?.hash))(entityId);
-          const previousList = this.store.getListState(listKey);
           const argsValue = fieldArgs?.value as AnyRecord | undefined;
 
           const mergeInfo = getPaginationMergeInfo(argsValue);
@@ -4978,6 +5053,7 @@ export class FateClient<
               ? previousList
               : this.mergeListState(previousList, ids, cursors, pagination, {
                   ...mergeInfo,
+                  refreshStale,
                   replace: mergeWindowMetadata ? false : replace,
                   resetInsertions: Boolean(this.mutationWrite && replace),
                 });

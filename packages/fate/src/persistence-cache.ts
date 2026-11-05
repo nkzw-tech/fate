@@ -240,6 +240,9 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
     }
   }
   const result = { ...latest, ids };
+  if (after.stale || before.stale !== after.stale) {
+    result.stale = after.stale;
+  }
   if (latest.cursors || after.cursors) {
     result.cursors = ids.map((id) => cursors.get(id));
   }
@@ -268,6 +271,8 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
       }
     }
     result.windows = windows;
+  } else if (before.stale && !after.stale) {
+    result.windows = undefined;
   }
   if (before.afterCursor !== after.afterCursor) {
     result.afterCursor = after.afterCursor;
@@ -401,6 +406,7 @@ export class PersistenceCache {
     }
     const lists = new Set([
       ...previousLists.keys(),
+      ...(command.invalidate ?? []),
       ...targets.map(({ list }) => list.key),
       ...(typeof command.insert === 'string' && command.insert !== 'none'
         ? this.client.getPersistenceRootLists(command.entity)

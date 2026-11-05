@@ -119,7 +119,7 @@ const result = await fate.mutations.comment.add({
 });
 ```
 
-The options are the same as for Actions, including `optimistic`, `insert`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
+The options are the same as for Actions, including `optimistic`, `insert`, `invalidate`, and `view`. The call returns a promise; handle pending state and errors in the calling code.
 
 ## Mutation Server Implementation
 
@@ -224,3 +224,20 @@ Insertions work with pagination, optimistic updates, and [offline mutations](/gu
 ### Migrating from automatic insertion
 
 Earlier versions appended mutation results automatically. Add an `insert` option to calls that relied on that behavior. The strings `'before'` and `'after'` still enable automatic list matching, but prefer an explicit target. `'none'` is now the default.
+
+## Invalidating Lists
+
+Sometimes a mutation changes which objects belong in a list. For example, archiving a post can remove it from the active posts and bring the next post into the first page. Pass the list as an invalidation target so fate fetches its membership again:
+
+```tsx
+await fate.mutations.post.archive({
+  input: { id: post.id },
+  invalidate: [activePosts],
+});
+```
+
+Use the original list or connection returned by the same client. When the mutation succeeds, fate marks that list stale and keeps its current items visible. The next cache-first request for the list fetches it again. Other filters keep their cached results. If you want to refresh the list right away, call [`useRefetch`](/guide/requests#refreshing-requests).
+
+A successful first-page refresh replaces the old page and its cached continuation pages. You can load more pages again from the new result.
+
+Try this in the regular example. Open **Pagination**, sign in, and choose **Create a post and invalidate this feed**. Then choose **Request this feed (cache-first)** to load the new post.

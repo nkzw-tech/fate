@@ -60,7 +60,7 @@ export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__va
 /** Where (or if) to insert the resulting record into relevant lists. */
 export type InsertPosition = 'after' | 'before' | 'none';
 
-type ResolvedInsertionTarget<TName extends string> =
+export type ResolvedInsertionTarget<TName extends string> =
   | ReadonlyArray<Readonly<{ __typename: TName }> | null>
   | Readonly<{
       items: ReadonlyArray<Readonly<{ node: Readonly<{ __typename: TName }> | null }>>;
@@ -135,6 +135,8 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   /** Input data for the mutation. */
   input: Omit<MutationInput<Identifier>, 'select'>;
   insert?: MutationInsertion<MutationEntity<Identifier>['__typename']>;
+  /** Mark these lists stale after the server confirms the mutation. */
+  invalidate?: ReadonlyArray<ResolvedInsertionTarget<string>>;
   /** Optional optimistic update to apply immediately. */
   optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
   /** Skip durable delivery for this call, even when persistence is configured. */
@@ -346,6 +348,7 @@ export type MutationCommand = {
   entity: string;
   input: AnyRecord;
   insert: ResolvedMutationInsertion;
+  invalidate?: ReadonlyArray<string>;
   key: string;
   optimistic?: AnyRecord;
   plan?: SelectionPlan;
@@ -358,18 +361,35 @@ export function prepareMutation(
   config: TypeConfig | undefined,
   durable = false,
 ) {
-  const { args, delete: deleteRecord, entity, input, insert, key, optimistic, plan } = command;
+  const {
+    args,
+    delete: deleteRecord,
+    entity,
+    input,
+    insert,
+    invalidate,
+    key,
+    optimistic,
+    plan,
+  } = command;
   const position = typeof insert === 'string' ? insert : 'none';
   if (!config) {
     if (deleteRecord || optimistic) {
       throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
     }
+    const release = client.retainMutationLists(insert, invalidate);
     return {
-      commit: (_result: unknown) => {},
+      commit: (_result: unknown) => {
+        try {
+          client.invalidateMutationLists(invalidate);
+        } finally {
+          release();
+        }
+      },
       entityId: null,
       execute: (identity?: MutationIdentity) =>
         client.executeMutation(key, input, plan?.paths ?? new Set(), { args, identity }),
-      rollback: () => {},
+      rollback: release,
     };
   }
   const id = maybeGetId(config.getId, input);
@@ -394,7 +414,7 @@ export function prepareMutation(
   if (deleteRecord && id == null) {
     throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
   }
-  const release = client.retainMutationLists(insert);
+  const release = client.retainMutationLists(insert, invalidate);
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
   try {
     settle = client.store.optimisticUpdate(() => {
@@ -450,6 +470,7 @@ export function prepareMutation(
           if (deleteRecord && id != null) {
             client.deleteRecord(entity, id);
           }
+          client.invalidateMutationLists(invalidate);
         });
       } finally {
         release();
@@ -481,6 +502,7 @@ export function wrapMutation<
     delete: deleteRecord,
     input,
     insert = 'none',
+    invalidate,
     optimistic,
     persist,
     select,
@@ -492,6 +514,7 @@ export function wrapMutation<
       entity: identifier.entity,
       input,
       insert: client.resolveMutationInsertion(identifier.entity, insert),
+      ...(invalidate && { invalidate: client.resolveMutationInvalidation(invalidate) }),
       key: identifier.key,
       optimistic: optimistic as AnyRecord | undefined,
       plan: view
@@ -502,7 +525,9 @@ export function wrapMutation<
     };
     // Durable admission can await restoration and disk writes before preparation
     // acquires its own pins. Keep the caller's targets alive throughout that gap.
-    const release = client.persistence ? client.retainMutationLists(command.insert) : undefined;
+    const release = client.persistence
+      ? client.retainMutationLists(command.insert, command.invalidate)
+      : undefined;
     try {
       if (client.persistence && persist !== false) {
         try {

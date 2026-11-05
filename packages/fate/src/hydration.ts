@@ -414,6 +414,7 @@ const listKeys = new Set([
   'pagination',
   'pendingAfterIds',
   'pendingBeforeIds',
+  'stale',
   'unloaded',
   'windows',
 ]);
@@ -465,6 +466,7 @@ const isList = (value: unknown): value is List => {
     isPagination(value.pagination) &&
     (value.pendingAfterIds === undefined || isUniqueStringArray(value.pendingAfterIds)) &&
     (value.pendingBeforeIds === undefined || isUniqueStringArray(value.pendingBeforeIds)) &&
+    (value.stale === undefined || value.stale === true) &&
     (value.unloaded === undefined || value.unloaded === true) &&
     (value.windows === undefined ||
       (isRecord(value.windows) &&

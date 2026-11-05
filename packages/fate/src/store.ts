@@ -43,6 +43,7 @@ export type List = Readonly<{
   pagination?: Pagination;
   pendingAfterIds?: ReadonlyArray<EntityId>;
   pendingBeforeIds?: ReadonlyArray<EntityId>;
+  stale?: true;
   /** Membership changes held before any server page has been fetched. */
   unloaded?: true;
   windows?: Readonly<Record<string, ListWindow>>;
@@ -1091,6 +1092,7 @@ export class Store {
           pagination: list.pagination,
           pendingAfterIds: pendingAfterIds?.filter((id) => !canonicalIds.has(id)),
           pendingBeforeIds: pendingBeforeIds?.filter((id) => !canonicalIds.has(id)),
+          stale: list.stale,
           unloaded: list.unloaded,
           windows: list.windows,
         });
@@ -1237,6 +1239,7 @@ export class Store {
           pagination: list.pagination,
           pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
           pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
+          stale: list.stale,
           unloaded: list.unloaded,
           windows: list.windows,
         });

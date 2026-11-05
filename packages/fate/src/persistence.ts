@@ -102,7 +102,10 @@ const decodeCommand = (value: Encoded): MutationCommand => {
     !command ||
     typeof command.key !== 'string' ||
     typeof command.entity !== 'string' ||
-    !isResolvedMutationInsertion(command.insert)
+    !isResolvedMutationInsertion(command.insert) ||
+    (command.invalidate !== undefined &&
+      (!Array.isArray(command.invalidate) ||
+        !command.invalidate.every((key) => typeof key === 'string')))
   ) {
     throw new Error('fate: Invalid persisted mutation.');
   }
