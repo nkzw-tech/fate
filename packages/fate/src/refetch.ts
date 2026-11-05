@@ -1,4 +1,4 @@
-import { schemaField } from './alias.ts';
+import { schemaField, typeCondition } from './alias.ts';
 import { cloneArgs } from './args.ts';
 import { isRecord } from './record.ts';
 import type { AnyRecord, TypeConfig } from './types.ts';
@@ -160,7 +160,7 @@ export const expandRefetchSelection = (
     let current = type;
     let prefix = '';
     for (const segment of path.split('.')) {
-      const relation = types.get(current)?.fields?.[schemaField(segment)];
+      const relation = types.get(typeCondition(segment) ?? current)?.fields?.[schemaField(segment)];
       if (!relation || relation === 'scalar') {
         break;
       }

@@ -180,7 +180,11 @@ export function useView<V extends View<any, any>>(
 
       return readViewSnapshot(
         client,
-        client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
+        client.ref<ViewEntity<V>>(
+          resolvedRef.__typename,
+          resolvedRef.id,
+          resolveView(view, resolvedRef),
+        ),
         deferredSnapshot.value.coverage,
       );
     }
@@ -196,7 +200,11 @@ export function useView<V extends View<any, any>>(
 
       return readViewSnapshot(
         client,
-        client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef)),
+        client.ref<ViewEntity<V>>(
+          resolvedRef.__typename,
+          resolvedRef.id,
+          resolveView(view, resolvedRef),
+        ),
         deferredValue.coverage,
       );
     });

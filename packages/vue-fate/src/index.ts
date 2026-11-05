@@ -50,6 +50,7 @@ export {
   type PersistenceSession,
   type PersistenceSnapshot,
   type ViewRef,
+  forType,
   view,
   when,
   type ConditionalSelection,

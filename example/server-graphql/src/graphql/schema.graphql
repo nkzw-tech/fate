@@ -172,6 +172,7 @@ type Query {
   node(id: ID!): Node
   nodes(ids: [ID!]!): [Node]!
   posts(after: String, before: String, first: Int, last: Int): QueryPostsConnection
+  search(after: String, before: String, first: Int, last: Int, query: String!): QuerySearchConnection!
   viewer: User
 }
 
@@ -214,6 +215,18 @@ type QueryPostsConnectionEdge {
   cursor: String!
   node: Post
 }
+
+type QuerySearchConnection {
+  edges: [QuerySearchConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type QuerySearchConnectionEdge {
+  cursor: String!
+  node: SearchResult
+}
+
+union SearchResult = Post | User
 
 type Subscription {
   fateLiveConnection(args: JSON, procedure: String!, select: [String!]!, selectionArgs: JSON, type: String!): FateLiveConnectionEvent

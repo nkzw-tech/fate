@@ -55,7 +55,11 @@ export function useLiveView<V extends View<any, any>>(
       ).data
     : (ref as ViewRef<ViewEntityName<V>> | null | undefined);
   const liveRef = resolvedRef
-    ? client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef))
+    ? client.ref<ViewEntity<V>>(
+        resolvedRef.__typename,
+        resolvedRef.id,
+        resolveView(view, resolvedRef),
+      )
     : null;
 
   const subscribeLiveView = useEffectEvent(() => {

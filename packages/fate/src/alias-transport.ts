@@ -1,4 +1,4 @@
-import { schemaField } from './alias.ts';
+import { schemaField, typeCondition } from './alias.ts';
 import { isArgumentRecord } from './args.ts';
 import { isRecord } from './record.ts';
 import type { Transport } from './transport.ts';
@@ -11,6 +11,9 @@ const groupsFor = (select: Iterable<string>): Array<Group> => {
   const groups: Array<Group> = [];
   for (const path of select) {
     const parts = path.split('.');
+    if (parts.some(typeCondition)) {
+      throw new Error('fate: forType requires a GraphQL query or mutation selection.');
+    }
     const sources = parts.map(
       (_, index) =>
         [

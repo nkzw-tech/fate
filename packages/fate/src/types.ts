@@ -1,4 +1,5 @@
 import type { AliasedSelection, AliasedView } from './alias.ts';
+import type { TypeBranchKey, TypeBranchSelection } from './forType.ts';
 import type { SelectedGraphQLResult, GraphQLSelectedResult } from './graphql-types.ts';
 import { FateMutations } from './mutation.ts';
 import type { RefetchConfig } from './refetch.ts';
@@ -110,11 +111,13 @@ export type ViewResult = AnyRecord & {
 };
 
 /** Reference to a normalized entity instance that can be resolved against one or more view tags. */
-export type ViewRef<TName extends string> = Readonly<{
-  __typename: TName;
-  id: string | number;
-  [ViewsTag]: Set<string>;
-}>;
+export type ViewRef<TName extends string> = TName extends string
+  ? Readonly<{
+      __typename: TName;
+      id: string | number;
+      [ViewsTag]: Set<string>;
+    }>
+  : never;
 
 /** Describes how a field relates to another entity for normalization. */
 export type RelationDescriptor =
@@ -269,19 +272,23 @@ type InvalidSelectionObject<T, S> = S extends object
       : 'selection'
   : 'selection';
 type InvalidSelectionEntry<T, K, S> =
-  S extends ConditionalSelection<boolean, infer Value>
-    ? InvalidSelectionEntry<T, K, Value>
-    : S extends AliasedView<infer V>
-      ? T extends ViewEntity<V>
-        ? never
-        : K
-      : S extends AliasedSelection<infer Field, infer Value>
-        ? Field extends keyof T
-          ? InvalidSelectedValue<T[Field], Value>
+  S extends TypeBranchSelection<infer Type>
+    ? Type extends EntityName<T>
+      ? never
+      : K
+    : S extends ConditionalSelection<boolean, infer Value>
+      ? InvalidSelectionEntry<T, K, Value>
+      : S extends AliasedView<infer V>
+        ? T extends ViewEntity<V>
+          ? never
           : K
-        : K extends keyof T
-          ? InvalidSelectedValue<T[K], S>
-          : K;
+        : S extends AliasedSelection<infer Field, infer Value>
+          ? Field extends keyof T
+            ? InvalidSelectedValue<T[Field], Value>
+            : K
+          : K extends keyof T
+            ? InvalidSelectedValue<T[K], S>
+            : K;
 
 type InvalidSelection<T, S> = 0 extends 1 & S
   ? never
@@ -403,12 +410,19 @@ type MaskNonNullish<T, S> =
             : ViewRef<EntityName<NonNullable<T>>>
           : {
               [
-                K in keyof S as K extends Exclude<SelectionMetadata, keyof T> | 'args' ? never : K
+                K in keyof S as K extends
+                  | Exclude<SelectionMetadata, keyof T>
+                  | TypeBranchKey
+                  | 'args'
+                  ? never
+                  : K
               ]: MaskSelectionEntry<T, K, S[K]>;
             } & (T extends Entity
               ? typeof __FateEntityBrand extends keyof S
                 ? ViewRef<T['__typename']>
-                : Pick<T, '__typename'>
+                : Extract<keyof S, TypeBranchKey> extends never
+                  ? Pick<T, '__typename'>
+                  : ViewRef<T['__typename']>
               : Record<never, never>)
         : T;
 
@@ -492,6 +506,14 @@ type NullableRootResult<Result> = unknown extends Result
     ? null
     : never;
 
+type RootEntityName<Result> = Result extends { items: ReadonlyArray<{ node: infer Node }> }
+  ? EntityName<Node>
+  : EntityName<Result>;
+
+type RootResultType<Type extends TypeName, Result> = [RootEntityName<Result>] extends [never]
+  ? Type
+  : RootEntityName<Result>;
+
 type ListResult<Item extends AnyRequestItem, Type extends TypeName, Result> = Item extends ValueItem
   ? Result extends GraphQLSelectedResult<infer Output>
     ? SelectedGraphQLResult<Output, Item['value']>
@@ -501,9 +523,7 @@ type ListResult<Item extends AnyRequestItem, Type extends TypeName, Result> = It
     : Item extends AnyNodesItem
       ? Array<ViewRef<Type>>
       : Item extends AnyQueryItem
-        ? Result extends null
-          ? ViewRef<Type> | null
-          : ViewRef<Type>
+        ? ViewRef<RootResultType<Type, Result>> | NullableRootResult<Result>
         : Item extends AnyListItem
           ?
               | (Item['list'] extends { items?: { node?: View<any, any> } }
@@ -514,7 +534,7 @@ type ListResult<Item extends AnyRequestItem, Type extends TypeName, Result> = It
                       }>;
                       pagination?: Pagination;
                     }>
-                  : Array<ViewRef<Type>>)
+                  : Array<ViewRef<RootResultType<Type, NonNullable<Result>>>>)
               | NullableRootResult<Result>
           : never;
 

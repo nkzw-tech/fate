@@ -1,4 +1,5 @@
 import { cloneArgs, hashArgs } from './args.ts';
+import { isTypeBranch, typeBranchPrefix } from './forType.ts';
 import type {
   AnyRecord,
   Entity,
@@ -19,6 +20,7 @@ type MutableSelection<T extends Entity, S extends Selection<T>> = {
 
 const ParameterizedViewTag = Symbol('fate.parameterized-view');
 const boundViews = new WeakMap<ViewPayload<any, any>, View<any, any>>();
+const branchViewNames = new WeakMap<ReadonlySet<string>, Map<string, ReadonlySet<string>>>();
 const namePayloads = new WeakMap<ReadonlySet<string>, Map<string, ViewPayload<any, any>>>();
 
 export type ParameterizedView<T extends Entity, P extends object, S extends Selection<T>> = View<
@@ -89,13 +91,64 @@ export const getViewNames = <T extends Entity, S extends Selection<T>, V extends
   return result;
 };
 
-/**
- * Extracts view tags from a nested selection object.
- */
-export const getSelectionViewNames = <T extends Entity, S extends Selection<T>>(
-  selection: S,
-): Set<ViewTag> => {
-  return getViewNames(selection as unknown as View<T, S>);
+export const collectSelectionViewNames = (names: Set<string>, selection: AnyRecord) => {
+  for (const [name, value] of Object.entries(selection)) {
+    if (isViewTag(name)) {
+      addViewName(names, name, value as ViewPayload<any, any>);
+    } else if (isTypeBranch(value)) {
+      if (!branchViewNames.has(names)) {
+        branchViewNames.set(names, new Map());
+      }
+      const prefix = `${typeBranchPrefix}${value.type}:`;
+      for (const [tag, payload] of Object.entries(value.view)) {
+        if (!isViewTag(tag)) {
+          continue;
+        }
+        addViewName(names, `${prefix}${tag}`, payload);
+        for (const [child, childPayload] of Object.entries(payload.select)) {
+          if (isViewTag(child)) {
+            addViewName(names, `${prefix}${child}`, childPayload as ViewPayload<any, any>);
+          }
+        }
+      }
+    }
+  }
+};
+
+export const restoreViewNames = (names: Array<string>): ReadonlySet<string> => {
+  const result = new Set(names);
+  if (names.some((name) => name.startsWith(typeBranchPrefix))) {
+    branchViewNames.set(result, new Map());
+  }
+  return result;
+};
+
+export const viewNamesForType = (names: ReadonlySet<string>, type: string): ReadonlySet<string> => {
+  const byType = branchViewNames.get(names);
+  if (!byType) {
+    return names;
+  }
+  const existing = byType.get(type);
+  if (existing) {
+    return existing;
+  }
+  const prefix = `${typeBranchPrefix}${type}:`;
+  const result = new Set<string>();
+  const payloads = namePayloads.get(names);
+  for (const name of names) {
+    if (name.startsWith(typeBranchPrefix) && !name.startsWith(prefix)) {
+      continue;
+    }
+    const tag = name.startsWith(prefix) ? name.slice(prefix.length) : name;
+    const payload = payloads?.get(name);
+    if (payload) {
+      addViewName(result, tag, payload);
+    } else {
+      result.add(tag);
+    }
+  }
+  byType.set(type, result);
+  return result;
 };
 
 let id = 0;

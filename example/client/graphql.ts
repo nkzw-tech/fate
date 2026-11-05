@@ -9,7 +9,7 @@ export const fateGraphQL = {
     'post.unlike': { entity: 'Post', field: 'postUnlike' },
     'user.update': { entity: 'User', field: 'userUpdate' },
   },
-  roots: { categories: {}, commentSearch: {}, events: {}, posts: {}, viewer: {} },
+  roots: { categories: {}, commentSearch: {}, events: {}, posts: {}, search: {}, viewer: {} },
   scalars: { DateTime: 'string' },
   schema,
 } as const;

@@ -1,5 +1,5 @@
 import { withAliasSupport } from './alias-transport.ts';
-import { responseField, schemaField } from './alias.ts';
+import { responseField, schemaField, typeCondition } from './alias.ts';
 import { GraphQLRequestError, type GraphQLErrorPayload } from './graphql-error.ts';
 import { readGraphQLIncremental } from './graphqlIncremental.ts';
 import {
@@ -451,6 +451,7 @@ const buildRecordSelection = ({
   argumentsForField,
   embedded,
   path,
+  schema,
   select,
   type,
   types,
@@ -459,6 +460,7 @@ const buildRecordSelection = ({
   argumentsForField: ArgumentsForField;
   embedded?: boolean;
   path: string;
+  schema?: GraphQLArgumentSchema;
   select: Iterable<string>;
   type: string;
   types: ReadonlyMap<string, TypeConfig>;
@@ -472,12 +474,28 @@ const buildRecordSelection = ({
     embedded = false,
   ): string => {
     const config = getTypeConfig(types, currentType);
+    const possibleTypes = config.possibleTypes ?? [];
+    const needsConcreteIds =
+      !embedded &&
+      possibleTypes.length > 0 &&
+      schema?.outputs !== undefined &&
+      !schema.outputs[currentType]?.id;
     const fields = new Set([
       ...currentTree.fields.keys(),
-      ...(embedded ? [] : ['id', '__typename']),
+      ...(embedded ? [] : needsConcreteIds ? ['__typename'] : ['id', '__typename']),
       ...getRefetchFields(config.refetch),
     ]);
     const lines: Array<string> = [];
+    let fragments: Map<string, Array<string>> | undefined;
+    const fragment = (type: string) => {
+      fragments ??= new Map();
+      let lines = fragments.get(type);
+      if (!lines) {
+        lines = [];
+        fragments.set(type, lines);
+      }
+      return lines;
+    };
 
     for (const field of [...fields].sort()) {
       if (field === '__typename') {
@@ -487,11 +505,25 @@ const buildRecordSelection = ({
 
       const childTree = currentTree.fields.get(field) ?? createSelectionTree();
       const sourceField = schemaField(field);
-      const descriptor = config.fields?.[sourceField];
+      const condition = typeCondition(field);
+      if (condition && condition !== currentType && !possibleTypes.includes(condition)) {
+        continue;
+      }
+      if (needsConcreteIds && field === 'id') {
+        continue;
+      }
+      const fieldType = condition ?? currentType;
+      const selections = condition && condition !== currentType ? fragment(condition) : lines;
+      const descriptor = (condition && condition !== currentType ? types.get(condition) : config)
+        ?.fields?.[sourceField];
       const fieldPath = currentPath ? `${currentPath}.${field}` : field;
       const fieldName = field.includes(':')
         ? `${assertIdentifier(responseField(field), 'alias')}: ${assertIdentifier(sourceField, 'field')}`
         : assertIdentifier(field, 'field');
+      if (sourceField === '__typename') {
+        selections.push(fieldName);
+        continue;
+      }
       const resultType =
         descriptor && typeof descriptor === 'object'
           ? 'type' in descriptor
@@ -501,21 +533,21 @@ const buildRecordSelection = ({
               : descriptor.listOf
           : undefined;
       const fieldArguments = argumentsForField(
-        currentType,
+        fieldType,
         sourceField,
         getArgsAtPath(args, fieldPath),
         resultType,
       );
 
       if (descriptor && typeof descriptor === 'object' && 'type' in descriptor) {
-        lines.push(
+        selections.push(
           `${fieldName}${fieldArguments} { ${walk(descriptor.type, childTree, fieldPath)} }`,
         );
         continue;
       }
 
       if (descriptor && typeof descriptor === 'object' && 'embedded' in descriptor) {
-        lines.push(
+        selections.push(
           `${fieldName}${fieldArguments} { ${walk(descriptor.embedded, childTree, fieldPath, true)} }`,
         );
         continue;
@@ -523,12 +555,12 @@ const buildRecordSelection = ({
 
       if (descriptor && typeof descriptor === 'object' && 'listOf' in descriptor) {
         if (descriptor.array) {
-          lines.push(
+          selections.push(
             `${fieldName}${fieldArguments} { ${walk(descriptor.listOf, childTree, fieldPath)} }`,
           );
           continue;
         }
-        lines.push(
+        selections.push(
           `${fieldName}${fieldArguments} { edges { cursor node { ${walk(
             descriptor.listOf,
             childTree,
@@ -538,18 +570,21 @@ const buildRecordSelection = ({
         continue;
       }
 
-      lines.push(`${fieldName}${fieldArguments}`);
+      selections.push(`${fieldName}${fieldArguments}`);
     }
 
-    for (const concrete of config.possibleTypes ?? []) {
-      const fields = [...getRefetchFields(types.get(concrete)?.refetch)].filter(
-        (field) => !currentTree.fields.has(field),
-      );
-      if (fields.length) {
-        lines.push(
-          `... on ${assertIdentifier(concrete, 'type')} { ${fields.map((field) => `${field}${argumentsForField(concrete, field)}`).join(' ')} }`,
-        );
+    for (const concrete of possibleTypes) {
+      if (needsConcreteIds) {
+        fragment(concrete).push('id');
       }
+      for (const field of getRefetchFields(types.get(concrete)?.refetch)) {
+        if (!currentTree.fields.has(field)) {
+          fragment(concrete).push(`${field}${argumentsForField(concrete, field)}`);
+        }
+      }
+    }
+    for (const [concrete, fields] of fragments ?? []) {
+      lines.push(`... on ${assertIdentifier(concrete, 'type')} { ${fields.join(' ')} }`);
     }
     return lines.join(' ');
   };
@@ -593,7 +628,7 @@ class GraphQLInput implements NormalizationInput {
 
   get(record: AnyRecord, key: string): unknown {
     const value = record[this.responseKeys.get(key) ?? key];
-    if (key !== 'id' && !key.endsWith(':id')) {
+    if (key !== 'id' && (!key.includes(':') || schemaField(key) !== 'id')) {
       return value;
     }
     const type = typeof record.__typename === 'string' ? record.__typename : this.type;
@@ -856,8 +891,9 @@ export function createGraphQLTransport<
                 if (Object.hasOwn(definitions, key) || !isRecord(value)) {
                   return true;
                 }
-                const nestedArguments = schema.fields[resultType]?.[schemaField(key)];
-                const relation = types.get(resultType)?.fields?.[schemaField(key)];
+                const childType = typeCondition(key) ?? resultType;
+                const nestedArguments = schema.fields[childType]?.[schemaField(key)];
+                const relation = types.get(childType)?.fields?.[schemaField(key)];
                 return !(
                   nestedArguments &&
                   (Object.keys(nestedArguments).length > 0 ||
@@ -1066,6 +1102,7 @@ export function createGraphQLTransport<
             args,
             argumentsForField,
             path: '',
+            schema,
             select: paths,
             type,
             types,
@@ -1093,6 +1130,7 @@ export function createGraphQLTransport<
         args,
         argumentsForField,
         path: '',
+        schema,
         select: paths,
         type,
         types,
@@ -1120,6 +1158,7 @@ export function createGraphQLTransport<
         args,
         argumentsForField,
         path: '',
+        schema,
         select,
         type: root.type,
         types,
@@ -1178,6 +1217,7 @@ export function createGraphQLTransport<
               argumentsForField,
               embedded: root.embedded,
               path: '',
+              schema,
               select,
               type: root.type,
               types,
@@ -1227,6 +1267,7 @@ export function createGraphQLTransport<
               argumentsForField,
               embedded: mutation.entity === '__value__',
               path: '',
+              schema,
               select,
               type: mutation.type ?? mutation.entity,
               types,

@@ -1,3 +1,4 @@
+import { pathHasTypeCondition } from './alias.ts';
 import { decodeHydrationValue, encodeHydrationValue } from './hydration.ts';
 import { isRecord } from './record.ts';
 import type {
@@ -10,6 +11,7 @@ import type {
 } from './request-descriptor.ts';
 import type { SelectionPlan } from './selection.ts';
 import type { AnyRecord, ConnectionLivePolicy } from './types.ts';
+import { restoreViewNames } from './view.ts';
 
 type Encoded = ReturnType<typeof encodeHydrationValue>;
 type SerializedSelectionPlan = {
@@ -110,6 +112,7 @@ export const deserializePlan = (value: SerializedSelectionPlan): SelectionPlan =
     ]),
   ),
   live: new Map(value.live),
+  ...(value.paths.some(pathHasTypeCondition) ? { hasTypeBranches: true as const } : null),
   paths: new Set(value.paths),
 });
 
@@ -131,13 +134,13 @@ const decodeItem = (item: SerializedRequestItem): RequestItemDescriptor =>
   item.kind === 'list'
     ? {
         ...item,
-        nodeRefViewNames: new Set(item.nodeRefViewNames),
+        nodeRefViewNames: restoreViewNames(item.nodeRefViewNames),
         plan: deserializePlan(item.plan),
       }
     : {
         ...item,
         plan: deserializePlan(item.plan),
-        refViewNames: new Set(item.refViewNames),
+        refViewNames: restoreViewNames(item.refViewNames),
       };
 
 export const decodeRequests = (value: Encoded): Array<RequestDescriptor> => {

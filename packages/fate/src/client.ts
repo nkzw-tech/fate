@@ -1,5 +1,11 @@
 import { withAliasSupport } from './alias-transport.ts';
-import { aliasedField, isAliasedSelection, isAliasedView, schemaField } from './alias.ts';
+import {
+  aliasedField,
+  fieldAppliesTo,
+  isAliasedSelection,
+  isAliasedView,
+  schemaField,
+} from './alias.ts';
 import {
   combineArgsPayload,
   filterConnectionArgs,
@@ -16,6 +22,7 @@ import {
   isDeferredSelection,
 } from './defer.ts';
 import { argumentFieldKey, getFieldKey, getStoragePath } from './field-key.ts';
+import { isTypeBranch } from './forType.ts';
 import {
   decodeClientHydrationState,
   encodeHydrationValue,
@@ -131,7 +138,13 @@ import {
   MutationDefinition,
   RootDefinition,
 } from './types.ts';
-import { addViewName, getViewNames, getViewPayloads, resolveView } from './view.ts';
+import {
+  addViewName,
+  viewNamesForType,
+  getViewNames,
+  getViewPayloads,
+  resolveView,
+} from './view.ts';
 import { resolveConditionalSelection } from './when.ts';
 
 /**
@@ -1736,7 +1749,8 @@ export class FateClient<
     viewNames: ReadonlySet<string>,
   ): ViewRef<TName> {
     const entityId = toEntityId(type, id);
-    const key = `${typeof id}:${String(id)}:${[...viewNames].sort().join(',')}`;
+    const names = viewNamesForType(viewNames, type);
+    const key = `${typeof id}:${String(id)}:${[...names].sort().join(',')}`;
     let refs = this.stableRefs.get(entityId);
     if (!refs) {
       refs = new Map();
@@ -1748,7 +1762,7 @@ export class FateClient<
       return existing as ViewRef<TName>;
     }
 
-    const ref = createRefWithViewNames(type, id, viewNames);
+    const ref = createRefWithViewNames(type, id, names);
     const resolution = this.optimisticEntityResolutions.get(entityId)?.deref();
     if (resolution) {
       this.optimisticRefResolutions.set(ref, resolution);
@@ -1860,7 +1874,11 @@ export class FateClient<
       const { id: resolvedId, type: resolvedType } = parseEntityId(resolvedEntityId);
       return this.readViewInternal<T, S, V>(
         view,
-        this.stableRefWithViewNames(resolvedType, resolvedId, getViewNames(view)),
+        this.stableRefWithViewNames(
+          resolvedType as T['__typename'],
+          resolvedId,
+          getViewNames(view),
+        ),
         renderScope,
       );
     }
@@ -4079,10 +4097,15 @@ export class FateClient<
     dependencies?: Set<string>,
     revalidate = false,
   ): Set<string> {
-    const selection = expandRefetchSelection(this.types, parseEntityId(entityId).type, paths);
+    const { type } = parseEntityId(entityId);
+    const selection = expandRefetchSelection(this.types, type, paths);
     dependencies?.add(`entity:${entityId}`);
     if (!this.store.read(entityId)) {
-      return new Set(selection);
+      return new Set(
+        plan.hasTypeBranches
+          ? [...selection].filter((path) => fieldAppliesTo(path.split('.')[0], type))
+          : selection,
+      );
     }
     const missing = new Set<string>();
     const covered = (id: EntityId, parts: ReadonlyArray<string>, prefix: string): boolean => {
@@ -4092,6 +4115,10 @@ export class FateClient<
         return false;
       }
       const field = parts[0];
+      const { type } = parseEntityId(id);
+      if (plan.hasTypeBranches && !fieldAppliesTo(field, type)) {
+        return true;
+      }
       const path = prefix ? `${prefix}.${field}` : field;
       const storageKey = getFieldKey(path, plan);
       if (
@@ -4102,7 +4129,7 @@ export class FateClient<
         return false;
       }
       const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
-      const relation = this.types.get(parseEntityId(id).type)?.fields?.[schemaField(field)];
+      const relation = this.types.get(type)?.fields?.[schemaField(field)];
       if (
         relation &&
         typeof relation === 'object' &&
@@ -5440,15 +5467,20 @@ export class FateClient<
     const selectedPaths: Array<string> = [];
     let storagePaths = normalized.storagePaths.get(prefix);
     if (!storagePaths) {
-      storagePaths = [...expandedSelection].map((path) => {
+      storagePaths = [];
+      for (const path of expandedSelection) {
+        const recordKey = path.split('.')[0];
+        if (!fieldAppliesTo(recordKey, type)) {
+          continue;
+        }
         const storagePath = getStoragePath(path, plan, prefix);
-        return {
+        storagePaths.push({
           path,
-          recordKey: path.split('.')[0],
+          recordKey,
           storageKey: storagePath.split('.')[0],
           storagePath,
-        };
-      });
+        });
+      }
       normalized.storagePaths.set(prefix, storagePaths);
     }
     for (const { path, recordKey, storageKey, storagePath } of storagePaths) {
@@ -5599,6 +5631,17 @@ export class FateClient<
     const coverageById = new Map<EntityId, Set<string>>();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
+    const getViewTags = (target: ViewResult, parentId: EntityId) => {
+      if (!target[ViewsTag]) {
+        assignViewTag(target, new Set());
+        const { id, type } = parseEntityId(parentId);
+        const ownerRef =
+          parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
+        this.optimisticRefOwners.set(target, this.optimisticRefOwners.get(ownerRef) ?? ownerRef);
+      }
+      return target[ViewsTag]!;
+    };
+
     const walk = (
       viewPayload: object,
       record: AnyRecord,
@@ -5610,6 +5653,19 @@ export class FateClient<
         const rawSelection = resolveConditionalSelection(conditionalSelection);
         if (rawSelection === undefined) {
           setRecordValue(target, key, undefined);
+          continue;
+        }
+        if (isTypeBranch(rawSelection)) {
+          const { id, type } = parseEntityId(parentId);
+          target.id = parentId === entityId ? ref.id : id;
+          const names = getViewTags(target, parentId);
+          if (rawSelection.type === type) {
+            for (const [name, payload] of Object.entries(rawSelection.view)) {
+              if (isViewTag(name)) {
+                addViewName(names, name, payload);
+              }
+            }
+          }
           continue;
         }
         if (isAliasedView(rawSelection)) {
@@ -5633,18 +5689,7 @@ export class FateClient<
         const field = isAliasedSelection(rawSelection) ? rawSelection.field : key;
         const pathField = isAliasedSelection(rawSelection) ? aliasedField(key, field) : key;
         if (isViewTag(key)) {
-          if (!target[ViewsTag]) {
-            assignViewTag(target, new Set());
-            const { id, type } = parseEntityId(parentId);
-            const ownerRef =
-              parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
-            this.optimisticRefOwners.set(
-              target,
-              this.optimisticRefOwners.get(ownerRef) ?? ownerRef,
-            );
-          }
-
-          addViewName(target[ViewsTag]!, key, rawSelection as ViewPayload<any, any>);
+          addViewName(getViewTags(target, parentId), key, rawSelection as ViewPayload<any, any>);
           continue;
         }
 

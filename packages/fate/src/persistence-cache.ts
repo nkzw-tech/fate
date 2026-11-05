@@ -1,4 +1,4 @@
-import { schemaField } from './alias.ts';
+import { fieldAppliesTo, schemaField } from './alias.ts';
 import { filterConnectionArgs } from './args.ts';
 import type { FateClient } from './client.ts';
 import { getFieldKey, getStoragePath } from './field-key.ts';
@@ -952,10 +952,14 @@ export class PersistenceCache {
     }
     for (let index = 0; index < queue.length; index++) {
       const { id, plan, prefix } = queue[index];
-      const locator = getRefetchFields(this.client.getTypeConfig(parseEntityId(id).type).refetch);
-      const paths = locator.size
+      const { type } = parseEntityId(id);
+      const locator = getRefetchFields(this.client.getTypeConfig(type).refetch);
+      const selected = locator.size
         ? [...new Set([...queue[index].paths, ...locator])]
         : queue[index].paths;
+      const paths = plan.hasTypeBranches
+        ? selected.filter((path) => fieldAppliesTo(path.split('.')[0], type))
+        : selected;
       const key = recordKey(id);
       const seen = nodes.get(key);
       const contexts = visited.get(plan) ?? new Map<string, Set<string>>();

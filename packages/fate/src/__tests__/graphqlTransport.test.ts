@@ -1,12 +1,14 @@
 import { buildSchema, graphql, parse, validate } from 'graphql';
-import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import { beforeEach, expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
+import { forType } from '../forType.ts';
 import { graphQLOutputRelations } from '../graphqlSchema.ts';
 import { createGraphQLTransport, graphqlValueRoot } from '../graphqlTransport.ts';
 import { mutation, valueMutation } from '../mutation.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
+import type { ViewRef, ViewSelection } from '../types.ts';
 import { view } from '../view.ts';
 
 const graphQLSSE = vi.hoisted(() => ({
@@ -445,16 +447,164 @@ test('normalizes interface relations and arrays under their concrete GraphQL typ
   expect(client.store.read('User:2')).toMatchObject({ name: 'Bob' });
   expect(client.store.read('Node:2')).toBeUndefined();
   expect(validate(schema, parse(getRequestBody(fetch).query))).toEqual([]);
-  await client.request({
-    node: {
-      view: view<{
-        __typename: 'User';
-        id: string;
-        name: string;
-      }>()({ id: true, name: true }),
-    },
+  const FriendView = view<{
+    __typename: 'User';
+    friend: { __typename: 'User'; id: string; name: string } | null;
+    id: string;
+  }>()({ friend: { name: true } });
+  const NodeView = view<{ __typename: 'User'; id: string; name: string }>()({
+    ...forType('User', FriendView),
+    name: true,
   });
+  await client.request({ node: { view: NodeView } });
+  const nodeQuery = JSON.parse(String(fetch.mock.lastCall?.[1]?.body)).query;
+  expect(validate(schema, parse(nodeQuery))).toEqual([]);
+  expect(nodeQuery).toContain('... on User');
   expect(client.store.read('Node:2')).toBeUndefined();
+});
+
+test('requests mixed GraphQL connection results with masked concrete views', async () => {
+  const schema = buildSchema(`
+    type User { id: ID!, name: String!, label(prefix: String!): String! }
+    type Post { id: ID!, title: String!, label(prefix: String!): String! }
+    type Tag { id: ID! }
+    union Result = User | Post | Tag
+    type ResultEdge { cursor: String!, node: Result! }
+    type PageInfo { endCursor: String, hasNextPage: Boolean!, hasPreviousPage: Boolean!, startCursor: String }
+    type ResultConnection { edges: [ResultEdge!]!, pageInfo: PageInfo! }
+    type Feed { id: ID!, results: [Result!]! }
+    type Query { feed: Feed!, search: ResultConnection! }
+  `);
+  const metadata = createGraphQLArgumentSchema(schema);
+  const types = graphQLOutputRelations(metadata);
+  const entries = [
+    {
+      __typename: 'User',
+      id: '1',
+      label: ({ prefix }: { prefix: string }) => prefix + 'Ada',
+      name: 'Ada',
+    },
+    {
+      __typename: 'Post',
+      id: '1',
+      label: ({ prefix }: { prefix: string }) => prefix + 'Hello',
+      title: 'Hello',
+    },
+    { __typename: 'Tag', id: '1' },
+  ];
+  const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    const { query, variables } = JSON.parse(String(init?.body));
+    return jsonResponse(
+      await graphql({
+        rootValue: {
+          feed: { id: '1', results: entries },
+          search: {
+            edges: entries.map((node, index) => ({ cursor: String(index), node })),
+            pageInfo: { hasNextPage: false, hasPreviousPage: false },
+          },
+        },
+        schema,
+        source: query,
+        variableValues: variables,
+      }),
+    );
+  });
+  type User = { __typename: 'User'; id: string; label: string; name: string };
+  type Post = { __typename: 'Post'; id: string; label: string; title: string };
+  type Tag = { __typename: 'Tag'; id: string };
+  type Result = User | Post | Tag;
+  type Feed = { __typename: 'Feed'; id: string; results: Array<Result> };
+  const roots = {
+    feed: clientRoot<Feed, 'Feed'>('Feed'),
+    search: clientRoot<{ items: Array<{ node: Result }> }, 'Result'>('Result'),
+  };
+  const client = createClient<[typeof roots, Record<never, never>]>({
+    roots,
+    transport: createGraphQLTransport({
+      fetch,
+      live: false,
+      roots: { feed: { type: 'Feed' }, search: { type: 'Result' } },
+      schema: metadata,
+      types,
+      url: '/graphql',
+    }),
+    types,
+  });
+  const UserView = view<User>()({
+    label: { args: { prefix: '@' } },
+    name: true,
+  });
+  const PostView = view<Post>()({
+    label: { args: { prefix: '#' } },
+    title: true,
+  });
+  const ResultView = view<Result>()({
+    ...forType('User', UserView),
+    ...forType('Post', PostView),
+  });
+  const FeedView = view<Feed>()({ results: ResultView });
+  const request = {
+    feed: { view: FeedView },
+    search: { list: ResultView },
+  };
+  const { feed, search } = await client.request(request);
+  expect(search.map(({ __typename, id }) => [__typename, id])).toEqual([
+    ['User', '1'],
+    ['Post', '1'],
+    ['Tag', '1'],
+  ]);
+
+  const readResults = async (results: Array<ViewRef<Result['__typename']>>) =>
+    Promise.all(
+      results.map(async (result) => {
+        switch (result.__typename) {
+          case 'User':
+            expectTypeOf(result).toEqualTypeOf<ViewRef<'User'>>();
+            return (await client.readView(UserView, result)).data;
+          case 'Post':
+            expectTypeOf(result).toEqualTypeOf<ViewRef<'Post'>>();
+            return (await client.readView(PostView, result)).data;
+          case 'Tag':
+            return result;
+        }
+      }),
+    );
+
+  const expected = [
+    { __typename: 'User', label: '@Ada', name: 'Ada' },
+    { __typename: 'Post', label: '#Hello', title: 'Hello' },
+    { __typename: 'Tag', id: '1' },
+  ];
+  expectTypeOf(search).toEqualTypeOf<Array<ViewRef<'User'> | ViewRef<'Post'> | ViewRef<'Tag'>>>();
+  expect(await readResults(search)).toMatchObject(expected);
+
+  const nested = (
+    await client.readView<Feed, ViewSelection<typeof FeedView>, typeof FeedView>(FeedView, feed)
+  ).data;
+  // A nested result carries the composed view and masks the concrete fields.
+  const nodes = await Promise.all(
+    nested.results.map(
+      async (result) =>
+        (
+          await client.readView<Result, ViewSelection<typeof ResultView>, typeof ResultView>(
+            ResultView,
+            result,
+          )
+        ).data,
+    ),
+  );
+  expect(await readResults(nodes)).toMatchObject(expected);
+  const query = getRequestBody(fetch).query;
+  expect(validate(schema, parse(query))).toEqual([]);
+  expect(query).toContain('... on User');
+  expect(query).toContain('... on Post');
+  expect(query).toContain('... on Tag { id }');
+  expect(client.store.hasCoverage('Post:1', 'name')).toBe(false);
+  expect(client.store.hasCoverage('User:1', 'title')).toBe(false);
+  const fetchCount = fetch.mock.calls.length;
+  await client.request(request);
+  expect(fetch).toHaveBeenCalledTimes(fetchCount);
+  expect(fetchCount).toBe(1);
 });
 
 test('selects arrays of embedded objects without identity or connection fields', async () => {

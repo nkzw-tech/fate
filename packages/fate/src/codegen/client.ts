@@ -1,6 +1,7 @@
 import type { GraphQLSchema } from 'graphql';
 import {
   graphQLOutputRelations,
+  isGraphQLEntity,
   validateGraphQLRefetchMappings,
   validateGraphQLQueryRefetch,
   type GraphQLByIdConfig,
@@ -470,7 +471,7 @@ const createGraphQLClientSource = ({
     const edge = outputFields?.pageInfo && outputFields.edges;
     const node = edge && argumentSchema?.outputs?.[edge.replaceAll(/[![\]]/g, '')]?.node;
     const type = root.type ?? (node ? node.replaceAll(/[![\]]/g, '') : output?.replace(/!$/, ''));
-    if (!type || !argumentSchema?.outputs?.[type]?.id) {
+    if (!type || !isGraphQLEntity(argumentSchema, type)) {
       throw new Error(
         `fate(graphql): Root '${name}' needs an entity query or an explicit embedded mapping.`,
       );
@@ -547,7 +548,7 @@ const createGraphQLClientSource = ({
       })),
     ...inferredTypes.filter(
       (entry) =>
-        argumentSchema?.outputs?.[entry.type]?.id &&
+        isGraphQLEntity(argumentSchema, entry.type) &&
         !types.some((type) => type.type === entry.type) &&
         !(graphQLConfig.types ?? []).some((type) => type.type === entry.type),
     ),
@@ -661,6 +662,7 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
           (entry) =>
             argumentSchema.outputs?.[entry.type]?.id &&
             !argumentSchema.possibleTypes?.[entry.type] &&
+            !argumentSchema.unions?.[entry.type] &&
             !types.some((type) => type.type === entry.type),
         ),
       ]
@@ -739,6 +741,9 @@ ${Object.entries(argumentSchema.fields[type] ?? {})
     ? [
         ...new Set([
           ...byIdTypes.map(({ type }) => type),
+          ...Object.values(roots)
+            .map(({ type }) => type)
+            .filter((type) => type !== '__value__'),
           ...mutationEntries
             .filter(({ entity }) => entity !== '__value__')
             .map(({ entity }) => entity),

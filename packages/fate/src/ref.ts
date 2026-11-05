@@ -6,11 +6,14 @@ import {
   TypeName,
   View,
   ViewRef,
-  ViewPayload,
-  isViewTag,
   ViewsTag,
 } from './types.ts';
-import { addViewName, getViewNames, getViewPayloads } from './view.ts';
+import {
+  collectSelectionViewNames,
+  getViewNames,
+  getViewPayloads,
+  viewNamesForType,
+} from './view.ts';
 
 /**
  * Builds the canonical cache ID for an entity.
@@ -39,14 +42,11 @@ export function assignViewTag(target: AnyRecord, value: ReadonlySet<string>) {
 }
 
 export const getRootViewNames = (view: View<any, any>) => {
-  const names = getViewNames(view);
   const payloads = getViewPayloads(view, null);
+  const names = new Set<string>();
+  collectSelectionViewNames(names, view);
   for (const payload of payloads) {
-    for (const [name, value] of Object.entries(payload.select)) {
-      if (isViewTag(name)) {
-        addViewName(names, name, value as ViewPayload<any, any>);
-      }
-    }
+    collectSelectionViewNames(names, payload.select);
   }
   return names;
 };
@@ -72,5 +72,7 @@ export default function createRef<T extends Entity, S extends Selection<T>, V ex
   options?: { root?: boolean },
 ): ViewRef<T['__typename']> {
   const names = options?.root ? getRootViewNames(view) : getViewNames(view);
-  return createRefWithViewNames(__typename, id, names) as ViewRef<T['__typename']>;
+  return createRefWithViewNames(__typename, id, viewNamesForType(names, __typename)) as ViewRef<
+    T['__typename']
+  >;
 }

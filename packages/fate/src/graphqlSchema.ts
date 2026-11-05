@@ -63,6 +63,14 @@ export type GraphQLArgumentSchema = Readonly<{
   unions?: Readonly<Record<string, ReadonlyArray<string>>>;
 }>;
 
+export const isGraphQLEntity = (schema: GraphQLArgumentSchema | undefined, type: string) => {
+  if (schema?.outputs?.[type]?.id) {
+    return true;
+  }
+  const possible = schema?.unions?.[type] ?? schema?.possibleTypes?.[type];
+  return Boolean(possible?.length && possible.every((name) => schema?.outputs?.[name]?.id));
+};
+
 /** Infer relation storage shapes from GraphQL output types. */
 const baseGraphQLType = (type: string) => type.replaceAll(/[![\]]/g, '');
 
@@ -73,7 +81,10 @@ export const graphQLOutputRelations = (
   possibleTypes?: ReadonlyArray<string>;
   type: string;
 }> => {
-  const outputs = schema?.outputs ?? {};
+  const outputs = { ...schema?.outputs };
+  for (const name of Object.keys(schema?.unions ?? {})) {
+    outputs[name] = {};
+  }
   return Object.entries(outputs).map(([type, outputFields]) => {
     const fields: Record<string, RelationDescriptor> = {};
     for (const [field, outputType] of Object.entries(outputFields)) {
@@ -90,8 +101,8 @@ export const graphQLOutputRelations = (
         }
       }
       const array = outputType.replaceAll('!', '').startsWith('[');
-      const possibleTypes = schema?.possibleTypes?.[childType];
-      if (outputs[childType].id) {
+      const possibleTypes = schema?.unions?.[childType] ?? schema?.possibleTypes?.[childType];
+      if (isGraphQLEntity(schema, childType)) {
         fields[field] = array
           ? { array: true, listOf: childType, ...(possibleTypes ? { possibleTypes } : {}) }
           : { type: childType, ...(possibleTypes ? { possibleTypes } : {}) };
@@ -99,7 +110,7 @@ export const graphQLOutputRelations = (
         fields[field] = array ? { array: true, embedded: childType } : { embedded: childType };
       }
     }
-    const possibleTypes = schema?.possibleTypes?.[type];
+    const possibleTypes = schema?.unions?.[type] ?? schema?.possibleTypes?.[type];
     return { fields, ...(possibleTypes ? { possibleTypes } : {}), type };
   });
 };

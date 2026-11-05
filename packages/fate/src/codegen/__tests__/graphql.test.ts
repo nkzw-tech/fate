@@ -23,9 +23,12 @@ const schema = `
   type MapConnection { edges: [MapEdge], pageInfo: PageInfo! }
   type Map implements Node { replay: Replay, related: MapConnection, id: ID!, name: String!, image: Image, json: JSON, state(biome: Biome!): String! }
   union Result = Map | Image
+  union SearchResult = Map | Replay
+  type SearchEdge { cursor: String, node: SearchResult! }
+  type SearchConnection { edges: [SearchEdge], pageInfo: PageInfo! }
   type Price { amount: Int! }
   type Receipt { code: String! }
-  type Read { prices: Price!, map(filter: Filter!): Map, optionalMap(biome: Biome): Map, viewer: Map }
+  type Read { search: SearchConnection!, prices: Price!, map(filter: Filter!): Map, optionalMap(biome: Biome): Map, viewer: Map }
   type Write { end: Boolean!, receipt: Receipt!, edit(input: Filter!): Map, rename(id: ID!, name: String!): Map }
 `;
 type MapEntity = { __typename: 'Map'; id: string; name: string; state: string };
@@ -41,7 +44,7 @@ const moduleExports = {
         inputArg: false,
       }),
     },
-    roots: { prices: { embedded: true, type: 'Price' }, selectedMap: { field: 'map' } },
+    roots: { prices: { embedded: true, type: 'Price' }, search: {}, selectedMap: { field: 'map' } },
     schema,
   },
   mapDataView,
@@ -159,7 +162,7 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
         path.join(directory, 'usage.ts'),
         `
       import '${clientModule}/client';
-      import { alias, when, view, type ViewData, type RefetchArguments } from '@nkzw/fate';
+      import { alias, forType, when, view, type ViewData, type ViewRef, type RefetchArguments } from '@nkzw/fate';
       import type { GraphQLEntities, GraphQLInputs, GraphQLResponses, GraphQLTypes } from './client.ts';
       const biome: GraphQLInputs['Biome'] = 'Grassland';
       const response: GraphQLResponses['Price'] = { __typename: 'Price', amount: 1 };
@@ -194,6 +197,29 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       const ImageView = view<Map>()({ image: { url: true } });
       const ReplayView = view<GraphQLEntities['Replay']>()({ content: true });
       client.request({ replay: { id: 'Replay-1', view: ReplayView } });
+      const SearchView = view<GraphQLEntities['SearchResult']>()({
+        ...forType('Map', MapView),
+        ...forType('Replay', ReplayView),
+      });
+      // @ts-expect-error The branch typename must match the view.
+      forType('Replay', MapView);
+      // @ts-expect-error The typename must be a possible result of the parent view.
+      view<Map>()({ ...forType('Replay', ReplayView) });
+      // @ts-expect-error A branch composes a view of one concrete type.
+      forType('Map', SearchView);
+      const searchRequest = { search: { list: SearchView } };
+      client.request(searchRequest).then(({ search }) => {
+        for (const result of search) {
+          if (result.__typename === 'Map') {
+            const ref: ViewRef<'Map'> = result;
+            void ref;
+          } else {
+            const ref: ViewRef<'Replay'> = result;
+            void ref;
+          }
+        }
+      });
+
       const RelatedView = view<Map>()({ related: { items: { node: { name: true } } } });
       void ImageView;
       // @ts-expect-error Generated entities reject fields absent from GraphQL.
@@ -217,6 +243,9 @@ test.each(['@nkzw/fate', 'react-fate', 'vue-fate'] as const)(
       ${
         clientModule === 'react-fate'
           ? `import { useRefetch } from 'react-fate';
+        const { search } = useRequest(searchRequest);
+        const results: Array<ViewRef<'Map'> | ViewRef<'Replay'>> = search;
+        void results;
         const refetch = useRefetch({ selectedMap: { args: { filter: { biome: 'Grassland' } }, view: MapView } });
         void refetch();
         // @ts-expect-error Refetch requires schema arguments too.

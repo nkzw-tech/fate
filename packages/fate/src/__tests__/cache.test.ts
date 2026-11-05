@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
+import { createRefWithViewNames } from '../ref.ts';
 import {
   ViewsTag,
   type EntityId,
@@ -22,11 +23,8 @@ const createThenable = <T>(value: T): FateThenable<T> =>
 
 const createView = (): View<any, any> => ({}) as View<any, any>;
 
-const createViewRef = <TName extends string>(__typename: TName, id: string): ViewRef<TName> => ({
-  __typename,
-  id,
-  [ViewsTag]: new Set<string>(),
-});
+const createViewRef = <TName extends string>(__typename: TName, id: string): ViewRef<TName> =>
+  createRefWithViewNames(__typename, id, new Set());
 
 test('evicts dependents and the dependency when invalidating an entity', () => {
   const cache = new ViewDataCache();

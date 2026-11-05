@@ -128,6 +128,42 @@ Custom scalars default to `unknown`. Set `fateGraphQL.scalars` to describe their
 
 Use `import type` for generated types. After updating the schema, run `fate generate` to refresh them.
 
+## Views on Unions and Interfaces
+
+A GraphQL search can return different kinds of results in the same list. Use `forType` to compose a view for each type you want to render. For example, if your `search` connection returns a `SearchResult` union of posts and users:
+
+```tsx
+import { forType, useRequest, view } from 'react-fate';
+import type { GraphQLEntities } from '../../.fate/client.generated.ts';
+import { PostResult, UserResult } from './SearchResults.tsx';
+
+export const PostResultView = view<GraphQLEntities['Post']>()({ title: true });
+export const UserResultView = view<GraphQLEntities['User']>()({ name: true });
+
+const SearchResultView = view<GraphQLEntities['SearchResult']>()({
+  ...forType('Post', PostResultView),
+  ...forType('User', UserResultView),
+});
+
+export function Search({ query }: { query: string }) {
+  const { search } = useRequest({ search: { args: { query }, list: SearchResultView } });
+
+  return search.map((result) => {
+    const key = `${result.__typename}:${result.id}`;
+
+    switch (result.__typename) {
+      case 'Post':
+        return <PostResult key={key} post={result} />;
+      case 'User':
+        return <UserResult key={key} user={result} />;
+    }
+    return null;
+  });
+}
+```
+
+fate fetches the fields from each view for results of that type. Check `result.__typename` to narrow the reference in TypeScript, then pass it to a component that resolves the matching view with `useView`. Each member of the union or interface needs an `id` so fate can identify it in the cache.
+
 ## Creating a Client
 
 Create the client with your GraphQL endpoint and provide it through the `FateClient` provider:

@@ -95,7 +95,11 @@ export function useLiveView<V extends View<any, any>>(
       );
 
       const liveRef = resolvedRef
-        ? client.ref(resolvedRef.__typename, resolvedRef.id, resolveView(view, resolvedRef))
+        ? client.ref<ViewEntity<V>>(
+            resolvedRef.__typename,
+            resolvedRef.id,
+            resolveView(view, resolvedRef),
+          )
         : undefined;
       if (client === subscribedClient && liveRef === subscribedRef) {
         return;

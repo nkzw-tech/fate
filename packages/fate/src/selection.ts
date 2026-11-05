@@ -1,6 +1,13 @@
-import { aliasedField, isAliasedSelection, isAliasedView, responseField } from './alias.ts';
+import {
+  aliasedField,
+  isAliasedSelection,
+  isAliasedView,
+  responseField,
+  typeBranchField,
+} from './alias.ts';
 import { cloneArgs, getConnectionWindowIgnoreKeys, hashArgs, hashConnectionArgs } from './args.ts';
 import { isDeferredSelection } from './defer.ts';
+import { isTypeBranch } from './forType.ts';
 import { isRecord } from './record.ts';
 import {
   AnyRecord,
@@ -26,6 +33,7 @@ export type SelectionPlan = {
     string,
     Readonly<{ hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }>
   >;
+  readonly hasTypeBranches?: true;
   readonly live: Map<string, ConnectionLivePolicy>;
   readonly paths: Set<string>;
 };
@@ -49,6 +57,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
   const live = new Map<string, ConnectionLivePolicy>();
   const paths = new Set<string>();
   const responsePaths = new Map<string, string>();
+  let hasTypeBranches: true | undefined;
 
   const assignArgs = (path: string, value: AnyRecord, ignoreKeys?: ReadonlySet<string>) => {
     const previous = args.get(path);
@@ -64,6 +73,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     prefix: string | null,
     context: WalkContext = 'default',
     namespace: ReadonlyArray<string> = [],
+    type?: string,
   ) => {
     if (prefix === null && context !== 'connection' && isConnectionSelection(selection)) {
       if (selection.live && isRecord(selection.live)) {
@@ -82,7 +92,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       }
 
       const { args: _args, live: _live, ...withoutArgs } = selection;
-      walk(withoutArgs, prefix, 'connection', namespace);
+      walk(withoutArgs, prefix, 'connection', namespace, type);
       return;
     }
 
@@ -91,10 +101,17 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       if (rawValue === undefined) {
         continue;
       }
+      if (isTypeBranch(rawValue)) {
+        hasTypeBranches = true;
+        // Identity is enough when the concrete view has only deferred fields.
+        paths.add(prefix ? `${prefix}.__typename` : '__typename');
+        walk(rawValue.view, prefix, context, namespace, rawValue.type);
+        continue;
+      }
       if (isAliasedView(rawValue)) {
         aliasedField(key, key);
         for (const payload of getViewPayloads(rawValue.view, null)) {
-          walk(payload.select, prefix, context, [...namespace, key]);
+          walk(payload.select, prefix, context, [...namespace, key], type);
         }
         continue;
       }
@@ -103,10 +120,13 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       const resultField = isAliasedSelection(rawValue) ? aliasedField(key, sourceField) : key;
       // Alias the first schema field of each named fragment. Its children share the
       // usual normalized schema-field/argument keys when the response is written.
-      const field =
+      let field =
         namespace.length && !isViewTag(key)
           ? `fate_fragment_${[...namespace, key].map((part) => `${part.length}_${part}`).join('_')}:${sourceField}`
           : resultField;
+      if (type && !isViewTag(key)) {
+        field = typeBranchField(type, field);
+      }
       const valueType = typeof value;
       if (valueType === 'function') {
         throw new Error('fate: Bind the view parameters before using a view in a selection.');
@@ -147,8 +167,8 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       }
 
       if (isViewTag(key)) {
-        if (options?.includeNestedViews || !ref || ref[ViewsTag]?.has(key)) {
-          walk((value as { select: AnyRecord }).select, prefix, context, namespace);
+        if (type || options?.includeNestedViews || !ref || ref[ViewsTag]?.has(key)) {
+          walk((value as { select: AnyRecord }).select, prefix, context, namespace, type);
         }
         continue;
       }
@@ -209,7 +229,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     }
   }
 
-  return { args, live, paths };
+  return { args, ...(hasTypeBranches ? { hasTypeBranches } : null), live, paths };
 };
 
 export const getDeferredSelectionPlan = (field: string, selection: unknown): SelectionPlan => {

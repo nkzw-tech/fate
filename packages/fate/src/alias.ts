@@ -40,8 +40,37 @@ export function alias(field: string | View<any, any>, selection?: unknown) {
 export const isAliasedSelection = (value: unknown): value is AliasedSelection =>
   Boolean(value && typeof value === 'object' && AliasTag in value);
 
-/** Transport paths encode aliases as resultName:schemaField. */
-export const schemaField = (field: string): string => field.slice(field.indexOf(':') + 1);
+/** Transport paths encode aliases as resultName:schemaField[:typeCondition]. */
+export const schemaField = (field: string): string => {
+  const start = field.indexOf(':') + 1;
+  if (!start) {
+    return field;
+  }
+  const end = field.indexOf(':', start);
+  return end < 0 ? field.slice(start) : field.slice(start, end);
+};
+
+export const typeCondition = (field: string): string | undefined => {
+  const alias = field.indexOf(':');
+  const separator = alias < 0 ? -1 : field.indexOf(':', alias + 1);
+  return separator < 0 ? undefined : field.slice(separator + 1);
+};
+
+export const pathHasTypeCondition = (path: string): boolean => {
+  const alias = path.indexOf(':');
+  if (alias < 0) {
+    return false;
+  }
+  return path.split('.').some(typeCondition);
+};
+
+export const fieldAppliesTo = (field: string, type: string): boolean => {
+  const condition = typeCondition(field);
+  return condition === undefined || condition === type;
+};
+
+export const typeBranchField = (type: string, field: string): string =>
+  `fate_type_${type.length}_${type}_${responseField(field)}:${schemaField(field)}:${type}`;
 export const responseField = (field: string): string => field.split(':')[0];
 export const aliasedField = (name: string, field: string): string => {
   if (
