@@ -17,6 +17,9 @@ type ConnectionInputWithAdditional<TAdditionalInput extends AdditionalInputSchem
 
 type ConnectionCursor = string;
 
+const getIdCursor = (node: unknown): ConnectionCursor =>
+  String((node as { id: string | number }).id);
+
 /**
  * Connection item including the node and opaque cursor.
  */
@@ -136,7 +139,7 @@ const extractPaginationArgs = (
 export async function resolveConnection<TContext, TItem, TNode, TInput extends ConnectionInput>({
   ctx,
   defaultSize = 20,
-  getCursor = (node: TNode) => (node as { id: string }).id,
+  getCursor = getIdCursor,
   input,
   map,
   query,
@@ -194,11 +197,7 @@ export async function resolveConnection<TContext, TItem, TNode, TInput extends C
  */
 export function arrayToConnection<TNode extends { id: string | number }>(
   nodes?: Array<TNode>,
-  {
-    args,
-    cursorApplied = false,
-    getCursor = (node: TNode) => String((node as { id: string | number }).id),
-  }: ArrayToConnectionOptions<TNode> = {},
+  { args, cursorApplied = false, getCursor = getIdCursor }: ArrayToConnectionOptions<TNode> = {},
 ): ConnectionResult<TNode> | undefined {
   if (!nodes) {
     return undefined;
@@ -412,7 +411,7 @@ export function withConnection(procedure: ProcedureLike) {
     TAdditionalInput extends AdditionalInputSchema | undefined = undefined,
   >({
     defaultSize = 20,
-    getCursor = (node: TNode) => (node as { id: string }).id,
+    getCursor = getIdCursor,
     input: additionalInput,
     map,
     query,
