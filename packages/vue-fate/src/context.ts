@@ -1,3 +1,4 @@
+import type { ClientDefinitionOf, RegisteredClient } from '@nkzw/fate';
 import type { FateClient as FateClientT, FateMutations } from '@nkzw/fate';
 import {
   computed,
@@ -17,10 +18,12 @@ import {
 } from 'vue';
 import type { Roots } from './useRequest.ts';
 
-type GeneratedFateClient = ReturnType<typeof import('vue-fate/client').createFateClient>;
+type GeneratedFateClient = RegisteredClient<
+  ReturnType<typeof import('vue-fate/client').createFateClient>
+>;
 type Mutations = [GeneratedFateClient] extends [never]
   ? FateMutations
-  : GeneratedFateClient extends FateClientT<any, infer M>
+  : ClientDefinitionOf<GeneratedFateClient> extends { mutations: infer M extends FateMutations }
     ? M
     : FateMutations;
 

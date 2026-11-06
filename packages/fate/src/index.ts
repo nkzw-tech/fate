@@ -117,3 +117,13 @@ export { when, type ConditionalSelection } from './when.ts';
 export type { GraphQLSelectedResult } from './graphql-types.ts';
 
 export type { RefetchConfig, RefetchArgument, RefetchArguments } from './refetch.ts';
+
+export {
+  clientSchema,
+  type ClientSchema,
+  type EntityOf,
+  type ClientDefinitionOf,
+  type ClientRegistration,
+  type RegisteredClient,
+} from './client-schema.ts';
+export { dataView, list, computed, field } from './data-view.ts';

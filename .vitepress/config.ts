@@ -29,6 +29,7 @@ const guideSidebar = [
       { link: '/guide/list-views', text: 'List Views' },
       { link: '/guide/live-views', text: 'Live Views' },
       { link: '/guide/actions', text: 'Actions' },
+      { link: '/guide/client-state', text: 'Client State' },
       { link: '/guide/persistence', text: 'Persistence' },
       { link: '/guide/requests', text: 'Requests' },
       { link: '/guide/deferred-views', text: 'Deferred Views' },

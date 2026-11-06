@@ -595,7 +595,9 @@ test('root list optimistic pending edges roll back after failed mutations', asyn
         rejectMutation = reject;
       }),
   ) as NonNullable<
-    Parameters<typeof createClient<[typeof roots, typeof mutations]>>[0]['transport']['mutate']
+    NonNullable<
+      Parameters<typeof createClient<[typeof roots, typeof mutations]>>[0]['transport']
+    >['mutate']
   >;
   const client = createClient<[typeof roots, typeof mutations]>({
     mutations,
@@ -699,9 +701,9 @@ test('nested list optimistic pending edges roll back after failed mutations', as
         rejectMutation = reject;
       }),
   ) as NonNullable<
-    Parameters<
-      typeof createClient<[Record<string, never>, typeof mutations]>
-    >[0]['transport']['mutate']
+    NonNullable<
+      Parameters<typeof createClient<[Record<string, never>, typeof mutations]>>[0]['transport']
+    >['mutate']
   >;
   const client = createClient<[Record<string, never>, typeof mutations]>({
     mutations,

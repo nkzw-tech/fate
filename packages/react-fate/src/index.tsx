@@ -65,3 +65,13 @@ export { useViews } from './useViews.tsx';
 export { useRequest, type UseRequestOptions } from './useRequest.tsx';
 export { useRefetch } from './useRefetch.tsx';
 export { useListView } from './useListView.tsx';
+
+export {
+  clientSchema,
+  dataView,
+  list,
+  computed,
+  field,
+  type ClientSchema,
+  type EntityOf,
+} from '@nkzw/fate';

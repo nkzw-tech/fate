@@ -12,7 +12,9 @@ vp create fate
 
 Explore the [fate stack](https://fate.technology/#stack) to see the tools included in your new project.
 
-Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default; choose Vue in the selector or pass `--framework vue`.
+Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default. Choose Vue in the selector or pass `--framework vue`.
+
+Choose **Client Only** or pass `--template client-only` to start with a static Void app that saves its data in IndexedDB. See [Persisting Client State](/guide/client-state#persisting-client-state).
 
 ## Manual Installation
 

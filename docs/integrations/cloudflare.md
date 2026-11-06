@@ -29,6 +29,12 @@ After changing your database schema or auth configuration, run `vp run db:genera
 
 See [Void's Cloudflare deployment guide](https://void.cloud/integrations/cloudflare) for custom domains, secrets, and CI configuration.
 
+## Client-only Apps
+
+Choose `--template client-only` when creating the app. The template uses Void Pages Routing and prerenders both routes as static shells. IndexedDB stores application data in each browser.
+
+Run `vp exec void deploy --platform cloudflare` from the generated app to deploy the assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
+
 ## Migrating from cf-fate
 
 Fate 1.6 replaces the standalone Cloudflare adapter and template with the Void integration. Use `--template void` for new projects and `transport: 'void'` in the fate Vite plugin.

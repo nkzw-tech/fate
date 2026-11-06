@@ -73,11 +73,15 @@ test('resolvers can add prisma selections and compute values', async () => {
 });
 
 test('computed fields can resolve hidden source dependencies', async () => {
-  const view = dataView<{ email: string; id: string; name: string }>('User')({
-    email: computed<{ email: string; id: string; name: string }, string>({
-      resolve: (_item, deps) => deps.email as string,
+  type User = { email: string; id: string; name: string };
+  const view = dataView<User>('User')({
+    email: computed({
+      resolve: (_item: User, { email }) => {
+        expectTypeOf(email).toEqualTypeOf<string>();
+        return email;
+      },
       select: {
-        email: field('email'),
+        email: true,
       },
     }),
     id: true,
@@ -88,6 +92,8 @@ test('computed fields can resolve hidden source dependencies', async () => {
     select: ['email', 'name'],
     view,
   });
+
+  expect(selection.select).toMatchObject({ email: true });
 
   const item = await selection.resolve({
     email: 'jane@example.com',
@@ -100,6 +106,30 @@ test('computed fields can resolve hidden source dependencies', async () => {
     id: 'user-1',
     name: 'Jane',
   });
+});
+
+test('computed dependency paths project scalar values across relation lists', async () => {
+  type Project = { id: string; tasks: Array<{ done: boolean }> };
+  const view = dataView<Project>('Project')({
+    completed: computed({
+      resolve: (_item: Project, { done, total }) => {
+        expectTypeOf(done).toEqualTypeOf<Array<boolean> | undefined>();
+        expectTypeOf(total).toEqualTypeOf<number>();
+        return `${done?.filter(Boolean).length ?? 0} of ${total}`;
+      },
+      select: { done: field('tasks.done'), total: count('tasks') },
+    }),
+    id: true,
+  });
+  const selection = createResolver({ select: ['completed'], view });
+
+  expect(selection.select).toEqual({
+    _count: { select: { tasks: true } },
+    id: true,
+    tasks: { select: { done: true } },
+  });
+  const project = { _count: { tasks: 2 }, id: 'p1', tasks: [{ done: true }, { done: false }] };
+  await expect(selection.resolve(project)).resolves.toEqual({ completed: '1 of 2', id: 'p1' });
 });
 
 test('computed fields can resolve conflicting relation counts from attached state', async () => {

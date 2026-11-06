@@ -1,11 +1,14 @@
+import type { ClientDefinitionOf, RegisteredClient } from '@nkzw/fate';
 import type { FateClient as FateClientT, FateMutations } from '@nkzw/fate';
 import { createContext, ReactNode, use } from 'react';
 import { Roots } from './useRequest.tsx';
 
-type GeneratedFateClient = ReturnType<typeof import('react-fate/client').createFateClient>;
+type GeneratedFateClient = RegisteredClient<
+  ReturnType<typeof import('react-fate/client').createFateClient>
+>;
 type Mutations = [GeneratedFateClient] extends [never]
   ? FateMutations
-  : GeneratedFateClient extends FateClientT<any, infer M>
+  : ClientDefinitionOf<GeneratedFateClient> extends { mutations: infer M extends FateMutations }
     ? M
     : FateMutations;
 

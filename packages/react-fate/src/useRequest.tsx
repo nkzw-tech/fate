@@ -1,5 +1,5 @@
+import type { ClientDefinitionOf, RegisteredClient } from '@nkzw/fate';
 import {
-  type FateClient as FateClientT,
   type CheckedRequest,
   FateRoots,
   RequestResult,
@@ -10,10 +10,12 @@ import { use, useDeferredValue, useEffect, useMemo, useSyncExternalStore } from 
 import { useFateClient } from './context.tsx';
 import { fulfilledThenable, isFulfilledThenable } from './thenable.ts';
 
-type GeneratedFateClient = ReturnType<typeof import('react-fate/client').createFateClient>;
+type GeneratedFateClient = RegisteredClient<
+  ReturnType<typeof import('react-fate/client').createFateClient>
+>;
 export type Roots = [GeneratedFateClient] extends [never]
   ? FateRoots
-  : GeneratedFateClient extends FateClientT<infer R, any>
+  : ClientDefinitionOf<GeneratedFateClient> extends { roots: infer R extends FateRoots }
     ? R
     : FateRoots;
 

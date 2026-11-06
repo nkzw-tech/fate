@@ -1,6 +1,7 @@
 import { buildSchema, graphql } from 'graphql';
 import { expect, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
+import { clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
 import { defer } from '../defer.ts';
@@ -10,6 +11,7 @@ import { mutation } from '../mutation.ts';
 import { createPersistence } from '../persistence.ts';
 import type { RefetchConfig } from '../refetch.ts';
 import { clientRoot } from '../root.ts';
+import { computed, dataView, field } from '../server/dataView.ts';
 import type { Transport } from '../transport.ts';
 import { ConnectionTag, type ConnectionMetadata } from '../types.ts';
 import type { ViewSelection } from '../types.ts';
@@ -120,6 +122,50 @@ test('fetches missing fields through the configured username query without leaki
   expect(request.query).toContain('user(');
   expect(Object.values(request.variables)).toContain('cpojer');
   expect(request.query).not.toContain('nodes(');
+});
+
+test('computed relationships include the locators needed to refetch their children', async () => {
+  const fetchQuery = vi.fn(async (name: string, select: Iterable<string>) =>
+    name === 'viewer'
+      ? {
+          friends: [
+            { id: '2', ...([...select].includes('friends.username') && { username: 'friend' }) },
+          ],
+          id: '1',
+          username: 'owner',
+        }
+      : { bio: 'Friend biography', id: '2', username: 'friend' },
+  );
+  const base = createClient({
+    roots: { viewer: clientRoot<User, 'User'>('User') },
+    transport: { fetchById: async () => [], fetchQuery },
+    types: [
+      { fields: { friends: { array: true, listOf: 'User' } }, refetch: recipe, type: 'User' },
+    ],
+  });
+  const client = base.registerClientSchema(
+    clientSchema({
+      typeExtensions: {
+        User: {
+          defaults: () => ({}),
+          view: dataView<User>('User')({
+            friendIds: computed({
+              resolve: (_user: User, { ids = [] }) => ids.join(', '),
+              select: { ids: field('friends.id') },
+            }),
+          }),
+        },
+      },
+    }),
+  );
+  const Friends = view<EntityOf<typeof client, 'User'>>()({ friendIds: true });
+  const { viewer } = await client.request({ viewer: { view: Friends } });
+  expect([...fetchQuery.mock.calls[0][1]]).toContain('friends.username');
+  expect((await client.readView(Friends, viewer!)).data.friendIds).toBe('2');
+  const profile = await client.readView(Profile, client.ref('User', '2', Profile));
+  expect(profile.data.bio).toBe('Friend biography');
+  expect(client.store.read('User:2')?.username).toBe('friend');
+  expect(fetchQuery).toHaveBeenCalledTimes(2);
 });
 
 const recipe = { args: { username: { field: 'username' } }, root: 'user' } as const;

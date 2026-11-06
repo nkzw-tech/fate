@@ -355,3 +355,30 @@ test('consumes coverage iterables before extending the existing field mask', () 
   store.merge('Post:coverage', {}, paths());
   expect(store.missingForSelection('Post:coverage', ['profile.age', 'extra'])).toEqual(new Set());
 });
+
+test('transactions roll back records, coverage, invalidation and optimistic settlement', () => {
+  const changes = vi.fn();
+  const store = new Store(undefined, changes);
+  store.merge('Post:1', { id: '1', title: 'Base' }, ['id', 'title']);
+  const settle = store.optimisticUpdate(() =>
+    store.merge('Post:1', { title: 'Pending' }, ['title']),
+  );
+  changes.mockClear();
+  const notify = vi.fn();
+  store.subscribe('Post:1', notify);
+  expect(() =>
+    store.transaction(() => {
+      settle(() => store.merge('Post:1', { title: 'Committed' }, ['title']));
+      store.invalidateRecord('Post:1');
+      store.merge('Post:2', { id: '2' }, ['id']);
+      throw new Error('normalization failed');
+    }),
+  ).toThrow('normalization failed');
+  expect(store.read('Post:1')?.title).toBe('Pending');
+  expect(store.read('Post:2')).toBeUndefined();
+  expect(store.hasStaleRecord('Post:1')).toBe(false);
+  expect(notify).not.toHaveBeenCalled();
+  expect(changes).not.toHaveBeenCalled();
+  settle();
+  expect(store.read('Post:1')?.title).toBe('Base');
+});

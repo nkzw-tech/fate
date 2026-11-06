@@ -13,6 +13,7 @@ vi.mock('../src/user/AuthClient.tsx', () => ({
 vi.mock('../src/ui/Header.tsx', () => ({ default: () => null }));
 vi.mock('../src/lib/env.tsx', () => ({ default: () => 'http://localhost:9020' }));
 vi.mock('react-fate/client', () => ({ createFateClient: () => ({}) }));
+vi.mock('../src/state.ts', () => ({ withClientState: (client: unknown) => client }));
 
 test.each([
   { data: null, isPending: true, name: 'checking the session', showContent: false },

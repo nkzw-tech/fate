@@ -36,7 +36,6 @@ export function useLiveListView<
       liveUnsubscribe = undefined;
       if (metadata.value) {
         try {
-          client.assertLiveConnectionSupport();
           liveUnsubscribe = client.subscribeLiveListView(nodeView, metadata.value);
         } catch (error) {
           listResource.error.value = error;

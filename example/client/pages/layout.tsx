@@ -6,6 +6,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { FateClient } from 'react-fate';
 import { createFateClient } from 'react-fate/client';
 import env from '../src/lib/env.tsx';
+import { withClientState } from '../src/state.ts';
 import Card from '../src/ui/Card.tsx';
 import Error from '../src/ui/Error.tsx';
 import Header from '../src/ui/Header.tsx';
@@ -36,33 +37,35 @@ export default function Layout({ children }: { children: ReactNode }) {
       : undefined;
 
     const serverUrl = env('SERVER_URL');
-    return createFateClient(
-      (transport === 'graphql'
-        ? {
-            fetch: credentialFetch,
-            streaming: true,
-            url: `${serverUrl}/graphql`,
-          }
-        : transport === 'native'
+    return withClientState(
+      createFateClient(
+        (transport === 'graphql'
           ? {
               fetch: credentialFetch,
-              liveUrl: `${serverUrl}/fate/live`,
-              url: `${serverUrl}/fate/rpc`,
+              streaming: true,
+              url: `${serverUrl}/graphql`,
             }
-          : {
-              ...(credentialFetch ? { fetch: credentialFetch } : null),
-              links: [
-                httpBatchLink({
-                  fetch: (input, init) =>
-                    fetch(input, {
-                      ...init,
-                      credentials: userId ? 'include' : undefined,
-                    }),
-                  url: `${serverUrl}/trpc`,
-                }),
-              ],
-              liveUrl: `${serverUrl}/fate`,
-            }) as never,
+          : transport === 'native'
+            ? {
+                fetch: credentialFetch,
+                liveUrl: `${serverUrl}/fate/live`,
+                url: `${serverUrl}/fate/rpc`,
+              }
+            : {
+                ...(credentialFetch ? { fetch: credentialFetch } : null),
+                links: [
+                  httpBatchLink({
+                    fetch: (input, init) =>
+                      fetch(input, {
+                        ...init,
+                        credentials: userId ? 'include' : undefined,
+                      }),
+                    url: `${serverUrl}/trpc`,
+                  }),
+                ],
+                liveUrl: `${serverUrl}/fate`,
+              }) as Parameters<typeof createFateClient>[0],
+      ),
     );
   }, [userId]);
 

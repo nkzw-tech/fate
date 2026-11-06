@@ -14,6 +14,18 @@ import {
   scopeArgsPayload,
 } from './args.ts';
 import ViewDataCache from './cache.ts';
+import type { ClientStateReference, ClientStateSnapshot } from './client-persistence.ts';
+import {
+  clientMutationBuilder,
+  type ClientDefinition,
+  type ClientDefinitionOf,
+  type ClientDefinitionShape,
+  type ClientSchema,
+  type ClientMutationBuilder,
+  type ClientMutationDefinition,
+  type ExtendedClient,
+} from './client-schema.ts';
+import ClientState, { recordPaths } from './client-state.ts';
 import {
   createDeferred,
   getDeferredMetadata,
@@ -99,6 +111,7 @@ import {
   type RequestStateOptions,
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
+import { clientRoot } from './root.ts';
 import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
 import {
   compileListKey,
@@ -133,6 +146,9 @@ import {
   type ViewData,
   type ViewRef,
   type ViewSnapshot,
+  type ViewEntity,
+  type ViewEntityName,
+  type ViewSelection,
   FateRoots,
   MutationDefinition,
   RootDefinition,
@@ -213,9 +229,9 @@ type FateClientOptions<
   mutations?: Mutations;
   onLiveError?: (error: unknown) => void;
   persistence?: Persistence;
-  roots: Roots;
-  transport: Transport<MutationMapFromDefinitions<Mutations>>;
-  types: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<{ getId: TypeConfig['getId'] }>>;
+  roots?: Roots;
+  transport?: Transport<MutationMapFromDefinitions<Mutations>>;
+  types?: ReadonlyArray<Omit<TypeConfig, 'getId'> & Partial<{ getId: TypeConfig['getId'] }>>;
 };
 
 const getId: TypeConfig['getId'] = (record: unknown) => {
@@ -649,6 +665,11 @@ export class FateClient<
   Mutations extends FateMutations,
   HydrationScope extends string = string,
 > {
+  declare readonly [ClientDefinition]: {
+    hydrationScope: HydrationScope;
+    mutations: Mutations;
+    roots: Roots;
+  };
   private writeGeneration = 0;
   private lastInvalidation = 0;
   private mutationWrite: { fields?: ReadonlySet<string> } | undefined;
@@ -711,6 +732,7 @@ export class FateClient<
   }
 
   private withResponseWrite<T>(generation: number, apply: () => T): T {
+    this.remoteWriteDepth++;
     const previous = this.uncontendedWriteGeneration;
     if (
       this.pendingNetworkRequests === 1 &&
@@ -723,6 +745,7 @@ export class FateClient<
     try {
       return this.withWriteGeneration(generation, apply);
     } finally {
+      this.remoteWriteDepth--;
       this.uncontendedWriteGeneration = previous;
     }
   }
@@ -752,6 +775,11 @@ export class FateClient<
       );
     }
     return actualType;
+  }
+
+  /** @internal */
+  resolveEntityType(type: string, record: AnyRecord): string {
+    return this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
   }
 
   private readonly requestListeners = new Map<
@@ -885,8 +913,10 @@ export class FateClient<
   );
   private readonly operationLifetime: OperationLifetime;
   private readonly hydrationLimits: HydrationLimits;
-  private readonly hydrationScope: HydrationScope;
-  private readonly types: ReadonlyMap<string, TypeConfig>;
+  private hydrationScope: HydrationScope;
+  private readonly types: Map<string, TypeConfig>;
+  private readonly clientState = new ClientState(this);
+  private remoteWriteDepth = 0;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
   // Intermediate rollback/replay states must not evict or populate view snapshots.
   private readonly viewDataCache = new ViewDataCache(() => !this.store.isRebasing);
@@ -901,27 +931,30 @@ export class FateClient<
     this.persistenceDisposal = options.persistence ? new AbortController() : undefined;
     this.actions = Object.create(null) as MutationActionsFor<Mutations>;
     this.mutationMap = Object.create(null);
-    if (options.persistence || options.types.some((config) => config.refetch)) {
-      this.mutationEntities = new Map(
-        Object.entries(options.mutations ?? {}).map(([key, definition]) => [
-          key,
-          definition.entity,
-        ]),
-      );
-    }
+    this.mutationEntities = new Map(
+      Object.entries(options.mutations ?? {}).map(([key, definition]) => [key, definition.entity]),
+    );
     this.mutations = Object.create(null) as MutationFunctionsFor<Mutations>;
     this.onLiveError = options.onLiveError;
     this.operationLifetime = new OperationLifetime(options.gcReleaseBufferSize ?? 10);
     this.hydrationLimits = resolveHydrationLimits(options.hydrationLimits);
     const hydrationScope =
-      options.hydrationScope ?? getDefaultHydrationScope(options.roots, options.types);
+      options.hydrationScope ?? getDefaultHydrationScope(options.roots, options.types ?? []);
     if (typeof hydrationScope !== 'string' || hydrationScope.length === 0) {
       throw new Error(`fate: Hydration scope must be a non-empty string.`);
     }
     this.hydrationScope = hydrationScope as HydrationScope;
-    this.roots = options.roots;
-    this.types = new Map(options.types.map((entity) => [entity.type, { getId, ...entity }]));
-    this.transport = withAliasSupport(options.transport);
+    this.roots = { ...options.roots } as Roots;
+    this.types = new Map(
+      (options.types ?? []).map((entity) => [entity.type, { getId, ...entity }]),
+    );
+    this.transport = withAliasSupport(
+      options.transport ?? {
+        fetchById: async (type) => {
+          throw new Error(`fate: No transport configured for '${type}'.`);
+        },
+      },
+    );
 
     for (const config of this.types.values()) {
       if (config.refetch) {
@@ -953,6 +986,141 @@ export class FateClient<
     this.initializeParentLists();
     this.persistenceRuntime = options.persistence?.attach(this);
     this.persistence = this.persistenceRuntime;
+  }
+
+  /** Register client definitions at setup time and return this client with the updated types. */
+  registerClientSchema<
+    C extends { readonly [ClientDefinition]: ClientDefinitionShape },
+    const S extends ClientSchema,
+    Added extends FateMutations = Record<never, never>,
+  >(
+    this: C,
+    schema: S,
+    defineMutations?: (
+      builder: ClientMutationBuilder<
+        ClientDefinitionOf<C>['roots'],
+        ClientDefinitionOf<C>['mutations'],
+        S
+      >,
+    ) => Added,
+  ): ExtendedClient<
+    ClientDefinitionOf<C>['roots'],
+    ClientDefinitionOf<C>['mutations'],
+    ClientDefinitionOf<C>['hydrationScope'],
+    S,
+    Added
+  >;
+  registerClientSchema(
+    schema: ClientSchema,
+    defineMutations?: (builder: any) => FateMutations,
+  ): any {
+    if (this.requests.size || this.store.dehydrate().records.length) {
+      throw new Error('fate: Register the client schema before reading or writing data.');
+    }
+    for (const name of Object.keys(schema.roots ?? {})) {
+      if (Object.hasOwn(this.roots, name)) {
+        throw new Error(`fate: Root '${name}' already exists.`);
+      }
+    }
+    this.clientState.install(schema, this.types);
+    this.hydrationScope = `${this.hydrationScope}|client:${hashArgs({
+      roots: schema.roots ?? {},
+      types: [...this.clientState.definitions].map(([name, definition]) => ({
+        fields: Object.entries(definition.view.fields).map(([field, config]) => ({
+          field,
+          kind: config === true ? 'stored' : config.kind,
+          ...(config !== true && 'select' in config ? { select: config.select } : {}),
+          ...(config !== true && 'typeName' in config ? { type: config.typeName } : {}),
+        })),
+        name,
+      })),
+    })}` as HydrationScope;
+    for (const [name, root] of this.clientState.roots) {
+      (this.roots as FateRoots)[name] = clientRoot(root.type);
+    }
+    const definitions: FateMutations = defineMutations?.(clientMutationBuilder) ?? {};
+    for (const [key, definition] of Object.entries(definitions)) {
+      if (this.mutationMap[key]) {
+        throw new Error(`fate: Mutation '${key}' already exists.`);
+      }
+      this.clientState.mutations.set(key, definition as ClientMutationDefinition);
+      const mutation = wrapMutation(this, { ...definition, key });
+      this.mutationMap[key] = mutation;
+      setNestedValue(this.mutations as AnyRecord, key, mutation);
+      setNestedValue(this.actions as AnyRecord, key, wrapAction(mutation));
+    }
+    this.initializeParentLists();
+    for (const [name, root] of this.clientState.roots) {
+      const data = {
+        ...this.clientState.initial(root.type, root.id),
+        id: root.id,
+      };
+      const entityId = this.write(root.type, data, recordPaths(data));
+      this.rootRequests.set(name, entityId);
+    }
+    for (const [id, record] of this.store.dehydrate().records) {
+      this.clientState.initialRecords.add(record);
+      this.clientState.initialIds.add(id);
+    }
+    return this;
+  }
+
+  /** @internal */
+  getMutationEntity(key: string) {
+    return this.mutationEntities?.get(key);
+  }
+
+  /** @internal */
+  isClientMutation(key: string) {
+    return this.clientState.mutations.has(key);
+  }
+
+  /** @internal */
+  prepareClientMutation(
+    key: string,
+    input: unknown,
+    select: Set<string>,
+    plan?: SelectionPlan,
+    args?: AnyRecord,
+  ) {
+    return this.clientState.prepare(key, input, async (name, value, options) => {
+      if (!this.mutationEntities?.has(name)) {
+        throw new Error(`fate: Unknown remote mutation '${name}'.`);
+      }
+      const inherit =
+        this.getMutationEntity(name) === this.clientState.mutations.get(key)?.entity &&
+        !options?.view &&
+        !options?.select;
+      const remotePlan = options?.view
+        ? getSelectionPlan(options.view, null)
+        : options?.select
+          ? getSelectionPlan(options.select as View<any, any>, null)
+          : inherit
+            ? plan
+            : undefined;
+      const result = await this.executeMutation(
+        name,
+        value,
+        inherit ? select : (remotePlan?.paths ?? new Set()),
+        {
+          args: options?.args ?? (inherit ? args : undefined),
+          plan: remotePlan,
+        },
+      );
+      return { plan: remotePlan, result };
+    });
+  }
+
+  private remoteSelection(
+    type: string,
+    paths: Iterable<string>,
+    plan?: SelectionPlan,
+  ): Iterable<string> {
+    return expandRefetchSelection(
+      this.types,
+      type,
+      this.clientState.remoteSelection(type, paths, plan),
+    );
   }
 
   private initializeParentLists() {
@@ -1058,7 +1226,10 @@ export class FateClient<
     }
     const decoded = decodeClientHydrationState(state.data, this.hydrationLimits);
 
-    const notify = this.store.hydrate(decoded.store, mode, { deferNotifications: true });
+    const notify = this.store.hydrate(decoded.store, mode, {
+      deferNotifications: true,
+      initialRecords: this.clientState.initialRecords,
+    });
 
     if (mode === 'replace') {
       this.rootLists.clear();
@@ -1124,6 +1295,177 @@ export class FateClient<
   }
 
   /** @internal */
+  hasClientState() {
+    return this.clientState.definitions.size > 0;
+  }
+
+  /** @internal */
+  isClientOwnedType(type: string) {
+    return this.clientState.localTypes.has(type);
+  }
+
+  /** @internal */
+  isPersistedClientField(id: EntityId, key: string) {
+    const { type } = parseEntityId(id);
+    const field = key.split('(', 1)[0];
+    return this.clientState.isLocalField(type, field) && !this.clientState.isComputed(type, field);
+  }
+
+  /** @internal */
+  isClientStateList(key: string) {
+    const owner = parseListKey(key);
+    return !!owner && this.isPersistedClientField(owner.ownerId, owner.field);
+  }
+
+  /** @internal */
+  getRemotePersistenceSelection(type: string, paths: Iterable<string>) {
+    return this.clientState.remoteSelection(type, paths);
+  }
+
+  /** @internal Include client relationships when walking to cached server records. */
+  getPersistenceSelection(type: string, paths: Iterable<string>, plan?: SelectionPlan) {
+    return this.hasClientState() && type !== '__value__'
+      ? this.clientState.expand(type, paths, false, plan)
+      : paths;
+  }
+
+  /** @internal */
+  getPersistenceClientRoot(name: string) {
+    const root = this.clientState.roots.get(name);
+    return root && toEntityId(root.type, root.id);
+  }
+
+  /** @internal Read client edges without copying their values into the read cache. */
+  readClientPersistenceRecord(id: EntityId) {
+    return this.store.readConfirmed(id)?.record ?? this.clientState.savedRecords.get(id);
+  }
+
+  /** @internal */
+  readRemotePersistenceRecord(id: EntityId) {
+    const value = this.store.readConfirmed(id);
+    const { type } = parseEntityId(id);
+    if (!value || this.isClientOwnedType(type)) {
+      return;
+    }
+    if (!this.clientState.definitions.has(type)) {
+      return value;
+    }
+    const isRemote = (path: string) => !this.isPersistedClientField(id, path.split('.', 1)[0]);
+    return {
+      paths: value.paths.filter(isRemote),
+      record: Object.fromEntries(Object.entries(value.record).filter(([key]) => isRemote(key))),
+      stale: value.stale?.filter(isRemote),
+    };
+  }
+
+  private initializePersistedClientFields(id: EntityId, record: AnyRecord) {
+    const { id: rawId, type } = parseEntityId(id);
+    const defaults = this.clientState.defaults(type, rawId, record);
+    if (defaults) {
+      const input = { ...defaults, id: record.id ?? rawId };
+      this.writeEntity(
+        type,
+        input,
+        recordPaths(input),
+        undefined,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        rawId,
+        true,
+      );
+    }
+  }
+
+  /** @internal */
+  captureClientReferences(records: Iterable<AnyRecord | null>) {
+    const references = new Map<EntityId, ClientStateReference | null>();
+    const capture = (entityId: EntityId) => {
+      const { id, type } = parseEntityId(entityId);
+      if (this.clientState.localTypes.has(type) || references.has(entityId)) {
+        return;
+      }
+      const config = this.getTypeConfig(type);
+      const saved = this.clientState.savedReferences.get(entityId);
+      const record = this.store.readConfirmed(entityId)?.record;
+      const rawId = (record && config.getId(record)) ?? saved?.id ?? record?.id ?? id;
+      const fields = { ...saved?.record };
+      for (const field of ['id', '__typename', ...getRefetchFields(config.refetch)]) {
+        if (record && Object.hasOwn(record, field)) {
+          fields[field] = record[field];
+        }
+      }
+      references.set(entityId, {
+        id: typeof rawId === 'string' || typeof rawId === 'number' ? rawId : id,
+        record: fields,
+      });
+    };
+    for (const record of records) {
+      if (record) {
+        this.markRecordReferences(record, capture);
+      }
+    }
+    return references;
+  }
+
+  /** @internal */
+  captureClientState(): ClientStateSnapshot {
+    const state = this.store.dehydrateConfirmed();
+    const records = new Map<EntityId, AnyRecord | null>();
+    for (const [id, record] of state.records) {
+      if (!this.clientState.definitions.has(parseEntityId(id).type)) {
+        continue;
+      }
+      const fields = Object.entries(record).filter(([key]) => this.isPersistedClientField(id, key));
+      if (fields.length) {
+        records.set(id, {
+          __typename: record.__typename,
+          id: record.id,
+          ...Object.fromEntries(fields),
+        });
+      }
+    }
+    return {
+      lists: new Map(state.lists.filter(([key]) => this.isClientStateList(key))),
+      records,
+      references: this.captureClientReferences(records.values()),
+    };
+  }
+
+  /** @internal */
+  isInitialClientRecord(id: EntityId) {
+    return this.clientState.initialIds.has(id);
+  }
+
+  /** @internal */
+  restoreClientState(state: ClientStateSnapshot, changes: ClientStateSnapshot) {
+    this.clientState.savedRecords = state.records;
+    this.clientState.savedReferences = state.references;
+    if (!changes.records.size && !changes.lists.size) {
+      return;
+    }
+    this.store.transaction(() =>
+      this.store.update(() => {
+        for (const [id, record] of changes.records) {
+          if (record) {
+            this.store.merge(id, record, recordPaths(record));
+            this.initializePersistedClientFields(id, record);
+          } else {
+            const { id: value, type } = parseEntityId(id);
+            if (this.clientState.localTypes.has(type)) {
+              this.deleteRecord(type, value);
+            }
+          }
+        }
+        for (const [key, list] of changes.lists) {
+          this.store.restoreList(key, list ?? undefined);
+        }
+      }),
+    );
+  }
+
+  /** @internal */
   getPersistenceRootLists(type: string) {
     return this.rootLists.get(type) ?? new Set<string>();
   }
@@ -1143,18 +1485,36 @@ export class FateClient<
     this.store.update(() => {
       const coverage = new Map(state.store.coverage);
       const stale = new Map(state.store.stale);
-      for (const [id, record] of state.store.records) {
-        this.store.restoreRecordStaleness(id, stale.get(id));
+      const local = this.persistenceRuntime?.mutateClient && this.hasClientState();
+      for (const [id, saved] of state.store.records) {
+        const { type } = parseEntityId(id);
+        if (local && this.clientState.localTypes.has(type)) {
+          continue;
+        }
+        const isRemote = (path: string) => !this.isPersistedClientField(id, path.split('.', 1)[0]);
+        const record = local
+          ? Object.fromEntries(Object.entries(saved).filter(([field]) => isRemote(field)))
+          : saved;
+        this.store.restoreRecordStaleness(
+          id,
+          local ? stale.get(id)?.filter(isRemote) : stale.get(id),
+        );
         const existing = this.store.read(id);
         const paths = coverage.get(id) ?? [];
         this.store.merge(
           id,
           existing ? (mergePreservingExisting(record, existing) as AnyRecord) : record,
-          paths,
+          local ? paths.filter(isRemote) : paths,
         );
+        if (local) {
+          this.initializePersistedClientFields(id, record);
+        }
       }
       for (const [key, list] of state.store.lists) {
-        if (!this.store.getListState(key)) {
+        if (
+          !this.store.getListState(key) &&
+          !(this.persistenceRuntime?.mutateClient && this.isClientStateList(key))
+        ) {
           this.store.setList(key, list);
         }
       }
@@ -1360,6 +1720,9 @@ export class FateClient<
     if (invalidate || invalidateRecords) {
       this.store.update(() => {
         for (const key of invalidate ?? []) {
+          if (this.isClientStateList(key)) {
+            continue;
+          }
           const list = this.store.getListState(key);
           if (list) {
             const generation = this.recordInvalidation(`list:${key}`);
@@ -1370,9 +1733,20 @@ export class FateClient<
         }
         for (const id of invalidateRecords ?? []) {
           const entityId = this.resolveEntityId(id);
+          const { type } = parseEntityId(entityId);
+          if (this.clientState.localTypes.has(type)) {
+            continue;
+          }
           const generation = this.recordInvalidation(`entity:${entityId}`);
           this.acceptWrite(`record:${entityId}`, generation);
-          this.withWriteGeneration(generation, () => this.store.invalidateRecord(entityId));
+          this.withWriteGeneration(generation, () =>
+            this.store.invalidateRecord(
+              entityId,
+              this.clientState.definitions.has(type)
+                ? (path) => !this.clientState.isLocalField(type, path.split(/[.(]/, 1)[0])
+                : undefined,
+            ),
+          );
         }
       });
     }
@@ -1609,6 +1983,15 @@ export class FateClient<
   }
 
   /** @internal */
+  persistClientMutation<T>(
+    run: (commit: (apply: () => void) => void | Promise<void>) => Promise<T>,
+  ) {
+    return this.persistenceRuntime?.mutateClient
+      ? this.persistenceRuntime.mutateClient(run)
+      : run((apply) => apply());
+  }
+
+  /** @internal */
   assertPersistenceActive(): void {
     if (
       this.persistenceDisposal?.signal.aborted ||
@@ -1656,7 +2039,7 @@ export class FateClient<
 
     const entity = this.mutationEntities?.get(key);
     if (entity && entity !== '__value__') {
-      select = new Set(expandRefetchSelection(this.types, entity, select));
+      select = new Set(this.remoteSelection(entity, select, options.plan));
     }
     const baseRecord = input && typeof input === 'object' ? (input as AnyRecord) : undefined;
     const separateSelectionArgs = this.transport.separateMutationSelectionArgs;
@@ -1664,20 +2047,26 @@ export class FateClient<
       !separateSelectionArgs && baseRecord && typeof baseRecord.args === 'object'
         ? (baseRecord.args as AnyRecord)
         : undefined;
-    const argsPayload = combineArgsPayload(
+    const selectionArgs = combineArgsPayload(
       options.plan ? resolvedArgsFromPlan(options.plan) : undefined,
       combineArgsPayload(inputArgs, options.args),
     );
 
-    const requestInput = separateSelectionArgs
-      ? input
-      : argsPayload && baseRecord
-        ? ({ ...baseRecord, args: argsPayload } as AnyRecord)
-        : argsPayload
-          ? ({ args: argsPayload } as AnyRecord)
-          : input;
+    const argsPayload = entity
+      ? this.clientState.remoteArgs(
+          entity,
+          selectionArgs,
+          options.plan ? new Set(options.plan.args.keys()) : undefined,
+        )
+      : selectionArgs;
 
-    return await this.trackPendingRequest(() =>
+    let requestInput = input;
+    if (!separateSelectionArgs && (argsPayload || (inputArgs && selectionArgs))) {
+      const { args: _inputArgs, ...fields } = baseRecord ?? {};
+      requestInput = argsPayload ? { ...fields, args: argsPayload } : fields;
+    }
+
+    const result = await this.trackPendingRequest(() =>
       options.identity
         ? separateSelectionArgs
           ? this.transport.mutateDurably!(
@@ -1692,6 +2081,7 @@ export class FateClient<
           ? this.transport.mutate!(key as any, requestInput as any, select, argsPayload)
           : this.transport.mutate!(key as any, requestInput as any, select),
     );
+    return entity ? this.clientState.sanitize(entity, result) : result;
   }
 
   write(
@@ -1702,6 +2092,30 @@ export class FateClient<
     insert?: InsertPosition,
   ) {
     return this.writeEntity(type, data, select, plan, null, insert);
+  }
+
+  /** @internal Commit a client patch whose identity is already known. */
+  writeClientRecord(
+    type: string,
+    id: string | number,
+    data: AnyRecord,
+    plan?: SelectionPlan,
+    prefix?: string,
+    remote = false,
+  ) {
+    const write = () =>
+      this.writeEntity(
+        type,
+        data,
+        recordPaths(data),
+        plan,
+        prefix ?? null,
+        undefined,
+        undefined,
+        undefined,
+        id,
+      );
+    return remote ? this.withMutationWrite(plan, write) : write();
   }
 
   /** @internal Normalize an optimistic patch identified by its mutation input. */
@@ -1724,6 +2138,10 @@ export class FateClient<
     plan?: SelectionPlan,
     insert?: InsertPosition,
   ) {
+    return this.withMutationWrite(plan, () => this.write(type, data, select, plan, insert));
+  }
+
+  private withMutationWrite<T>(plan: SelectionPlan | undefined, write: () => T): T {
     const previous = this.mutationWrite;
     const fields = plan ? new Set<string>() : undefined;
     if (fields && plan) {
@@ -1736,7 +2154,7 @@ export class FateClient<
     }
     this.mutationWrite = { fields };
     try {
-      return this.write(type, data, select, plan, insert);
+      return write();
     } finally {
       this.mutationWrite = previous;
     }
@@ -1748,6 +2166,7 @@ export class FateClient<
 
       this.viewDataCache.invalidate(entityId);
       this.stableRefs.delete(entityId);
+      this.clientState.collect(entityId);
       this.store.deleteRecord(entityId);
       this.store.removeReferencesTo(entityId, this.viewDataCache);
     });
@@ -1794,6 +2213,14 @@ export class FateClient<
     return this.stableRefWithViewNames(type, id, getRootViewNames(rootView));
   }
 
+  readView<V extends View<any, any>>(
+    view: V,
+    ref: ViewRef<ViewEntityName<V>>,
+  ): FateThenable<ViewSnapshot<ViewEntity<V>, ViewSelection<V>>>;
+  readView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): FateThenable<ViewSnapshot<T, S>>;
   readView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     view: V,
     ref: ViewRef<T['__typename']>,
@@ -1992,7 +2419,7 @@ export class FateClient<
                 await persistence.restoreRequest(persistedRequest);
                 const remaining = this.missingForSelection(entityId, selectedPaths, plan);
                 if (remaining.size) {
-                  await this.fetchByIdAndNormalize(type, [id], remaining, plan);
+                  await this.fetchMissingFields(type, id, remaining, plan);
                   persistence.fetched({
                     ...persistedRequest,
                     items: persistedRequest.items.map((item) => ({
@@ -2003,7 +2430,7 @@ export class FateClient<
                   });
                 }
               } else {
-                await this.fetchByIdAndNormalize(type, [id], missing, plan);
+                await this.fetchMissingFields(type, id, missing, plan);
               }
             }),
           (joined) => {
@@ -2124,7 +2551,11 @@ export class FateClient<
 
       const promise = this.trackPendingRequest(async () => {
         try {
-          await this.fetchByIdAndNormalize(ownerType, [rawOwnerId], fetchPaths, plan);
+          if (listMissing) {
+            await this.fetchByIdAndNormalize(ownerType, [rawOwnerId], fetchPaths, plan);
+          } else {
+            await this.fetchMissingFields(ownerType, rawOwnerId, fetchPaths, plan);
+          }
           const remainingMissing = this.missingForSelection(resolvedOwner, selectedPaths, plan);
 
           if (remainingMissing.size > 0 || hasMissingList()) {
@@ -2194,7 +2625,13 @@ export class FateClient<
 
     const entityId = toEntityId(type, id);
     const plan = getSelectionPlan(view, ref, { includeNestedViews: true });
-    if (plan.paths.size === 0) {
+    const remotePaths = new Set(this.remoteSelection(type, plan.paths, plan));
+    if (
+      this.clientState.localTypes.has(type) ||
+      plan.paths.size === 0 ||
+      (this.clientState.definitions.size &&
+        this.clientState.expand(type, plan.paths, true).size === 0)
+    ) {
       return () => {};
     }
     this.assertLiveViewSupport();
@@ -2211,28 +2648,36 @@ export class FateClient<
     const args = resolvedArgsFromPlan(plan);
     let unsubscribe: () => void;
     try {
-      unsubscribe = this.transport.subscribeById!(type, id, plan.paths, args, {
-        onData: (record, liveSelect) => {
-          if (this.persistenceDisposal?.signal.aborted || !record || typeof record !== 'object') {
-            return;
-          }
+      unsubscribe = this.transport.subscribeById!(
+        type,
+        id,
+        remotePaths,
+        this.clientState.remoteArgs(type, args),
+        {
+          onData: (record, liveSelect) => {
+            if (this.persistenceDisposal?.signal.aborted || !record || typeof record !== 'object') {
+              return;
+            }
 
-          const select = new Set(liveSelect ?? plan.paths);
+            const select = new Set(liveSelect ?? plan.paths);
 
-          this.write(type, record as AnyRecord, select, plan, 'none');
+            this.withResponseWrite(++this.writeGeneration, () =>
+              this.write(type, record as AnyRecord, select, plan, 'none'),
+            );
+          },
+          onDelete: (deletedId) => {
+            if (this.persistenceDisposal?.signal.aborted) {
+              return;
+            }
+            this.deleteRecord(type, deletedId ?? id);
+          },
+          onError: (error) => {
+            if (!this.persistenceDisposal?.signal.aborted) {
+              this.reportLiveError(error);
+            }
+          },
         },
-        onDelete: (deletedId) => {
-          if (this.persistenceDisposal?.signal.aborted) {
-            return;
-          }
-          this.deleteRecord(type, deletedId ?? id);
-        },
-        onError: (error) => {
-          if (!this.persistenceDisposal?.signal.aborted) {
-            this.reportLiveError(error);
-          }
-        },
-      });
+      );
     } catch (error) {
       this.reportLiveError(error);
       return emptyDispose;
@@ -2254,6 +2699,13 @@ export class FateClient<
     connection: ConnectionMetadata,
   ): () => void {
     this.assertPersistenceActive();
+    if (
+      this.clientState.localTypes.has(connection.type) ||
+      (!connection.root &&
+        this.clientState.isLocalField(parseEntityId(connection.owner).type, connection.field))
+    ) {
+      return () => {};
+    }
     this.assertLiveConnectionSupport();
 
     const plan = getSelectionPlan(view, null);
@@ -2290,8 +2742,8 @@ export class FateClient<
         connection.procedure,
         connection.type,
         connectionArgs,
-        plan.paths,
-        selectionArgs,
+        this.remoteSelection(connection.type, plan.paths, plan),
+        this.clientState.remoteArgs(connection.type, selectionArgs),
         {
           onError: (error) => {
             if (!this.persistenceDisposal?.signal.aborted) {
@@ -2373,7 +2825,9 @@ export class FateClient<
         return;
       }
 
-      const entityId = this.write(nodeType, nodeRecord, plan.paths, plan, 'none');
+      const entityId = this.withResponseWrite(++this.writeGeneration, () =>
+        this.write(nodeType, nodeRecord, plan.paths, plan, 'none'),
+      );
       this.insertConnectionEdge(
         connection.key,
         entityId,
@@ -3123,9 +3577,9 @@ export class FateClient<
           (this.writeVersions.get(refreshVersionKey) ?? 0) <= generation
         : (this.writeVersions.get(listVersionKey) ?? 0) <= generation);
     const applyResponse = <T>(apply: () => T) =>
-      isPage
-        ? this.withPaginationWrite(connection.key, generation, apply)
-        : this.withWriteGeneration(generation, apply);
+      this.withResponseWrite(generation, () =>
+        isPage ? this.withPaginationWrite(connection.key, generation, apply) : apply(),
+      );
     if (connection.root) {
       if (!this.transport.fetchList) {
         throw new Error(
@@ -3136,8 +3590,8 @@ export class FateClient<
       const context = normalizationReadContext(this.transport);
       const connectionResult = await this.transport.fetchList(
         connection.field,
-        expandRefetchSelection(this.types, connection.type, plan.paths),
-        argsPayload,
+        this.remoteSelection(connection.type, plan.paths, plan),
+        this.clientState.remoteArgs(connection.type, argsPayload, new Set(plan.args.keys())),
         ...(context ? [context] : []),
       );
       this.assertPersistenceActive();
@@ -3205,7 +3659,7 @@ export class FateClient<
     }
 
     const owner = parseEntityId(connection.owner);
-    const nodeSelection = plan.paths;
+    const nodeSelection = this.clientState.expand(connection.type, plan.paths, false, plan);
     const scopedArgsPayload = argsPayload
       ? scopeArgsPayload(argsPayload, connection.field)
       : undefined;
@@ -3811,6 +4265,14 @@ export class FateClient<
       }
     };
 
+    for (const root of this.clientState.roots.values()) {
+      markRecord(toEntityId(root.type, root.id));
+    }
+    for (const [id, record] of this.clientState.savedRecords) {
+      if (record && this.clientState.localTypes.has(parseEntityId(id).type)) {
+        markRecord(id);
+      }
+    }
     const optimisticRoots = this.store.getOptimisticRoots();
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
     optimisticRoots.records.forEach(markRecord);
@@ -3885,6 +4347,7 @@ export class FateClient<
 
     const swept = this.store.collectGarbage(markedRecords, markedLists, {
       onRecordDeleted: (id) => {
+        this.clientState.collect(id);
         this.viewDataCache.invalidate(id);
         this.stableRefs.delete(id);
         this.clearStalledRequestsForEntity(id);
@@ -4141,14 +4604,23 @@ export class FateClient<
     revalidate = false,
   ): Set<string> {
     const { type } = parseEntityId(entityId);
-    const selection = expandRefetchSelection(this.types, type, paths);
+    const selection = expandRefetchSelection(
+      this.types,
+      type,
+      this.clientState.definitions.size ? this.clientState.expand(type, paths, false, plan) : paths,
+    );
     dependencies?.add(`entity:${entityId}`);
     if (!this.store.read(entityId)) {
-      return new Set(
+      const missing = new Set(
         plan.hasTypeBranches
           ? [...selection].filter((path) => fieldAppliesTo(path.split('.')[0], type))
           : selection,
       );
+      // Dependency-free computations still need an entity to read from.
+      if (!missing.size && plan.paths.size) {
+        missing.add('id');
+      }
+      return missing;
     }
     const missing = new Set<string>();
     const covered = (id: EntityId, parts: ReadonlyArray<string>, prefix: string): boolean => {
@@ -4379,7 +4851,7 @@ export class FateClient<
               : item.plan.paths;
 
           if (fetchAll || !hasResult || (entityId && missing.size > 0)) {
-            promises.push(this.fetchQueryAndNormalize(item, signal));
+            promises.push(this.fetchQueryAndNormalize(item, signal, fetchAll));
             fetchedItems.push(item);
           } else {
             fetchedAll = false;
@@ -4394,7 +4866,7 @@ export class FateClient<
           fetchedAll = false;
           continue;
         }
-        promises.push(this.fetchListAndNormalize(item, signal));
+        promises.push(this.fetchListAndNormalize(item, signal, fetchAll));
         fetchedItems.push(item);
       }
     }
@@ -4416,6 +4888,7 @@ export class FateClient<
               null,
               signal,
               group.plan?.args.size ? batch : undefined,
+              fetchAll,
             )
           : Promise.resolve(),
       ),
@@ -4625,13 +5098,15 @@ export class FateClient<
     generation: number,
     args?: AnyRecord,
     signal?: AbortSignal,
+    plan?: SelectionPlan,
   ): Promise<Array<EntityFetchResult>> {
     const config = this.getTypeConfig(type);
-    const selection = expandRefetchSelection(this.types, type, select);
+    const selection = this.remoteSelection(type, select, plan);
+    const fieldArgs = this.clientState.remoteArgs(type, args);
     if (!config.refetch) {
       const context = normalizationReadContext(this.transport, signal ? { signal } : undefined);
       const records = await abortable(
-        this.transport.fetchById(type, ids, selection, args, ...(context ? [context] : [])),
+        this.transport.fetchById(type, ids, selection, fieldArgs, ...(context ? [context] : [])),
         signal,
       );
       return records.map((record) => ({ generation, record }));
@@ -4641,23 +5116,26 @@ export class FateClient<
       throw new Error(`fate: Refetching '${type}' requires transport.fetchQuery.`);
     }
     const selectionSignature = JSON.stringify([...selection].sort());
-    const fieldArgsSignature = args ? hashArgs(args) : '';
+    const fieldArgsSignature = fieldArgs ? hashArgs(fieldArgs) : '';
     return Promise.all(
       ids.map(async (id) => {
         const entityId = toEntityId(type, id);
         const locator = resolveRefetchArgs(
           recipe,
-          this.store.readConfirmed(entityId)?.record,
+          {
+            ...this.clientState.savedReferences.get(entityId)?.record,
+            ...this.store.readConfirmed(entityId)?.record,
+          },
           type,
         );
         for (const key of Object.keys(locator)) {
-          if (args && Object.hasOwn(args, key)) {
+          if (fieldArgs && Object.hasOwn(fieldArgs, key)) {
             throw new Error(
               `fate: Refetch argument '${key}' conflicts with selected field arguments. Use a field alias.`,
             );
           }
         }
-        const requestArgs = { ...args, ...locator };
+        const requestArgs = { ...fieldArgs, ...locator };
         const key = JSON.stringify([
           entityId,
           recipe.root,
@@ -4729,6 +5207,103 @@ export class FateClient<
     return { fields, ids: new Set(ids) };
   }
 
+  private async loadClientEdges(
+    ids: Iterable<EntityId>,
+    paths: Iterable<string>,
+    plan?: SelectionPlan,
+    signal?: AbortSignal,
+    fetchAll = false,
+  ) {
+    if (!this.clientState.definitions.size) {
+      return;
+    }
+    const tasks: Array<Promise<unknown>> = [];
+    const walk = (owner: EntityId, segments: Array<string>, prefix: string) => {
+      const [segment, ...tail] = segments;
+      if (!tail.length) {
+        return;
+      }
+      const { type } = parseEntityId(owner);
+      if (!fieldAppliesTo(segment, type)) {
+        return;
+      }
+      const field = schemaField(segment);
+      const path = prefix ? `${prefix}.${segment}` : segment;
+      const value = this.store.read(owner)?.[getFieldKey(path, plan)];
+      const refs = Array.isArray(value) ? value.filter(isNodeRef) : isNodeRef(value) ? [value] : [];
+      for (const ref of refs) {
+        const childId = getNodeRefId(ref);
+        if (this.clientState.isLocalField(type, field)) {
+          const child = parseEntityId(childId);
+          const record = this.store.read(childId);
+          const rawId =
+            (record && this.getTypeConfig(child.type).getId(record)) ??
+            this.clientState.savedReferences.get(childId)?.id ??
+            record?.id;
+          const childPlan: SelectionPlan = {
+            ...plan,
+            args: new Map(
+              [...(plan?.args ?? [])]
+                .filter(([key]) => key.startsWith(`${path}.`))
+                .map(([key, value]) => [key.slice(path.length + 1), value]),
+            ),
+            live: new Map(),
+            paths: new Set([tail.join('.')]),
+          };
+          if (
+            fetchAll ||
+            this.missingForSelection(childId, childPlan.paths, childPlan, undefined, true).size
+          ) {
+            const id = typeof rawId === 'string' || typeof rawId === 'number' ? rawId : child.id;
+            tasks.push(
+              fetchAll
+                ? this.fetchByIdAndNormalize(
+                    child.type,
+                    [id],
+                    childPlan.paths,
+                    childPlan,
+                    null,
+                    signal,
+                    undefined,
+                    true,
+                  )
+                : this.fetchMissingFields(child.type, id, childPlan.paths, childPlan, signal, true),
+            );
+          }
+        } else {
+          walk(childId, tail, path);
+        }
+      }
+    };
+    for (const id of ids) {
+      for (const path of this.clientState.expand(parseEntityId(id).type, paths, false, plan)) {
+        walk(id, path.split('.'), '');
+      }
+    }
+    await Promise.all(tasks);
+  }
+
+  private async fetchMissingFields(
+    type: string,
+    id: string | number,
+    select: Set<string>,
+    plan: SelectionPlan,
+    signal?: AbortSignal,
+    revalidate = false,
+  ) {
+    const entityId = toEntityId(type, id);
+    if (this.hasClientState() && !this.isClientOwnedType(type) && this.store.read(entityId)) {
+      // An existing parent may already cover every server field in the view.
+      // Resolve client relationships first, including on query-only types.
+      await this.loadClientEdges([entityId], select, plan, signal);
+      select = this.missingForSelection(entityId, select, plan, undefined, revalidate);
+      if (!select.size) {
+        return;
+      }
+    }
+    await this.fetchByIdAndNormalize(type, [id], select, plan, null, signal);
+  }
+
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
@@ -4737,7 +5312,23 @@ export class FateClient<
     prefix: string | null = null,
     signal?: AbortSignal,
     batch?: { generation: number; normalization: NormalizationContext },
+    fetchAll = false,
   ) {
+    if (this.clientState.localTypes.has(type)) {
+      for (const id of ids) {
+        if (!this.store.read(toEntityId(type, id))) {
+          throw new FateRequestError('NOT_FOUND', `fate: Missing client record '${type}:${id}'.`);
+        }
+      }
+      await this.loadClientEdges(
+        ids.map((id) => toEntityId(type, id)),
+        select,
+        plan,
+        signal,
+        fetchAll,
+      );
+      return;
+    }
     const fetch = async (
       sharedSignal?: AbortSignal,
       generation = batch?.generation ?? ++this.writeGeneration,
@@ -4751,11 +5342,12 @@ export class FateClient<
           generation,
           resolvedArgs,
           sharedSignal,
+          plan,
         );
         sharedSignal?.throwIfAborted();
         this.assertPersistenceActive();
         const normalization = batch?.normalization ?? createNormalizationContext();
-        for (const { generation, record } of records) {
+        const entityIds = records.map(({ generation, record }) =>
           this.withResponseWrite(generation, () =>
             this.writeEntity(
               type,
@@ -4766,8 +5358,9 @@ export class FateClient<
               undefined,
               normalization,
             ),
-          );
-        }
+          ),
+        );
+        await this.loadClientEdges(entityIds, select, plan, sharedSignal, fetchAll);
       });
     };
     const read = plan && !prefix ? this.getScalarRead(type, ids, select, plan) : undefined;
@@ -4842,7 +5435,26 @@ export class FateClient<
     );
   }
 
-  private async fetchQueryAndNormalize(item: QueryRequestDescriptor, signal?: AbortSignal) {
+  private async fetchQueryAndNormalize(
+    item: QueryRequestDescriptor,
+    signal?: AbortSignal,
+    fetchAll = false,
+  ) {
+    const localRoot = this.clientState.roots.get(item.procedure);
+    if (localRoot) {
+      this.rootRequests.set(item.queryKey, toEntityId(localRoot.type, localRoot.id));
+      await this.fetchByIdAndNormalize(
+        item.type,
+        [localRoot.id],
+        item.plan.paths,
+        item.plan,
+        null,
+        signal,
+        undefined,
+        fetchAll,
+      );
+      return;
+    }
     if (!this.transport.fetchQuery) {
       throw new Error(
         `fate: transport does not support queries. Please add support for 'fetchQuery' in your transport for '${item.name}'.`,
@@ -4855,8 +5467,8 @@ export class FateClient<
       const record = await abortable(
         this.transport.fetchQuery!(
           item.procedure,
-          expandRefetchSelection(this.types, item.type, item.plan.paths),
-          item.argsPayload,
+          this.remoteSelection(item.type, item.plan.paths, item.plan),
+          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
           ...(context ? [context] : []),
         ),
         signal,
@@ -4884,6 +5496,7 @@ export class FateClient<
       if (acceptRoot()) {
         this.rootRequests.set(item.queryKey, entityId);
       }
+      await this.loadClientEdges([entityId], item.plan.paths, item.plan, signal, fetchAll);
     });
   }
 
@@ -4896,8 +5509,8 @@ export class FateClient<
       const value = await abortable(
         this.transport.fetchQuery!(
           item.procedure,
-          expandRefetchSelection(this.types, item.type, item.plan.paths),
-          item.argsPayload,
+          this.remoteSelection(item.type, item.plan.paths, item.plan),
+          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
           ...(signal ? [{ signal }] : []),
         ),
         signal,
@@ -4910,7 +5523,11 @@ export class FateClient<
     });
   }
 
-  private async fetchListAndNormalize(item: ListRequestDescriptor, signal?: AbortSignal) {
+  private async fetchListAndNormalize(
+    item: ListRequestDescriptor,
+    signal?: AbortSignal,
+    fetchAll = false,
+  ) {
     if (!this.transport.fetchList) {
       throw new Error(
         `fate: 'transport.fetchList' is not configured but request includes a list for key '${item.name}'.`,
@@ -4923,8 +5540,8 @@ export class FateClient<
       const connection = await abortable(
         this.transport.fetchList!(
           item.procedure,
-          expandRefetchSelection(this.types, item.type, item.plan.paths),
-          item.argsPayload,
+          this.remoteSelection(item.type, item.plan.paths, item.plan),
+          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
           ...(context ? [context] : []),
         ),
         signal,
@@ -4949,10 +5566,10 @@ export class FateClient<
       }
       const { items, pagination } = connection;
       const input = normalizationInput(connection);
+      const ids: Array<EntityId> = [];
       this.withResponseWrite(generation, () =>
         this.store.update(() => {
           const normalization = createNormalizationContext();
-          const ids: Array<EntityId> = [];
           const cursors: Array<string | undefined> = [];
           for (const entry of items) {
             const id = this.writeEntity(
@@ -4986,6 +5603,7 @@ export class FateClient<
           );
         }),
       );
+      await this.loadClientEdges(ids, item.plan.paths, item.plan, signal, fetchAll);
     });
   }
 
@@ -5095,6 +5713,7 @@ export class FateClient<
     normalization: NormalizationContext = createNormalizationContext(),
     input = normalizationInput(record),
     knownId?: string | number,
+    initializing = false,
   ): EntityId {
     const { selections, windows } = normalization;
     if (this.store.hasOptimisticUpdates && !this.store.isRebasing) {
@@ -5109,10 +5728,39 @@ export class FateClient<
           normalization,
           input,
           knownId,
+          initializing,
         ),
       );
     }
-    type = this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
+    if (this.remoteWriteDepth && this.clientState.definitions.size) {
+      if (input) {
+        record = input.materialize(record) as AnyRecord;
+      }
+      input = undefined;
+      record = this.clientState.sanitize(type, record);
+      select = new Set(this.clientState.expand(type, select, true, plan, pathPrefix ?? ''));
+      // The complete response graph is sanitized once. Defaults introduced while
+      // normalizing it are trusted client data, including nested local records.
+      const depth = this.remoteWriteDepth;
+      this.remoteWriteDepth = 0;
+      try {
+        return this.writeEntity(
+          type,
+          record,
+          select,
+          plan,
+          pathPrefix,
+          insert,
+          normalization,
+          undefined,
+          knownId,
+          initializing,
+        );
+      } finally {
+        this.remoteWriteDepth = depth;
+      }
+    }
+    type = this.resolveEntityType(type, record);
     const config = this.types.get(type);
     if (!config) {
       throw new Error(`fate: Found unknown entity type '${type}' in normalization.`);
@@ -5123,6 +5771,16 @@ export class FateClient<
       input = undefined;
     }
     const id = knownId ?? normalizationId(config, record, input);
+    const defaults = this.clientState.defaults(type, id, record);
+    if (defaults) {
+      if (input) {
+        record = input.materialize(record) as AnyRecord;
+      }
+      input = undefined;
+      record = { ...defaults, ...record };
+      select = new Set([...select, ...recordPaths(defaults)]);
+    }
+
     const entityId = toEntityId(type, id);
     const generation = this.applyingGeneration ?? ++this.writeGeneration;
     if (
@@ -5177,7 +5835,10 @@ export class FateClient<
       normalized.fields.set(prefix, fields);
     }
 
-    const keys = input ? input.keys(record) : Object.keys(record);
+    // A nested initializer only supplies fields the related record does not have yet.
+    const existing = initializing ? this.store.read(entityId) : undefined;
+    const recordKeys = input ? input.keys(record) : Object.keys(record);
+    const keys = existing ? recordKeys.filter((key) => !Object.hasOwn(existing, key)) : recordKeys;
     for (const key of keys) {
       const field = normalizationField(fields, key, pathPrefix, config, plan);
       const {
@@ -5192,6 +5853,7 @@ export class FateClient<
       const value = input ? input.get(record, key) : record[key];
       const childInput =
         input && value && typeof value === 'object' ? input.child(record, key) : undefined;
+      const initializeChild = initializing || Boolean(defaults && Object.hasOwn(defaults, key));
       const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
       if (relationDescriptor === 'scalar') {
         if (!acceptField) {
@@ -5217,7 +5879,17 @@ export class FateClient<
           }
           continue;
         }
-        if (value && typeof value === 'object' && !isNodeRef(value)) {
+        if (isNodeRef(value)) {
+          if (acceptField) {
+            setRecordValue(
+              result,
+              storageKey,
+              reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
+            );
+          }
+          continue;
+        }
+        if (value && typeof value === 'object') {
           const childType = this.relatedEntityType(
             relationDescriptor.type,
             relationDescriptor.possibleTypes,
@@ -5252,6 +5924,8 @@ export class FateClient<
             undefined,
             normalization,
             childReader,
+            undefined,
+            initializeChild,
           );
         }
       } else if (
@@ -5369,6 +6043,8 @@ export class FateClient<
                 undefined,
                 normalization,
                 childInput,
+                undefined,
+                initializeChild,
               );
 
               ids.push(childId);
@@ -5533,6 +6209,7 @@ export class FateClient<
       if (Object.hasOwn(result, storageKey)) {
         selectedPaths.push(storagePath);
       } else if (
+        !initializing &&
         !(input ? input.has(record, recordKey) : Object.hasOwn(record, recordKey)) &&
         this.acceptFieldWrite(entityId, storageKey, generation)
       ) {
@@ -5763,7 +6440,11 @@ export class FateClient<
 
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
-          const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
+          const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+            ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
+            : Object.hasOwn(record, storageKey)
+              ? record[storageKey]
+              : undefined;
           const metadata = Array.isArray(value)
             ? this.nestedListMetadata(parentId, field, plan, fieldPath, getWindowScope())
             : undefined;
@@ -5781,7 +6462,11 @@ export class FateClient<
             Object.keys(selectionWithoutArgs).length === 0;
 
           if (hasArgsOnly) {
-            const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
+            const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+              ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
+              : Object.hasOwn(record, storageKey)
+                ? record[storageKey]
+                : undefined;
             const metadata = Array.isArray(value)
               ? this.nestedListMetadata(parentId, field, plan, fieldPath, getWindowScope())
               : undefined;
@@ -5803,7 +6488,11 @@ export class FateClient<
             ? selectionWithoutArgs
             : selectionValue;
 
-          const value = Object.hasOwn(record, storageKey) ? record[storageKey] : undefined;
+          const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+            ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
+            : Object.hasOwn(record, storageKey)
+              ? record[storageKey]
+              : undefined;
 
           if (value == null) {
             setRecordValue(target, key, null);
@@ -6116,12 +6805,20 @@ export class FateClient<
   }
 }
 
+export function createClient(): FateClient<Record<never, never>, Record<never, never>>;
 export function createClient<
   T extends [FateRoots, FateMutations] = [
     Record<never, RootDefinition<any, any>>,
     Record<never, MutationDefinition<any, any, any>>,
   ],
   HydrationScope extends string = string,
->(options: FateClientOptions<T[0], T[1], HydrationScope>) {
+>(options: FateClientOptions<T[0], T[1], HydrationScope>): FateClient<T[0], T[1], HydrationScope>;
+export function createClient<
+  T extends [FateRoots, FateMutations] = [
+    Record<never, RootDefinition<any, any>>,
+    Record<never, MutationDefinition<any, any, any>>,
+  ],
+  HydrationScope extends string = string,
+>(options: FateClientOptions<T[0], T[1], HydrationScope> = {}) {
   return new FateClient<T[0], T[1], HydrationScope>(options);
 }

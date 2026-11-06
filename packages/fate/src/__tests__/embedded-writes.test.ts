@@ -1,10 +1,12 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
+import { clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { createPersistence } from '../persistence.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
-import type { SelectionOf } from '../types.ts';
+import { computed, dataView, field } from '../server/dataView.ts';
+import { ConnectionTag, type ConnectionMetadata, type SelectionOf } from '../types.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 
@@ -28,6 +30,125 @@ const setup = () => {
   });
   return { client, fetchQuery };
 };
+
+test('client extensions preserve embedded paths, arguments and values', async () => {
+  const { client: base, fetchQuery } = setup();
+  const client = base.registerClientSchema(
+    clientSchema({
+      typeExtensions: {
+        User: {
+          defaults: () => ({}),
+          view: dataView<User>('User')({
+            characterName: computed({
+              resolve: (_user: User, { name }) => name,
+              select: { name: field('character.detail.name') },
+            }),
+          }),
+        },
+      },
+    }),
+  );
+  const Character = view<User>()({
+    character: {
+      args: { locale: 'en' },
+      color: true,
+      detail: { level: true, name: true },
+      unitId: true,
+    },
+  });
+  const { viewer } = await client.request({ viewer: { view: Character } });
+  expect((await client.readView(Character, viewer)).data.character).toEqual(initial.character);
+  expect(fetchQuery).toHaveBeenCalledExactlyOnceWith(
+    'viewer',
+    new Set([
+      'character.color',
+      'character.detail.level',
+      'character.detail.name',
+      'character.unitId',
+    ]),
+    { character: { locale: 'en' } },
+  );
+  const Name = view<EntityOf<typeof client, 'User'>>()({ characterName: true });
+  const { viewer: named } = await client.request({ viewer: { view: Name } });
+  expect((await client.readView(Name, named)).data.characterName).toBe('Sam');
+  expect(fetchQuery).toHaveBeenCalledTimes(2);
+});
+
+test('nested pagination preserves embedded fields without client extensions', async () => {
+  type Group = { __typename: 'Group'; id: string; users: Array<User> };
+  const fetchById = vi.fn(async (_type, _ids, _select, args) => [
+    {
+      id: 'g',
+      users: {
+        items: [
+          {
+            cursor: args?.users?.after ? '2' : '1',
+            node: { ...initial, id: args?.users?.after ? '2' : '1' },
+          },
+        ],
+        pagination: { hasNext: !args?.users?.after, nextCursor: args?.users?.after ? '2' : '1' },
+      },
+    },
+  ]);
+  const client = createClient({
+    roots: { group: clientRoot<Group, 'Group'>('Group') },
+    transport: { fetchById },
+    types: [
+      { fields: { users: { listOf: 'User' } }, type: 'Group' },
+      { fields: { character: { embedded: 'Character' } }, type: 'User' },
+    ],
+  });
+  const GroupView = view<Group>()({
+    users: { items: { node: Full }, pagination: { hasNext: true, nextCursor: true } },
+  });
+  const { group } = await client.request({ group: { id: 'g', view: GroupView } });
+  const { users } = (await client.readView(GroupView, group)).data;
+  const metadata = (users as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
+  await client.loadConnection(Full, metadata, { after: '1' });
+  expect((await client.readView(Full, client.ref('User', '2', Full))).data.character).toEqual(
+    initial.character,
+  );
+  expect(client.store.getListState(metadata.key)?.ids).toEqual(['User:1', 'User:2']);
+  expect(fetchById).toHaveBeenCalledTimes(2);
+});
+
+test.each([null, [{ color: 2, unitId: 42 }]])(
+  'embedded arrays preserve values even when their type name matches a client entity: %j',
+  async (characters) => {
+    type Profile = {
+      __typename: 'User';
+      characters: Array<{ __typename: 'Character'; color: number; unitId: number }> | null;
+      id: string;
+    };
+    const fetchQuery = vi.fn(async () => ({ characters, id: '1' }));
+    const client = createClient({
+      roots: { viewer: clientRoot<Profile, 'User'>('User') },
+      transport: { fetchById: async () => [], fetchQuery },
+      types: [{ fields: { characters: { embedded: 'Character' } }, type: 'User' }],
+    }).registerClientSchema(
+      clientSchema({
+        types: {
+          Character: {
+            defaults: () => ({ color: 0, unitId: 0 }),
+            view: dataView<{ color: number; unitId: number }>('Character')({
+              color: true,
+              unitId: true,
+            }),
+          },
+        },
+      }),
+    );
+    const Characters = view<Profile>()({ characters: { color: true, unitId: true } });
+    const { viewer } = await client.request({ viewer: { view: Characters } });
+    expect((await client.readView(Characters, viewer)).data.characters).toEqual(characters);
+    expect(client.store.read('User:1')?.characters).toEqual(characters);
+    expect(fetchQuery).toHaveBeenCalledExactlyOnceWith(
+      'viewer',
+      new Set(['characters.color', 'characters.unitId']),
+      undefined,
+    );
+  },
+);
 
 test('partial embedded responses preserve cached siblings recursively', async () => {
   const { client, fetchQuery } = setup();

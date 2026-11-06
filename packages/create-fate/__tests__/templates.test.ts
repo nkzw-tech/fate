@@ -43,6 +43,7 @@ const getViteConfigImports = (source: string): Array<string> =>
 describe('create-fate templates', () => {
   const registryVersions = new Map([
     ['@nkzw/fate', '1.2.3'],
+    ['@nkzw/fate-indexeddb', '1.2.4'],
     ['react-fate', '2.3.4'],
     ['void-fate', '3.4.5'],
     ['vue-fate', '4.5.6'],
@@ -295,10 +296,9 @@ describe('create-fate templates', () => {
         },
       );
 
-      const docsDir =
-        templateName === 'void' || templateName === 'graphql-client'
-          ? 'node_modules/react-fate/docs/'
-          : 'client/node_modules/react-fate/docs/';
+      const docsDir = ['client-only', 'graphql-client', 'void'].includes(templateName)
+        ? 'node_modules/react-fate/docs/'
+        : 'client/node_modules/react-fate/docs/';
       const agents = readFileSync(join(target, 'AGENTS.md'), 'utf8');
       expect(agents).toContain(`\`${docsDir}\``);
       expect(agents).toContain('`index.md`');
@@ -311,7 +311,7 @@ describe('create-fate templates', () => {
   test('generates Vue projects for every backend template', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-vue-'));
     try {
-      for (const templateName of templateNames()) {
+      for (const templateName of templateNames().filter((name) => name !== 'client-only')) {
         const target = join(tempRoot, templateName);
         await execFileAsync(
           process.execPath,
@@ -514,5 +514,47 @@ describe('create-fate templates', () => {
       }
     },
     30_000,
+  );
+
+  test.each(['react', 'vue'])(
+    'generates a static client-only %s starter with IndexedDB',
+    async (framework) => {
+      const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-client-only-'));
+      try {
+        const target = join(tempRoot, 'app');
+        await execFileAsync(
+          process.execPath,
+          [
+            join(packageRoot, 'bin/create-fate.mjs'),
+            target,
+            '--template',
+            'client-only',
+            '--framework',
+            framework,
+            '--no-setup',
+          ],
+          { env: { ...process.env, npm_config_registry: registryURL } },
+        );
+        const manifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
+        const [extension, other] = framework === 'vue' ? ['vue', 'tsx'] : ['tsx', 'vue'];
+        expect(manifest.dependencies).toHaveProperty('@nkzw/fate-indexeddb', '^1.2.4');
+        expect(manifest.dependencies).toHaveProperty(`@void/${framework}`);
+        expect(manifest.dependencies).toHaveProperty(`${framework}-fate`);
+        expect(manifest.dependencies).not.toHaveProperty('void-fate');
+        expect(manifest.scripts['dev:setup']).toBe('vp run prepare:void');
+        expect(readFileSync(join(target, 'void.config.ts'), 'utf8')).toContain("output: 'static'");
+        expect(readFileSync(join(target, 'src/state.ts'), 'utf8')).toContain(
+          'createIndexedDBStorage()',
+        );
+        for (const page of ['index', 'about', 'layout']) {
+          expect(existsSync(join(target, `pages/${page}.${extension}`))).toBe(true);
+          expect(existsSync(join(target, `pages/${page}.${other}`))).toBe(false);
+        }
+        expect(existsSync(join(target, 'routes'))).toBe(false);
+        expect(existsSync(join(target, 'db'))).toBe(false);
+      } finally {
+        rmSync(tempRoot, { force: true, recursive: true });
+      }
+    },
   );
 });

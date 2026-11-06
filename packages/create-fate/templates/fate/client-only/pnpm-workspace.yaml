@@ -1,0 +1,24 @@
+packages:
+  - .
+
+allowBuilds:
+  better-sqlite3: false
+  esbuild: true
+  workerd: true
+
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
+
+minimumReleaseAgeExclude:
+  - '@voidzero-dev/vite-plus-core'
+  - vite-plus
+
+overrides:
+  vite: 'catalog:'
+
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: '*'

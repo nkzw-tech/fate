@@ -1,8 +1,4 @@
-import type {
-  Category,
-  Comment as InlineComment,
-  Post,
-} from '@nkzw/fate-server/src/trpc/router.ts';
+import type { Category, Comment as InlineComment } from '@nkzw/fate-server/src/trpc/router.ts';
 import Stack, { VStack } from '@nkzw/stack';
 import { cx } from 'class-variance-authority';
 import {
@@ -25,6 +21,7 @@ import {
   view,
   ViewRef,
 } from 'react-fate';
+import type { Post } from '../state.ts';
 import { Button } from '../ui/Button.tsx';
 import Card from '../ui/Card.tsx';
 import TagBadge, { TagView } from '../ui/TagBadge.tsx';
@@ -52,6 +49,7 @@ const CommentConnectionView = {
 
 export const PostView = view<Post>()({
   author: UserView,
+  bookmarked: true,
   category: CategorySummaryView,
   commentCount: true,
   comments: defer(CommentConnectionView),
@@ -214,6 +212,24 @@ export function PostCard({ detail, post: postRef }: { detail?: boolean; post: Vi
   return (
     <Card>
       <VStack gap={16}>
+        <Stack gap wrap>
+          <Button
+            onClick={() => void fate.mutations.post.bookmark({ input: { id: post.id } })}
+            size="sm"
+            variant="ghost"
+          >
+            {post.bookmarked ? '★ Bookmarked' : '☆ Bookmark'}
+          </Button>
+          <Button
+            action={() =>
+              fate.mutations.post.likeAndBookmark({ input: { id: post.id }, view: PostView })
+            }
+            size="sm"
+            variant="ghost"
+          >
+            Like & bookmark
+          </Button>
+        </Stack>
         <Stack alignStart between gap={16} wrap>
           <VStack gap>
             <Link to={`/post/${post.id}`}>

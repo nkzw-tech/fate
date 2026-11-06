@@ -6,10 +6,11 @@ Create a new fate app:
 vp create fate
 ```
 
-The generated app is installed and the fate client is generated during creation.
+Dependencies are installed during creation. Templates that use a server also generate the fate client.
 
 Choose between these templates:
 
+- `client-only` uses Void Pages Routing with local state persisted in IndexedDB.
 - `void`: Void pages router with Drizzle, live updates, and native Cloudflare deployment.
 - `drizzle`: tRPC with Drizzle.
 - `graphql`: GraphQL with Prisma.

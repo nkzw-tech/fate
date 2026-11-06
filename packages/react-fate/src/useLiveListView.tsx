@@ -33,7 +33,6 @@ export function useLiveListView<
       return;
     }
 
-    client.assertLiveConnectionSupport();
     return client.subscribeLiveListView(nodeView, metadata);
   });
 

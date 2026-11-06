@@ -72,3 +72,13 @@ export { useRequest, type RequestResource } from './useRequest.ts';
 export { useRefetch } from './useRefetch.ts';
 export { useView, type ViewResource } from './useView.ts';
 export { useViews } from './useViews.ts';
+
+export {
+  clientSchema,
+  dataView,
+  list,
+  computed,
+  field,
+  type ClientSchema,
+  type EntityOf,
+} from '@nkzw/fate';

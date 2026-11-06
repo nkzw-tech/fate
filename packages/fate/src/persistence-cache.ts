@@ -493,6 +493,9 @@ export class PersistenceCache {
       }
     };
     for (const id of ids) {
+      if (this.client.isClientOwnedType(parseEntityId(id).type)) {
+        continue;
+      }
       const key = recordKey(id);
       const saved = previousRecords.get(id);
       const before = saved
@@ -502,7 +505,7 @@ export class PersistenceCache {
             stale: previousStale.get(id),
           }
         : undefined;
-      const memory = this.client.store.readConfirmed(id);
+      const memory = this.client.readRemotePersistenceRecord(id);
       const disk = memory || before ? undefined : await this.node(key);
       const recovery = this.recoveryUpdates.get(key);
       const changed = this.pendingNodes.values.has(key);
@@ -546,6 +549,9 @@ export class PersistenceCache {
     }
     const listValues: Array<readonly [string, List]> = [];
     for (const key of lists) {
+      if (this.client.isClientStateList(key)) {
+        continue;
+      }
       const value = this.pendingNodes.values.has(listKey(key))
         ? (this.pendingNodes.values.get(listKey(key)) as List | undefined)
         : this.recoveryUpdates.has(listKey(key))
@@ -627,6 +633,13 @@ export class PersistenceCache {
 
   changedNode(change?: StoreChange) {
     if (!this.suppressed && change) {
+      if (
+        change.kind === 'record'
+          ? this.client.isClientOwnedType(parseEntityId(change.key).type)
+          : this.client.isClientStateList(change.key)
+      ) {
+        return false;
+      }
       let selected: Set<string> | undefined;
       if (change.kind === 'record') {
         if (change.invalidated) {
@@ -649,7 +662,7 @@ export class PersistenceCache {
       }
       const id = change.kind === 'record' ? recordKey(change.key) : listKey(change.key);
       const record =
-        change.kind === 'record' ? this.client.store.readConfirmed(change.key) : undefined;
+        change.kind === 'record' ? this.client.readRemotePersistenceRecord(change.key) : undefined;
       const value =
         change.kind === 'record'
           ? record &&
@@ -835,7 +848,7 @@ export class PersistenceCache {
         if (prefersNetworkResult) {
           const id = key.slice(2);
           const value = key.startsWith('r:')
-            ? this.client.store.readConfirmed(id)
+            ? this.client.readRemotePersistenceRecord(id)
             : key.startsWith('l:')
               ? this.client.store.readConfirmedList(id)
               : this.client.getPersistenceQuery(id);
@@ -857,7 +870,7 @@ export class PersistenceCache {
         // A newly inserted branch can reference an unchanged in-memory record
         // whose last disk claim was evicted. Existing disk values always win.
         return readsMemory && key.startsWith('r:')
-          ? this.client.store.readConfirmed(key.slice(2))
+          ? this.client.readRemotePersistenceRecord(key.slice(2))
           : undefined;
       }
       const value = decodeHydrationValue(stored.value);
@@ -923,12 +936,17 @@ export class PersistenceCache {
       }
     };
     for (const item of request.items) {
-      const paths = [...item.plan.paths];
+      const paths = [...this.client.getPersistenceSelection(item.type, item.plan.paths, item.plan)];
       if (item.kind === 'node' || item.kind === 'nodes') {
         for (const id of item.ids) {
           queue.push({ id: toEntityId(item.type, id), paths, plan: item.plan, prefix: '' });
         }
       } else if (item.kind === 'query') {
+        const clientRoot = this.client.getPersistenceClientRoot(item.procedure);
+        if (clientRoot) {
+          queue.push({ id: clientRoot, paths, plan: item.plan, prefix: '' });
+          continue;
+        }
         let id = await readNode(queryKey(item.queryKey));
         if (id === undefined && item.legacyQueryKey) {
           id = await readNode(queryKey(item.legacyQueryKey));
@@ -962,6 +980,7 @@ export class PersistenceCache {
     for (let index = 0; index < queue.length; index++) {
       const { id, plan, prefix } = queue[index];
       const { type } = parseEntityId(id);
+      const local = this.client.isClientOwnedType(type);
       const locator = getRefetchFields(this.client.getTypeConfig(type).refetch);
       const selected = locator.size
         ? [...new Set([...queue[index].paths, ...locator])]
@@ -980,22 +999,25 @@ export class PersistenceCache {
         continue;
       }
       contexts.set(context, new Set([...(traversed ?? []), ...paths]));
-      const record = (await readNode(key)) as RecordValue | undefined;
-      if (!record) {
-        complete = false;
-        continue;
+      const record = local ? undefined : ((await readNode(key)) as RecordValue | undefined);
+      if (!local) {
+        const storagePaths = [...this.client.getRemotePersistenceSelection(type, paths)].map(
+          (path) => getStoragePath(path, plan, prefix),
+        );
+        if (
+          !record ||
+          storagePaths.some(
+            (path) =>
+              !record.paths.some((covered) => path === covered || path.startsWith(`${covered}.`)),
+          )
+        ) {
+          complete = false;
+        }
+        if (record) {
+          const all = new Set([...(seen?.paths ?? []), ...storagePaths]);
+          nodes.set(key, { paths: all, value: projectRecord(record, [...all]) });
+        }
       }
-      const storagePaths = paths.map((path) => getStoragePath(path, plan, prefix));
-      if (
-        storagePaths.some(
-          (path) =>
-            !record.paths.some((covered) => path === covered || path.startsWith(`${covered}.`)),
-        )
-      ) {
-        complete = false;
-      }
-      const all = new Set([...(seen?.paths ?? []), ...storagePaths]);
-      nodes.set(key, { paths: all, value: projectRecord(record, [...all]) });
       const groups = new Map<string, Array<string>>();
       for (const path of needed) {
         const [field, ...rest] = path.split('.');
@@ -1026,7 +1048,13 @@ export class PersistenceCache {
       for (const [field, children] of groups) {
         const childPrefix = prefix ? `${prefix}.${field}` : field;
         const storageKey = getFieldKey(childPrefix, plan);
-        const value = record.record[storageKey];
+        if (local || this.client.isPersistedClientField(id, storageKey)) {
+          if (children.length) {
+            walk(this.client.readClientPersistenceRecord(id)?.[storageKey], children, childPrefix);
+          }
+          continue;
+        }
+        const value = record?.record[storageKey];
         if (Array.isArray(value)) {
           const nestedKey = getListKey(id, schemaField(field), plan.args.get(childPrefix)?.hash);
           const list = (await readNode(listKey(nestedKey))) as List | undefined;
@@ -1162,6 +1190,10 @@ export class PersistenceCache {
       return;
     }
     const { nodes } = await this.collect(request, fromNetwork ? 'network' : 'memory');
+    if (!nodes.size) {
+      await this.remove(request.key);
+      return;
+    }
     const root: Root = {
       fetchedAt,
       maxAge,

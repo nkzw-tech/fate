@@ -285,3 +285,70 @@ test('rejects conflicting bound field arguments and execution-time selection ove
   await client.actions.edit.with(StateView({ biome: 'Grassland' }))(null, { input: { id: '1' } });
   expect(mutate.mock.calls[1][1]).toEqual({ args: { state: { biome: 'Grassland' } }, id: '1' });
 });
+
+test('inputless mutations and actions can omit input and retain selection options', async () => {
+  const mutate = vi.fn().mockResolvedValue(note);
+  const mutations = {
+    empty: mutation<Note, Record<never, never>, Note>('Note'),
+    emptyRecord: mutation<Note, Record<string, never>, Note>('Note'),
+    selected: mutation<Note, { select: Array<string> }, GraphQLSelectedResult<Note>>('Note'),
+    void: valueMutation<void, number>(),
+  };
+  const client = createClient<[Record<never, never>, typeof mutations]>({
+    mutations,
+    transport: { fetchById: async () => [], mutate },
+    types: [{ fields: { author: { type: 'Author' } }, type: 'Note' }, { type: 'Author' }],
+  });
+  await client.mutations.empty();
+  await client.mutations.emptyRecord();
+  await client.mutations.empty({});
+  await client.mutations.empty({ input: {} });
+  await client.mutations.empty({ view: TitleView });
+  expect(new Set(mutate.mock.calls.at(-1)![2])).toEqual(new Set(['title']));
+  await client.actions.empty(null, {});
+  await client.actions.empty.with(TitleView)(null, {});
+  expect(new Set(mutate.mock.calls.at(-1)![2])).toEqual(new Set(['title']));
+  await expect(client.actions.empty(null, 'reset')).resolves.toBeNull();
+  const selected = await client.mutations.selected({ view: TitleView });
+  if (!selected.error) {
+    expectTypeOf(selected.result.title).toEqualTypeOf<string>();
+    // @ts-expect-error Omitted input must not widen GraphQL result selections.
+    void selected.result.author;
+  }
+  await client.mutations.selected();
+  mutate.mockResolvedValueOnce(1);
+  await expect(client.mutations.void()).resolves.toEqual({ error: undefined, result: 1 });
+  for (const call of mutate.mock.calls) {
+    expect(call[1]).toEqual({});
+  }
+});
+
+test('input-bearing and unspecified contracts still require mutation input', () => {
+  const mutations = {
+    any: valueMutation<any, number>(),
+    optional: valueMutation<{ reason?: string }, number>(),
+    required: valueMutation<{ id: string }, number>(),
+    union: valueMutation<{ id: string } | { name: string }, number>(),
+    unknown: valueMutation<unknown, number>(),
+  };
+  const client = createClient<[Record<never, never>, typeof mutations]>({
+    mutations,
+    transport: { fetchById: async () => [], mutate: vi.fn() },
+  });
+  expectTypeOf<Parameters<typeof client.mutations.required>['length']>().toEqualTypeOf<1>();
+  expectTypeOf<Parameters<typeof client.mutations.optional>['length']>().toEqualTypeOf<1>();
+  expectTypeOf<Parameters<typeof client.mutations.union>['length']>().toEqualTypeOf<1>();
+  expectTypeOf<Parameters<typeof client.mutations.any>['length']>().toEqualTypeOf<1>();
+  expectTypeOf<Parameters<typeof client.mutations.unknown>['length']>().toEqualTypeOf<1>();
+  expectTypeOf<Record<never, never>>().not.toExtend<
+    Parameters<typeof client.mutations.required>[0]
+  >();
+  expectTypeOf<Record<never, never>>().not.toExtend<
+    Parameters<typeof client.mutations.optional>[0]
+  >();
+  expectTypeOf<{ input: Record<never, never> }>().not.toExtend<
+    Parameters<typeof client.mutations.required>[0]
+  >();
+  expectTypeOf<Parameters<typeof client.actions.required>['length']>().toEqualTypeOf<2>();
+  expectTypeOf<Parameters<typeof client.actions.optional>['length']>().toEqualTypeOf<2>();
+});

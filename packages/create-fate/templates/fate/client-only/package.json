@@ -1,0 +1,47 @@
+{
+  "name": "fate-app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "fate is a modern data client for the web.",
+  "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nkzw-tech/fate.git"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "vp build",
+    "dev": "vp dev",
+    "dev:setup": "vp run prepare:void",
+    "prepare:void": "void prepare",
+    "test:all": "vp check"
+  },
+  "dependencies": {
+    "@nkzw/fate": "latest",
+    "@nkzw/fate-indexeddb": "latest",
+    "@void/react": "^1.6.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-error-boundary": "^6.1.6",
+    "react-fate": "latest",
+    "void": "^1.6.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "browserslist": [
+    ">0.2%",
+    "not dead",
+    "not op_mini all"
+  ],
+  "engines": {
+    "node": "^24.22.0 || >=26.12.0",
+    "pnpm": ">=11.0.0"
+  },
+  "packageManager": "pnpm@12.6.0"
+}

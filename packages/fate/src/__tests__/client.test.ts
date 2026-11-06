@@ -3198,7 +3198,9 @@ test('pending root prepends preserve newest-first order while the leading edge i
     resolveMutations.push(() => resolve(response));
     return promise;
   }) as NonNullable<
-    Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']['mutate']
+    NonNullable<
+      Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']
+    >['mutate']
   >;
 
   const client = createClient<[FateRoots, typeof mutations]>({
@@ -5612,7 +5614,9 @@ test('pending optimistic nested prepends stay visible in plain list views', asyn
         resolveMutation = resolve;
       }),
   ) as NonNullable<
-    Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']['mutate']
+    NonNullable<
+      Parameters<typeof createClient<[FateRoots, typeof mutations]>>[0]['transport']
+    >['mutate']
   >;
 
   const client = createClient<[FateRoots, typeof mutations]>({

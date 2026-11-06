@@ -152,17 +152,37 @@ export function isResolvedMutationInsertion(value: unknown): value is ResolvedMu
     return true;
   });
 }
+type MutationInputKeys<T> = T extends unknown ? keyof Omit<T, 'select'> : never;
+
+// Optional fields still describe input. Only a known empty contract may omit it.
+type HasNoMutationInput<T> = 0 extends 1 & T
+  ? false
+  : [T] extends [never]
+    ? false
+    : unknown extends T
+      ? false
+      : [T] extends [void]
+        ? true
+        : [T] extends [Record<string, never>]
+          ? true
+          : [T] extends [object]
+            ? [MutationInputKeys<T>] extends [never]
+              ? true
+              : false
+            : false;
+
+type MutationArguments<I extends MutationIdentifier<any, any, any>, Options> =
+  HasNoMutationInput<MutationInput<I>> extends true ? [options?: Options] : [options: Options];
+
 /**
  * Options accepted by a mutation invocation, including optimistic updates and
  * optional selection for the returned payload.
  */
-export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>> = {
+type MutationBaseOptions<Identifier extends MutationIdentifier<any, any, any>> = {
   /** Optional arguments to pass to the mutation resolver. */
   args?: Record<string, unknown>;
   /** If true, deletes the record with the ID specified in the input. */
   delete?: boolean;
-  /** Input data for the mutation. */
-  input: Omit<MutationInput<Identifier>, 'select'>;
   insert?: MutationInsertion<MutationEntity<Identifier>['__typename']>;
   /** Mark these lists or records stale after the server confirms the mutation. */
   invalidate?: ReadonlyArray<InvalidationTarget>;
@@ -180,6 +200,13 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
   view?: View<MutationEntity<Identifier>, Selection<MutationEntity<Identifier>>>;
 };
 
+/** Mutation options. Input may be omitted only for mutations with no input fields. */
+export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>> =
+  MutationBaseOptions<Identifier> &
+    (HasNoMutationInput<MutationInput<Identifier>> extends true
+      ? { input?: Omit<MutationInput<Identifier>, 'select'> }
+      : { input: Omit<MutationInput<Identifier>, 'select'> });
+
 /**
  * Callable mutation entry point returned on the client that resolves to either
  * a successful result or an error.
@@ -192,12 +219,15 @@ export type MutationFunction<I extends MutationIdentifier<any, any, any>> = I ex
   readonly [GraphQLSelectionBrand]: unknown;
 }
   ? <
-      const V extends MutationOptions<I>['view'] = undefined,
-      const S extends MutationOptions<I>['select'] = undefined,
+      const V extends MutationBaseOptions<I>['view'] = undefined,
+      const S extends MutationBaseOptions<I>['select'] = undefined,
     >(
-      options: Omit<MutationOptions<I>, 'view' | 'select'> & { select?: S; view?: V },
+      ...args: MutationArguments<
+        I,
+        Omit<MutationOptions<I>, 'view' | 'select'> & { select?: S; view?: V }
+      >
     ) => MutationResponse<GraphQLMutationCallResult<I, { select: S; view: V }, MutationResult<I>>>
-  : (options: MutationOptions<I>) => MutationResponse<MutationResult<I>>;
+  : (...args: MutationArguments<I, MutationOptions<I>>) => MutationResponse<MutationResult<I>>;
 
 type ActionEntity<I extends MutationIdentifier<any, any, any>> =
   MutationEntity<I>['__typename'] extends '__value__'
@@ -267,14 +297,20 @@ export function wrapAction<I extends MutationIdentifier<any, any, any>>(
     getSelectionPlan(view, null);
   }
   return Object.assign(
-    async (_previousState: unknown, options: MutationOptions<I> | 'reset') => {
+    async (
+      _previousState: unknown,
+      options: MutationOptions<I> | 'reset' = {} as MutationOptions<I>,
+    ) => {
       if (options === 'reset') {
         return null;
       }
       if (view && ('view' in options || 'select' in options)) {
         throw new Error('fate: An action selection bound with .with() cannot be overridden.');
       }
-      return mutation(view ? { ...options, view } : options);
+      const invoke = mutation as (
+        options: MutationOptions<I>,
+      ) => MutationResponse<MutationResult<I>>;
+      return invoke(view ? { ...options, view } : options);
     },
     {
       with: (selection: AnyRecord) => {
@@ -465,6 +501,7 @@ export function prepareMutation(
   if (deleteRecord && id == null) {
     throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
   }
+  const local = client.prepareClientMutation(key, input, selection, plan, args);
   const release = client.retainMutationTargets(command);
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
   try {
@@ -499,41 +536,61 @@ export function prepareMutation(
   return {
     commit: (result: unknown) => {
       try {
-        settle(() => {
-          if (result && typeof result === 'object' && (!deleteRecord || plan)) {
-            client.writeMutationResult(
-              entity,
-              result as AnyRecord,
-              collectImplicitSelectedPaths(result as AnyRecord),
-              plan,
-              position,
-            );
-            const resultId = maybeGetId(config.getId, result as AnyRecord);
-            if (!deleteRecord && resultId != null && typeof insert !== 'string') {
-              client.insertMutationTargets(toEntityId(entity, resultId), insert);
+        (local
+          ? (apply: () => void) => client.store.transaction(apply)
+          : (apply: () => void) => apply())(() =>
+          settle(() => {
+            const snapshot =
+              result && typeof result === 'object' && (!deleteRecord || plan)
+                ? (result as AnyRecord)
+                : undefined;
+            if (snapshot && !local) {
+              client.writeMutationResult(
+                entity,
+                snapshot,
+                collectImplicitSelectedPaths(snapshot),
+                plan,
+                position,
+              );
             }
-            if (optimisticEntityId && resultId != null) {
-              client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+            // Client results are action payloads; only explicit staged writes change the graph.
+            // A returned snapshot can predate edits made while an async resolver was waiting.
+            local?.commit();
+            if (snapshot) {
+              const resultId = maybeGetId(config.getId, snapshot);
+              if (!deleteRecord && resultId != null && typeof insert !== 'string') {
+                client.insertMutationTargets(toEntityId(entity, resultId), insert);
+              }
+              if (optimisticEntityId && resultId != null) {
+                client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+              }
+              if (
+                optimisticRecordId != null &&
+                resultId != null &&
+                optimisticRecordId !== resultId
+              ) {
+                client.deleteRecord(entity, optimisticRecordId);
+              }
             }
-            if (optimisticRecordId != null && resultId != null && optimisticRecordId !== resultId) {
-              client.deleteRecord(entity, optimisticRecordId);
+            if (deleteRecord && id != null) {
+              client.deleteRecord(entity, id);
             }
-          }
-          if (deleteRecord && id != null) {
-            client.deleteRecord(entity, id);
-          }
-          client.removeMutationTargets(remove, true);
-          client.invalidateMutationTargets(command);
-        });
+            client.removeMutationTargets(remove, true);
+            client.invalidateMutationTargets(command);
+          }),
+        );
       } finally {
         release();
       }
     },
     entityId: optimisticEntityId,
     execute: (identity?: MutationIdentity) =>
-      client.executeMutation(key, input, selection, { args, identity, plan }),
+      local
+        ? local.execute()
+        : client.executeMutation(key, input, selection, { args, identity, plan }),
     rollback: () => {
       try {
+        local?.rollback();
         settle();
       } finally {
         release();
@@ -550,18 +607,20 @@ export function wrapMutation<
   const config =
     identifier.entity === '__value__' ? undefined : client.getTypeConfig(identifier.entity);
 
-  return (async ({
-    args,
-    delete: deleteRecord,
-    input,
-    insert = 'none',
-    invalidate,
-    optimistic,
-    persist,
-    remove,
-    select,
-    view,
-  }: MutationOptions<I>) => {
+  return (async (
+    {
+      args,
+      delete: deleteRecord,
+      input = {} as Omit<MutationInput<I>, 'select'>,
+      insert = 'none',
+      invalidate,
+      optimistic,
+      persist,
+      remove,
+      select,
+      view,
+    }: MutationOptions<I> = {} as MutationOptions<I>,
+  ) => {
     const command: MutationCommand = {
       args,
       delete: deleteRecord,
@@ -582,7 +641,7 @@ export function wrapMutation<
     // acquires its own pins. Keep the caller's targets alive throughout that gap.
     const release = client.persistence ? client.retainMutationTargets(command) : undefined;
     try {
-      if (client.persistence && persist !== false) {
+      if (client.persistence && persist !== false && !client.isClientMutation(identifier.key)) {
         try {
           const result = (await client.withPersistenceLifecycle(() =>
             client.persistMutation(command),
@@ -596,27 +655,42 @@ export function wrapMutation<
       if (client.persistence) {
         await client.withPersistenceLifecycle(() => client.persistence!.ready);
       }
-      client.assertPersistenceActive();
-      // Preparation failures reject directly, as they did before persistence.
-      const operation = prepareMutation(client, command, config);
-      const performMutation = async () => {
-        try {
-          const result = (await operation.execute()) as MutationResult<I>;
-          client.assertPersistenceActive();
-          operation.commit(result);
-          return { error: undefined, result };
-        } catch (error) {
-          operation.rollback();
-          return handleMutationError(identifier.key, error);
+      const run = async (commit: (apply: () => void) => void | Promise<void>) => {
+        client.assertPersistenceActive();
+        // Preparation failures reject directly, as they did before persistence.
+        const operation = prepareMutation(client, command, config);
+        const performMutation = async () => {
+          try {
+            const execution = operation.execute();
+            const result = (
+              execution && typeof execution === 'object' && 'then' in execution
+                ? await execution
+                : execution
+            ) as MutationResult<I>;
+            client.assertPersistenceActive();
+            const saved = commit(() => operation.commit(result));
+            if (saved) {
+              await saved;
+            }
+            return { error: undefined, result };
+          } catch (error) {
+            operation.rollback();
+            return handleMutationError(identifier.key, error);
+          }
+        };
+        const mutationPromise = client.trackPendingRequest(performMutation);
+
+        if (operation.entityId) {
+          client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
         }
+
+        return await mutationPromise;
       };
-      const mutationPromise = client.trackPendingRequest(performMutation);
-
-      if (operation.entityId) {
-        client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
-      }
-
-      return await mutationPromise;
+      return await (client.persistence &&
+      persist !== false &&
+      client.isClientMutation(identifier.key)
+        ? client.persistClientMutation(run)
+        : run((apply) => apply()));
     } finally {
       release?.();
     }

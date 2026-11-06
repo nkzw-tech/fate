@@ -69,7 +69,9 @@ vp create fate
 
 Explore the [fate stack](https://fate.technology/#stack) to see the tools included in your new project.
 
-Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default; choose Vue in the selector or pass `--framework vue`.
+Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default. Choose Vue in the selector or pass `--framework vue`.
+
+Choose **Client Only** or pass `--template client-only` to start with a static Void app that saves its data in IndexedDB. See [Persisting Client State](/docs/guide/client-state.md#persisting-client-state).
 
 ### Manual Installation
 
@@ -879,8 +881,6 @@ For GraphQL servers with incremental delivery enabled, [streaming batched reads]
 ### Pagination with `useListView`
 
 You can wrap a list of references using `useListView` to enable connection-style lists with pagination support.
-
-Run the regular example with `vp run dev` (tRPC) or `vp run dev:graphql` (GraphQL), then open **Pagination** from its header (`http://localhost:6001/pagination/preview`). The demo uses the existing posts, client, and router to exercise independent view ranges, navigation, refreshes, and optimistic insertion and rollback. Reading and pagination work without signing in; insertions require an example account and successful insertions create real posts in its database. Browser network throttling makes pending work easier to observe.
 
 For example, you can define a `CommentView` and reuse it inside of a `CommentConnectionView`:
 
@@ -3109,34 +3109,34 @@ For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` in
 
 ### Data View Resolvers
 
-fate data views support computed fields. Use `computed`, `field`, and `count` to describe the hidden data needed to resolve a public field:
+fate data views support computed fields. Use `computed` to describe the hidden data needed to resolve a public field.
 
 ```tsx
-import { computed, count, field } from '@nkzw/fate/server';
+import { computed, count } from '@nkzw/fate/server';
 
 export const userDataView = dataView<UserItem>('User')({
-  email: computed<UserItem, string | null, AppContext>({
-    authorize: ({ id }, context) => context?.sessionUser?.id === id,
+  email: computed({
+    authorize: ({ id }, context?: AppContext) => context?.sessionUser?.id === id,
     select: {
-      email: field('email'),
+      email: true,
     },
-    resolve: (_item, deps) => (deps.email as string | null) ?? null,
+    resolve: (_item: UserItem, { email }) => email ?? null,
   }),
   id: true,
 });
 
 export const postDataView = dataView<PostItem>('Post')({
-  commentCount: computed<PostItem, number>({
+  commentCount: computed({
     select: {
       count: count('comments'),
     },
-    resolve: (_item, deps) => (deps.count as number) ?? 0,
+    resolve: (_item: PostItem, { count }) => count,
   }),
   id: true,
 });
 ```
 
-The adapters fetch the hidden `field(...)` and `count(...)` dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
+Set a dependency to `true` to select a field by the same name. Use `field('path')` for aliases or nested paths and `count('relation')` for relation counts. The adapters fetch these dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
 
 ### Connecting the Client
 
@@ -3568,6 +3568,12 @@ The template includes the `VOID_LIVE` Durable Object binding and its class migra
 After changing your database schema or auth configuration, run `vp run db:generate`, review and commit the generated migrations, then deploy. The migrations must include the Better Auth schema used in production.
 
 See [Void's Cloudflare deployment guide](https://void.cloud/integrations/cloudflare) for custom domains, secrets, and CI configuration.
+
+### Client-only Apps
+
+Choose `--template client-only` when creating the app. The template uses Void Pages Routing and prerenders both routes as static shells. IndexedDB stores application data in each browser.
+
+Run `vp exec void deploy --platform cloudflare` from the generated app to deploy the assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
 
 ### Migrating from cf-fate
 

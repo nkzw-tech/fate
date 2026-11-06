@@ -527,34 +527,34 @@ For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` in
 
 ## Data View Resolvers
 
-fate data views support computed fields. Use `computed`, `field`, and `count` to describe the hidden data needed to resolve a public field:
+fate data views support computed fields. Use `computed` to describe the hidden data needed to resolve a public field.
 
 ```tsx
-import { computed, count, field } from '@nkzw/fate/server';
+import { computed, count } from '@nkzw/fate/server';
 
 export const userDataView = dataView<UserItem>('User')({
-  email: computed<UserItem, string | null, AppContext>({
-    authorize: ({ id }, context) => context?.sessionUser?.id === id,
+  email: computed({
+    authorize: ({ id }, context?: AppContext) => context?.sessionUser?.id === id,
     select: {
-      email: field('email'),
+      email: true,
     },
-    resolve: (_item, deps) => (deps.email as string | null) ?? null,
+    resolve: (_item: UserItem, { email }) => email ?? null,
   }),
   id: true,
 });
 
 export const postDataView = dataView<PostItem>('Post')({
-  commentCount: computed<PostItem, number>({
+  commentCount: computed({
     select: {
       count: count('comments'),
     },
-    resolve: (_item, deps) => (deps.count as number) ?? 0,
+    resolve: (_item: PostItem, { count }) => count,
   }),
   id: true,
 });
 ```
 
-The adapters fetch the hidden `field(...)` and `count(...)` dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
+Set a dependency to `true` to select a field by the same name. Use `field('path')` for aliases or nested paths and `count('relation')` for relation counts. The adapters fetch these dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
 
 ## Connecting the Client
 

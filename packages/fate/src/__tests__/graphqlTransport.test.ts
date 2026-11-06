@@ -1,8 +1,10 @@
 import { buildSchema, graphql, parse, validate } from 'graphql';
 import { beforeEach, expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { alias } from '../alias.ts';
+import { clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
+import { computed, dataView, field } from '../data-view.ts';
 import { graphQLOutputRelations } from '../graphqlSchema.ts';
 import { createGraphQLTransport, graphqlValueRoot } from '../graphqlTransport.ts';
 import { mutation, valueMutation } from '../mutation.ts';
@@ -1935,4 +1937,67 @@ test('passes arguments to a shared union field without treating them as root arg
       formatted: `@${term}`,
     });
   }
+});
+
+test('client computed dependencies retain GraphQL union branches', async () => {
+  const schema = buildSchema(`
+    type Query { result: Result! }
+    union Result = Post | User
+    type Post { id: ID!, title: String! }
+    type User { id: ID!, name: String! }
+  `);
+  const metadata = createGraphQLArgumentSchema(schema);
+  const types = graphQLOutputRelations(metadata);
+  type Post = { __typename: 'Post'; id: string; title: string };
+  type User = { __typename: 'User'; id: string; name: string };
+  let result: Post | User = { __typename: 'Post', id: 'p', title: 'Hello' };
+  const fetch = vi.fn(async (_url, init) => {
+    const { query, variables } = JSON.parse(String(init?.body));
+    return jsonResponse(
+      await graphql({ rootValue: { result }, schema, source: query, variableValues: variables }),
+    );
+  });
+  const client = createClient({
+    roots: { result: clientRoot<Post | User, 'Result'>('Result') },
+    transport: createGraphQLTransport({
+      fetch,
+      live: false,
+      roots: { result: { type: 'Result' } },
+      schema: metadata,
+      types,
+      url: '/graphql',
+    }),
+    types,
+  }).registerClientSchema(
+    clientSchema({
+      typeExtensions: {
+        Post: {
+          defaults: () => ({}),
+          view: dataView<{ title: string }>('Post')({
+            displayTitle: computed<{ title: string }, string>({
+              resolve: (_item, { title }) => `Title: ${title}`,
+              select: { title: field('title') },
+            }),
+          }),
+        },
+      },
+    }),
+  );
+  const PostView = view<EntityOf<typeof client, 'Post'>>()({
+    displayTitle: { args: { format: 'summary' } },
+  });
+  const UserView = view<User>()({ name: true });
+  const ResultView = view<EntityOf<typeof client, 'Post'> | User>()({
+    ...viewFor('Post', PostView),
+    ...viewFor('User', UserView),
+  });
+  const request = { result: { view: ResultView } };
+  const first = await client.request(request);
+  expect(first.result).toMatchObject({ __typename: 'Post', id: 'p' });
+  expect((await client.readView(PostView, first.result)).data.displayTitle).toBe('Title: Hello');
+  result = { __typename: 'User', id: 'u', name: 'Ada' };
+  const second = await client.request(request, { mode: 'network-only' });
+  expect(second.result).toMatchObject({ __typename: 'User', id: 'u' });
+  expect((await client.readView(UserView, second.result)).data.name).toBe('Ada');
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

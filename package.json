@@ -22,6 +22,7 @@
     "dev:graphql-server": "cd example/server-graphql && vp run dev",
     "dev:persistence": "vp run --filter @nkzw/fate build && vp run --filter react-fate build && cd example/persistence && vp dev",
     "dev:server": "cd example/server-prisma && vp run dev",
+    "dev:state": "vp run --filter '@nkzw/fate' build && vp run --filter react-fate build && vp run --filter '@nkzw/fate-indexeddb' build && node scripts/dev-client-only.mjs",
     "dev:void": "cd example/void && vp dev",
     "dev:vue": "vp run --filter '@nkzw/fate' build && vp run --filter vue-fate build && npm-run-all --parallel dev:vue-client dev:server",
     "dev:vue-client": "cd example/client-vue && vp dev",

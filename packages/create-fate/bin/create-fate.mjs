@@ -7,6 +7,11 @@ import { URL } from 'node:url';
 import { cancel, intro, isCancel, outro, select, text } from '@clack/prompts';
 
 const variants = {
+  'client-only': {
+    description: 'Void pages with local state saved in IndexedDB',
+    label: 'Client Only',
+    template: 'client-only',
+  },
   drizzle: {
     description: 'tRPC with Drizzle',
     label: 'Drizzle',
@@ -50,11 +55,17 @@ const frontendFrameworks = {
   },
 };
 
-const fateDependencyNames = ['@nkzw/fate', 'react-fate', 'void-fate', 'vue-fate'];
+const fateDependencyNames = [
+  '@nkzw/fate',
+  '@nkzw/fate-indexeddb',
+  'react-fate',
+  'void-fate',
+  'vue-fate',
+];
 
 const usage = () => {
   process.stdout
-    .write(`Usage: create-fate [directory] [--template void|drizzle|graphql|graphql-client|http|prisma] [--framework react|vue]
+    .write(`Usage: create-fate [directory] [--template ${Object.keys(variants).join('|')}] [--framework react|vue]
 
 Create a new fate app.
 
@@ -548,7 +559,7 @@ const vueTemplatePackage = () =>
   path.resolve(packageRoot, 'templates', 'fate', '_shared', 'vue-app');
 
 const frontendRootForVariant = (targetPath, selectedVariant) =>
-  selectedVariant === 'void' || selectedVariant === 'graphql-client'
+  ['client-only', 'graphql-client', 'void'].includes(selectedVariant)
     ? targetPath
     : path.join(targetPath, 'client');
 
@@ -556,6 +567,35 @@ const removeIfExists = (entryPath) => {
   if (fs.existsSync(entryPath)) {
     fs.rmSync(entryPath, { force: true, recursive: true });
   }
+};
+
+const configureClientOnlyVue = (targetPath) => {
+  const pages = path.join(targetPath, 'pages');
+  for (const file of fs.readdirSync(pages)) {
+    if (file.endsWith('.tsx')) {
+      removeIfExists(path.join(pages, file));
+    }
+  }
+  fs.cpSync(path.resolve(packageRoot, 'templates/fate/_shared/client-only-vue'), targetPath, {
+    recursive: true,
+  });
+  const packagePath = path.join(targetPath, 'package.json');
+  const packageJson = readPackageJson(packagePath);
+  const vuePackageJson = readPackageJson(path.join(vueTemplatePackage(), 'package.json'));
+  removePackageEntries(packageJson.dependencies, reactPackageEntries);
+  removePackageEntries(packageJson.devDependencies, reactPackageEntries);
+  for (const name of ['@void/vue', 'vue', 'vue-fate']) {
+    packageJson.dependencies[name] = vuePackageJson.dependencies[name];
+  }
+  writePackageJson(packagePath, packageJson);
+  const agentsPath = path.join(targetPath, 'AGENTS.md');
+  fs.writeFileSync(
+    agentsPath,
+    fs
+      .readFileSync(agentsPath, 'utf8')
+      .replaceAll('react-fate', 'vue-fate')
+      .replaceAll('React', 'Vue'),
+  );
 };
 
 const removeReactFrontend = (frontendRoot, selectedVariant) => {
@@ -919,6 +959,9 @@ const setupProject = (targetPath, selectedVariant) => {
   }
 
   switch (selectedVariant) {
+    case 'client-only':
+      runCommand('vp', ['run', 'prepare:void'], targetPath);
+      break;
     case 'graphql':
     case 'prisma':
       runCommand('vp', ['run', '--filter', '@app/server', 'dev:setup'], targetPath);
@@ -1004,7 +1047,11 @@ const main = async () => {
     );
   }
   if (selectedFramework === 'vue') {
-    configureVueTemplate(targetPath, selectedVariant);
+    if (selectedVariant === 'client-only') {
+      configureClientOnlyVue(targetPath);
+    } else {
+      configureVueTemplate(targetPath, selectedVariant);
+    }
   }
   restoreTemplateFileNames(targetPath);
   if (selectedFramework === 'vue') {

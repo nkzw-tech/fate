@@ -208,7 +208,7 @@ export const mergePreservingExisting = (incoming: unknown, existing: unknown): u
   return result;
 };
 
-const areHydrationValuesEqual = (left: unknown, right: unknown): boolean => {
+export const areHydrationValuesEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) {
     return true;
   }
@@ -302,6 +302,108 @@ export class Store {
     private readonly onRebase?: (ids: ReadonlySet<EntityId>, lists: ReadonlySet<string>) => void,
     private readonly onChange?: (change: StoreChange, owner?: ListKeyParts | null) => void,
   ) {}
+
+  private transactionSnapshots: Snapshots | undefined;
+  private transactionStale: Map<EntityId, ReadonlyArray<string> | undefined> | undefined;
+  private transactionChanges: Array<() => void> | undefined;
+  private transactionSubscribers: Set<() => void> | undefined;
+
+  /** Publish a synchronous graph update atomically, restoring data if it throws. */
+  transaction<T>(apply: () => T): T {
+    if (this.transactionChanges) {
+      return apply();
+    }
+    const snapshot: Snapshots = { lists: new Map(), records: new Map() };
+    const stale = new Map<EntityId, ReadonlyArray<string> | undefined>();
+    this.transactionSnapshots = snapshot;
+    this.transactionStale = stale;
+    const layers = [...this.optimisticLayers].map((layer) => ({
+      apply: layer.apply,
+      layer,
+      settled: layer.settled,
+      writes: new Map(layer.writes),
+    }));
+    const baseRecords = new Map(this.optimisticBase.records);
+    const baseLists = new Map(this.optimisticBase.lists);
+    const changes: Array<() => void> = [];
+    const subscribers = new Set<() => void>();
+    this.transactionChanges = changes;
+    this.transactionSubscribers = subscribers;
+    let result: T;
+    try {
+      result = apply();
+      if (result && typeof result === 'object' && 'then' in result) {
+        throw new Error('fate: Store transactions must be synchronous.');
+      }
+    } catch (error) {
+      for (const [id, { mask, record }] of snapshot.records) {
+        if (record) {
+          this.records.set(id, record);
+        } else {
+          this.records.delete(id);
+        }
+        if (mask) {
+          this.coverage.set(id, mask);
+        } else {
+          this.coverage.delete(id);
+        }
+        const paths = stale.get(id);
+        if (paths) {
+          this.stalePaths.set(id, paths);
+        } else {
+          this.stalePaths.delete(id);
+        }
+      }
+      for (const [key, list] of snapshot.lists) {
+        if (list) {
+          this.lists.set(key, list);
+        } else {
+          this.lists.delete(key);
+        }
+      }
+      this.rebuildIndexes();
+      this.optimisticLayers.clear();
+      for (const { apply, layer, settled, writes } of layers) {
+        layer.apply = apply;
+        layer.settled = settled;
+        layer.writes = writes;
+        this.optimisticLayers.add(layer);
+      }
+      this.optimisticBase.records.clear();
+      this.optimisticBase.lists.clear();
+      for (const [key, value] of baseRecords) {
+        this.optimisticBase.records.set(key, value);
+      }
+      for (const [key, value] of baseLists) {
+        this.optimisticBase.lists.set(key, value);
+      }
+      throw error;
+    } finally {
+      this.transactionSnapshots = undefined;
+      this.transactionStale = undefined;
+      this.transactionChanges = undefined;
+      this.transactionSubscribers = undefined;
+    }
+    for (const change of changes) {
+      change();
+    }
+    for (const subscriber of subscribers) {
+      try {
+        subscriber();
+      } catch {
+        /* Subscribers cannot undo a committed update. */
+      }
+    }
+    return result;
+  }
+
+  private publishChange(change: StoreChange, owner?: ListKeyParts | null) {
+    if (this.transactionChanges) {
+      this.transactionChanges.push(() => this.onChange?.(change, owner));
+    } else {
+      this.onChange?.(change, owner);
+    }
+  }
 
   get hasOptimisticUpdates(): boolean {
     return this.optimisticLayers.size > 0;
@@ -507,7 +609,20 @@ export class Store {
     return overlaps;
   }
 
+  private captureTransactionRecord(id: EntityId) {
+    if (this.transactionSnapshots && !this.transactionSnapshots.records.has(id)) {
+      const mask = this.coverage.get(id);
+      this.transactionSnapshots.records.set(id, {
+        mask: mask && cloneMask(mask),
+        record: this.records.get(id),
+      });
+      this.transactionStale?.set(id, this.stalePaths.get(id));
+    }
+  }
+
   private captureRecord(id: EntityId) {
+    this.captureTransactionRecord(id);
+
     if (!this.rebase) {
       return;
     }
@@ -523,6 +638,9 @@ export class Store {
   }
 
   private captureList(key: string) {
+    if (this.transactionSnapshots && !this.transactionSnapshots.lists.has(key)) {
+      this.transactionSnapshots.lists.set(key, this.lists.get(key));
+    }
     if (!this.rebase) {
       return;
     }
@@ -634,7 +752,7 @@ export class Store {
   hydrate(
     state: StoreHydrationState,
     mode: 'preserve-existing' | 'replace',
-    options: { deferNotifications?: boolean } = {},
+    options: { deferNotifications?: boolean; initialRecords?: WeakSet<AnyRecord> } = {},
   ) {
     const previousCoverage = this.coverage;
     const previousLists = this.lists;
@@ -649,7 +767,7 @@ export class Store {
     for (const [id, incoming] of state.records) {
       const previous = records.get(id);
       const next =
-        previous && mode === 'preserve-existing'
+        previous && mode === 'preserve-existing' && !options.initialRecords?.has(previous)
           ? (mergePreservingExisting(incoming, previous) as AnyRecord)
           : incoming;
       records.set(id, previous && areHydrationValuesEqual(previous, next) ? previous : next);
@@ -658,7 +776,11 @@ export class Store {
     for (const [id, paths] of state.coverage) {
       const incoming = fromPaths(paths);
       const previous = coverage.get(id);
-      if (previous && mode === 'preserve-existing') {
+      if (
+        previous &&
+        mode === 'preserve-existing' &&
+        !options.initialRecords?.has(previousRecords.get(id)!)
+      ) {
         union(previous, incoming);
       } else {
         coverage.set(id, incoming);
@@ -667,7 +789,11 @@ export class Store {
 
     for (const [key, list] of state.lists) {
       const previous = lists.get(key);
-      if (mode === 'replace' || !previous) {
+      const owner = options.initialRecords && parseListKey(key);
+      // Replacing an untouched initializer also replaces its relationship membership.
+      const initialOwner =
+        owner && options.initialRecords?.has(previousRecords.get(owner.ownerId)!);
+      if (mode === 'replace' || !previous || initialOwner) {
         lists.set(key, previous && areHydrationValuesEqual(previous, list) ? previous : list);
       }
     }
@@ -746,6 +872,7 @@ export class Store {
     if (!this.rebase && this.optimisticLayers.size) {
       return this.update(() => this.merge(id, partial, paths, replacedPaths, refresh));
     }
+    this.captureTransactionRecord(id);
     const stale = refresh && !this.recordingLayer ? this.stalePaths.get(id) : undefined;
     const refreshed = stale ? new Set([...paths, ...replacedPaths]) : undefined;
     const change = this.mergeInternal(id, partial, paths, replacedPaths);
@@ -905,7 +1032,7 @@ export class Store {
       this.coverage.delete(id);
       if (!this.recordingLayer) {
         this.stalePaths.delete(id);
-        this.onChange?.({ key: id, kind: 'record', referencesChanged: true });
+        this.publishChange({ key: id, kind: 'record', referencesChanged: true });
         if (record && !this.rebase && this.subscriptions.has(id)) {
           // Let synchronous reference removal or replacement finish before readers refetch.
           queueMicrotask(() => this.notify(id, undefined, false));
@@ -914,18 +1041,21 @@ export class Store {
     });
   }
 
-  invalidateRecord(id: EntityId) {
+  invalidateRecord(id: EntityId, includePath?: (path: string) => boolean) {
+    this.captureTransactionRecord(id);
     const mask = this.coverage.get(id);
     const record = this.records.get(id);
-    const paths = mask && record && expandStalePaths(record, toPaths(mask));
+    const covered = mask && record && expandStalePaths(record, toPaths(mask));
+    const paths = includePath ? covered?.filter(includePath) : covered;
     if (paths?.length) {
       this.stalePaths.set(id, paths);
-      this.onChange?.({ invalidated: true, key: id, kind: 'record', referencesChanged: false });
+      this.publishChange({ invalidated: true, key: id, kind: 'record', referencesChanged: false });
     }
   }
 
   /** @internal Only restore staleness for fields supplied by the incoming cache. */
   restoreRecordStaleness(id: EntityId, paths?: ReadonlyArray<string>, replace = false) {
+    this.captureTransactionRecord(id);
     const incoming = paths?.filter((path) => replace || !this.hasCoverage(id, path));
     if (incoming?.length) {
       this.stalePaths.set(id, [...new Set([...(this.stalePaths.get(id) ?? []), ...incoming])]);
@@ -1010,7 +1140,7 @@ export class Store {
     patchPaths?: ReadonlySet<string>,
   ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.({ key: id, kind: 'record', patchPaths, paths, referencesChanged });
+      this.publishChange({ key: id, kind: 'record', patchPaths, paths, referencesChanged });
     }
     if (this.rebase) {
       return;
@@ -1028,6 +1158,10 @@ export class Store {
         continue;
       }
 
+      if (this.transactionSubscribers) {
+        this.transactionSubscribers.add(fn);
+        continue;
+      }
       try {
         fn();
       } catch {
@@ -1043,7 +1177,7 @@ export class Store {
     owner = parseListKey(key),
   ) {
     if (confirmed && !this.recordingLayer) {
-      this.onChange?.({ key, kind: 'list', previousList }, owner);
+      this.publishChange({ key, kind: 'list', previousList }, owner);
     }
     if (this.rebase) {
       return;
@@ -1054,6 +1188,10 @@ export class Store {
     }
 
     for (const fn of set) {
+      if (this.transactionSubscribers) {
+        this.transactionSubscribers.add(fn);
+        continue;
+      }
       try {
         fn();
       } catch {
@@ -1390,6 +1528,7 @@ export class Store {
   }
 
   private restore(id: EntityId, snapshot: Snapshot) {
+    this.captureTransactionRecord(id);
     return this.update(() => {
       this.captureRecord(id);
       const previous = this.records.get(id);

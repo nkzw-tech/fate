@@ -1,3 +1,4 @@
+import { ClientPersistence } from './client-persistence.ts';
 import type { FateClient } from './client.ts';
 import {
   decodeClientHydrationState,
@@ -181,6 +182,7 @@ class Session implements PersistenceRuntime {
   private refreshRequested = false;
   private refreshing?: Promise<void>;
   private readonly cache: PersistenceCache;
+  private readonly clientState: ClientPersistence;
   private readonly journal: PersistenceJournal;
   private readonly onOnline = () => this.retry();
 
@@ -197,6 +199,7 @@ class Session implements PersistenceRuntime {
       decodeCommand(entry.command);
     });
     this.cache = new PersistenceCache(client, storage, key, maxAge, maxBytes);
+    this.clientState = new ClientPersistence(client, storage, key, maxBytes);
     try {
       client.validatePersistence();
     } catch (error) {
@@ -322,6 +325,10 @@ class Session implements PersistenceRuntime {
     await this.cache.initialize();
     if (this.disposed) {
       return;
+    }
+    // registerClientSchema() seeds the roots during synchronous setup.
+    if (this.client.hasClientState()) {
+      await this.clientState.restore();
     }
     for (const entry of data.mutations) {
       if (isPendingMutation(entry)) {
@@ -528,6 +535,14 @@ class Session implements PersistenceRuntime {
     void this.refresh().catch((error: unknown) => this.report(error));
     this.retry();
     return result;
+  }
+
+  async mutateClient<T>(
+    run: (commit: (apply: () => void) => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    await this.ready;
+    this.assertActive();
+    return this.clientState.mutate(run);
   }
 
   async restoreRequest(request: RequestDescriptor) {

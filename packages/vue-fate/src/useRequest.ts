@@ -1,5 +1,5 @@
+import type { ClientDefinitionOf, RegisteredClient } from '@nkzw/fate';
 import {
-  type FateClient as FateClientT,
   type CheckedRequest,
   type FateRoots,
   type Request,
@@ -18,10 +18,12 @@ import {
 } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
 
-type GeneratedFateClient = ReturnType<typeof import('vue-fate/client').createFateClient>;
+type GeneratedFateClient = RegisteredClient<
+  ReturnType<typeof import('vue-fate/client').createFateClient>
+>;
 export type Roots = [GeneratedFateClient] extends [never]
   ? FateRoots
-  : GeneratedFateClient extends FateClientT<infer R, any>
+  : ClientDefinitionOf<GeneratedFateClient> extends { roots: infer R extends FateRoots }
     ? R
     : FateRoots;
 

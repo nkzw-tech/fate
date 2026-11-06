@@ -1,0 +1,42 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 38rem;
+  padding: 2rem 1rem;
+}
+
+nav,
+form,
+li {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+}
+
+form input {
+  flex: 1;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 0.4rem;
+}
+
+li {
+  border-bottom: 1px solid GrayText;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+
+ul {
+  padding: 0;
+}
+
+[aria-current='page'] {
+  font-weight: bold;
+}
