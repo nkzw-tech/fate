@@ -24,19 +24,6 @@ export default defineConfig({
         },
       },
     ],
-    rules: {
-      'import-x-js/no-extraneous-dependencies': [
-        'error',
-        {
-          devDependencies: [
-            './prisma.config.ts',
-            './scripts/**/*.tsx',
-            './src/index.test.tsx',
-            './vite.config.ts',
-          ],
-        },
-      ],
-    },
   },
   pack: {
     deps: { resolveDepSubpath: true },

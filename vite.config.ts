@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import findWorkspaces from '@nkzw/find-workspaces';
 import nkzw from '@nkzw/oxlint-config';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
@@ -56,10 +55,7 @@ export default defineConfig({
       'packages/create-fate/templates',
       'packages/**/lib',
     ],
-    jsPlugins: [
-      'eslint-plugin-workspaces',
-      { name: 'import-x-js', specifier: 'eslint-plugin-import-x' },
-    ],
+    jsPlugins: ['eslint-plugin-workspaces'],
     options: { typeAware: true, typeCheck: true },
     overrides: [
       {
@@ -99,38 +95,6 @@ export default defineConfig({
     ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
-      'import-x-js/no-extraneous-dependencies': [
-        'error',
-        {
-          devDependencies: [
-            './.vitepress/**',
-            './oxlint.config.ts',
-            './example/client/vite.config.ts',
-            './example/client/vite.graphql.config.ts',
-            './example/client/graphql.ts',
-            './example/client-vue/vite.config.ts',
-            './example/server-graphql/prisma.config.ts',
-            './example/server-graphql/scripts/**/*.tsx',
-            './example/server-graphql/src/index.test.tsx',
-            './example/server-graphql/vite.config.ts',
-            './prisma.config.ts',
-            './packages/*/vite.config.ts',
-            './scripts/**/*.tsx',
-            './scripts/**/*.mjs',
-            './src/index.test.tsx',
-            './example/server-drizzle/drizzle.config.ts',
-            './example/server-prisma/prisma.config.ts',
-            './example/server-prisma/vite.config.ts',
-            './example/server-prisma/scripts/**/*.tsx',
-            './example/void/vite.config.ts',
-            './example/persistence/vite.config.ts',
-            '**/__tests__/**',
-            '**/tsdown.config.js',
-            'vite.config.ts',
-          ],
-          packageDir: findWorkspaces(import.meta.dirname),
-        },
-      ],
       'workspaces/no-absolute-imports': 'error',
       'workspaces/no-relative-imports': 'error',
     },

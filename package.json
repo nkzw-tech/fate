@@ -33,7 +33,6 @@
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/fate-server": "workspace:*",
-    "@nkzw/find-workspaces": "^1.1.0",
     "@nkzw/oxlint-config": "^2.0.1",
     "@oxc-node/core": "^1.0.1",
     "@paper-design/shaders": "^0.0.82",
@@ -42,7 +41,6 @@
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "catalog:",
     "dotenv": "^18.0.9",
-    "eslint-plugin-import-x": "^4.17.1",
     "eslint-plugin-workspaces": "^0.12.1",
     "graphql": "^17.0.2",
     "happy-dom": "^21.0.4",
