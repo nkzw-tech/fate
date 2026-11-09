@@ -40,6 +40,38 @@ The 1,000-record collections stress scaling beyond a typical page; they are not 
 recommendation to fetch thousands of records at once. No result here measures
 browser rendering, network latency, or backend query performance.
 
+## Browser client persistence
+
+Run the IndexedDB benchmark in an installed Playwright browser.
+
+```sh
+node scripts/benchmark-client-persistence.mjs chromium 100 15
+node scripts/benchmark-client-persistence.mjs webkit 100 15
+```
+
+The arguments after the browser are the document count and sample count. The
+fixture stores documents with serialized state and history, then measures a
+settings update, an edit to one document's history, a fresh client restoring the
+graph, and a bulk import into an empty graph. Bulk imports run up to five
+samples. Bytes are measured at the storage adapter. Frame gaps are
+requestAnimationFrame intervals and give a coarse view of main-thread delays.
+
+An Apple M5 Max run with 100 documents used about 7.9 MB of encoded state.
+The table shows median elapsed milliseconds before and after incremental writes,
+using the same fixture and the original monolithic runtime at `91539bd` as
+the baseline.
+
+| Operation        | Chromium before | Chromium after | WebKit before | WebKit after |
+| ---------------- | --------------: | -------------: | ------------: | -----------: |
+| Settings update  |            23.6 |            0.6 |            10 |            1 |
+| Save one history |            25.2 |            1.9 |            11 |            2 |
+| Cold restore     |             7.0 |           10.0 |             5 |            7 |
+| Bulk import      |            19.9 |           21.9 |             7 |            9 |
+
+In this run a settings update read 112 bytes and wrote 300 bytes. A history
+edit wrote about 75 kB. Both previously read and wrote the whole graph. A cold
+restore still reads all saved entries. These are desktop headless measurements.
+
 ## Normalization optimization measurements
 
 An idle-machine run on an Apple M5 Max with Node 24.22.1 compared the fixture at
