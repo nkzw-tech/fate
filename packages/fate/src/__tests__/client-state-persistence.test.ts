@@ -594,6 +594,103 @@ test.each(['string', 'numeric', 'custom-id', 'username-refetch'] as const)(
   },
 );
 
+test('saving an unrelated record retains a default relationship’s server refetch locator', async () => {
+  type Person = { __typename: 'Person'; id: number; name: string; username: string };
+  const person = dataView<Person>('Person')({ id: true, name: true, username: true });
+  const schema = clientSchema({
+    roots: {
+      selection: { id: 'main', type: 'Selection' },
+      settings: { id: 'main', type: 'Settings' },
+    },
+    typeExtensions: {
+      Post: {
+        defaults: () => ({ person: { id: 43 } }),
+        view: dataView<{ person: Person }>('Post')({ person }),
+      },
+    },
+    types: {
+      Selection: {
+        defaults: (id) => ({ id, person: { id: 42 } }),
+        view: dataView<{ id: string; person: Person }>('Selection')({ id: true, person }),
+      },
+      Settings: {
+        defaults: (id) => ({ enabled: false, id }),
+        view: dataView<{ enabled: boolean; id: string }>('Settings')({ enabled: true, id: true }),
+      },
+    },
+  });
+  const storage = memoryStorage();
+  const writeBatch = vi.spyOn(storage, 'writeBatch');
+  const fetchQuery = vi.fn(async (_root, _selection, args) =>
+    args?.username === 'bea'
+      ? { id: 43, name: 'Refetched extension', username: 'bea' }
+      : { id: 42, name: 'Refetched root', username: 'ada' },
+  );
+  const make = () =>
+    createClient({
+      persistence: createPersistence({ key: 'defaults', maxAge: 0, storage }),
+      transport: { fetchById: async (_type, ids) => ids.map((id) => ({ id })), fetchQuery },
+      types: [
+        {
+          refetch: { args: { username: { field: 'username' } }, root: 'person' },
+          type: 'Person',
+        },
+        { type: 'Post' },
+      ],
+    }).registerClientSchema(schema, ({ mutation }) => ({
+      enable: mutation('Settings', {
+        resolve: ({ store }) => store.update('Settings', 'main', { enabled: true }),
+      }),
+    }));
+  const first = make();
+  try {
+    await first.persistence!.ready;
+    first.write(
+      'Person',
+      { id: 42, name: 'Expired name', username: 'ada' },
+      new Set(['id', 'name', 'username']),
+    );
+    first.write('Post', { id: 'p' }, new Set(['id']));
+    first.write(
+      'Person',
+      { id: 43, name: 'Expired extension', username: 'bea' },
+      new Set(['id', 'name', 'username']),
+    );
+    writeBatch.mockRejectedValueOnce(new Error('Disk write failed'));
+    await expect(first.mutations.enable()).rejects.toThrow('Disk write failed');
+    await first.mutations.enable();
+    await first.persistence!.clearCache();
+  } finally {
+    first.persistence!.dispose();
+  }
+
+  const reopened = make();
+  try {
+    await reopened.persistence!.ready;
+    expect(reopened.store.read('Person:42')?.name).toBeUndefined();
+    const Selection = view<EntityOf<typeof reopened, 'Selection'>>()({ person: { name: true } });
+    const { selection } = await reopened.request({ selection: { view: Selection } });
+    expect((await reopened.readView(Selection, selection)).data.person.name).toBe('Refetched root');
+    expect(fetchQuery).toHaveBeenCalledWith(
+      'person',
+      expect.anything(),
+      { username: 'ada' },
+      { refetch: 'Person' },
+    );
+    const Post = view<{ __typename: 'Post'; person: Person }>()({ person: { name: true } });
+    const post = reopened.ref('Post', 'p', Post);
+    expect((await reopened.readView(Post, post)).data.person.name).toBe('Refetched extension');
+    expect(fetchQuery).toHaveBeenCalledWith(
+      'person',
+      expect.anything(),
+      { username: 'bea' },
+      { refetch: 'Person' },
+    );
+  } finally {
+    reopened.persistence!.dispose();
+  }
+});
+
 test('in-memory relationship edits do not discard saved server identities', async () => {
   type Person = { __typename: 'Person'; id: number; name: string };
   const person = dataView<Person>('Person')({ id: true, name: true });

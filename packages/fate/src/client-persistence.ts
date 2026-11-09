@@ -156,6 +156,7 @@ export class ClientPersistence {
   private bytes = 0;
   private sizes = new Map<string, number>();
   private referenceCounts = new Map<EntityId, number>();
+  private dirtyReferences = new Set<EntityId>();
   private saved = emptySnapshot();
 
   constructor(
@@ -170,6 +171,24 @@ export class ClientPersistence {
 
   private entryKey(kind: Collection, id: string) {
     return this.prefix + JSON.stringify([kind, id]);
+  }
+
+  recordChanged(id: EntityId, referencesChanged: boolean) {
+    if (this.referenceCounts.has(id) || this.client.hasClientReference(id)) {
+      this.dirtyReferences.add(id);
+    }
+    if (referencesChanged) {
+      this.trackRecordReferences(id, this.client.store.readConfirmed(id)?.record);
+    }
+  }
+
+  trackRecordReferences(id: EntityId, record: AnyRecord | undefined) {
+    const owned = this.client.captureClientRecord(id, record);
+    if (owned) {
+      for (const target of this.client.clientReferenceIds(owned)) {
+        this.dirtyReferences.add(target);
+      }
+    }
   }
 
   restore() {
@@ -337,7 +356,9 @@ export class ClientPersistence {
       records: new Map(),
       references: new Map(),
     };
-    const referenceDeltas = new Map<EntityId, number>();
+    const referenceDeltas = new Map<EntityId, number>(
+      [...this.dirtyReferences].map((id) => [id, 0]),
+    );
     const addReferences = (record: AnyRecord | null | undefined, delta: number) => {
       if (record) {
         for (const id of this.client.clientReferenceIds(record)) {
@@ -346,17 +367,20 @@ export class ClientPersistence {
       }
     };
     for (const [id, [before, after]] of records) {
-      if (this.referenceCounts.has(id)) {
-        referenceDeltas.set(id, referenceDeltas.get(id) ?? 0);
-      }
       if (before === after) {
         continue;
+      }
+      if (this.referenceCounts.has(id) || this.client.hasClientReference(id)) {
+        referenceDeltas.set(id, referenceDeltas.get(id) ?? 0);
       }
       const previous = this.client.captureClientRecord(id, before);
       const record = this.client.captureClientRecord(id, after);
       if (areHydrationValuesEqual(previous, record)) {
         continue;
       }
+      // Defaults are live client fields even when they have no saved record patch.
+      addReferences(previous, 0);
+      addReferences(record, 0);
       const saved = this.saved.records.get(id);
       // Merge only fields changed by this mutation, excluding unrelated in-memory edits.
       const next = record
@@ -383,7 +407,10 @@ export class ClientPersistence {
     const counts = new Map<EntityId, number | undefined>();
     for (const [id, delta] of referenceDeltas) {
       const count = (this.referenceCounts.get(id) ?? 0) + delta;
-      const reference = count ? this.client.captureClientReference(id) : undefined;
+      const reference =
+        count || this.client.hasClientReference(id)
+          ? this.client.captureClientReference(id)
+          : undefined;
       if (!areHydrationValuesEqual(this.saved.references.get(id), reference)) {
         changes.references.set(id, reference);
       }
@@ -403,11 +430,20 @@ export class ClientPersistence {
         const { changes, counts } = this.client.previewClientMutation(apply, (preview) =>
           this.collectChanges(preview),
         );
+        const dirty = this.dirtyReferences;
+        this.dirtyReferences = new Set();
         if (!changes.records.size && !changes.lists.size && !changes.references.size) {
           apply();
           return;
         }
-        await this.write(changes);
+        try {
+          await this.write(changes);
+        } catch (error) {
+          for (const id of dirty) {
+            this.dirtyReferences.add(id);
+          }
+          throw error;
+        }
         this.client.assertPersistenceActive();
         try {
           apply();

@@ -30,6 +30,7 @@ import { persistencePageSize, yieldPersistenceTask } from './persistence-utils.t
 import { FateRequestError } from './protocol.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
 import type { StoreChange } from './store.ts';
+import type { AnyRecord, EntityId } from './types.ts';
 
 export type {
   PersistedMutationStatus,
@@ -597,6 +598,9 @@ class Session implements PersistenceRuntime {
     if (this.disposed) {
       return;
     }
+    if (change?.kind === 'record' && this.client.hasClientState()) {
+      this.clientState.recordChanged(change.key, change.referencesChanged);
+    }
     if (this.cache.changedNode(change)) {
       this.needsCacheRecovery = true;
       this.cacheChangeRevision++;
@@ -608,6 +612,12 @@ class Session implements PersistenceRuntime {
       this.flushRequested = true;
     } else {
       this.scheduleSave();
+    }
+  }
+
+  clientRecordCollected(id: EntityId, record: AnyRecord | undefined) {
+    if (!this.disposed && this.client.hasClientState()) {
+      this.clientState.trackRecordReferences(id, record);
     }
   }
 

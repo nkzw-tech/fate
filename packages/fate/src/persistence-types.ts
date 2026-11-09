@@ -2,6 +2,7 @@ import type { FateClient } from './client.ts';
 import type { MutationCommand } from './mutation.ts';
 import type { RequestDescriptor } from './request-descriptor.ts';
 import type { StoreChange } from './store.ts';
+import type { AnyRecord, EntityId } from './types.ts';
 
 /** Identity of one logical mutation, reused across every delivery attempt. */
 export type MutationIdentity = Readonly<{
@@ -48,6 +49,7 @@ export interface PersistenceSession {
 /** Contract used internally by Fate to drive an attached persistence session. @internal */
 export interface PersistenceRuntime extends PersistenceSession {
   changed(change?: StoreChange): void;
+  clientRecordCollected?(id: EntityId, record: AnyRecord | undefined): void;
   fetched(request: RequestDescriptor, options?: RequestPersistenceOptions): void;
   mutate(command: MutationCommand): Promise<unknown>;
   mutateClient?<T>(run: (commit: (apply: () => void) => Promise<void>) => Promise<T>): Promise<T>;

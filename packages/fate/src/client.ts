@@ -1400,6 +1400,16 @@ export class FateClient<
   }
 
   /** @internal */
+  hasClientReference(id: EntityId) {
+    return (
+      !this.isClientOwnedType(parseEntityId(id).type) &&
+      this.store.hasConfirmedRecordReference(id, (owner, field) =>
+        this.isPersistedClientField(owner, field),
+      )
+    );
+  }
+
+  /** @internal */
   captureClientReference(entityId: EntityId): ClientStateReference {
     const { id, type } = parseEntityId(entityId);
     const config = this.getTypeConfig(type);
@@ -4364,7 +4374,8 @@ export class FateClient<
     }
 
     const swept = this.store.collectGarbage(markedRecords, markedLists, {
-      onRecordDeleted: (id) => {
+      onRecordDeleted: (id, record) => {
+        this.persistenceRuntime?.clientRecordCollected?.(id, record);
         this.clientState.collect(id);
         this.viewDataCache.invalidate(id);
         this.stableRefs.delete(id);

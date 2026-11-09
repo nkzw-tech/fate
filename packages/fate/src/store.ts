@@ -745,6 +745,33 @@ export class Store {
     };
   }
 
+  /** Check incoming references without treating optimistic relationships as confirmed. */
+  hasConfirmedRecordReference(
+    target: EntityId,
+    include: (owner: EntityId, field: string) => boolean,
+  ): boolean {
+    for (const [owner, fields] of this.recordReferencesByTarget.get(target) ?? []) {
+      if (!this.optimisticBase.records.has(owner)) {
+        for (const field of indexValues(fields)) {
+          if (include(owner, field)) {
+            return true;
+          }
+        }
+      }
+    }
+    for (const [owner, { record }] of this.optimisticBase.records) {
+      for (const [field, value] of Object.entries(record ?? {})) {
+        if (include(owner, field)) {
+          const refs = this.getRecordFieldReferences(value);
+          if (typeof refs === 'string' ? refs === target : refs?.has(target)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   /** @internal List keys whose result depends on this entity's coverage. */
   getListKeysForEntity(id: EntityId): ReadonlyArray<string> {
     return copyIndexValues(this.listKeysByReferencedEntity.get(id));
@@ -1422,7 +1449,7 @@ export class Store {
   collectGarbage(
     markedRecords: ReadonlySet<EntityId>,
     markedLists: ReadonlySet<string>,
-    options: { onRecordDeleted?: (id: EntityId) => void } = {},
+    options: { onRecordDeleted?: (id: EntityId, record: AnyRecord | undefined) => void } = {},
   ): { lists: Set<string>; records: Set<EntityId> } {
     const records = new Set<EntityId>();
     const lists = new Set<string>();
@@ -1451,7 +1478,7 @@ export class Store {
       this.records.delete(id);
       this.coverage.delete(id);
       this.stalePaths.delete(id);
-      options.onRecordDeleted?.(id);
+      options.onRecordDeleted?.(id, record);
     }
 
     for (const key of lists) {
