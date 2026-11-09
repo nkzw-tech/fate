@@ -1,9 +1,11 @@
 import { Link as VoidLink } from '@void/react';
 import type { ComponentProps } from 'react';
 
-export type LinkProps = Omit<ComponentProps<typeof VoidLink>, 'href'> & {
-  href?: string;
-  to?: string;
+type VoidLinkProps = ComponentProps<typeof VoidLink>;
+
+export type LinkProps = Omit<VoidLinkProps, 'href'> & {
+  href?: VoidLinkProps['href'];
+  to?: VoidLinkProps['href'];
 };
 
 export default function Link({ href, to, ...props }: LinkProps) {

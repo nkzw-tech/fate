@@ -340,6 +340,13 @@ const updatePackageJsonFiles = (rootDir, dir, packageName, fateDependencyVersion
 const readPackageJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 const writePackageJson = (filePath, json) => {
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    if (json[section]) {
+      json[section] = Object.fromEntries(
+        Object.entries(json[section]).sort(([left], [right]) => left.localeCompare(right)),
+      );
+    }
+  }
   fs.writeFileSync(filePath, `${JSON.stringify(json, null, 2)}\n`);
 };
 
@@ -874,10 +881,10 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
       selectedVariant === 'void' || selectedVariant === 'graphql-client'
         ? "['**/.cloudflare/**', '.fate', '.void', '.void-wrangler.jsonc', 'dist', 'node_modules', 'vite.config.ts.timestamp-*']"
         : "['**/.cloudflare/**', '.fate', '.void', 'dist', 'node_modules', '../dist', 'vite.config.ts.timestamp-*']",
-    __TSCONFIG_EXTENDS__:
+    '"__TSCONFIG_EXTENDS__"':
       selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? './.void/tsconfig.json'
-        : '../tsconfig.json',
+        ? '"./.void/tsconfig.json"'
+        : '["../tsconfig.json", "./.void/tsconfig.json"]',
     '"__TSCONFIG_INCLUDE__"':
       selectedVariant === 'void'
         ? `[
@@ -958,26 +965,12 @@ const setupProject = (targetPath, selectedVariant) => {
     runCommand('vp', ['run', 'fbtee:all'], frontendRoot);
   }
 
-  switch (selectedVariant) {
-    case 'client-only':
-      runCommand('vp', ['run', 'prepare:void'], targetPath);
-      break;
-    case 'graphql':
-    case 'prisma':
-      runCommand('vp', ['run', '--filter', '@app/server', 'dev:setup'], targetPath);
-      runCommand('vp', ['run', 'fate:generate'], targetPath);
-      break;
-    case 'graphql-client':
-      runCommand('vp', ['run', 'prepare:void'], targetPath);
-      runCommand('vp', ['run', 'fate:generate'], targetPath);
-      break;
-    case 'void':
-      runCommand('vp', ['run', 'prepare:void'], targetPath);
-      runCommand('vp', ['run', 'fate:generate'], targetPath);
-      break;
-    default:
-      runCommand('vp', ['run', 'fate:generate'], targetPath);
-      break;
+  if (selectedVariant === 'graphql' || selectedVariant === 'prisma') {
+    runCommand('vp', ['run', '--filter', '@app/server', 'dev:setup'], targetPath);
+  }
+  runCommand('vp', ['run', 'prepare:void'], frontendRoot);
+  if (selectedVariant !== 'client-only') {
+    runCommand('vp', ['run', 'fate:generate'], targetPath);
   }
 };
 

@@ -5,7 +5,7 @@ import { PostView } from '../../src/fateViews.ts';
 import PostCard from '../../src/ui/PostCard.vue';
 import Section from '../../src/ui/Section.vue';
 
-const params = useParams<{ id: string }>();
+const params = useParams<'/post/[id]'>();
 const id = params.id;
 
 if (!id) {

@@ -129,8 +129,12 @@ describe('create-fate templates', () => {
     expect(voidGitignore).toContain('.void/');
   });
 
-  test.each(['react', 'vue'])('enables typed routes in a new Void %s app', async (framework) => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-void-prepare-'));
+  test.each(
+    templateNames().flatMap((template) =>
+      ['react', 'vue'].map((framework) => [template, framework]),
+    ),
+  )('enables typed routes in a new %s %s app', async (template, framework) => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'create-fate-typed-routes-'));
     try {
       const target = join(tempRoot, 'app');
       await execFileAsync(
@@ -139,7 +143,7 @@ describe('create-fate templates', () => {
           join(packageRoot, 'bin/create-fate.mjs'),
           target,
           '--template',
-          'void',
+          template,
           '--framework',
           framework,
           '--no-setup',
@@ -147,8 +151,32 @@ describe('create-fate templates', () => {
         { env: { ...process.env, npm_config_registry: registryURL } },
       );
 
-      expect(readFileSync(join(target, 'void.config.ts'), 'utf8')).toContain('typedRoutes: true');
-      expect(existsSync(join(target, 'void.json'))).toBe(false);
+      const frontend = existsSync(join(target, 'client')) ? join(target, 'client') : target;
+      if (existsSync(join(frontend, 'void.config.ts'))) {
+        expect(readFileSync(join(frontend, 'void.config.ts'), 'utf8')).toContain(
+          'typedRoutes: true',
+        );
+        expect(existsSync(join(frontend, 'void.json'))).toBe(false);
+      } else {
+        expect(
+          JSON.parse(readFileSync(join(frontend, 'void.json'), 'utf8')).routing.typedRoutes,
+        ).toBe(true);
+      }
+      const tsconfig = JSON.parse(readFileSync(join(frontend, 'tsconfig.json'), 'utf8'));
+      expect([tsconfig.extends].flat()).toContain('./.void/tsconfig.json');
+      const { dependencies, scripts } = JSON.parse(
+        readFileSync(join(frontend, 'package.json'), 'utf8'),
+      );
+      expect(scripts['dev:setup']).toContain('prepare:void');
+      expect(dependencies.void).toBe('^1.7.0');
+      expect(dependencies[`@void/${framework}`]).toBe('^1.7.0');
+      if (existsSync(join(frontend, 'pages/post'))) {
+        const page = readFileSync(
+          join(frontend, `pages/post/[id].${framework === 'react' ? 'tsx' : 'vue'}`),
+          'utf8',
+        );
+        expect(page).toContain("useParams<'/post/[id]'>()");
+      }
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });
     }

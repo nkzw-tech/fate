@@ -124,6 +124,7 @@ export default defineConfig({
           "vp run --filter '@nkzw/fate-server' dev:setup",
           "vp run --filter '@nkzw/fate-server-graphql' dev:setup",
           'vp run fate:generate',
+          "vp run --filter '@nkzw/fate-client' prepare:void",
           "vp run --filter '@nkzw/fate-void-example' prepare:void",
           "vp run --filter '@nkzw/fate-void-example' fate:generate",
           'vp run build:api-docs',

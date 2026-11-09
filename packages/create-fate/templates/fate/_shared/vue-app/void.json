@@ -1,5 +1,8 @@
 {
   "pages": {
     "router": true
+  },
+  "routing": {
+    "typedRoutes": true
   }
 }

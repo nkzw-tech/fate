@@ -4,7 +4,7 @@ import { PostCard, PostView } from '../../src/ui/PostCard.tsx';
 import Section from '../../src/ui/Section.tsx';
 
 export default function PostPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams<'/post/[id]'>();
 
   if (!id) {
     throw new Error('fate: Post ID is required.');

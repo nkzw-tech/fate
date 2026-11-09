@@ -11,12 +11,13 @@
   "scripts": {
     "build": "vp run fbtee:all && vp build",
     "dev": "vp dev",
-    "dev:setup": "vp run fbtee:all",
+    "dev:setup": "vp run fbtee:all && vp run prepare:void",
     "fate:generate": "vp exec fate generate",
     "fbtee:all": "vp run fbtee:collect && vp run fbtee:translate",
     "fbtee:collect": "vp exec fbtee collect",
     "fbtee:prepare": "vp run fbtee:collect && vp exec fbtee prepare-translations --source-strings source_strings.json --output-dir translations --locales de-DE ja-JP",
     "fbtee:translate": "vp exec fbtee translate --source-strings source_strings.json --output-dir src/translations --output-locale-style=bcp47",
+    "prepare:void": "void prepare",
     "start": "node start.mjs"
   },
   "dependencies": {
@@ -26,7 +27,7 @@
     "@nkzw/define-env": "^1.1.0",
     "@nkzw/stack": "^2.3.2",
     "@radix-ui/react-slot": "^1.5.0",
-    "@void/react": "^1.6.1",
+    "@void/react": "^1.7.0",
     "better-auth": "^1.7.14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -38,7 +39,7 @@
     "react-error-boundary": "^6.1.6",
     "react-fate": "latest",
     "tailwind-merge": "^3.7.0",
-    "void": "^1.6.1"
+    "void": "^1.7.0"
   },
   "devDependencies": {
     "@nkzw/fbtee-compiler": "^5.0.0",

@@ -1,0 +1,17 @@
+{
+  "extends": ["../../tsconfig.json", "./.void/tsconfig.json"],
+  "compilerOptions": {
+    "types": ["vite/client", "void/env"]
+  },
+  "include": [
+    ".fate/**/*.ts",
+    ".void/**/*.d.ts",
+    "pages/**/*.ts",
+    "pages/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "env.ts",
+    "vite.config.ts",
+    "vite.graphql.config.ts"
+  ]
+}

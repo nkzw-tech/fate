@@ -21,9 +21,9 @@
     "@nkzw/fate": "workspace:*",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
-    "@trpc/server": "^11.23.0",
-    "better-auth": "^1.7.15",
-    "hono": "^4.13.16",
+    "@trpc/server": "^11.25.0",
+    "better-auth": "^1.7.18",
+    "hono": "^4.13.17",
     "zod": "^4.6.7"
   },
   "devDependencies": {

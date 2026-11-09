@@ -236,7 +236,7 @@ vp create fate -- --template client-only
 
 Add `--framework vue` for the Vue version. Both templates include a task list that keeps edits across reloads. Run `vp run build` for static output in `dist/client/`, or see the [Cloudflare deployment instructions](/integrations/cloudflare#client-only-apps).
 
-From the fate repository, run `vp run dev:state` and open [localhost:6011](http://localhost:6011) to try the React starter.
+From the fate repository, run `vp run dev:state` and open `http://localhost:6011` to try the React starter.
 
 ## Example
 

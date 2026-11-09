@@ -108,6 +108,7 @@ cd "${target_dir}"
 vp install --no-frozen-lockfile
 vp run dev:setup
 vp run fate:generate
+node "${repo_root}/scripts/check-template-routes.mjs" "${target_dir}" "${framework}"
 if [[ "${template}" == "prisma" || "${template}" == "graphql" ]]; then
   vp run --filter '@app/server' prisma db push
   vp run --filter '@app/server' prisma db seed
