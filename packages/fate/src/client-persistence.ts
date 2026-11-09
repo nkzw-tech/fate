@@ -8,7 +8,7 @@ import {
 } from './persistence-utils.ts';
 import type { PersistenceStorage, PersistenceStorageWrite } from './persistence.ts';
 import { isRecord } from './record.ts';
-import { areHydrationValuesEqual, parseListKey, type List } from './store.ts';
+import { areHydrationValuesEqual, parseListKey, type List, type StorePreview } from './store.ts';
 import type { AnyRecord, EntityId } from './types.ts';
 
 export type ClientStateReference = {
@@ -22,11 +22,48 @@ export type ClientStateSnapshot = {
   references: Map<EntityId, ClientStateReference | null>;
 };
 
+type ClientStatePatch = {
+  lists: Map<string, List | null | undefined>;
+  records: Map<EntityId, AnyRecord | null | undefined>;
+  references: Map<EntityId, ClientStateReference | null | undefined>;
+};
+
 const emptySnapshot = (): ClientStateSnapshot => ({
   lists: new Map(),
   records: new Map(),
   references: new Map(),
 });
+
+const migratedEntries = <T>(before: ReadonlyMap<string, T>, after: ReadonlyMap<string, T>) => {
+  const changes = new Map<string, T | undefined>(after);
+  for (const key of before.keys()) {
+    if (!after.has(key)) {
+      changes.set(key, undefined);
+    }
+  }
+  return changes;
+};
+
+const applyEntries = <T>(target: Map<string, T>, changes: ReadonlyMap<string, T | undefined>) => {
+  for (const [key, value] of changes) {
+    if (value === undefined) {
+      target.delete(key);
+    } else {
+      target.set(key, value);
+    }
+  }
+};
+
+const recordFieldsChanged = (before: AnyRecord, after: AnyRecord) =>
+  Object.fromEntries(
+    Object.entries(after).filter(
+      ([key, value]) =>
+        key === 'id' ||
+        key === '__typename' ||
+        !Object.hasOwn(before, key) ||
+        !areHydrationValuesEqual(before[key], value),
+    ),
+  );
 
 const changedEntries = <T>(
   before: ReadonlyMap<string, T | null>,
@@ -55,18 +92,7 @@ const getChanges = (
     const previous = before.records.get(id);
     if (record && previous) {
       // Preserve fields intentionally changed only in memory by persist: false.
-      records.set(
-        id,
-        Object.fromEntries(
-          Object.entries(record).filter(
-            ([key, value]) =>
-              key === 'id' ||
-              key === '__typename' ||
-              !Object.hasOwn(previous, key) ||
-              !areHydrationValuesEqual(previous[key], value),
-          ),
-        ),
-      );
+      records.set(id, recordFieldsChanged(previous, record));
     }
   }
   return {
@@ -128,6 +154,7 @@ export class ClientPersistence {
   private header?: Header;
   private bytes = 0;
   private sizes = new Map<string, number>();
+  private referenceCounts = new Map<EntityId, number>();
   private saved = emptySnapshot();
 
   constructor(
@@ -170,7 +197,7 @@ export class ClientPersistence {
         references: decodeEntries(state.references ?? [], isReference),
       };
       migrateClientState(next, 1, this.options);
-      await this.write(next, emptySnapshot());
+      await this.write(next);
       this.publish(next);
     });
   }
@@ -238,7 +265,11 @@ export class ClientPersistence {
         references: new Map(next.references),
       };
       migrateClientState(next, header.version, this.options);
-      await this.write(next, previous, true);
+      await this.write({
+        lists: migratedEntries(previous.lists, next.lists),
+        records: migratedEntries(previous.records, next.records),
+        references: migratedEntries(previous.references, next.references),
+      });
     } else {
       this.header = header;
     }
@@ -247,11 +278,19 @@ export class ClientPersistence {
 
   private publish(next: ClientStateSnapshot) {
     const changes = getChanges(this.saved, next);
+    this.referenceCounts.clear();
+    for (const record of next.records.values()) {
+      if (record) {
+        for (const id of this.client.clientReferenceIds(record)) {
+          this.referenceCounts.set(id, (this.referenceCounts.get(id) ?? 0) + 1);
+        }
+      }
+    }
     this.client.restoreClientState(next, changes);
     this.saved = next;
   }
 
-  private async write(next: ClientStateSnapshot, previous = this.saved, force = false) {
+  private async write(changes: ClientStatePatch) {
     const writes: Array<PersistenceStorageWrite> = [];
     const sizes = new Map<string, number>();
     let bytes = this.bytes;
@@ -262,15 +301,11 @@ export class ClientPersistence {
       writes.push([key, value]);
     };
     for (const kind of collections) {
-      for (const [id, value] of next[kind]) {
-        if (force || !areHydrationValuesEqual(previous[kind].get(id), value)) {
-          stage(this.entryKey(kind, id), encodeHydrationValue(value, this.options.limits));
-        }
-      }
-      for (const id of previous[kind].keys()) {
-        if (!next[kind].has(id)) {
-          stage(this.entryKey(kind, id), undefined);
-        }
+      for (const [id, value] of changes[kind]) {
+        stage(
+          this.entryKey(kind, id),
+          value === undefined ? undefined : encodeHydrationValue(value, this.options.limits),
+        );
       }
     }
     const header = {
@@ -294,62 +329,93 @@ export class ClientPersistence {
     this.header = header;
   }
 
+  private collectChanges({ lists, records }: StorePreview) {
+    const changes: ClientStatePatch = {
+      lists: new Map(),
+      records: new Map(),
+      references: new Map(),
+    };
+    const referenceDeltas = new Map<EntityId, number>();
+    const addReferences = (record: AnyRecord | null | undefined, delta: number) => {
+      if (record) {
+        for (const id of this.client.clientReferenceIds(record)) {
+          referenceDeltas.set(id, (referenceDeltas.get(id) ?? 0) + delta);
+        }
+      }
+    };
+    for (const [id, [before, after]] of records) {
+      if (this.referenceCounts.has(id)) {
+        referenceDeltas.set(id, referenceDeltas.get(id) ?? 0);
+      }
+      if (before === after) {
+        continue;
+      }
+      const previous = this.client.captureClientRecord(id, before);
+      const record = this.client.captureClientRecord(id, after);
+      if (areHydrationValuesEqual(previous, record)) {
+        continue;
+      }
+      const saved = this.saved.records.get(id);
+      // Merge only fields changed by this mutation, excluding unrelated in-memory edits.
+      const next = record
+        ? { ...saved, ...(previous ? recordFieldsChanged(previous, record) : record) }
+        : this.client.isInitialClientRecord(id)
+          ? null
+          : undefined;
+      if (!areHydrationValuesEqual(saved, next)) {
+        changes.records.set(id, next);
+        addReferences(saved, -1);
+        addReferences(next, 1);
+      }
+    }
+    for (const [key, [before, after]] of lists) {
+      if (this.client.isClientStateList(key) && !areHydrationValuesEqual(before, after)) {
+        const owner = parseListKey(key);
+        const next =
+          after ?? (owner && this.client.isInitialClientRecord(owner.ownerId) ? null : undefined);
+        if (!areHydrationValuesEqual(this.saved.lists.get(key), next)) {
+          changes.lists.set(key, next);
+        }
+      }
+    }
+    const counts = new Map<EntityId, number | undefined>();
+    for (const [id, delta] of referenceDeltas) {
+      const count = (this.referenceCounts.get(id) ?? 0) + delta;
+      const reference = count ? this.client.captureClientReference(id) : undefined;
+      if (!areHydrationValuesEqual(this.saved.references.get(id), reference)) {
+        changes.references.set(id, reference);
+      }
+      if (delta) {
+        counts.set(id, count || undefined);
+      }
+    }
+    return { changes, counts };
+  }
+
   mutate<T>(run: (commit: (apply: () => void) => Promise<void>) => Promise<T>) {
     return this.storage.exclusive(this.storageKey, async () => {
       // Read under the same lock as the write so read-modify-write actions see
       // commits from other tabs even when the tab never got a notification.
       await this.load();
       return run(async (apply) => {
-        const before = this.client.captureClientState();
-        const next = this.client.previewClientMutation(() => {
-          apply();
-          const after = this.client.captureClientState();
-          const changes = getChanges(before, after);
-          const next: ClientStateSnapshot = {
-            lists: new Map(this.saved.lists),
-            records: new Map(this.saved.records),
-            references: new Map(),
-          };
-          for (const [id, record] of changes.records) {
-            if (record) {
-              next.records.set(id, { ...next.records.get(id), ...record });
-            } else if (this.client.isInitialClientRecord(id)) {
-              next.records.set(id, null);
-            } else {
-              next.records.delete(id);
-            }
-          }
-          for (const [listKey, list] of changes.lists) {
-            const owner = parseListKey(listKey);
-            if (list || (owner && this.client.isInitialClientRecord(owner.ownerId))) {
-              next.lists.set(listKey, list);
-            } else {
-              next.lists.delete(listKey);
-            }
-          }
-          // Keep locators for saved relationships even if persist: false changed
-          // their in-memory owners. Current defaults can also reference server data.
-          next.references = this.client.captureClientReferences([
-            ...next.records.values(),
-            ...after.records.values(),
-          ]);
-          if (
-            changes.records.size ||
-            changes.lists.size ||
-            changedEntries(this.saved.references, next.references).size
-          ) {
-            return next;
-          }
-        });
-        if (!next) {
+        const { changes, counts } = this.client.previewClientMutation(apply, (preview) =>
+          this.collectChanges(preview),
+        );
+        if (!changes.records.size && !changes.lists.size && !changes.references.size) {
           apply();
           return;
         }
-        await this.write(next);
-        this.saved = next;
+        await this.write(changes);
         this.client.assertPersistenceActive();
-        apply();
-        this.client.restoreClientState(next, emptySnapshot());
+        try {
+          apply();
+        } finally {
+          applyEntries(this.saved.lists, changes.lists);
+          applyEntries(this.saved.records, changes.records);
+          applyEntries(this.saved.references, changes.references);
+          applyEntries(this.referenceCounts, counts);
+          this.client.restoreClientState(this.saved, emptySnapshot());
+        }
       });
     });
   }

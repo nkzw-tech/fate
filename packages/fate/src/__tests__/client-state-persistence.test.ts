@@ -7,6 +7,72 @@ import { createPersistence } from '../persistence.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 
+test('saving a small record in a large graph only reads the header and writes that record', async () => {
+  const storage = memoryStorage();
+  const read = vi.spyOn(storage, 'read');
+  const scan = vi.spyOn(storage, 'scan');
+  const write = vi.spyOn(storage, 'writeBatch');
+  const payload = 'x'.repeat(50_000);
+  const schema = clientSchema({
+    roots: { settings: { id: 'main', type: 'Settings' } },
+    types: {
+      Document: {
+        defaults: (id) => ({ id, payload: '' }),
+        view: dataView<{ id: string; payload: string }>('Document')({ id: true, payload: true }),
+      },
+      Settings: {
+        defaults: (id) => ({ enabled: false, id }),
+        view: dataView<{ enabled: boolean; id: string }>('Settings')({ enabled: true, id: true }),
+      },
+    },
+  });
+  const make = () =>
+    createClient({
+      persistence: createPersistence({ key: 'library', storage }),
+    }).registerClientSchema(schema, ({ mutation }) => ({
+      enable: mutation('Settings', {
+        resolve: ({ store }) => store.update('Settings', 'main', { enabled: true }),
+      }),
+      importDocuments: mutation('Document', {
+        resolve: ({ store }) => {
+          for (let id = 0; id < 100; id++) {
+            store.create('Document', { id: String(id), payload });
+          }
+        },
+      }),
+    }));
+  const client = make();
+  try {
+    await client.mutations.importDocuments();
+    const snapshot = vi.spyOn(client.store, 'dehydrateConfirmed');
+    read.mockClear();
+    scan.mockClear();
+    write.mockClear();
+
+    await client.mutations.enable();
+
+    const header = JSON.stringify(['library', 'client-state-v2']);
+    expect(read.mock.calls).toEqual([[header]]);
+    expect(scan).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledOnce();
+    const batch = write.mock.calls[0][0];
+    expect(batch.map(([key]) => key)).toEqual([`${header}:["records","Settings:main"]`, header]);
+    expect(JSON.stringify(batch).length).toBeLessThan(512);
+
+    const reopened = make();
+    try {
+      await reopened.persistence!.ready;
+      expect(reopened.store.read('Settings:main')?.enabled).toBe(true);
+      expect(reopened.store.read('Document:99')?.payload).toBe(payload);
+    } finally {
+      reopened.persistence!.dispose();
+    }
+  } finally {
+    client.persistence!.dispose();
+  }
+});
+
 test('retrying a failed save persists the assignment without saving memory-only fields', async () => {
   const storage = memoryStorage();
   const writeBatch = vi.spyOn(storage, 'writeBatch');

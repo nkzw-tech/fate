@@ -120,6 +120,7 @@ import {
   mergePreservingExisting,
   parseListKey,
   Store,
+  type StorePreview,
 } from './store.ts';
 import { Transport } from './transport.ts';
 import {
@@ -1388,40 +1389,39 @@ export class FateClient<
   }
 
   /** @internal */
-  captureClientReferences(records: Iterable<AnyRecord | null>) {
-    const references = new Map<EntityId, ClientStateReference | null>();
-    const capture = (entityId: EntityId) => {
-      const { id, type } = parseEntityId(entityId);
-      if (this.clientState.localTypes.has(type) || references.has(entityId)) {
-        return;
+  clientReferenceIds(record: AnyRecord) {
+    const ids = new Set<EntityId>();
+    this.markRecordReferences(record, (id) => {
+      if (!this.clientState.localTypes.has(parseEntityId(id).type)) {
+        ids.add(id);
       }
-      const config = this.getTypeConfig(type);
-      const saved = this.clientState.savedReferences.get(entityId);
-      const record = this.store.readConfirmed(entityId)?.record;
-      const rawId = (record && config.getId(record)) ?? saved?.id ?? record?.id ?? id;
-      const fields = { ...saved?.record };
-      for (const field of ['id', '__typename', ...getRefetchFields(config.refetch)]) {
-        if (record && Object.hasOwn(record, field)) {
-          fields[field] = record[field];
-        }
-      }
-      references.set(entityId, {
-        id: typeof rawId === 'string' || typeof rawId === 'number' ? rawId : id,
-        record: fields,
-      });
-    };
-    for (const record of records) {
-      if (record) {
-        this.markRecordReferences(record, capture);
-      }
-    }
-    return references;
+    });
+    return ids;
   }
 
   /** @internal */
-  previewClientMutation<T>(apply: () => T): T {
+  captureClientReference(entityId: EntityId): ClientStateReference {
+    const { id, type } = parseEntityId(entityId);
+    const config = this.getTypeConfig(type);
+    const saved = this.clientState.savedReferences.get(entityId);
+    const record = this.store.readConfirmed(entityId)?.record;
+    const rawId = (record && config.getId(record)) ?? saved?.id ?? record?.id ?? id;
+    const fields = { ...saved?.record };
+    for (const field of ['id', '__typename', ...getRefetchFields(config.refetch)]) {
+      if (record && Object.hasOwn(record, field)) {
+        fields[field] = record[field];
+      }
+    }
+    return {
+      id: typeof rawId === 'string' || typeof rawId === 'number' ? rawId : id,
+      record: fields,
+    };
+  }
+
+  /** @internal */
+  previewClientMutation<T>(apply: () => void, read: (changes: StorePreview) => T): T {
     try {
-      return this.store.preview(apply);
+      return this.store.preview(apply, read);
     } finally {
       this.undoPreviewResolution?.();
       this.undoPreviewResolution = undefined;
@@ -1429,27 +1429,14 @@ export class FateClient<
   }
 
   /** @internal */
-  captureClientState(): ClientStateSnapshot {
-    const state = this.store.dehydrateConfirmed();
-    const records = new Map<EntityId, AnyRecord | null>();
-    for (const [id, record] of state.records) {
-      if (!this.clientState.definitions.has(parseEntityId(id).type)) {
-        continue;
-      }
-      const fields = Object.entries(record).filter(([key]) => this.isPersistedClientField(id, key));
-      if (fields.length) {
-        records.set(id, {
-          __typename: record.__typename,
-          id: record.id,
-          ...Object.fromEntries(fields),
-        });
-      }
+  captureClientRecord(id: EntityId, record?: AnyRecord) {
+    if (!record || !this.clientState.definitions.has(parseEntityId(id).type)) {
+      return;
     }
-    return {
-      lists: new Map(state.lists.filter(([key]) => this.isClientStateList(key))),
-      records,
-      references: this.captureClientReferences(records.values()),
-    };
+    const fields = Object.entries(record).filter(([key]) => this.isPersistedClientField(id, key));
+    if (fields.length) {
+      return { __typename: record.__typename, id: record.id, ...Object.fromEntries(fields) };
+    }
   }
 
   /** @internal */

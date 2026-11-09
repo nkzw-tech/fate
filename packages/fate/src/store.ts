@@ -64,6 +64,11 @@ type Snapshots = {
   records: Map<EntityId, Snapshot>;
 };
 
+export type StorePreview = {
+  lists: Map<string, readonly [List | undefined, List | undefined]>;
+  records: Map<EntityId, readonly [AnyRecord | undefined, AnyRecord | undefined]>;
+};
+
 type Subscription = Readonly<{ fn: () => void; mask: FieldMask | null }>;
 
 export type Subscriptions = Map<EntityId, Set<Subscription>>;
@@ -314,13 +319,35 @@ export class Store {
   }
 
   /** Run a synchronous update without publishing it or retaining its changes. */
-  preview<T>(apply: () => T): T {
+  preview<T>(apply: () => void, read: (changes: StorePreview) => T): T {
     if (this.transactionChanges) {
       throw new Error('fate: Cannot preview changes inside a store transaction.');
     }
+    const baseRecords = new Map(this.optimisticBase.records);
+    const baseLists = new Map(this.optimisticBase.lists);
     this.previewing = true;
     try {
-      return this.transaction(apply);
+      return this.transaction(() => {
+        apply();
+        const changes = this.transactionSnapshots!;
+        return read({
+          lists: new Map(
+            [...changes.lists].map(([key, list]) => [
+              key,
+              [baseLists.has(key) ? baseLists.get(key) : list, this.readConfirmedList(key)],
+            ]),
+          ),
+          records: new Map(
+            [...changes.records].map(([id, { record }]) => [
+              id,
+              [
+                baseRecords.has(id) ? baseRecords.get(id)?.record : record,
+                this.confirmedRecord(id),
+              ],
+            ]),
+          ),
+        });
+      });
     } finally {
       this.previewing = false;
     }
@@ -732,6 +759,11 @@ export class Store {
     return record
       ? { paths: mask ? toPaths(mask) : [], record, ...(stale && { stale }) }
       : undefined;
+  }
+
+  private confirmedRecord(id: EntityId) {
+    const snapshot = this.optimisticBase.records.get(id);
+    return snapshot ? snapshot.record : this.records.get(id);
   }
 
   /** @internal */
