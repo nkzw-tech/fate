@@ -222,9 +222,40 @@ const fate = createClient({
 }).registerClientSchema(schema, defineMutations);
 ```
 
-Use a stable key for each app or account. fate restores saved records before serving views. Both client records and client fields on server records survive reloads. Server fields still follow the ordinary read cache lifetime. The saved client graph has its own storage budget of `maxBytes` and survives cache expiration and `clearCache()`. Changing the schema scope starts a separate saved graph.
+Use a stable key for each app or account. fate restores client records and client fields on server records before serving views. They survive cache expiration, schema changes, and `clearCache()`. Server fields still follow the ordinary read cache lifetime.
 
-Client mutations save their results, including list changes and deletions. A mutation reports success after its storage write commits. If that write fails, the mutation reports the error and the confirmed change stays in memory for the current session. Use `persist: false` on a mutation to keep its changes in memory. Client mutations use the same storage lock across tabs and read the latest saved data before each write.
+Client mutations save changed records and lists in a single transaction, including deletions. fate publishes the confirmed state after the write commits. If the write fails, the mutation reports the error and you can retry from the last confirmed state. Use `persist: false` to keep a mutation's changes in memory. Client mutations share a lock across tabs and check for newer saves before running.
+
+Set `clientState.maxBytes` to configure the saved graph's storage budget separately from the read cache. It defaults to the value of `maxBytes` (25 MiB by default). Use `clientState.limits` to adjust serialization limits per entry, such as `maxStringLength` for a long serialized document.
+
+### Migrations
+
+Adding a field with a default preserves existing data. When changing the shape of saved data, increment `clientState.version` and add a migration for that version. Versions start at 1.
+
+```ts
+const persistence = createPersistence({
+  clientState: {
+    migrations: {
+      2(state) {
+        state.renameField('Task', 'label', 'title');
+        state.mapRecords('Task', (record) => ({
+          ...record,
+          title: String(record.title).trim(),
+        }));
+      },
+    },
+    version: 2,
+  },
+  key: 'my-app',
+  storage: createIndexedDBStorage(),
+});
+```
+
+Migrations run in order before views can read the saved data. Each step is synchronous, and fate commits the complete upgrade atomically. `renameField` also renames persisted list membership. `mapRecords` can transform saved values and remove old fields while preserving the record's identity.
+
+If an upgrade fails, the previous saved version stays on disk. A tab running an older version reports an error when opening or writing a graph that has been upgraded. New installations start at the configured version.
+
+If you used an earlier build with scope-keyed client persistence, fate imports the graph for the current scope on first open. If the schema has already changed, set `clientState.legacyScope` to the previous client's `dehydrate().scope` to import that graph. The import treats the old graph as version 1 and leaves the original copy intact. Close tabs running that earlier build before importing.
 
 ## Client-only Template
 

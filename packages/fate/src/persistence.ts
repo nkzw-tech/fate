@@ -1,4 +1,8 @@
 import { ClientPersistence } from './client-persistence.ts';
+import {
+  resolveClientStateOptions,
+  type ClientStatePersistenceOptions,
+} from './client-state-migration.ts';
 import type { FateClient } from './client.ts';
 import {
   decodeClientHydrationState,
@@ -34,6 +38,11 @@ export type {
   PersistenceSnapshot,
   RequestPersistenceOptions,
 } from './persistence-types.ts';
+export type {
+  ClientStateMigration,
+  ClientStateMigrationState,
+  ClientStatePersistenceOptions,
+} from './client-state-migration.ts';
 type Encoded = ReturnType<typeof encodeHydrationValue>;
 type PreparedOperation = Omit<ReturnType<typeof prepareMutation>, 'commit' | 'rollback'> & {
   commit(result: unknown, persist?: boolean): void;
@@ -79,6 +88,8 @@ export interface PersistenceStorage {
 }
 
 export type PersistenceOptions = Readonly<{
+  /** Durable client state configuration, independent of cache schema and expiry. */
+  clientState?: ClientStatePersistenceOptions;
   key: string;
   /** Maximum disk retention since a successful fetch, in milliseconds. Defaults to one day. */
   maxAge?: number;
@@ -124,6 +135,7 @@ const decodeCommand = (value: Encoded): MutationCommand => {
  * isolate authenticated accounts/workspaces and match the server's identity scope.
  */
 export function createPersistence({
+  clientState,
   key,
   maxAge = 86_400_000,
   maxBytes = 25 * 1024 * 1024,
@@ -147,8 +159,10 @@ export function createPersistence({
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error('fate: Persistence maxBytes must be a positive safe integer.');
   }
+  const clientStateOptions = resolveClientStateOptions(clientState, maxBytes);
   return {
-    attach: (client) => new Session(client, storage, key, online, retryDelay, maxAge, maxBytes),
+    attach: (client) =>
+      new Session(client, storage, key, online, retryDelay, maxAge, maxBytes, clientStateOptions),
   };
 }
 
@@ -194,12 +208,13 @@ class Session implements PersistenceRuntime {
     private readonly retryDelay: number,
     maxAge: number,
     maxBytes: number,
+    clientStateOptions: ReturnType<typeof resolveClientStateOptions>,
   ) {
     this.journal = new PersistenceJournal(storage, key, (entry) => {
       decodeCommand(entry.command);
     });
     this.cache = new PersistenceCache(client, storage, key, maxAge, maxBytes);
-    this.clientState = new ClientPersistence(client, storage, key, maxBytes);
+    this.clientState = new ClientPersistence(client, storage, key, clientStateOptions);
     try {
       client.validatePersistence();
     } catch (error) {

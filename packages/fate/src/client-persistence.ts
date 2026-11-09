@@ -1,7 +1,12 @@
+import { migrateClientState, type resolveClientStateOptions } from './client-state-migration.ts';
 import type { FateClient } from './client.ts';
 import { decodeHydrationValue, encodeHydrationValue } from './hydration.ts';
-import { persistenceEntrySize } from './persistence-utils.ts';
-import type { PersistenceStorage } from './persistence.ts';
+import {
+  persistenceEntrySize,
+  persistencePageSize,
+  yieldPersistenceTask,
+} from './persistence-utils.ts';
+import type { PersistenceStorage, PersistenceStorageWrite } from './persistence.ts';
 import { isRecord } from './record.ts';
 import { areHydrationValuesEqual, parseListKey, type List } from './store.ts';
 import type { AnyRecord, EntityId } from './types.ts';
@@ -102,49 +107,198 @@ const isReference = (value: unknown): value is ClientStateReference =>
   (typeof value.id === 'string' || typeof value.id === 'number') &&
   isRecord(value.record);
 
+const collections = ['lists', 'records', 'references'] as const;
+type Collection = (typeof collections)[number];
+type Header = { format: 2; revision: string; version: number };
+
+const invalidState = () => new Error('fate: Invalid persisted client state.');
+
+const isHeader = (value: unknown): value is Header =>
+  isRecord(value) &&
+  value.format === 2 &&
+  typeof value.revision === 'string' &&
+  typeof value.version === 'number' &&
+  Number.isSafeInteger(value.version) &&
+  value.version > 0;
+
 /** The confirmed client graph has its own lifetime, independent of the read cache. */
 export class ClientPersistence {
+  private readonly storageKey: string;
+  private readonly prefix: string;
+  private header?: Header;
+  private bytes = 0;
+  private sizes = new Map<string, number>();
   private saved = emptySnapshot();
 
   constructor(
     private readonly client: FateClient<any, any, any>,
     private readonly storage: PersistenceStorage,
     private readonly key: string,
-    private readonly maxBytes: number,
-  ) {}
-
-  private storageKey() {
-    return JSON.stringify([this.key, 'client-state-v1', this.client.getPersistenceScope()]);
+    private readonly options: ReturnType<typeof resolveClientStateOptions>,
+  ) {
+    this.storageKey = JSON.stringify([key, 'client-state-v2']);
+    this.prefix = `${this.storageKey}:`;
   }
 
-  async restore(key = this.storageKey()) {
-    const raw = await this.storage.read(key);
+  private entryKey(kind: Collection, id: string) {
+    return this.prefix + JSON.stringify([kind, id]);
+  }
+
+  restore() {
+    return this.storage.exclusive(this.storageKey, () => this.load());
+  }
+
+  private async loadLegacy() {
+    const key = JSON.stringify([
+      this.key,
+      'client-state-v1',
+      this.options.legacyScope ?? this.client.getPersistenceScope(),
+    ]);
+    await this.storage.exclusive(key, async () => {
+      const raw = await this.storage.read(key);
+      this.client.assertPersistenceActive();
+      if (raw === undefined) {
+        return;
+      }
+      const state = decodeHydrationValue(raw as ReturnType<typeof encodeHydrationValue>);
+      if (!isRecord(state)) {
+        throw invalidState();
+      }
+      const next = {
+        lists: decodeEntries(state.lists, isList),
+        records: decodeEntries(state.records, isRecord),
+        references: decodeEntries(state.references ?? [], isReference),
+      };
+      migrateClientState(next, 1, this.options);
+      await this.write(next, emptySnapshot());
+      this.publish(next);
+    });
+  }
+
+  private async load() {
+    const header = await this.storage.read(this.storageKey);
     this.client.assertPersistenceActive();
-    const state =
-      raw === undefined
-        ? undefined
-        : decodeHydrationValue(raw as ReturnType<typeof encodeHydrationValue>);
-    if (state !== undefined && !isRecord(state)) {
-      throw new Error('fate: Invalid persisted client state.');
+    if (header === undefined) {
+      if (this.header) {
+        throw invalidState();
+      }
+      await this.loadLegacy();
+      return;
     }
-    const next = state
-      ? {
-          lists: decodeEntries(state.lists, isList),
-          records: decodeEntries(state.records, isRecord),
-          references: decodeEntries(state.references ?? [], isReference),
+    if (!isHeader(header)) {
+      throw invalidState();
+    }
+    if (header.version > this.options.version) {
+      throw new Error(`fate: Saved client state version ${header.version} requires a newer app.`);
+    }
+    if (this.header?.revision === header.revision) {
+      return;
+    }
+    const next = emptySnapshot();
+    const sizes = new Map<string, number>();
+    let bytes = 0;
+    let after: string | undefined;
+    while (true) {
+      const page = await this.storage.scan(this.prefix, after, persistencePageSize);
+      this.client.assertPersistenceActive();
+      for (const { key, value } of page) {
+        const [kind, id] = JSON.parse(key.slice(this.prefix.length)) as [unknown, unknown];
+        if (typeof id !== 'string' || sizes.has(key)) {
+          throw invalidState();
         }
-      : emptySnapshot();
+        const entry = decodeHydrationValue(
+          value as ReturnType<typeof encodeHydrationValue>,
+          this.options.limits,
+        );
+        if (kind === 'records' && (entry === null || isRecord(entry))) {
+          next.records.set(id, entry);
+        } else if (kind === 'lists' && (entry === null || isList(entry))) {
+          next.lists.set(id, entry);
+        } else if (kind === 'references' && (entry === null || isReference(entry))) {
+          next.references.set(id, entry);
+        } else {
+          throw invalidState();
+        }
+        const size = persistenceEntrySize(key, value);
+        sizes.set(key, size);
+        bytes += size;
+      }
+      if (page.length < persistencePageSize) {
+        break;
+      }
+      after = page.at(-1)!.key;
+      await yieldPersistenceTask();
+    }
+    this.bytes = bytes;
+    this.sizes = sizes;
+    if (header.version < this.options.version) {
+      const previous = {
+        lists: new Map(next.lists),
+        records: new Map(next.records),
+        references: new Map(next.references),
+      };
+      migrateClientState(next, header.version, this.options);
+      await this.write(next, previous, true);
+    } else {
+      this.header = header;
+    }
+    this.publish(next);
+  }
+
+  private publish(next: ClientStateSnapshot) {
     const changes = getChanges(this.saved, next);
     this.client.restoreClientState(next, changes);
     this.saved = next;
   }
 
+  private async write(next: ClientStateSnapshot, previous = this.saved, force = false) {
+    const writes: Array<PersistenceStorageWrite> = [];
+    const sizes = new Map<string, number>();
+    let bytes = this.bytes;
+    const stage = (key: string, value: unknown) => {
+      const size = value === undefined ? 0 : persistenceEntrySize(key, value);
+      bytes += size - (this.sizes.get(key) ?? 0);
+      sizes.set(key, size);
+      writes.push([key, value]);
+    };
+    for (const kind of collections) {
+      for (const [id, value] of next[kind]) {
+        if (force || !areHydrationValuesEqual(previous[kind].get(id), value)) {
+          stage(this.entryKey(kind, id), encodeHydrationValue(value, this.options.limits));
+        }
+      }
+      for (const id of previous[kind].keys()) {
+        if (!next[kind].has(id)) {
+          stage(this.entryKey(kind, id), undefined);
+        }
+      }
+    }
+    const header = {
+      format: 2 as const,
+      revision: crypto.randomUUID(),
+      version: this.options.version,
+    };
+    if (bytes + persistenceEntrySize(this.storageKey, header) > this.options.maxBytes) {
+      throw new Error('fate: Persisted client state exceeds the storage size limit.');
+    }
+    this.client.assertPersistenceActive();
+    await this.storage.writeBatch([...writes, [this.storageKey, header]]);
+    this.bytes = bytes;
+    for (const [key, size] of sizes) {
+      if (size) {
+        this.sizes.set(key, size);
+      } else {
+        this.sizes.delete(key);
+      }
+    }
+    this.header = header;
+  }
+
   mutate<T>(run: (commit: (apply: () => void) => Promise<void>) => Promise<T>) {
-    const key = this.storageKey();
-    return this.storage.exclusive(key, async () => {
+    return this.storage.exclusive(this.storageKey, async () => {
       // Read under the same lock as the write so read-modify-write actions see
       // commits from other tabs even when the tab never got a notification.
-      await this.restore(key);
+      await this.load();
       return run(async (apply) => {
         const before = this.client.captureClientState();
         const next = this.client.previewClientMutation(() => {
@@ -191,16 +345,7 @@ export class ClientPersistence {
           apply();
           return;
         }
-        const encoded = encodeHydrationValue({
-          lists: [...next.lists],
-          records: [...next.records],
-          references: [...next.references],
-        });
-        if (persistenceEntrySize(key, encoded) > this.maxBytes) {
-          throw new Error('fate: Persisted client state exceeds the storage size limit.');
-        }
-        this.client.assertPersistenceActive();
-        await this.storage.writeBatch([[key, encoded]]);
+        await this.write(next);
         this.saved = next;
         this.client.assertPersistenceActive();
         apply();

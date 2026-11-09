@@ -202,7 +202,7 @@ test('a local mutation only reports success after its IndexedDB write commits', 
   const client = app({
     ...storage,
     async writeBatch(entries) {
-      if (blockWrite && entries.some(([key]) => key.includes('client-state-v1'))) {
+      if (blockWrite && entries.some(([key]) => key.includes('client-state-v2'))) {
         writing.resolve();
         await release.promise;
       }
