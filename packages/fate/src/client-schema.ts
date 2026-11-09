@@ -164,8 +164,8 @@ type StoredKeys<S extends ClientSchema, N extends PropertyKey> = N extends keyof
     : never
   : never;
 type WritableValue<T> =
-  T extends ReadonlyArray<infer Item>
-    ? Array<WritableValue<Item>>
+  T extends ReadonlyArray<unknown>
+    ? { [K in keyof T]: WritableValue<T[K]> }
     : T extends Entity
       ? { __typename?: T['__typename']; id: string | number } & Partial<{
           [K in keyof T]: WritableValue<T[K]>;

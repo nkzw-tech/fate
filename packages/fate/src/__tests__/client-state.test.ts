@@ -100,6 +100,36 @@ test('client-only roots, mutations, computed views, relationships and GC need no
   expectTypeOf<UI['summary']>().toEqualTypeOf<string>();
 });
 
+test('client mutations accept readonly scalar arrays and preserve their tuple types', async () => {
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      roots: { save: { id: 'main', type: 'Save' } },
+      types: {
+        Save: {
+          defaults: (id) => ({ id, turns: ['start', 0] }),
+          view: dataView<{ id: string; turns: readonly [string, number] }>('Save')({
+            id: true,
+            turns: true,
+          }),
+        },
+      },
+    }),
+    ({ mutation }) => ({
+      advance: mutation('Save', {
+        resolve: ({ store }) => {
+          const turns = ['next', 1] as const;
+          store.update('Save', 'main', { turns });
+        },
+      }),
+    }),
+  );
+  const Save = view<EntityOf<typeof client, 'Save'>>()({ turns: true });
+  await client.mutations.advance();
+  const { data } = await client.readView(Save, client.ref('Save', 'main', Save));
+  expectTypeOf(data.turns).toEqualTypeOf<readonly [string, number]>();
+  expect(data.turns).toEqual(['next', 1]);
+});
+
 test('computed dependencies are masked, subscribed, memoized and invalidated', async () => {
   const client = makeClient();
   const ComputedView = view<UI>()({ summary: true });
