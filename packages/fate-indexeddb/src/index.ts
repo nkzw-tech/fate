@@ -3,6 +3,16 @@ import { openDB } from 'idb';
 
 export type IndexedDBStorageOptions = Readonly<{ name?: string }>;
 
+// IndexedDB sorts strings by UTF-16 code units.
+const prefixEnd = (prefix: string) => {
+  for (let index = prefix.length - 1; index >= 0; index--) {
+    const unit = prefix.charCodeAt(index);
+    if (unit < 0xff_ff) {
+      return prefix.slice(0, index) + String.fromCharCode(unit + 1);
+    }
+  }
+};
+
 export function createIndexedDBStorage({
   name = 'fate',
 }: IndexedDBStorageOptions = {}): PersistenceStorage {
@@ -90,21 +100,26 @@ export function createIndexedDBStorage({
       }
     },
     async scan(prefix, after, limit = 64) {
+      const lowerOpen = after !== undefined && after >= prefix;
+      const lower = lowerOpen ? after : prefix;
+      if (!(limit > 0) || !lower.startsWith(prefix)) {
+        return [];
+      }
+      const upper = prefixEnd(prefix);
+      const range =
+        upper === undefined
+          ? IDBKeyRange.lowerBound(lower, lowerOpen)
+          : IDBKeyRange.bound(lower, upper, lowerOpen, true);
+      const count = Math.min(Math.ceil(limit), 0xff_ff_ff_ff);
       const db = await acquireDatabase();
       try {
-        const range = IDBKeyRange.lowerBound(
-          after !== undefined && after >= prefix ? after : prefix,
-          after !== undefined && after >= prefix,
-        );
         const transaction = db.transaction('fate');
-        const entries: Array<{ key: string; value: unknown }> = [];
-        let cursor = await transaction.store.openCursor(range);
-        while (cursor && String(cursor.key).startsWith(prefix) && entries.length < limit) {
-          entries.push({ key: String(cursor.key), value: cursor.value });
-          cursor = await cursor.continue();
-        }
-        await transaction.done;
-        return entries;
+        const [keys, values] = await Promise.all([
+          transaction.store.getAllKeys(range, count),
+          transaction.store.getAll(range, count),
+          transaction.done,
+        ]);
+        return keys.map((key, index) => ({ key: String(key), value: values[index] }));
       } finally {
         releaseDatabase();
       }

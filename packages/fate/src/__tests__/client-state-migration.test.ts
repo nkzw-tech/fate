@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vite-plus/test';
+import { z } from 'zod';
 import { clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { dataView, list } from '../data-view.ts';
@@ -178,6 +179,45 @@ test('client state budgets and serialization limits are independent of the read 
     for (const session of [defaultLimit, smallBudget, client]) {
       session.persistence!.dispose();
     }
+  }
+});
+
+test('restored entry sizes count toward the budget and replacements reclaim space', async () => {
+  const storage = memoryStorage();
+  const schema = clientSchema({
+    types: {
+      Note: { defaults: (id) => ({ id, text: '' }), view: note },
+    },
+  });
+  const input = z.object({ id: z.string() });
+  const make = () =>
+    store(storage, { maxBytes: 1700 }).registerClientSchema(schema, ({ mutation }) => ({
+      remove: mutation('Note', {
+        input,
+        resolve: ({ input, store }) => store.delete('Note', input.id),
+      }),
+      save: mutation('Note', {
+        input: input.extend({ text: z.string() }),
+        resolve: ({ input, store }) =>
+          store.get('Note', input.id)
+            ? store.update('Note', input.id, { text: input.text })
+            : store.create('Note', input),
+      }),
+    }));
+  const first = make();
+  await first.mutations.save({ input: { id: 'a', text: 'x'.repeat(1000) } });
+  first.persistence!.dispose();
+  const reopened = make();
+  try {
+    const next = { id: 'b', text: 'z'.repeat(1000) };
+    await expect(reopened.mutations.save({ input: next })).rejects.toThrow('storage size limit');
+    expect(reopened.store.read('Note:b')).toBeUndefined();
+    await reopened.mutations.save({ input: { id: 'a', text: 'y'.repeat(1000) } });
+    await reopened.mutations.remove({ input: { id: 'a' } });
+    await reopened.mutations.save({ input: next });
+    expect(reopened.store.read('Note:b')?.text).toBe(next.text);
+  } finally {
+    reopened.persistence!.dispose();
   }
 });
 

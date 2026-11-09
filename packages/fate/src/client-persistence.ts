@@ -136,6 +136,7 @@ const isReference = (value: unknown): value is ClientStateReference =>
 const collections = ['lists', 'records', 'references'] as const;
 type Collection = (typeof collections)[number];
 type Header = { format: 2; revision: string; version: number };
+type Encoded = ReturnType<typeof encodeHydrationValue>;
 
 const invalidState = () => new Error('fate: Invalid persisted client state.');
 
@@ -187,7 +188,7 @@ export class ClientPersistence {
       if (raw === undefined) {
         return;
       }
-      const state = decodeHydrationValue(raw as ReturnType<typeof encodeHydrationValue>);
+      const state = decodeHydrationValue(raw as Encoded);
       if (!isRecord(state)) {
         throw invalidState();
       }
@@ -230,13 +231,17 @@ export class ClientPersistence {
       this.client.assertPersistenceActive();
       for (const { key, value } of page) {
         const [kind, id] = JSON.parse(key.slice(this.prefix.length)) as [unknown, unknown];
-        if (typeof id !== 'string' || sizes.has(key)) {
+        if (
+          typeof id !== 'string' ||
+          sizes.has(key) ||
+          !isRecord(value) ||
+          typeof value.bytes !== 'number' ||
+          !Number.isSafeInteger(value.bytes) ||
+          value.bytes <= 0
+        ) {
           throw invalidState();
         }
-        const entry = decodeHydrationValue(
-          value as ReturnType<typeof encodeHydrationValue>,
-          this.options.limits,
-        );
+        const entry = decodeHydrationValue(value.data as Encoded, this.options.limits);
         if (kind === 'records' && (entry === null || isRecord(entry))) {
           next.records.set(id, entry);
         } else if (kind === 'lists' && (entry === null || isList(entry))) {
@@ -246,9 +251,8 @@ export class ClientPersistence {
         } else {
           throw invalidState();
         }
-        const size = persistenceEntrySize(key, value);
-        sizes.set(key, size);
-        bytes += size;
+        sizes.set(key, value.bytes);
+        bytes += value.bytes;
       }
       if (page.length < persistencePageSize) {
         break;
@@ -294,18 +298,16 @@ export class ClientPersistence {
     const writes: Array<PersistenceStorageWrite> = [];
     const sizes = new Map<string, number>();
     let bytes = this.bytes;
-    const stage = (key: string, value: unknown) => {
-      const size = value === undefined ? 0 : persistenceEntrySize(key, value);
-      bytes += size - (this.sizes.get(key) ?? 0);
-      sizes.set(key, size);
-      writes.push([key, value]);
-    };
     for (const kind of collections) {
       for (const [id, value] of changes[kind]) {
-        stage(
-          this.entryKey(kind, id),
-          value === undefined ? undefined : encodeHydrationValue(value, this.options.limits),
-        );
+        const key = this.entryKey(kind, id);
+        const data =
+          value === undefined ? undefined : encodeHydrationValue(value, this.options.limits);
+        const size = data === undefined ? 0 : persistenceEntrySize(key, data);
+        bytes += size - (this.sizes.get(key) ?? 0);
+        sizes.set(key, size);
+        // Keep the encoded byte count so cold restores can size entries without re-encoding them.
+        writes.push([key, data === undefined ? undefined : { bytes: size, data }]);
       }
     }
     const header = {

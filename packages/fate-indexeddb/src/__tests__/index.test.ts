@@ -69,6 +69,24 @@ test('bounded scans are ordered and isolated, and batches support deletion', asy
   expect(await storage.read('cache:b')).toBe(4);
 });
 
+test('scan bounds include the full prefix and resume strictly after the cursor', async () => {
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
+  await storage.writeBatch([
+    ['a\uffff', 1],
+    ['a\uffff\uffff', 2],
+    ['b', 3],
+    ['\uffff', 4],
+    ['\uffff:a', 5],
+  ]);
+  expect(await storage.scan('a\uffff', 'a')).toEqual([
+    { key: 'a\uffff', value: 1 },
+    { key: 'a\uffff\uffff', value: 2 },
+  ]);
+  expect(await storage.scan('a\uffff', 'b')).toEqual([]);
+  expect(await storage.scan('a\uffff', undefined, 0)).toEqual([]);
+  expect(await storage.scan('\uffff', '\uffff')).toEqual([{ key: '\uffff:a', value: 5 }]);
+});
+
 test('a failed batch rolls back every write', async () => {
   const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   await storage.writeBatch([['key', 'Original']]);
