@@ -130,6 +130,26 @@ test('client mutations accept readonly scalar arrays and preserve their tuple ty
   expect(data.turns).toEqual(['next', 1]);
 });
 
+test('views can select an entire object-valued client field', async () => {
+  type SaveData = { id: string; snapshot: { player: { name: string }; turn: number } };
+  const snapshot = { player: { name: 'Ada' }, turn: 2 };
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      roots: { save: { id: 'main', type: 'Save' } },
+      types: {
+        Save: {
+          defaults: (id) => ({ id, snapshot }),
+          view: dataView<SaveData>('Save')({ id: true, snapshot: true }),
+        },
+      },
+    }),
+  );
+  const Save = view<EntityOf<typeof client, 'Save'>>()({ snapshot: true });
+  const { data } = await client.readView(Save, client.ref('Save', 'main', Save));
+  expectTypeOf(data.snapshot).toEqualTypeOf<SaveData['snapshot']>();
+  expect(data.snapshot).toEqual(snapshot);
+});
+
 test('computed dependencies are masked, subscribed, memoized and invalidated', async () => {
   const client = makeClient();
   const ComputedView = view<UI>()({ summary: true });

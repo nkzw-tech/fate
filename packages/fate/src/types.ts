@@ -216,7 +216,7 @@ type BaseSelectionFieldValue<T extends Entity, K extends keyof T> =
     : NonNullable<T[K]> extends Entity
       ? true | Selection<NonNullable<T[K]>> | View<NonNullable<T[K]>, Selection<NonNullable<T[K]>>>
       : NonNullable<T[K]> extends AnyRecord
-        ? PlainObjectSelection<NonNullable<T[K]>>
+        ? true | PlainObjectSelection<NonNullable<T[K]>>
         : true;
 
 type SelectionFieldValue<T extends Entity, K extends keyof T> =
