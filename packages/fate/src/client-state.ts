@@ -11,26 +11,34 @@ import { getFieldKey } from './field-key.ts';
 import type { MutationOptions } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import { normalizationInput } from './normalization-input.ts';
-import { isDate, isRecord } from './record.ts';
+import { isDate, isRecord, setRecordValue } from './record.ts';
 import { parseEntityId, toEntityId } from './ref.ts';
 import type { SelectionPlan } from './selection.ts';
 import type { AnyRecord, EntityId, RelationDescriptor, TypeConfig } from './types.ts';
 
-export const recordPaths = (record: AnyRecord, prefix = ''): Set<string> => {
-  const paths = new Set<string>();
-  for (const [key, value] of Object.entries(record)) {
+export type ClientStateWrite = {
+  data: AnyRecord | null;
+  id: EntityId;
+  plan?: SelectionPlan;
+  prefix?: string;
+  remote?: boolean;
+};
+
+export const recordPaths = (
+  record: AnyRecord,
+  prefix = '',
+  paths = new Set<string>(),
+): Set<string> => {
+  for (const key of Object.keys(record)) {
+    const value = record[key];
     const path = `${prefix}${key}`;
     paths.add(path);
     if (isRecord(value) && !isNodeRef(value)) {
-      for (const nested of recordPaths(value, `${path}.`)) {
-        paths.add(nested);
-      }
+      recordPaths(value, `${path}.`, paths);
     } else if (Array.isArray(value)) {
       for (const item of value) {
         if (isRecord(item) && !isNodeRef(item)) {
-          for (const nested of recordPaths(item, `${path}.`)) {
-            paths.add(nested);
-          }
+          recordPaths(item, `${path}.`, paths);
         }
       }
     }
@@ -76,6 +84,8 @@ const dependencyPath = (path: string, plan: SelectionPlan | undefined, prefix: s
     })
     .join('.');
 
+type ComputedValue = { key: string; result: unknown; values: Array<unknown> };
+
 export default class ClientState {
   readonly initialRecords = new WeakSet<AnyRecord>();
   readonly initialIds = new Set<EntityId>();
@@ -85,7 +95,9 @@ export default class ClientState {
   readonly mutations = new Map<string, ClientMutationDefinition>();
   savedRecords: ReadonlyMap<EntityId, AnyRecord | null> = new Map();
   savedReferences: ReadonlyMap<EntityId, ClientStateReference | null> = new Map();
-  private readonly computedCache = new Map<string, { result: unknown; values: Array<unknown> }>();
+  // Most entities have one cached computation. Allocate a field map only when
+  // another field or argument variant is actually read. Collection is O(1).
+  private readonly computedCache = new Map<EntityId, ComputedValue | Map<string, ComputedValue>>();
 
   constructor(private readonly client: FateClient<any, any, any>) {}
 
@@ -184,27 +196,29 @@ export default class ClientState {
     if (!definition) {
       return;
     }
-    const existing = this.client.store.read(toEntityId(type, id));
-    const missing = Object.entries(definition.view.fields).filter(
-      ([key, value]) =>
-        !isComputed(value) && !Object.hasOwn(incoming, key) && !Object.hasOwn(existing ?? {}, key),
-    );
-    if (!missing.length) {
-      return;
-    }
-    const saved = this.savedRecords.get(toEntityId(type, id));
+    const entityId = toEntityId(type, id);
+    const existing = this.client.store.read(entityId);
+    const saved = this.savedRecords.get(entityId);
     let initial: AnyRecord | undefined;
-    const result: AnyRecord = {};
-    for (const [key] of missing) {
+    let result: AnyRecord | undefined;
+    for (const key of Object.keys(definition.view.fields)) {
+      if (
+        isComputed(definition.view.fields[key]) ||
+        Object.hasOwn(incoming, key) ||
+        (existing && Object.hasOwn(existing, key))
+      ) {
+        continue;
+      }
+      result ??= {};
       if (saved && Object.hasOwn(saved, key)) {
-        result[key] = saved[key];
+        setRecordValue(result, key, saved[key]);
         continue;
       }
       initial ??= this.initial(type, id);
       if (!Object.hasOwn(initial, key)) {
         throw new Error(`fate: Missing initializer for client field '${type}.${key}'.`);
       }
-      result[key] = initial[key];
+      setRecordValue(result, key, initial[key]);
     }
     return result;
   }
@@ -373,30 +387,23 @@ export default class ClientState {
     }
     stack = new Set(stack).add(cacheKey);
     const values: Array<unknown> = [];
-    const read = (owner: EntityId, segments: Array<string>): unknown => {
-      const [name, ...tail] = segments;
-      const value = this.readField(
-        owner,
-        name,
-        { ...plan, args: new Map() },
-        name,
-        coverage,
-        stack,
-      );
-      return readValue(value, tail);
+    const dependencyPlan = plan.args.size ? { ...plan, args: new Map() } : plan;
+    const read = (owner: EntityId, segments: Array<string>, index = 0): unknown => {
+      const name = segments[index];
+      const value = this.readField(owner, name, dependencyPlan, name, coverage, stack);
+      return readValue(value, segments, index + 1);
     };
-    const readValue = (value: unknown, segments: Array<string>): unknown => {
-      if (!segments.length || value == null) {
+    const readValue = (value: unknown, segments: Array<string>, index: number): unknown => {
+      if (index === segments.length || value == null) {
         return value;
       }
       if (isNodeRef(value)) {
-        return read(getNodeRefId(value), segments);
+        return read(getNodeRefId(value), segments, index);
       }
       if (Array.isArray(value)) {
-        return value.map((item) => readValue(item, segments));
+        return value.map((item) => readValue(item, segments, index));
       }
-      const [name, ...tail] = segments;
-      return isRecord(value) ? readValue(value[name], tail) : undefined;
+      return isRecord(value) ? readValue(value[segments[index]], segments, index + 1) : undefined;
     };
     const deps: AnyRecord = {};
     for (const [name, dependency] of Object.entries(definition.select ?? {}) as Array<
@@ -408,14 +415,19 @@ export default class ClientState {
       );
       deps[name] = dependency.kind === 'count' ? (Array.isArray(value) ? value.length : 0) : value;
       if (Array.isArray(deps[name])) {
-        values.push((deps[name] as Array<unknown>).length, ...(deps[name] as Array<unknown>));
+        values.push(deps[name].length);
+        for (const value of deps[name]) {
+          values.push(value);
+        }
       } else {
         values.push(deps[name]);
       }
     }
     const args = plan.args.get(path)?.value;
     values.push(args);
-    const previous = this.computedCache.get(cacheKey);
+    const cached = this.computedCache.get(id);
+    const previous =
+      cached && !('key' in cached) ? cached.get(key) : cached?.key === key ? cached : undefined;
     if (
       previous &&
       previous.values.length === values.length &&
@@ -432,16 +444,25 @@ export default class ClientState {
     if (result && typeof result === 'object' && 'then' in result) {
       throw new Error(`fate: Client computed field '${type}.${field}' must be synchronous.`);
     }
-    this.computedCache.set(cacheKey, { result, values });
+    const next = { key, result, values };
+    if (cached && !('key' in cached)) {
+      cached.set(key, next);
+    } else {
+      this.computedCache.set(
+        id,
+        cached && cached.key !== key
+          ? new Map([
+              [cached.key, cached],
+              [key, next],
+            ])
+          : next,
+      );
+    }
     return result;
   }
 
   collect(id: EntityId) {
-    for (const key of this.computedCache.keys()) {
-      if (key.startsWith(`${id}:`)) {
-        this.computedCache.delete(key);
-      }
-    }
+    this.computedCache.delete(id);
   }
 
   prepare(
@@ -461,13 +482,7 @@ export default class ClientState {
     // Track identities on materialized references: a custom getId can depend on
     // server fields that are absent after restoring a persisted relationship.
     const materializedIds = new WeakMap<AnyRecord, string | number>();
-    const writes: Array<{
-      data: AnyRecord | null;
-      id: EntityId;
-      plan?: SelectionPlan;
-      prefix?: string;
-      remote?: boolean;
-    }> = [];
+    const writes: Array<ClientStateWrite> = [];
     let active = true;
     const assertActive = () => {
       if (!active) {
@@ -492,11 +507,11 @@ export default class ClientState {
       }
       visiting.add(value);
       const previous = patches.get(entityId);
-      const existing = this.client.store.readConfirmed(entityId)?.record;
+      const existing = this.client.store.confirmedRecord(entityId);
       const initial =
         !previous?.data && !existing && this.definitions.has(type)
           ? { ...this.initial(type, id), ...this.savedRecords.get(entityId) }
-          : {};
+          : undefined;
       const storedId =
         (remote ? value.id : undefined) ??
         previous?.data?.id ??
@@ -509,7 +524,9 @@ export default class ClientState {
       const write: AnyRecord = { __typename: type, id: storedId };
       writes.push({ data: write, id: entityId, plan, prefix, remote });
       const config = this.client.getTypeConfig(type);
-      for (const [key, entry] of Object.entries({ ...initial, ...value })) {
+      const fields = initial ? { ...initial, ...value } : value;
+      for (const key of Object.keys(fields)) {
+        const entry = fields[key];
         const name = schemaField(key);
         const path = prefix ? `${prefix}.${key}` : key;
         if (
@@ -565,9 +582,17 @@ export default class ClientState {
       visiting.delete(value);
       return ref;
     };
+    const copyRecord = (record: AnyRecord | undefined, seen: Set<string>, result: AnyRecord) => {
+      if (record) {
+        for (const key of Object.keys(record)) {
+          setRecordValue(result, key, materialize(record[key], seen));
+        }
+      }
+      return result;
+    };
     const materialize = (value: unknown, seen = new Set<string>()): any => {
-      if (isDate(value)) {
-        return new Date(value.getTime());
+      if (value === null || typeof value !== 'object') {
+        return value;
       }
       if (isNodeRef(value)) {
         const id = getNodeRefId(value);
@@ -577,30 +602,52 @@ export default class ClientState {
         }
         const { id: rawId, type } = parseEntityId(id);
         const saved = this.savedReferences.get(id);
-        const record = {
-          __typename: type,
-          id: saved?.id ?? rawId,
-          ...saved?.record,
-          ...this.client.store.readConfirmed(id)?.record,
-          ...staged?.data,
-        };
-        const result = seen.has(id)
-          ? { __typename: type, id: record.id }
-          : materialize(record, new Set(seen).add(id));
-        materializedIds.set(result, saved?.id ?? rawId);
+        const existing = this.client.store.confirmedRecord(id);
+        const record =
+          saved?.record || staged?.data
+            ? { ...saved?.record, ...existing, ...staged?.data }
+            : existing;
+        const result: AnyRecord = { __typename: type, id: saved?.id ?? rawId };
+        if (seen.has(id)) {
+          if (record && Object.hasOwn(record, 'id')) {
+            result.id = record.id;
+          }
+        } else {
+          seen.add(id);
+          copyRecord(record, seen, result);
+          seen.delete(id);
+        }
+        // Client-owned identities always use `id`. Only server references need
+        // a side table for custom identities or partially restored records.
+        if (!this.localTypes.has(type)) {
+          materializedIds.set(result, saved?.id ?? rawId);
+        }
         return result;
       }
       if (Array.isArray(value)) {
-        return value
-          .filter((entry) => !isNodeRef(entry) || patches.get(getNodeRefId(entry))?.data !== null)
-          .map((entry) => materialize(entry, seen));
+        const result: Array<unknown> = [];
+        for (let index = 0; index < value.length; index++) {
+          if (!(index in value)) {
+            continue;
+          }
+          const entry = value[index];
+          if (!isNodeRef(entry) || patches.get(getNodeRefId(entry))?.data !== null) {
+            result.push(materialize(entry, seen));
+          }
+        }
+        return result;
       }
-      if (isRecord(value)) {
-        return Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [key, materialize(entry, seen)]),
-        );
+      if (isDate(value)) {
+        return new Date(value.getTime());
       }
-      return value;
+      return copyRecord(value as AnyRecord, seen, {});
+    };
+    // Existence checks must not materialize an entity's entire related graph.
+    const has = (type: string, id: string | number) => {
+      assertActive();
+      const entityId = toEntityId(type, id);
+      const staged = patches.get(entityId);
+      return staged ? staged.data !== null : Boolean(this.client.store.confirmedRecord(entityId));
     };
     const get = (type: string, id: string | number) => {
       assertActive();
@@ -609,14 +656,14 @@ export default class ClientState {
       if (staged?.data === null) {
         return undefined;
       }
-      const existing = this.client.store.readConfirmed(entityId)?.record;
+      const existing = this.client.store.confirmedRecord(entityId);
       return existing || staged
         ? materialize({ id, ...existing, ...staged?.data, __typename: type })
         : undefined;
     };
     const update = (type: string, id: string | number, data: AnyRecord, create = false) => {
       assertActive();
-      if (!create && !get(type, id)) {
+      if (!create && !has(type, id)) {
         throw new Error(`fate: Cannot update missing client record '${type}:${id}'.`);
       }
       for (const name of Object.keys(data)) {
@@ -657,7 +704,7 @@ export default class ClientState {
             if (typeof id !== 'string' && typeof id !== 'number') {
               throw new Error('fate: A client record needs an id.');
             }
-            if (get(type, id)) {
+            if (has(type, id)) {
               throw new Error(`fate: Client record '${type}:${id}' already exists.`);
             }
             return update(type, id, { ...this.initial(type, id), ...(data as AnyRecord) }, true);
@@ -678,14 +725,7 @@ export default class ClientState {
     return {
       commit: () => {
         active = false;
-        for (const { data, id: entityId, plan, prefix, remote } of writes) {
-          const { id, type } = parseEntityId(entityId);
-          if (data === null) {
-            this.client.deleteRecord(type, id);
-          } else {
-            this.client.writeClientRecord(type, id, data, plan, prefix, remote);
-          }
-        }
+        this.client.writeClientRecords(writes);
         if (!this.client.store.isPreviewing) {
           patches.clear();
           writes.length = 0;

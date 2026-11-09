@@ -21,6 +21,37 @@ test('notifies field subscribers when their record is deleted', async () => {
   dispose();
 });
 
+test('shared coverage survives transaction rollback, preview and optimistic rebasing', () => {
+  const store = new Store();
+  const selection = new CoverageSelection(['id', 'profile.name']);
+  for (const id of ['User:a', 'User:b']) {
+    store.merge(id, { id, profile: { name: 'Before' } }, selection);
+  }
+  const change = () =>
+    store.merge('User:a', { profile: { age: 42 } }, ['profile.age'], ['profile']);
+  const check = () => {
+    for (const id of ['User:a', 'User:b']) {
+      expect(store.hasCoverage(id, 'profile.name')).toBe(true);
+      expect(store.hasCoverage(id, 'profile.age')).toBe(false);
+      expect(store.read(id)?.profile).toEqual({ name: 'Before' });
+    }
+  };
+  expect(() =>
+    store.transaction(() => {
+      change();
+      throw new Error('Rollback');
+    }),
+  ).toThrow('Rollback');
+  check();
+  store.preview(change, () => expect(store.hasCoverage('User:a', 'profile.age')).toBe(true));
+  check();
+  const settle = store.optimisticUpdate(change);
+  expect(store.hasCoverage('User:b', 'profile.name')).toBe(true);
+  expect(store.hasCoverage('User:b', 'profile.age')).toBe(false);
+  settle();
+  check();
+});
+
 test('preserves references as index memberships shrink, grow, roll back, and are collected', () => {
   const store = new Store();
   const cache = new ViewDataCache();

@@ -25,7 +25,7 @@ import {
   type ClientMutationDefinition,
   type ExtendedClient,
 } from './client-schema.ts';
-import ClientState, { recordPaths } from './client-state.ts';
+import ClientState, { recordPaths, type ClientStateWrite } from './client-state.ts';
 import {
   createDeferred,
   getDeferredMetadata,
@@ -2110,28 +2110,59 @@ export class FateClient<
     return this.writeEntity(type, data, select, plan, null, insert);
   }
 
-  /** @internal Commit a client patch whose identity is already known. */
-  writeClientRecord(
-    type: string,
-    id: string | number,
-    data: AnyRecord,
-    plan?: SelectionPlan,
-    prefix?: string,
-    remote = false,
-  ) {
-    const write = () =>
-      this.writeEntity(
-        type,
-        data,
-        recordPaths(data),
-        plan,
-        prefix ?? null,
-        undefined,
-        undefined,
-        undefined,
-        id,
-      );
-    return remote ? this.withMutationWrite(plan, write) : write();
+  /** @internal Commit staged patches, sharing only selection metadata within this commit. */
+  writeClientRecords(writes: ReadonlyArray<ClientStateWrite>) {
+    const batches =
+      writes.length > 1
+        ? new Map<
+            SelectionPlan | undefined,
+            { normalization: NormalizationContext; paths: Map<string, Set<string>> }
+          >()
+        : undefined;
+    for (const { data, id: entityId, plan, prefix, remote } of writes) {
+      const { id, type } = parseEntityId(entityId);
+      if (data === null) {
+        this.deleteRecord(type, id);
+        continue;
+      }
+      let select = recordPaths(data);
+      let normalization: NormalizationContext | undefined;
+      if (batches) {
+        let batch = batches.get(plan);
+        if (!batch) {
+          batch = { normalization: createNormalizationContext(), paths: new Map() };
+          batches.set(plan, batch);
+        }
+        const key = JSON.stringify([...select]);
+        const previous = batch.paths.get(key);
+        if (previous) {
+          select = previous;
+        } else {
+          batch.paths.set(key, select);
+        }
+        normalization = batch.normalization;
+        // Each staged write is a separate replacement, not another window of
+        // the same response. Only compiled selection metadata can be shared.
+        normalization.windows.clear();
+      }
+      const write = () =>
+        this.writeEntity(
+          type,
+          data,
+          select,
+          plan,
+          prefix ?? null,
+          undefined,
+          normalization,
+          undefined,
+          id,
+        );
+      if (remote) {
+        this.withMutationWrite(plan, write);
+      } else {
+        write();
+      }
+    }
   }
 
   /** @internal Normalize an optimistic patch identified by its mutation input. */
@@ -4668,7 +4699,10 @@ export class FateClient<
       if (
         revalidate &&
         this.store.hasStaleRecord(id) &&
-        this.store.hasStalePath(id, getStoragePath(parts.join('.'), plan, prefix))
+        this.store.hasStalePath(
+          id,
+          parts.length === 1 ? storageKey : getStoragePath(parts.join('.'), plan, prefix),
+        )
       ) {
         return false;
       }
@@ -4705,13 +4739,19 @@ export class FateClient<
           if (parts.length === 1) {
             return childrenCovered;
           }
-          const children = list
-            ? getListEntries(getListWindow(list, args?.value)).map(({ id }) => id)
-            : value.filter(isNodeRef).map(getNodeRefId);
+          const children = list ? getListEntries(getListWindow(list, args?.value)) : value;
           const childPaths = parts.slice(1);
           for (const child of children) {
+            const childId = list
+              ? (child as { id: EntityId }).id
+              : isNodeRef(child)
+                ? getNodeRefId(child)
+                : undefined;
+            if (childId === undefined) {
+              continue;
+            }
             // Keep collecting dependencies even if an earlier child is missing.
-            if (!covered(child, childPaths, path)) {
+            if (!covered(childId, childPaths, path)) {
               if (!dependencies) {
                 return false;
               }
@@ -4721,7 +4761,10 @@ export class FateClient<
           return childrenCovered;
         }
       }
-      return this.store.hasCoverage(id, getStoragePath(parts.join('.'), plan, prefix));
+      return this.store.hasCoverage(
+        id,
+        parts.length === 1 ? storageKey : getStoragePath(parts.join('.'), plan, prefix),
+      );
     };
     for (const path of selection) {
       if (!covered(entityId, path.split('.'), '')) {
@@ -6378,6 +6421,9 @@ export class FateClient<
     const record = cached ?? { id: ref.id };
 
     const coverageById = new Map<EntityId, Set<string>>();
+    // A selection repeats for every row. Keep its entries only for this read,
+    // avoiding per-row entry arrays without retaining view metadata globally.
+    const entriesBySelection = new Map<object, Array<[string, unknown]>>();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
     const getViewTags = (target: ViewResult, parentId: EntityId) => {
@@ -6398,7 +6444,13 @@ export class FateClient<
       parentId: EntityId,
       prefix: string | null,
     ) => {
-      for (const [key, conditionalSelection] of Object.entries(viewPayload)) {
+      let entries = entriesBySelection.get(viewPayload);
+      if (!entries) {
+        entries = Object.entries(viewPayload);
+        entriesBySelection.set(viewPayload, entries);
+      }
+      const parentType = parseEntityId(parentId).type;
+      for (const [key, conditionalSelection] of entries) {
         const rawSelection = resolveConditionalSelection(conditionalSelection);
         if (rawSelection === undefined) {
           setRecordValue(target, key, undefined);
@@ -6469,7 +6521,7 @@ export class FateClient<
 
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
-          const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+          const value = this.clientState.isComputed(parentType, field)
             ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
             : Object.hasOwn(record, storageKey)
               ? record[storageKey]
@@ -6491,7 +6543,7 @@ export class FateClient<
             Object.keys(selectionWithoutArgs).length === 0;
 
           if (hasArgsOnly) {
-            const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+            const value = this.clientState.isComputed(parentType, field)
               ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
               : Object.hasOwn(record, storageKey)
                 ? record[storageKey]
@@ -6517,7 +6569,7 @@ export class FateClient<
             ? selectionWithoutArgs
             : selectionValue;
 
-          const value = this.clientState.isComputed(parseEntityId(parentId).type, field)
+          const value = this.clientState.isComputed(parentType, field)
             ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)
             : Object.hasOwn(record, storageKey)
               ? record[storageKey]

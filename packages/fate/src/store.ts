@@ -672,7 +672,8 @@ export class Store {
     if (this.transactionSnapshots && !this.transactionSnapshots.records.has(id)) {
       const mask = this.coverage.get(id);
       this.transactionSnapshots.records.set(id, {
-        mask: mask && cloneMask(mask),
+        // Compiled coverage is immutable; mergeInternal copies it before edits.
+        mask: mask && (this.sharedCoverage.has(mask) ? mask : cloneMask(mask)),
         record: this.records.get(id),
       });
       this.transactionStale?.set(id, this.stalePaths.get(id));
@@ -689,7 +690,7 @@ export class Store {
       if (target && !target.records.has(id)) {
         const mask = this.coverage.get(id);
         target.records.set(id, {
-          mask: mask ? cloneMask(mask) : undefined,
+          mask: mask && (this.sharedCoverage.has(mask) ? mask : cloneMask(mask)),
           record: this.records.get(id),
         });
       }
@@ -788,7 +789,8 @@ export class Store {
       : undefined;
   }
 
-  private confirmedRecord(id: EntityId) {
+  /** @internal Read confirmed data without allocating coverage paths or a snapshot wrapper. */
+  confirmedRecord(id: EntityId) {
     const snapshot = this.optimisticBase.records.get(id);
     return snapshot ? snapshot.record : this.records.get(id);
   }
@@ -1075,7 +1077,8 @@ export class Store {
       const patchPaths = coveragePaths.some((path) => path.includes('.'))
         ? new Set(changedPaths)
         : undefined;
-      for (const [key, value] of Object.entries(partial)) {
+      for (const key of Object.keys(partial)) {
+        const value = partial[key];
         if (previous[key] !== value) {
           hasChanges = true;
           changedPaths.add(key);

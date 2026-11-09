@@ -40,6 +40,129 @@ The 1,000-record collections stress scaling beyond a typical page; they are not 
 recommendation to fetch thousands of records at once. No result here measures
 browser rendering, network latency, or backend query performance.
 
+## Client schema performance and memory
+
+Run the package benchmark suite separately from ordinary tests:
+
+```sh
+vp test bench client-state --run
+```
+
+It covers setup, cached reads, leaf and parent mutations, changed and unchanged
+relationship replacement, create/delete cycles, and initializing, reading, and
+collecting many computed entities, at 100, 1,000, and 5,000 records. The collection
+case includes preparation and reads; it is not an isolated GC latency measurement.
+
+For minified production browser bundles and allocation/retention measurements:
+
+```sh
+node scripts/benchmark-client-state.mjs chromium 1000 30 /tmp/client-state-chromium.json
+node scripts/benchmark-client-state.mjs webkit 5000 30 /tmp/client-state-webkit.json
+node scripts/benchmark-client-state.mjs node 1000 100 /tmp/client-state-memory.json
+```
+
+Arguments are engine, related record count, sample count (iterations for Node),
+and an optional JSON report path. An installed Playwright browser is required
+for browser runs. The runner builds in a temporary directory and removes it on
+completion. Run comparisons sequentially on an idle machine without concurrent
+builds or tests. Use the same dependencies, fixture, and Node version.
+
+To substitute runtime source from an earlier commit without changing the checkout
+or the current benchmark fixture:
+
+```sh
+FATE_BENCH_BASELINE=5a733e6 node scripts/benchmark-client-state.mjs chromium 5000 30 /tmp/client-state-before.json
+FATE_BENCH_BASELINE=5a733e6 node scripts/benchmark-client-state.mjs node 1000 100 /tmp/client-state-memory-before.json
+```
+
+The fixture contains a parent with a scalar counter, related task records, and a
+computed aggregate of task titles. Mutations use the public API, including input
+validation where applicable. The changed replacement alternates every task's
+`done` value. The unchanged replacement repeatedly supplies the same rows. One
+case has 100 store listeners that increment a counter. Correctness checks verify
+related records, computed values, invalidation, and notification counts.
+
+Schema/view declarations and payloads are prepared before timing. Setup constructs
+fresh clients with warm code, excluding download, module parsing, and initial JIT
+compilation. Graph initialization uses `client.write`; relationship replacement
+uses a transaction through the mutation API. Core read/write controls use the
+same normalized graph without a client schema; direct writes omit mutation
+validation, staging, and detached return snapshots.
+
+Browser cases warm up for at least 100 ms and ten iterations. Fast cases use
+batches targeting at least 5 ms to accommodate clock rounding. Reported p50/p95
+values describe per-operation **batch averages**, not individual-call tail
+latencies. Each sample starts after an animation frame. The browser runs exclude
+persistence, network, framework rendering, and mobile hardware.
+
+Node memory runs are separate from timing. They report V8 heap allocation sampled
+at 16 KiB intervals, including objects collected during profiling, divided by the
+operation count. Retained heap is measured before and after an unprofiled pass,
+with three forced collections in separate event-loop turns at each boundary.
+Allocation is an estimate, not peak RSS or retained memory. Small retained-heap
+deltas can include JIT/GC noise and may be negative; they are not a leak test.
+Forced-GC regression tests independently verify that collected computed results
+and committed/rolled-back mutation payloads become unreachable, even when a
+settled mutation context remains reachable.
+
+An Apple M5 Max run on 2026-11-09 used Node 26.13.0, Chromium 158.0.8127.18,
+and WebKit 27.2. The same final fixture compared the runtime at `5a733e6` with the
+optimized working tree, using 30 browser samples. Medians below are milliseconds
+per operation for **5,000 related records**:
+
+| Operation                              | Chromium before | Chromium after | WebKit before | WebKit after |
+| -------------------------------------- | --------------: | -------------: | ------------: | -----------: |
+| Parent scalar mutation                 |            3.66 |           0.78 |          2.80 |         0.60 |
+| Parent read-modify-write               |            5.78 |           1.42 |          4.00 |         1.00 |
+| Replace unchanged relationship         |           18.30 |          10.00 |         30.00 |        13.00 |
+| Replace changed relationship           |           20.80 |          12.30 |         30.00 |        14.00 |
+| Leaf mutation + recompute aggregate    |            2.27 |           1.73 |          3.00 |         1.75 |
+| Leaf mutation + read invalidated graph |            6.60 |           4.55 |          7.00 |         4.00 |
+
+At 1,000 records, parent scalar mutation medians improved from 0.90 to 0.16 ms in
+Chromium and 0.63 to 0.11 ms in WebKit. Cached scalar, computed, and graph reads
+remained below 0.001 ms, comparable to the core client without a schema. Leaf
+mutations remained below 0.007 ms. Small schema registration with seven mutations
+and an empty root remained about 0.01 ms; registering 100 types with 20 fields each
+remained about 0.7–0.9 ms. Initializing 5,000 records remained about 3.7/2.5 ms in
+Chromium/WebKit. These controls did not show a material regression.
+
+Sampled allocation with **1,000 related records**, 100 iterations per pass,
+reported in decimal MB per operation:
+
+| Operation                              | Before, MB/op | After, MB/op | Reduction |
+| -------------------------------------- | ------------: | -----------: | --------: |
+| Parent scalar mutation                 |          3.86 |         0.41 |       89% |
+| Parent read-modify-write               |          5.90 |         0.80 |       86% |
+| Replace unchanged relationship         |         16.95 |         7.17 |       58% |
+| Replace changed relationship           |         18.36 |         8.62 |       53% |
+| Leaf mutation + recompute aggregate    |          1.72 |         1.34 |       22% |
+| Leaf mutation + read invalidated graph |          2.67 |         1.99 |       26% |
+
+The populated client graph and cached views occupied approximately 1.82 MB of
+additional V8 heap in both versions. The primary memory improvement is reduced
+transient allocation and GC pressure, with essentially unchanged retained graph
+size in this fixture.
+
+The implementation keeps returned mutation snapshots detached and publishes
+staged writes atomically. Existence checks read confirmed records without
+materializing graphs or allocating coverage paths. Snapshot copying uses one
+output object per record and a traversal-local cycle set. Normalization metadata
+is shared only within a commit and partitioned by selection plan; pagination
+windows remain isolated between staged writes. Immutable compiled coverage is
+shared by rollback snapshots and copied before mutation. Read paths reuse
+selection entries within a read and avoid temporary relationship arrays.
+Computed results are indexed by entity, with a compact single-result entry and a
+field map only when needed, so collecting one entity no longer scans the entire
+computed cache. No persistent cache of materialized mutation snapshots is added.
+
+Parent snapshots and whole-relationship replacement still scale with the graph.
+Changing 5,000 related records took 12.3/14.0 ms median and 13.3/17.0 ms p95 in
+Chromium/WebKit in this run. Those remain meaningful main-thread costs before
+rendering. Targeted leaf mutations and small settings entities remain the best
+fit for frequent interactive updates. Re-run with application payloads,
+subscribers, persistence, and target devices before setting production budgets.
+
 ## Browser client persistence
 
 Run the IndexedDB benchmark in an installed Playwright browser.

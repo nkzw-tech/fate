@@ -9,7 +9,7 @@ import type { DataViewResult } from '../data-view.ts';
 import { defer } from '../defer.ts';
 import { createGraphQLTransport } from '../graphqlTransport.ts';
 import { mutation } from '../mutation.ts';
-import { getNodeRefId, isNodeRef } from '../node-ref.ts';
+import { createNodeRef, getNodeRefId, isNodeRef } from '../node-ref.ts';
 import { createPersistence } from '../persistence.ts';
 import type { FateLiveConnectionEvent } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
@@ -610,6 +610,144 @@ test('nested client writes are visible through every staged relationship before 
     { id: 'a', title: 'New!' },
     { id: 'b', title: '' },
   ]);
+});
+
+test('client mutation existence checks honor staged creates and deletes', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('Todo', {
+      resolve: ({ store }) => {
+        expect(() => store.update('Todo', 'missing', { title: 'Missing' })).toThrow(
+          'Cannot update missing client record',
+        );
+        store.create('Todo', { id: 'new', title: 'Created' });
+        store.update('Todo', 'new', { title: 'Updated before commit' });
+        expect(() => store.create('Todo', { id: 'new' })).toThrow('already exists');
+        store.delete('Todo', 'existing');
+        expect(() => store.update('Todo', 'existing', { title: 'Deleted' })).toThrow(
+          'Cannot update missing client record',
+        );
+        store.create('Todo', { id: 'existing', title: 'Recreated' });
+        return store.update('Todo', 'existing', { title: 'Updated after recreation' });
+      },
+    }),
+  }));
+  client.write('Todo', { id: 'existing', title: 'Before' }, new Set(['id', 'title']));
+  const { result } = await client.mutations.edit();
+  expect(result?.title).toBe('Updated after recreation');
+  expect(client.store.read('Todo:new')?.title).toBe('Updated before commit');
+  expect(client.store.read('Todo:existing')?.title).toBe('Updated after recreation');
+  expect(client.store.read('Todo:missing')).toBeUndefined();
+});
+
+test('mutation snapshots stay detached across shared relationships and later writes', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('UI', {
+      resolve: ({ store }) => {
+        const first = store.get('UI', 'main')!;
+        const second = store.get('UI', 'main')!;
+        first.todos![0].title = 'Changed snapshot';
+        expect(first.todos![1].title).toBe('Before');
+        expect(second.todos![0].title).toBe('Before');
+        const updated = store.update('UI', 'main', { count: 1 });
+        store.update('Todo', 'a', { title: 'After' });
+        expect(updated.todos![0].title).toBe('Before');
+        expect(store.get('UI', 'main')!.todos!.map(({ title }) => title)).toEqual([
+          'After',
+          'After',
+        ]);
+        return updated;
+      },
+    }),
+  }));
+  client.write(
+    'UI',
+    {
+      id: 'main',
+      todos: [
+        { id: 'a', title: 'Before' },
+        { id: 'a', title: 'Before' },
+      ],
+    },
+    new Set(['id', 'todos', 'todos.id', 'todos.title']),
+  );
+  const { result } = await client.mutations.edit();
+  result!.todos![0].title = 'Changed returned snapshot';
+  expect(client.store.read('Todo:a')!.title).toBe('After');
+});
+
+test('batched client writes replace each relationship in order and preserve field coverage', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('UI', {
+      resolve: ({ store }) => {
+        store.update('UI', 'main', {
+          todos: [
+            { id: 'a', title: 'A' },
+            { id: 'b', title: 'B' },
+          ],
+        });
+        store.update('UI', 'main', { todos: [{ id: 'b', title: 'B2' }] });
+        store.update('Todo', 'a', { title: 'A2' });
+        return store.get('UI', 'main');
+      },
+    }),
+  }));
+  await client.mutations.edit();
+  const { ui } = await client.request({ ui: { view: UIView } });
+  expect((await client.readView(UIView, ui)).data.todos).toEqual([
+    { __typename: 'Todo', id: 'b', title: 'B2' },
+  ]);
+  expect(client.store.read('Todo:a')!.title).toBe('A2');
+});
+
+test('mutation snapshots preserve cycle boundaries and safely copy scalar objects and sparse arrays', async () => {
+  const cycle = dataView<{
+    id: string;
+    link: { id: string } | null;
+    metadata: Record<string, unknown>;
+  }>('Cycle')({
+    id: true,
+    link: dataView<{ id: string }>('Cycle')({ id: true }),
+    metadata: true,
+  });
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      types: { Cycle: { defaults: (id) => ({ id, link: null, metadata: {} }), view: cycle } },
+    }),
+    ({ mutation }) => ({
+      read: mutation('Cycle', { resolve: ({ store }) => store.get('Cycle', 'a') }),
+    }),
+  );
+  const values: Array<number> = [];
+  values[1] = 2;
+  const metadata = { ...JSON.parse('{"__proto__":{"marker":true}}'), values };
+  client.write(
+    'Cycle',
+    { id: 'a', link: createNodeRef('Cycle:b'), metadata },
+    new Set(['id', 'link', 'metadata']),
+  );
+  client.write(
+    'Cycle',
+    { id: 'b', link: createNodeRef('Cycle:a'), metadata: {} },
+    new Set(['id', 'link', 'metadata']),
+  );
+  const { result } = await client.mutations.read();
+  const copied = { ...metadata, values: [2] };
+  expect(result?.metadata).toEqual(copied);
+  expect(Object.hasOwn(result!.metadata!, '__proto__')).toBe(true);
+  expect(Object.getPrototypeOf(result!.metadata)).toBe(Object.prototype);
+  expect(result?.link).toEqual({
+    __typename: 'Cycle',
+    id: 'b',
+    link: {
+      __typename: 'Cycle',
+      id: 'a',
+      link: { __typename: 'Cycle', id: 'b' },
+      metadata: copied,
+    },
+    metadata: {},
+  });
+  expect(values).toHaveLength(2);
+  expect(0 in values).toBe(false);
 });
 
 test.each([null, { id: 'old', title: 'Old task' }])(
