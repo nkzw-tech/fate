@@ -172,6 +172,13 @@ Use another data view for a relationship and `list(childView)` for an array of r
 
 Inside a mutation, use `store.create(type, { id, ...fields })` to create a client object with its defaults, `store.update(type, id, patch)` to change stored client fields, and `store.delete(type, id)` to remove a client object. Update the parent's relationship when adding or removing an item. Use remote mutations to change server fields.
 
+For a list relationship, use `store.append(type, id, field, ...memberIds)` to add records without reading the list. The members must already exist or have been created earlier in the mutation. IDs already in the list keep their position. The new records and list membership commit together. Use `store.has(type, id)` to check whether a record exists without reading its fields.
+
+```ts
+store.create('Task', { id: taskId, title: 'Pack for the trip' });
+store.append('Board', boardId, 'tasks', taskId);
+```
+
 `store.get(type, id)` returns a copy of the object's stored fields, including changes made earlier in the current mutation. It can return partial data or `undefined` if the object is missing. It does not fetch missing fields or calculate computed values; use views to read computed fields.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.

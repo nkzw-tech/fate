@@ -177,7 +177,28 @@ type ClientPatch<Entities, S extends ClientSchema, N extends keyof Entities> = {
   >;
 };
 
+type ListKeys<S extends ClientSchema, N extends PropertyKey> = N extends keyof Definitions<S>
+  ? Definitions<S>[N] extends { view: infer V extends DataView<any> }
+    ? {
+        [K in keyof ViewFieldConfig<V>]: ViewFieldConfig<V>[K] extends { kind: 'list' } ? K : never;
+      }[keyof ViewFieldConfig<V>]
+    : never
+  : never;
+
+type ListMemberId<T> =
+  NonNullable<T> extends ReadonlyArray<{ id: infer Id extends string | number }> ? Id : never;
+
 export type ClientStore<Entities, S extends ClientSchema> = {
+  /** Append existing entities by ID without materializing the list. Duplicate IDs keep their position. */
+  append<
+    N extends keyof Entities & string,
+    K extends Extract<ListKeys<S, NoInfer<N>>, keyof Entities[N] & string>,
+  >(
+    type: N,
+    id: string | number,
+    field: K,
+    ...ids: Array<ListMemberId<Entities[N][K]>>
+  ): void;
   create<N extends keyof NonNullable<S['types']> & keyof Entities & string>(
     type: N,
     data: ClientPatch<Entities, S, N> & { id: string | number },
@@ -187,6 +208,7 @@ export type ClientStore<Entities, S extends ClientSchema> = {
     type: N,
     id: string | number,
   ): Readonly<Partial<Entities[N]>> | undefined;
+  has<N extends keyof Entities & string>(type: N, id: string | number): boolean;
   update<N extends keyof Entities & string>(
     type: N,
     id: string | number,

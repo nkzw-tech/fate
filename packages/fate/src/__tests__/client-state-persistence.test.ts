@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vite-plus/test';
+import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { z } from 'zod';
 import { clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
@@ -6,6 +6,70 @@ import { dataView, list } from '../data-view.ts';
 import { createPersistence } from '../persistence.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
+
+test('appends typed local records in the same durable transaction and preserves list order', async () => {
+  const storage = memoryStorage();
+  const note = dataView<{ id: string; text: string }>('Note')({ id: true, text: true });
+  const schema = clientSchema({
+    roots: { board: { id: 'main', type: 'Board' } },
+    types: {
+      Board: {
+        defaults: (id) => ({ id, notes: [{ id: 'first', text: 'First' }] }),
+        view: dataView<{ id: string; notes: Array<{ id: string; text: string }> }>('Board')({
+          id: true,
+          notes: list(note),
+        }),
+      },
+      Note: { defaults: (id) => ({ id, text: '' }), view: note },
+    },
+  });
+  const open = () =>
+    createClient({
+      persistence: createPersistence({ key: 'append-notes', storage }),
+    }).registerClientSchema(schema, ({ mutation }) => ({
+      add: mutation('Board', {
+        resolve: ({ store }) => {
+          expectTypeOf<
+            Parameters<typeof store.append<'Board', 'notes'>>[3]
+          >().toEqualTypeOf<string>();
+          expect(store.has('Note', 'second')).toBe(false);
+          store.create('Note', { id: 'second', text: 'Second' });
+          store.create('Note', { id: 'third', text: 'Third' });
+          store.append('Board', 'main', 'notes', 'second', 'first', 'second');
+          expect(store.get('Board', 'main')?.notes?.map(({ id }) => id)).toEqual([
+            'first',
+            'second',
+          ]);
+          store.delete('Note', 'first');
+          store.append('Board', 'main', 'notes', 'third');
+          return store.get('Board', 'main')?.notes?.map(({ id }) => id);
+        },
+      }),
+    }));
+  const Board = view<EntityOf<ReturnType<typeof open>, 'Board'>>()({ notes: { text: true } });
+  const client = open();
+  const write = vi.spyOn(storage, 'writeBatch');
+  try {
+    await client.persistence!.ready;
+    write.mockRejectedValueOnce(new Error('Disk write failed'));
+    await expect(client.mutations.add()).rejects.toThrow('Disk write failed');
+    const { board } = await client.request({ board: { view: Board } });
+    expect((await client.readView(Board, board)).data.notes).toMatchObject([{ text: 'First' }]);
+    expect((await client.mutations.add()).result).toEqual(['second', 'third']);
+    const reopened = open();
+    try {
+      const { board } = await reopened.request({ board: { view: Board } });
+      expect((await reopened.readView(Board, board)).data.notes).toMatchObject([
+        { text: 'Second' },
+        { text: 'Third' },
+      ]);
+    } finally {
+      reopened.persistence!.dispose();
+    }
+  } finally {
+    client.persistence!.dispose();
+  }
+});
 
 test('saving a small record in a large graph only reads the header and writes that record', async () => {
   const storage = memoryStorage();

@@ -680,6 +680,54 @@ export default class ClientState {
       stage(type, id, data);
       return get(type, id);
     };
+    const append = (
+      type: string,
+      id: string | number,
+      field: string,
+      ...ids: Array<string | number>
+    ) => {
+      if (!has(type, id)) {
+        throw new Error(`fate: Cannot update missing client record '${type}:${id}'.`);
+      }
+      const descriptor = this.client.getTypeConfig(type).fields?.[field];
+      if (
+        !this.definitions.get(type)?.view.fields[field] ||
+        !descriptor ||
+        descriptor === 'scalar' ||
+        !('listOf' in descriptor)
+      ) {
+        throw new Error(`fate: '${type}.${field}' is not a stored client list.`);
+      }
+      if (!ids.length) {
+        return;
+      }
+      const owner = toEntityId(type, id);
+      const staged = patches.get(owner)?.data;
+      const previous =
+        staged && Object.hasOwn(staged, field)
+          ? staged[field]
+          : this.client.store.confirmedRecord(owner)?.[field];
+      const members = Array.isArray(previous)
+        ? previous.filter((ref) => isNodeRef(ref) && patches.get(getNodeRefId(ref))?.data !== null)
+        : [];
+      const seen = new Set(members.map(getNodeRefId));
+      const originalSize = members.length;
+      for (const memberId of ids) {
+        const member = toEntityId(descriptor.listOf, memberId);
+        if (!seen.has(member)) {
+          if (!has(descriptor.listOf, memberId)) {
+            throw new Error(
+              `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
+            );
+          }
+          seen.add(member);
+          members.push(createNodeRef(member));
+        }
+      }
+      if (members.length !== originalSize) {
+        stage(type, id, { [field]: members });
+      }
+    };
     const execute = () =>
       definition.resolve({
         input: definition.input ? definition.input.parse(input) : input,
@@ -696,6 +744,7 @@ export default class ClientState {
           return result as any;
         },
         store: {
+          append,
           create: (type, data) => {
             if (!this.localTypes.has(type)) {
               throw new Error(`fate: Cannot create server type '${type}' locally.`);
@@ -719,6 +768,7 @@ export default class ClientState {
             writes.push({ data: null, id: entityId });
           },
           get,
+          has,
           update,
         },
       });
