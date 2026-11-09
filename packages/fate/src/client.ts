@@ -678,9 +678,14 @@ export class FateClient<
   private uncontendedWriteGeneration: number | undefined;
   private readonly writeVersions = new Map<string, number>();
   private readonly fieldWriteVersions = new Map<EntityId, Map<string, number>>();
+  private undoPreviewResolution?: () => void;
 
   private acceptFieldWrite(id: EntityId, field: string, generation: number): boolean {
-    if (this.store.isRecordingOptimistic || !this.pendingNetworkRequests) {
+    if (
+      this.store.isPreviewing ||
+      this.store.isRecordingOptimistic ||
+      !this.pendingNetworkRequests
+    ) {
       return true;
     }
     let fields = this.fieldWriteVersions.get(id);
@@ -705,7 +710,11 @@ export class FateClient<
   }
 
   private acceptWrite(key: string, generation: number): boolean {
-    if (this.store.isRecordingOptimistic || !this.pendingNetworkRequests) {
+    if (
+      this.store.isPreviewing ||
+      this.store.isRecordingOptimistic ||
+      !this.pendingNetworkRequests
+    ) {
       return true;
     }
     if ((this.writeVersions.get(key) ?? 0) > generation) {
@@ -1410,6 +1419,16 @@ export class FateClient<
   }
 
   /** @internal */
+  previewClientMutation<T>(apply: () => T): T {
+    try {
+      return this.store.preview(apply);
+    } finally {
+      this.undoPreviewResolution?.();
+      this.undoPreviewResolution = undefined;
+    }
+  }
+
+  /** @internal */
   captureClientState(): ClientStateSnapshot {
     const state = this.store.dehydrateConfirmed();
     const records = new Map<EntityId, AnyRecord | null>();
@@ -1717,7 +1736,7 @@ export class FateClient<
 
   /** @internal Mark confirmed data stale without evicting its snapshot. */
   invalidateMutationTargets({ invalidate, invalidateRecords }: MutationCommand) {
-    if (invalidate || invalidateRecords) {
+    if (!this.store.isPreviewing && (invalidate || invalidateRecords)) {
       this.store.update(() => {
         for (const key of invalidate ?? []) {
           if (this.isClientStateList(key)) {
@@ -1838,7 +1857,7 @@ export class FateClient<
           ? list
           : { ...list, key: getListKey(owner, list.field, list.hash), owner };
       const entityId = this.resolveEntityId(node);
-      if (confirmed) {
+      if (confirmed && !this.store.isPreviewing) {
         const generation = this.recordInvalidation(`list:${target.key}`);
         this.acceptWrite(`list:${target.key}`, generation);
         this.withWriteGeneration(generation, () => this.deleteConnectionEdge(target, entityId));
@@ -2164,9 +2183,11 @@ export class FateClient<
     return this.store.update(() => {
       const entityId = toEntityId(type, id);
 
-      this.viewDataCache.invalidate(entityId);
-      this.stableRefs.delete(entityId);
-      this.clientState.collect(entityId);
+      if (!this.store.isPreviewing) {
+        this.viewDataCache.invalidate(entityId);
+        this.stableRefs.delete(entityId);
+        this.clientState.collect(entityId);
+      }
       this.store.deleteRecord(entityId);
       this.store.removeReferencesTo(entityId, this.viewDataCache);
     });
@@ -3440,12 +3461,22 @@ export class FateClient<
     while (previous.next && previous.next !== resolution) {
       previous = previous.next;
     }
+    if (this.store.isPreviewing) {
+      const resolutionNext = resolution.next;
+      const previousNext = previous.next;
+      this.undoPreviewResolution = () => {
+        resolution.next = resolutionNext;
+        previous.next = previousNext;
+      };
+    }
     if (previous.next === resolution) {
       previous.next = undefined;
     }
     resolution.next = target;
-    for (const ref of this.stableRefs.get(optimisticEntityId)?.values() ?? []) {
-      this.optimisticRefResolutions.set(ref, resolution);
+    if (!this.store.isPreviewing) {
+      for (const ref of this.stableRefs.get(optimisticEntityId)?.values() ?? []) {
+        this.optimisticRefResolutions.set(ref, resolution);
+      }
     }
     this.store.replaceListEntityId(optimisticEntityId, resolvedEntityId);
   }

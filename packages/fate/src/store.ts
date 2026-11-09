@@ -307,6 +307,24 @@ export class Store {
   private transactionStale: Map<EntityId, ReadonlyArray<string> | undefined> | undefined;
   private transactionChanges: Array<() => void> | undefined;
   private transactionSubscribers: Set<() => void> | undefined;
+  private previewing = false;
+
+  get isPreviewing() {
+    return this.previewing;
+  }
+
+  /** Run a synchronous update without publishing it or retaining its changes. */
+  preview<T>(apply: () => T): T {
+    if (this.transactionChanges) {
+      throw new Error('fate: Cannot preview changes inside a store transaction.');
+    }
+    this.previewing = true;
+    try {
+      return this.transaction(apply);
+    } finally {
+      this.previewing = false;
+    }
+  }
 
   /** Publish a synchronous graph update atomically, restoring data if it throws. */
   transaction<T>(apply: () => T): T {
@@ -330,59 +348,71 @@ export class Store {
     this.transactionChanges = changes;
     this.transactionSubscribers = subscribers;
     let result: T;
+    let completed = false;
     try {
       result = apply();
       if (result && typeof result === 'object' && 'then' in result) {
         throw new Error('fate: Store transactions must be synchronous.');
       }
-    } catch (error) {
-      for (const [id, { mask, record }] of snapshot.records) {
-        if (record) {
-          this.records.set(id, record);
-        } else {
-          this.records.delete(id);
-        }
-        if (mask) {
-          this.coverage.set(id, mask);
-        } else {
-          this.coverage.delete(id);
-        }
-        const paths = stale.get(id);
-        if (paths) {
-          this.stalePaths.set(id, paths);
-        } else {
-          this.stalePaths.delete(id);
-        }
-      }
-      for (const [key, list] of snapshot.lists) {
-        if (list) {
-          this.lists.set(key, list);
-        } else {
-          this.lists.delete(key);
-        }
-      }
-      this.rebuildIndexes();
-      this.optimisticLayers.clear();
-      for (const { apply, layer, settled, writes } of layers) {
-        layer.apply = apply;
-        layer.settled = settled;
-        layer.writes = writes;
-        this.optimisticLayers.add(layer);
-      }
-      this.optimisticBase.records.clear();
-      this.optimisticBase.lists.clear();
-      for (const [key, value] of baseRecords) {
-        this.optimisticBase.records.set(key, value);
-      }
-      for (const [key, value] of baseLists) {
-        this.optimisticBase.lists.set(key, value);
-      }
-      throw error;
+      completed = true;
     } finally {
       this.transactionSnapshots = undefined;
       this.transactionStale = undefined;
       this.transactionChanges = undefined;
       this.transactionSubscribers = undefined;
+      if (!completed || this.previewing) {
+        for (const [id, { mask, record }] of snapshot.records) {
+          const current = this.records.get(id);
+          if (current !== record) {
+            if (current) {
+              this.removeRecordReferenceIndexes(id, current);
+            }
+            if (record) {
+              this.records.set(id, record);
+              this.addRecordReferenceIndexes(id, record);
+            } else {
+              this.records.delete(id);
+            }
+          }
+          if (mask) {
+            this.coverage.set(id, mask);
+          } else {
+            this.coverage.delete(id);
+          }
+          const paths = stale.get(id);
+          if (paths) {
+            this.stalePaths.set(id, paths);
+          } else {
+            this.stalePaths.delete(id);
+          }
+        }
+        for (const [key, list] of snapshot.lists) {
+          const current = this.lists.get(key);
+          if (current !== list) {
+            if (current) {
+              this.removeListIndexes(key, current);
+            }
+            if (list) {
+              this.lists.set(key, list);
+              this.addListIndexes(key, list);
+            } else {
+              this.lists.delete(key);
+            }
+          }
+        }
+        this.optimisticLayers.clear();
+        for (const { apply, layer, settled, writes } of layers) {
+          layer.apply = apply;
+          layer.settled = settled;
+          layer.writes = writes;
+          this.optimisticLayers.add(layer);
+        }
+        this.optimisticBase.records = baseRecords;
+        this.optimisticBase.lists = baseLists;
+      }
+    }
+    if (this.previewing) {
+      return result;
     }
     for (const change of changes) {
       change();
@@ -465,7 +495,9 @@ export class Store {
           }
         }
         this.rebase = undefined;
-        this.onRebase?.(new Set(records.keys()), lists);
+        if (!this.previewing) {
+          this.onRebase?.(new Set(records.keys()), lists);
+        }
         for (const [id, paths] of records) {
           this.notify(id, paths, false);
         }
@@ -1033,7 +1065,7 @@ export class Store {
       if (!this.recordingLayer) {
         this.stalePaths.delete(id);
         this.publishChange({ key: id, kind: 'record', referencesChanged: true });
-        if (record && !this.rebase && this.subscriptions.has(id)) {
+        if (record && !this.rebase && !this.previewing && this.subscriptions.has(id)) {
           // Let synchronous reference removal or replacement finish before readers refetch.
           queueMicrotask(() => this.notify(id, undefined, false));
         }

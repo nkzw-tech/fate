@@ -7,7 +7,7 @@ import { createPersistence } from '../persistence.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 
-test('retrying a failed save persists an assignment that already matches memory', async () => {
+test('retrying a failed save persists the assignment without saving memory-only fields', async () => {
   const storage = memoryStorage();
   const writeBatch = vi.spyOn(storage, 'writeBatch');
   const make = () =>
@@ -42,7 +42,7 @@ test('retrying a failed save persists an assignment that already matches memory'
     await client.mutations.draft({ persist: false });
     writeBatch.mockRejectedValueOnce(new Error('Disk write failed'));
     await expect(client.mutations.save()).rejects.toThrow('Disk write failed');
-    expect(client.store.read('Note:main')?.title).toBe('Saved');
+    expect(client.store.read('Note:main')?.title).toBe('Default');
 
     writeBatch.mockRejectedValueOnce(new Error('Disk write failed again'));
     await expect(client.mutations.save()).rejects.toThrow('Disk write failed again');
@@ -60,7 +60,7 @@ test('retrying a failed save persists an assignment that already matches memory'
   }
 });
 
-test('newer saved fields supersede failed patches while unrelated pending fields survive', async () => {
+test('a save preserves another tab’s edits without committing an earlier failed write', async () => {
   const storage = memoryStorage();
   const writeBatch = vi.spyOn(storage, 'writeBatch');
   const make = () =>
@@ -98,12 +98,12 @@ test('newer saved fields supersede failed patches while unrelated pending fields
     await Promise.all([first.persistence!.ready, second.persistence!.ready]);
     writeBatch.mockRejectedValueOnce(new Error('Disk write failed'));
     await expect(
-      first.mutations.save({ input: { draft: 'Keep this pending edit', title: 'A' } }),
+      first.mutations.save({ input: { draft: 'Failed draft', title: 'A' } }),
     ).rejects.toThrow('Disk write failed');
     await second.mutations.save({ input: { title: 'B' } });
     await first.mutations.increment();
 
-    const expected = { count: 1, draft: 'Keep this pending edit', title: 'B' };
+    const expected = { count: 1, draft: '', title: 'B' };
     expect(first.store.read('Note:main')).toMatchObject(expected);
     const reopened = make();
     try {
@@ -125,75 +125,85 @@ test.each([
   ['save', 'remove'],
   ['remove', 'save'],
   ['choose', 'choose'],
-] as const)("a failed %s preserves another tab's %s when retried", async (failed, saved) => {
-  const storage = memoryStorage();
-  const writeBatch = vi.spyOn(storage, 'writeBatch');
-  const note = dataView<{ id: string; title: string }>('Note')({ id: true, title: true });
-  const schema = clientSchema({
-    roots: { workspace: { id: 'main', type: 'Workspace' } },
-    types: {
-      Note: { defaults: (id) => ({ id, title: 'Default' }), view: note },
-      Workspace: {
-        defaults: (id) => ({ count: 0, id, notes: [{ id: 'seed', title: 'Default' }] }),
-        view: dataView<{ count: number; id: string; notes: Array<{ id: string; title: string }> }>(
-          'Workspace',
-        )({ count: true, id: true, notes: list(note) }),
+] as const)(
+  "a failed %s does not undo another tab's %s during the next save",
+  async (failed, saved) => {
+    const storage = memoryStorage();
+    const writeBatch = vi.spyOn(storage, 'writeBatch');
+    const note = dataView<{ id: string; title: string }>('Note')({ id: true, title: true });
+    const schema = clientSchema({
+      roots: { workspace: { id: 'main', type: 'Workspace' } },
+      types: {
+        Note: { defaults: (id) => ({ id, title: 'Default' }), view: note },
+        Workspace: {
+          defaults: (id) => ({ count: 0, id, notes: [{ id: 'seed', title: 'Default' }] }),
+          view: dataView<{
+            count: number;
+            id: string;
+            notes: Array<{ id: string; title: string }>;
+          }>('Workspace')({ count: true, id: true, notes: list(note) }),
+        },
       },
-    },
-  });
-  const make = (title: string) =>
-    createClient({
-      persistence: createPersistence({ key: 'notes', storage }),
-    }).registerClientSchema(schema, ({ mutation }) => ({
-      choose: mutation('Workspace', {
-        resolve: ({ store }) =>
-          store.update('Workspace', 'main', { notes: [{ id: title, title }] }),
-      }),
-      increment: mutation('Workspace', {
-        resolve: ({ store }) =>
-          store.update('Workspace', 'main', {
-            count: store.get('Workspace', 'main')!.count! + 1,
-          }),
-      }),
-      remove: mutation('Note', {
-        resolve: ({ store }) => store.delete('Note', 'seed'),
-      }),
-      save: mutation('Note', {
-        resolve: ({ store }) => store.update('Note', 'seed', { title }),
-      }),
-    }));
-  const first = make('A');
-  const second = make('B');
-  try {
-    await Promise.all([first.persistence!.ready, second.persistence!.ready]);
-    writeBatch.mockRejectedValueOnce(new Error('Disk write failed'));
-    await expect(first.mutations[failed]()).rejects.toThrow('Disk write failed');
-    await second.mutations[saved]();
-    await first.mutations.increment();
-
-    const reopened = make('Reopened');
+    });
+    const make = (title: string) =>
+      createClient({
+        persistence: createPersistence({ key: 'notes', storage }),
+      }).registerClientSchema(schema, ({ mutation }) => ({
+        choose: mutation('Workspace', {
+          resolve: ({ store }) =>
+            store.update('Workspace', 'main', { notes: [{ id: title, title }] }),
+        }),
+        increment: mutation('Workspace', {
+          resolve: ({ store }) =>
+            store.update('Workspace', 'main', {
+              count: store.get('Workspace', 'main')!.count! + 1,
+            }),
+        }),
+        remove: mutation('Note', {
+          resolve: ({ store }) => store.delete('Note', 'seed'),
+        }),
+        save: mutation('Note', {
+          resolve: ({ store }) => store.update('Note', 'seed', { title }),
+        }),
+      }));
+    const first = make('A');
+    const second = make('B');
     try {
-      await reopened.persistence!.ready;
-      const WorkspaceView = view<EntityOf<typeof reopened, 'Workspace'>>()({
-        count: true,
-        notes: { id: true, title: true },
-      });
-      const { workspace } = await reopened.request({ workspace: { view: WorkspaceView } });
-      expect((await reopened.readView(WorkspaceView, workspace)).data).toMatchObject({
-        count: 1,
-        notes: saved === 'choose' ? [{ id: 'B', title: 'B' }] : [],
-      });
-      expect(reopened.store.read('Note:seed')?.title).toBe(
-        { choose: 'Default', remove: undefined, save: 'B' }[saved],
-      );
+      await Promise.all([first.persistence!.ready, second.persistence!.ready]);
+      writeBatch.mockRejectedValueOnce(new Error('Disk write failed'));
+      await expect(first.mutations[failed]()).rejects.toThrow('Disk write failed');
+      await second.mutations[saved]();
+      await first.mutations.increment();
+
+      const reopened = make('Reopened');
+      try {
+        await reopened.persistence!.ready;
+        const WorkspaceView = view<EntityOf<typeof reopened, 'Workspace'>>()({
+          count: true,
+          notes: { id: true, title: true },
+        });
+        const { workspace } = await reopened.request({ workspace: { view: WorkspaceView } });
+        expect((await reopened.readView(WorkspaceView, workspace)).data).toMatchObject({
+          count: 1,
+          notes:
+            saved === 'choose'
+              ? [{ id: 'B', title: 'B' }]
+              : saved === 'save'
+                ? [{ id: 'seed', title: 'B' }]
+                : [],
+        });
+        expect(reopened.store.read('Note:seed')?.title).toBe(
+          { choose: 'Default', remove: undefined, save: 'B' }[saved],
+        );
+      } finally {
+        reopened.persistence!.dispose();
+      }
     } finally {
-      reopened.persistence!.dispose();
+      first.persistence!.dispose();
+      second.persistence!.dispose();
     }
-  } finally {
-    first.persistence!.dispose();
-    second.persistence!.dispose();
-  }
-});
+  },
+);
 
 test('linking an evicted server record preserves its saved client fields', async () => {
   const post = dataView<{ id: string }>('Post')({ id: true });

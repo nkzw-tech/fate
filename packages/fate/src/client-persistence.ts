@@ -104,8 +104,6 @@ const isReference = (value: unknown): value is ClientStateReference =>
 
 /** The confirmed client graph has its own lifetime, independent of the read cache. */
 export class ClientPersistence {
-  private readonly pendingRecords = new Map<EntityId, AnyRecord | null>();
-  private readonly pendingLists = new Map<string, List | null>();
   private saved = emptySnapshot();
 
   constructor(
@@ -138,24 +136,6 @@ export class ClientPersistence {
       : emptySnapshot();
     const changes = getChanges(this.saved, next);
     this.client.restoreClientState(next, changes);
-    // Restored edits supersede failed patches for the same fields. Retain
-    // unrelated patches so a retry still saves changes that only exist in memory.
-    for (const [id, record] of changes.records) {
-      const pending = this.pendingRecords.get(id);
-      if (!record || !pending) {
-        this.pendingRecords.delete(id);
-        continue;
-      }
-      for (const key of Object.keys(record)) {
-        delete pending[key];
-      }
-      if (!Object.keys(pending).length) {
-        this.pendingRecords.delete(id);
-      }
-    }
-    for (const key of changes.lists.keys()) {
-      this.pendingLists.delete(key);
-    }
     this.saved = next;
   }
 
@@ -167,53 +147,48 @@ export class ClientPersistence {
       await this.restore(key);
       return run(async (apply) => {
         const before = this.client.captureClientState();
-        apply();
-        const after = this.client.captureClientState();
-        const changes = getChanges(before, after);
-        // Keep unsaved patches until the disk commit succeeds. A retry can be
-        // a no-op in memory after a failed write applied these same values.
-        for (const [id, record] of changes.records) {
-          this.pendingRecords.set(
-            id,
-            record ? { ...this.pendingRecords.get(id), ...record } : null,
-          );
-        }
-        for (const [key, list] of changes.lists) {
-          this.pendingLists.set(key, list);
-        }
-        const next: ClientStateSnapshot = {
-          lists: new Map(this.saved.lists),
-          records: new Map(this.saved.records),
-          references: new Map(),
-        };
-        for (const [id, record] of this.pendingRecords) {
-          if (record) {
-            next.records.set(id, { ...next.records.get(id), ...record });
-          } else if (this.client.isInitialClientRecord(id)) {
-            next.records.set(id, null);
-          } else {
-            next.records.delete(id);
+        const next = this.client.previewClientMutation(() => {
+          apply();
+          const after = this.client.captureClientState();
+          const changes = getChanges(before, after);
+          const next: ClientStateSnapshot = {
+            lists: new Map(this.saved.lists),
+            records: new Map(this.saved.records),
+            references: new Map(),
+          };
+          for (const [id, record] of changes.records) {
+            if (record) {
+              next.records.set(id, { ...next.records.get(id), ...record });
+            } else if (this.client.isInitialClientRecord(id)) {
+              next.records.set(id, null);
+            } else {
+              next.records.delete(id);
+            }
           }
-        }
-        for (const [listKey, list] of this.pendingLists) {
-          const owner = parseListKey(listKey);
-          if (list || (owner && this.client.isInitialClientRecord(owner.ownerId))) {
-            next.lists.set(listKey, list);
-          } else {
-            next.lists.delete(listKey);
+          for (const [listKey, list] of changes.lists) {
+            const owner = parseListKey(listKey);
+            if (list || (owner && this.client.isInitialClientRecord(owner.ownerId))) {
+              next.lists.set(listKey, list);
+            } else {
+              next.lists.delete(listKey);
+            }
           }
-        }
-        // Keep locators for saved relationships even if persist: false changed
-        // their in-memory owners. Current defaults can also reference server data.
-        next.references = this.client.captureClientReferences([
-          ...next.records.values(),
-          ...after.records.values(),
-        ]);
-        if (
-          !this.pendingRecords.size &&
-          !this.pendingLists.size &&
-          !changedEntries(this.saved.references, next.references).size
-        ) {
+          // Keep locators for saved relationships even if persist: false changed
+          // their in-memory owners. Current defaults can also reference server data.
+          next.references = this.client.captureClientReferences([
+            ...next.records.values(),
+            ...after.records.values(),
+          ]);
+          if (
+            changes.records.size ||
+            changes.lists.size ||
+            changedEntries(this.saved.references, next.references).size
+          ) {
+            return next;
+          }
+        });
+        if (!next) {
+          apply();
           return;
         }
         const encoded = encodeHydrationValue({
@@ -226,9 +201,9 @@ export class ClientPersistence {
         }
         this.client.assertPersistenceActive();
         await this.storage.writeBatch([[key, encoded]]);
-        this.pendingRecords.clear();
-        this.pendingLists.clear();
         this.saved = next;
+        this.client.assertPersistenceActive();
+        apply();
         this.client.restoreClientState(next, emptySnapshot());
       });
     });

@@ -211,20 +211,31 @@ test('a local mutation only reports success after its IndexedDB write commits', 
   });
   try {
     await client.mutations.increment();
+    const subscriber = vi.fn();
+    client.store.subscribe('Workspace:main', subscriber);
     blockWrite = true;
     const pending = client.mutations.increment();
     const settled = vi.fn();
     const outcome = pending.then(settled, settled);
     await writing.promise;
     expect(settled).not.toHaveBeenCalled();
+    expect(client.store.read('Workspace:main')?.count).toBe(1);
+    expect(subscriber).not.toHaveBeenCalled();
     release.reject(new Error('Disk write failed'));
     await expect(pending).rejects.toThrow('Disk write failed');
     await outcome;
+    expect(client.store.read('Workspace:main')?.count).toBe(1);
+    expect(subscriber).not.toHaveBeenCalled();
+
+    blockWrite = false;
+    await client.mutations.increment();
+    expect(client.store.read('Workspace:main')?.count).toBe(2);
+    expect(subscriber).toHaveBeenCalledOnce();
 
     const reopened = app(storage);
     try {
       await reopened.persistence!.ready;
-      expect(reopened.store.read('Workspace:main')?.count).toBe(1);
+      expect(reopened.store.read('Workspace:main')?.count).toBe(2);
     } finally {
       reopened.persistence!.dispose();
     }
@@ -233,7 +244,7 @@ test('a local mutation only reports success after its IndexedDB write commits', 
   }
 });
 
-test('retries accumulated graph changes against the latest saved state', async () => {
+test('a later save starts from the latest committed state after a failed graph change', async () => {
   const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   const writeBatch = vi.spyOn(storage, 'writeBatch');
   const first = app(storage);
@@ -247,7 +258,7 @@ test('retries accumulated graph changes against the latest saved state', async (
     writeBatch.mockRejectedValueOnce(new Error('Disk write failed again'));
     await expect(first.mutations.removeSeed()).rejects.toThrow('Disk write failed again');
 
-    // The retry must keep another tab's change to the same parent record.
+    // A later mutation must keep another tab's edit without saving failed writes.
     await second.mutations.increment();
     await first.mutations.removeSeed();
     const reopened = app(storage);
@@ -255,9 +266,10 @@ test('retries accumulated graph changes against the latest saved state', async (
       const { workspace } = await reopened.request({ workspace: { view: WorkspaceView } });
       expect((await reopened.readView(WorkspaceView, workspace)).data).toMatchObject({
         count: 2,
-        tasks: [{ id: 'new', title: 'Saved' }],
+        tasks: [],
       });
       expect(reopened.store.read('Task:seed')).toBeUndefined();
+      expect(reopened.store.read('Task:new')).toBeUndefined();
 
       // A successful commit clears the retry state, so a no-op needs no write.
       const writes = writeBatch.mock.calls.length;

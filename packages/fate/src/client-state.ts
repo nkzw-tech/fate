@@ -677,7 +677,6 @@ export default class ClientState {
       });
     return {
       commit: () => {
-        assertActive();
         active = false;
         for (const { data, id: entityId, plan, prefix, remote } of writes) {
           const { id, type } = parseEntityId(entityId);
@@ -687,8 +686,10 @@ export default class ClientState {
             this.client.writeClientRecord(type, id, data, plan, prefix, remote);
           }
         }
-        patches.clear();
-        writes.length = 0;
+        if (!this.client.store.isPreviewing) {
+          patches.clear();
+          writes.length = 0;
+        }
       },
       execute,
       rollback: () => {

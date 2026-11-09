@@ -580,7 +580,9 @@ export function prepareMutation(
           }),
         );
       } finally {
-        release();
+        if (!client.store.isPreviewing) {
+          release();
+        }
       }
     },
     entityId: optimisticEntityId,
