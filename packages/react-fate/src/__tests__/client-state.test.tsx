@@ -74,6 +74,10 @@ test('ordinary requests, views and actions share local state across React compon
   const Derived = () => (
     <span>{useView(Double, client.ref('Counter', 'main', Double)).doubled}</span>
   );
+  const otherClient = createClient();
+  const ExplicitCounter = () => (
+    <span>{useView(Count, client.ref('Counter', 'main', Count), { client }).count}</span>
+  );
   const container = document.createElement('div');
   const root = createRoot(container);
   await act(async () =>
@@ -84,16 +88,19 @@ test('ordinary requests, views and actions share local state across React compon
           <Reader />
           <Derived />
           <IdentityReader />
+          <FateClient client={otherClient}>
+            <ExplicitCounter />
+          </FateClient>
         </Suspense>
       </FateClient>,
     ),
   );
-  expect(container.textContent).toBe('000');
+  expect(container.textContent).toBe('0000');
   const renders = identityRenders;
   await act(async () => container.querySelector('button')!.click());
-  expect(container.textContent).toBe('112');
+  expect(container.textContent).toBe('1121');
   await act(async () => container.querySelector('button')!.click());
-  expect(container.textContent).toBe('224');
+  expect(container.textContent).toBe('2242');
   expect(identityRenders).toBe(renders);
   await act(async () => root.unmount());
   client.gc();

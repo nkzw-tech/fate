@@ -96,6 +96,8 @@ export function CounterPanel() {
 
 Both panels read the same counter. Clicking either button updates both components. Components that select other fields do not re-render.
 
+If your React app has a separate client for local data, pass it to `useView(View, ref, { client })` to read from that client while keeping the existing provider for server data.
+
 Mutations with no input fields can be called without arguments. You can still pass options, such as `fate.mutations.counter.increment({ view: CounterView })`. Mutations that declare input fields require an `input` object, even when all of those fields are optional.
 
 Synchronous client mutations update the data immediately, before their returned promise settles. You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`; no `input` property is needed. See [Actions](/guide/actions).

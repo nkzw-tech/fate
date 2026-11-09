@@ -9,7 +9,7 @@ import {
   type ViewRef,
 } from '@nkzw/fate';
 import { use, useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useFateClient } from './context.tsx';
+import { useFateClient, useViewClient } from './context.tsx';
 import { fulfilledThenable, isFulfilledThenable } from './thenable.ts';
 
 export type ViewInput<V extends View<any, any>> =
@@ -358,8 +358,12 @@ export function useViewSnapshots<V extends View<any, any>>(
   return useSnapshot(client, getSnapshot, true) as ReadonlyArray<unknown>;
 }
 
-export function useViewSnapshot<V extends View<any, any>>(view: V, ref: ViewInput<V>): unknown {
-  const client = useFateClient();
+export function useViewSnapshot<V extends View<any, any>>(
+  view: V,
+  ref: ViewInput<V>,
+  explicitClient?: FateClient<any, any> | null,
+): unknown {
+  const client = useViewClient(explicitClient);
   const scope = useReadScope();
   const getSnapshot = useMemo(
     () => cacheReadError(createReader(client, view, ref, scope)),
