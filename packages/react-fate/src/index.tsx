@@ -67,6 +67,7 @@ export { useRefetch } from './useRefetch.tsx';
 export { useListView } from './useListView.tsx';
 
 export {
+  clientQuery,
   clientSchema,
   dataView,
   list,

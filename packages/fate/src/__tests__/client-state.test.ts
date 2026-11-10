@@ -2,7 +2,7 @@ import { buildSchema, graphql } from 'graphql';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { z } from 'zod';
 import { alias } from '../alias.ts';
-import { clientSchema, type EntityOf } from '../client-schema.ts';
+import { clientQuery, clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { createGraphQLArgumentSchema } from '../codegen/graphql.ts';
 import type { DataViewResult } from '../data-view.ts';
@@ -37,6 +37,89 @@ const ui = dataView<UIData>('UI')({
     select: { titles: field('todos.title') },
   }),
   todos: list(todo),
+});
+
+test('client queries resolve typed arguments and track records and lookup dependencies', async () => {
+  const Titles = view<UI>()({ todos: { id: true, title: true } });
+  const storage = memoryStorage();
+  const fetchById = vi.fn();
+  const open = () =>
+    createClient({
+      persistence: createPersistence({ key: 'client-query', storage }),
+      transport: { fetchById },
+    }).registerClientSchema(
+      clientSchema({
+        ...schema,
+        roots: {
+          ...schema.roots,
+          task: clientQuery('Todo', {
+            args: z.object({ id: z.string() }),
+            resolve: ({ args }) => args.id,
+          }),
+          taskByTitle: clientQuery('Todo', {
+            args: z.object({ title: z.string() }),
+            resolve: ({ args, read }) =>
+              read(Titles, 'UI', 'main')?.todos.find(({ title }) => title === args.title)?.id ??
+              null,
+          }),
+        },
+      }),
+      ({ mutation }) => ({
+        add: mutation('Todo', {
+          resolve: ({ store }) => {
+            store.create('Todo', { id: 'a', title: 'Apple' });
+            store.append('UI', 'main', 'todos', 'a');
+          },
+        }),
+        remove: mutation('Todo', {
+          resolve: ({ store }) => {
+            store.update('UI', 'main', { todos: [] });
+            store.delete('Todo', 'a');
+          },
+        }),
+        rename: mutation('Todo', {
+          resolve: ({ store }) => store.update('Todo', 'a', { title: 'Apricot' }),
+        }),
+      }),
+    );
+  const client = open();
+  const Task = view<EntityOf<typeof client, 'Todo'>>()({ title: true });
+  const request = {
+    task: { args: { id: 'a' }, view: Task },
+    taskByTitle: { args: { title: 'Apple' }, view: Task },
+  };
+  expect(await client.request(request)).toEqual({ task: null, taskByTitle: null });
+  const observer = client.observeRequestResult(request);
+  const changes = vi.fn();
+  const unsubscribe = observer.subscribe(changes);
+  try {
+    await client.mutations.add();
+    expect(changes).toHaveBeenCalled();
+    const { task, taskByTitle } = observer.getSnapshot();
+    expectTypeOf(task?.__typename).toEqualTypeOf<'Todo' | undefined>();
+    expect(task).toEqual(taskByTitle);
+    expect((await client.readView(Task, task!)).data.title).toBe('Apple');
+
+    const reopened = open();
+    try {
+      const { taskByTitle } = await reopened.request(request);
+      expect(taskByTitle?.id).toBe('a');
+    } finally {
+      reopened.persistence!.dispose();
+    }
+
+    changes.mockClear();
+    await client.mutations.rename();
+    expect(changes).toHaveBeenCalled();
+    expect(observer.getSnapshot()).toEqual({ task, taskByTitle: null });
+    await client.mutations.remove();
+    expect(observer.getSnapshot()).toEqual({ task: null, taskByTitle: null });
+    expect(await client.request(request)).toEqual({ task: null, taskByTitle: null });
+    expect(fetchById).not.toHaveBeenCalled();
+  } finally {
+    unsubscribe();
+    client.persistence!.dispose();
+  }
 });
 const schema = clientSchema({
   roots: { ui: { id: 'main', type: 'UI' } },

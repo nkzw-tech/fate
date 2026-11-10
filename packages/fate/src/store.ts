@@ -796,6 +796,11 @@ export class Store {
   }
 
   /** @internal */
+  recordIds() {
+    return this.records.keys();
+  }
+
+  /** @internal */
   readConfirmedList(key: string) {
     return this.optimisticBase.lists.has(key)
       ? this.optimisticBase.lists.get(key)

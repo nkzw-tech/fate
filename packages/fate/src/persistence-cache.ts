@@ -942,9 +942,11 @@ export class PersistenceCache {
           queue.push({ id: toEntityId(item.type, id), paths, plan: item.plan, prefix: '' });
         }
       } else if (item.kind === 'query') {
-        const clientRoot = this.client.getPersistenceClientRoot(item.procedure);
-        if (clientRoot) {
-          queue.push({ id: clientRoot, paths, plan: item.plan, prefix: '' });
+        const clientRoot = this.client.getPersistenceClientRoot(item);
+        if (clientRoot !== undefined) {
+          if (clientRoot) {
+            queue.push({ id: clientRoot, paths, plan: item.plan, prefix: '' });
+          }
           continue;
         }
         let id = await readNode(queryKey(item.queryKey));

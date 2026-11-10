@@ -104,6 +104,7 @@ export type QueryRequestDescriptor = Readonly<{
   procedure: string;
   queryKey: string;
   refViewNames: ReadonlySet<string>;
+  rootArgs: ResolvedArgsPayload | undefined;
   type: string;
   viewSignature: string;
 }>;
@@ -248,6 +249,7 @@ export const createRequestDescriptor = (
         procedure,
         queryKey,
         refViewNames: getRootViewNames(item.view),
+        rootArgs,
         type,
         viewSignature: getViewSignature(item.view),
       });

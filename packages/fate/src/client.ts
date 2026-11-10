@@ -861,6 +861,10 @@ export class FateClient<
   >();
   private readonly rootRequests = new Map<string, EntityId | null>();
   private readonly rootValues = new Map<string, unknown>();
+  private readonly clientQueryResults = new WeakMap<
+    QueryRequestDescriptor,
+    { dependencies: Set<string>; error?: { value: unknown }; id: EntityId | null; revision: number }
+  >();
   private readonly stalledRequests = new Set<string>();
   private readonly renderReadErrors = new RenderReadErrors();
   private gcPending = false;
@@ -1034,7 +1038,12 @@ export class FateClient<
     }
     this.clientState.install(schema, this.types);
     this.hydrationScope = `${this.hydrationScope}|client:${hashArgs({
-      roots: schema.roots ?? {},
+      roots: Object.fromEntries(
+        [...this.clientState.roots].map(([name, root]) => [
+          name,
+          'id' in root ? root : { query: true, type: root.type },
+        ]),
+      ),
       types: [...this.clientState.definitions].map(([name, definition]) => ({
         fields: Object.entries(definition.view.fields).map(([field, config]) => ({
           field,
@@ -1061,6 +1070,9 @@ export class FateClient<
     }
     this.initializeParentLists();
     for (const [name, root] of this.clientState.roots) {
+      if (!('id' in root)) {
+        continue;
+      }
       const data = {
         ...this.clientState.initial(root.type, root.id),
         id: root.id,
@@ -1340,9 +1352,11 @@ export class FateClient<
   }
 
   /** @internal */
-  getPersistenceClientRoot(name: string) {
-    const root = this.clientState.roots.get(name);
-    return root && toEntityId(root.type, root.id);
+  getPersistenceClientRoot(item: QueryRequestDescriptor) {
+    const root = this.clientState.roots.get(item.procedure);
+    return (
+      root && ('id' in root ? toEntityId(root.type, root.id) : this.resolveClientQuery(item)!.id)
+    );
   }
 
   /** @internal Read client edges without copying their values into the read cache. */
@@ -3842,6 +3856,62 @@ export class FateClient<
       : item.queryKey;
   }
 
+  private resolveClientQuery(item: QueryRequestDescriptor) {
+    const root = this.clientState.roots.get(item.procedure);
+    if (!root || 'id' in root) {
+      return undefined;
+    }
+    const revision = this.requestRevision;
+    const cached = this.clientQueryResults.get(item);
+    if (!this.store.isRebasing && cached?.revision === revision) {
+      return cached;
+    }
+    const dependencies = new Set<string>();
+    const read = <V extends View<any, any>>(
+      view: V,
+      type: ViewEntityName<NoInfer<V>>,
+      id: string | number,
+    ) => {
+      if (!this.isClientOwnedType(type)) {
+        throw new Error(`fate: Client queries must read client-owned records. Received '${type}'.`);
+      }
+      const entityId = toEntityId(type, id);
+      dependencies.add(`entity:${entityId}`);
+      if (!this.store.read(entityId)) {
+        return null;
+      }
+      const plan = getSelectionPlan(view, null);
+      if (this.missingForSelection(entityId, plan.paths, plan, dependencies).size) {
+        throw new Error(`fate: Client query '${item.procedure}' read unavailable fields.`);
+      }
+      const snapshot = this.readViewSelection(view, this.ref(type, id, view), entityId, plan);
+      return snapshot.data;
+    };
+    const result: NonNullable<ReturnType<typeof this.clientQueryResults.get>> = {
+      dependencies,
+      id: null,
+      revision,
+    };
+    try {
+      const args = root.args ? root.args.parse(item.rootArgs ?? {}) : (item.rootArgs ?? {});
+      const id = root.resolve({ args, read });
+      if (id !== null) {
+        if (typeof id !== 'string' && typeof id !== 'number') {
+          throw new Error(`fate: Client query '${item.procedure}' must return an ID or null.`);
+        }
+        const entityId = toEntityId(root.type, id);
+        dependencies.add(`entity:${entityId}`);
+        result.id = this.store.read(entityId) ? entityId : null;
+      }
+    } catch (error) {
+      result.error = { value: error };
+    }
+    if (!this.store.isRebasing) {
+      this.clientQueryResults.set(item, result);
+    }
+    return result;
+  }
+
   private requestDependencies(request: RequestDescriptor, includeChildren = false): Set<string> {
     const dependencies = new Set<string>();
     for (const item of request.items) {
@@ -3859,7 +3929,11 @@ export class FateClient<
         if (key !== item.queryKey) {
           dependencies.add(`root:${key}`);
         }
-        const entityId = this.rootRequests.get(key);
+        const local = this.resolveClientQuery(item);
+        for (const dependency of local?.dependencies ?? []) {
+          dependencies.add(dependency);
+        }
+        const entityId = local ? local.id : this.rootRequests.get(key);
         if (entityId) {
           dependencies.add(`entity:${entityId}`);
           if (includeChildren) {
@@ -4330,8 +4404,21 @@ export class FateClient<
       }
     };
 
-    for (const root of this.clientState.roots.values()) {
-      markRecord(toEntityId(root.type, root.id));
+    let hasClientQueries = false;
+    for (const [name, root] of this.clientState.roots) {
+      if ('id' in root) {
+        markedQueries.add(name);
+        markRecord(toEntityId(root.type, root.id));
+      } else {
+        hasClientQueries = true;
+      }
+    }
+    if (hasClientQueries) {
+      for (const id of this.store.recordIds()) {
+        if (this.isClientOwnedType(parseEntityId(id).type)) {
+          markRecord(id);
+        }
+      }
     }
     for (const [id, record] of this.clientState.savedRecords) {
       if (record && this.clientState.localTypes.has(parseEntityId(id).type)) {
@@ -4921,8 +5008,13 @@ export class FateClient<
         }
 
         if (item.kind === 'query') {
-          const hasResult = this.rootRequests.has(this.queryResultKey(item));
-          const entityId = this.rootRequests.get(this.queryResultKey(item));
+          const local = this.resolveClientQuery(item);
+          if (local?.error) {
+            throw local.error.value;
+          }
+          const key = this.queryResultKey(item);
+          const entityId = local ? local.id : this.rootRequests.get(key);
+          const hasResult = local !== undefined || this.rootRequests.has(key);
           const missing =
             !fetchAll && hasResult && entityId
               ? this.missingForSelection(entityId, item.plan.paths, item.plan, undefined, true)
@@ -5031,8 +5123,13 @@ export class FateClient<
       }
 
       if (item.kind === 'query') {
-        const hasResult = this.rootRequests.has(this.queryResultKey(item));
-        const entityId = this.rootRequests.get(this.queryResultKey(item));
+        const local = this.resolveClientQuery(item);
+        if (local?.error) {
+          return false;
+        }
+        const key = this.queryResultKey(item);
+        const entityId = local ? local.id : this.rootRequests.get(key);
+        const hasResult = local !== undefined || this.rootRequests.has(key);
         const missing =
           hasResult && entityId
             ? this.missingForSelection(entityId, item.plan.paths, item.plan, undefined, revalidate)
@@ -5092,7 +5189,14 @@ export class FateClient<
       return this.stableRefWithViewNames(item.type, item.ids[0], item.refViewNames);
     }
     if (item.kind === 'query') {
-      const entityId = this.rootRequests.get(this.queryResultKey(item));
+      const local = this.resolveClientQuery(item);
+      if (
+        local?.error &&
+        (!this.persistence || this.persistence.getSnapshot().status === 'ready')
+      ) {
+        throw local.error.value;
+      }
+      const entityId = local ? local.id : this.rootRequests.get(this.queryResultKey(item));
       if (!entityId || !this.store.read(entityId)) {
         return null;
       }
@@ -5520,6 +5624,16 @@ export class FateClient<
   ) {
     const localRoot = this.clientState.roots.get(item.procedure);
     if (localRoot) {
+      if (!('id' in localRoot)) {
+        const result = this.resolveClientQuery(item)!;
+        if (result.error) {
+          throw result.error.value;
+        }
+        if (result.id) {
+          await this.loadClientEdges([result.id], item.plan.paths, item.plan, signal, fetchAll);
+        }
+        return;
+      }
       this.rootRequests.set(item.queryKey, toEntityId(localRoot.type, localRoot.id));
       await this.fetchByIdAndNormalize(
         item.type,

@@ -2,6 +2,7 @@ import { responseField, schemaField, typeBranchField, typeCondition } from './al
 import type { ClientStateReference } from './client-persistence.ts';
 import type {
   ClientMutationDefinition,
+  ClientRoot,
   ClientSchema,
   ClientTypeDefinition,
 } from './client-schema.ts';
@@ -91,7 +92,7 @@ export default class ClientState {
   readonly initialIds = new Set<EntityId>();
   readonly definitions = new Map<string, ClientTypeDefinition>();
   readonly localTypes = new Set<string>();
-  readonly roots = new Map<string, { id: string | number; type: string }>();
+  readonly roots = new Map<string, ClientRoot>();
   readonly mutations = new Map<string, ClientMutationDefinition>();
   savedRecords: ReadonlyMap<EntityId, AnyRecord | null> = new Map();
   savedReferences: ReadonlyMap<EntityId, ClientStateReference | null> = new Map();

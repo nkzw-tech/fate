@@ -10,6 +10,11 @@ import type {
   MutationEntity,
   MutationResult,
   RootDefinition,
+  View,
+  ViewData,
+  ViewEntity,
+  ViewEntityName,
+  ViewSelection,
 } from './types.ts';
 import { MutationKind } from './types.ts';
 
@@ -28,8 +33,30 @@ export type ClientTypeDefinition = {
   view: DataView<any>;
 };
 
+type ClientQueryReader = <V extends View<any, any>>(
+  view: V,
+  type: ViewEntityName<NoInfer<V>>,
+  id: string | number,
+) => ViewData<ViewEntity<V>, ViewSelection<V>> | null;
+
+type ClientQuery<Type extends string, Args extends AnyRecord> = {
+  args?: { parse(value: unknown): Args };
+  resolve(context: { args: Args; read: ClientQueryReader }): string | number | null;
+  type: Type;
+};
+
+/** Define a client root that selects a record by its ID. Return null when there is no match. */
+export function clientQuery<
+  const Type extends string,
+  Args extends AnyRecord = Record<never, never>,
+>(type: Type, definition: Omit<ClientQuery<Type, Args>, 'type'>): ClientQuery<Type, Args> {
+  return { ...definition, type };
+}
+
+export type ClientRoot = { id: string | number; type: string } | ClientQuery<string, any>;
+
 export type ClientSchema = {
-  roots?: Record<string, { id: string | number; type: string }>;
+  roots?: Record<string, ClientRoot>;
   typeExtensions?: Record<string, ClientTypeDefinition>;
   types?: Record<string, ClientTypeDefinition>;
 };
@@ -139,7 +166,9 @@ export type ExtendedRoots<R extends FateRoots, S extends ClientSchema> = {
   [K in keyof S['roots']]: NonNullable<S['roots']>[K] extends {
     type: infer Name extends keyof Definitions<S> & string;
   }
-    ? RootDefinition<Name, LocalEntity<S, Name>, Record<never, never>>
+    ? NonNullable<S['roots']>[K] extends ClientQuery<Name, infer Args>
+      ? RootDefinition<Name, LocalEntity<S, Name> | null, Args>
+      : RootDefinition<Name, LocalEntity<S, Name>, Record<never, never>>
     : never;
 };
 

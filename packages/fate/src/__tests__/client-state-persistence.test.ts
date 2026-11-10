@@ -1,6 +1,6 @@
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { z } from 'zod';
-import { clientSchema, type EntityOf } from '../client-schema.ts';
+import { clientQuery, clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { dataView, list } from '../data-view.ts';
 import { createPersistence } from '../persistence.ts';
@@ -398,55 +398,72 @@ test('linking an evicted server record preserves its saved client fields', async
   }
 });
 
-test('server data read through a persisted client root is available offline after reload', async () => {
-  type Person = { __typename: 'Person'; id: string; name: string };
-  const person = dataView<Person>('Person')({ id: true, name: true });
-  const selection = dataView<{ id: string; people: Array<Person> }>('Selection')({
-    id: true,
-    people: list(person),
-  });
-  const storage = memoryStorage();
-  const fetchById = vi.fn(async () => [{ id: 'ada', name: 'Ada' }]);
-  const make = () =>
-    createClient({
-      persistence: createPersistence({ key: 'offline-selection', maxAge: 60_000, storage }),
-      transport: { fetchById },
-      types: [{ type: 'Person' }],
-    }).registerClientSchema(
-      clientSchema({
-        roots: { selection: { id: 'main', type: 'Selection' } },
-        types: { Selection: { defaults: (id) => ({ id, people: [] }), view: selection } },
-      }),
-      ({ mutation }) => ({
-        choose: mutation('Selection', {
-          resolve: ({ store }) => store.update('Selection', 'main', { people: [{ id: 'ada' }] }),
+test.each(['fixed', 'query'] as const)(
+  'server data read through a persisted client root is available offline after reload (%s)',
+  async (kind) => {
+    type Person = { __typename: 'Person'; id: string; name: string };
+    const person = dataView<Person>('Person')({ id: true, name: true });
+    const selection = dataView<{ id: string; people: Array<Person> }>('Selection')({
+      id: true,
+      people: list(person),
+    });
+    const storage = memoryStorage();
+    const fetchById = vi.fn(async () => [{ id: 'ada', name: 'Ada' }]);
+    const make = () =>
+      createClient({
+        persistence: createPersistence({ key: 'offline-selection', maxAge: 60_000, storage }),
+        transport: { fetchById },
+        types: [{ type: 'Person' }],
+      }).registerClientSchema(
+        clientSchema({
+          roots: {
+            selection:
+              kind === 'fixed'
+                ? { id: 'main', type: 'Selection' }
+                : clientQuery('Selection', { resolve: () => 'main' }),
+          },
+          types: { Selection: { defaults: (id) => ({ id, people: [] }), view: selection } },
         }),
-      }),
-    );
-  const Selection = view<EntityOf<ReturnType<typeof make>, 'Selection'>>()({
-    people: { name: true },
-  });
-  const request = { selection: { view: Selection } };
-  const first = make();
-  try {
-    await first.mutations.choose();
-    await first.request(request);
-    await first.persistence!.flush();
-    expect(fetchById).toHaveBeenCalledOnce();
-  } finally {
-    first.persistence!.dispose();
-  }
+        ({ mutation }) => ({
+          choose: mutation('Selection', {
+            resolve: ({ store }) => {
+              const people = [{ id: 'ada' }];
+              if (kind === 'fixed') {
+                store.update('Selection', 'main', { people });
+              } else {
+                store.create('Selection', { id: 'main', people });
+              }
+            },
+          }),
+        }),
+      );
+    const Selection = view<EntityOf<ReturnType<typeof make>, 'Selection'>>()({
+      people: { name: true },
+    });
+    const request = { selection: { view: Selection } };
+    const first = make();
+    try {
+      await first.mutations.choose();
+      await first.request(request);
+      await first.persistence!.flush();
+      expect(fetchById).toHaveBeenCalledOnce();
+    } finally {
+      first.persistence!.dispose();
+    }
 
-  fetchById.mockRejectedValue(new Error('Offline'));
-  const reopened = make();
-  try {
-    const { selection: ref } = await reopened.request(request);
-    expect((await reopened.readView(Selection, ref)).data.people).toMatchObject([{ name: 'Ada' }]);
-    expect(fetchById).toHaveBeenCalledOnce();
-  } finally {
-    reopened.persistence!.dispose();
-  }
-});
+    fetchById.mockRejectedValue(new Error('Offline'));
+    const reopened = make();
+    try {
+      const { selection: ref } = await reopened.request(request);
+      expect((await reopened.readView(Selection, ref!)).data.people).toMatchObject([
+        { name: 'Ada' },
+      ]);
+      expect(fetchById).toHaveBeenCalledOnce();
+    } finally {
+      reopened.persistence!.dispose();
+    }
+  },
+);
 
 test.each(['numeric', 'custom-id', 'id-refetch', 'username-refetch'] as const)(
   'persisted client relationships restore server identities (%s)',

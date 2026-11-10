@@ -119,6 +119,7 @@ export type { GraphQLSelectedResult } from './graphql-types.ts';
 export type { RefetchConfig, RefetchArgument, RefetchArguments } from './refetch.ts';
 
 export {
+  clientQuery,
   clientSchema,
   type ClientSchema,
   type EntityOf,

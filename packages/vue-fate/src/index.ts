@@ -74,6 +74,7 @@ export { useView, type ViewResource } from './useView.ts';
 export { useViews } from './useViews.ts';
 
 export {
+  clientQuery,
   clientSchema,
   dataView,
   list,

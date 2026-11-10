@@ -1,5 +1,6 @@
 /** @vitest-environment happy-dom */
 import {
+  clientQuery,
   clientSchema,
   computed,
   createClient,
@@ -105,4 +106,55 @@ test('ordinary requests, views and actions share local state across React compon
   await act(async () => root.unmount());
   client.gc();
   expect(client.store.read('Counter:main')?.count).toBe(2);
+});
+
+test('a nullable client query updates an existing component when its record is created or deleted', async () => {
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      roots: { counter: clientQuery('Counter', { resolve: () => 'main' }) },
+      types: {
+        Counter: {
+          defaults: (id) => ({ count: 0, id }),
+          view: dataView<{ count: number; id: string }>('Counter')({ count: true, id: true }),
+        },
+      },
+    }),
+    ({ mutation }) => ({
+      create: mutation('Counter', {
+        resolve: ({ store }) => store.create('Counter', { count: 2, id: 'main' }),
+      }),
+      remove: mutation('Counter', { resolve: ({ store }) => store.delete('Counter', 'main') }),
+    }),
+  );
+  const Counter = view<EntityOf<typeof client, 'Counter'>>()({ count: true });
+  const request = { counter: { view: Counter } };
+  const Reader = () => {
+    const { counter } = useRequest<typeof request, ClientDefinitionOf<typeof client>['roots']>(
+      request,
+    );
+    return <span>{useView(Counter, counter)?.count ?? 'missing'}</span>;
+  };
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <FateClient client={client}>
+          <Suspense>
+            <Reader />
+          </Suspense>
+        </FateClient>,
+      ),
+    );
+    expect(container.textContent).toBe('missing');
+    await act(async () => void (await client.mutations.create()));
+    expect(container.textContent).toBe('2');
+    await act(async () => void (await client.mutations.remove()));
+    expect(container.textContent).toBe('missing');
+  } finally {
+    await act(async () => root.unmount());
+  }
+  await client.mutations.create();
+  client.gc();
+  expect((await client.request(request)).counter?.id).toBe('main');
 });
