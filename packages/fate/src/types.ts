@@ -226,6 +226,7 @@ type SelectionFieldValue<T extends Entity, K extends keyof T> =
 
 type DeferrableSelectionFieldValue<T extends Entity, K extends keyof T> =
   | SelectionFieldValue<T, K>
+  | AliasedSelection<Extract<keyof T, string>>
   | DeferredSelection<SelectionFieldValue<T, K>>
   | ConditionalSelection<
       boolean,

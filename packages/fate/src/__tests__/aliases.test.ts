@@ -733,3 +733,24 @@ test('lowers aliases for custom abstract lists without wire alias support', asyn
   });
   expect((await client.readView(ItemView, feed[0])).data).toMatchObject({ label: 'Ada' });
 });
+
+test('aliases can reuse an existing field name with a different result type', async () => {
+  type Item = { __typename: 'Item'; decoded: { value: number }; encoded: string; id: string };
+  const selection = view<Item>()({ encoded: alias('decoded', true) });
+  expectTypeOf<ViewData<Item, SelectionOf<typeof selection>>['encoded']>().toEqualTypeOf<{
+    value: number;
+  }>();
+  const client = createClient({ types: [{ fields: { decoded: 'scalar' }, type: 'Item' }] });
+  client.write(
+    'Item',
+    { decoded: { value: 2 }, encoded: '{"value":2}', id: 'a' },
+    new Set(['id', 'encoded', 'decoded']),
+  );
+  expect(
+    (await client.readView(selection, client.ref('Item', 'a', selection))).data.encoded,
+  ).toEqual({ value: 2 });
+  // @ts-expect-error Alias sources must exist on the entity.
+  view<Item>()({ encoded: alias('missing', true) });
+  // @ts-expect-error Alias selections must match the source field.
+  view<Item>()({ encoded: alias('decoded', { missing: true }) });
+});
