@@ -48,9 +48,9 @@
     "void": "^1.7.0"
   },
   "peerDependencies": {
-    "@nkzw/fate": "^1.0.0-rc.0",
+    "@nkzw/fate": "^2.0.0",
     "react": "^19.2.0",
-    "react-fate": "^1.0.0-rc.0",
+    "react-fate": "^2.0.0",
     "void": ">=1.0.0"
   }
 }

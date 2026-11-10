@@ -95,7 +95,7 @@ export default defineConfig({
       { link: '/', text: 'Home' },
       { activeMatch: '^/(guide|integrations)/', link: '/guide/why-fate', text: 'Guide' },
       { activeMatch: '^/api(?:/|$)', link: '/api', text: 'API' },
-      { activeMatch: '^/posts/', link: '/posts/fate-1.0', text: 'Blog' },
+      { activeMatch: '^/posts/', link: '/posts/whats-new-in-fate-2.0', text: 'Blog' },
       {
         items: [
           {
@@ -124,8 +124,9 @@ export default defineConfig({
         {
           collapsed: false,
           items: [
-            { link: '/posts/fate-1.0', text: 'Fate 1.0' },
-            { link: '/posts/introducing-fate', text: 'Introducing Fate' },
+            { link: '/posts/whats-new-in-fate-2.0', text: "What's new in fate 2.0?" },
+            { link: '/posts/fate-1.0', text: 'fate 1.0' },
+            { link: '/posts/introducing-fate', text: 'Introducing fate' },
           ],
           text: 'Blog',
         },

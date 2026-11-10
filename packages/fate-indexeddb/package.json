@@ -25,6 +25,6 @@
     "vite-plus": "catalog:"
   },
   "peerDependencies": {
-    "@nkzw/fate": "^1.5.1"
+    "@nkzw/fate": "^2.0.0"
   }
 }
