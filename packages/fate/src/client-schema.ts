@@ -116,11 +116,19 @@ export type WithClientFields<
         ? {
             [
               K in keyof (T & (Name extends keyof Definitions<S> ? LocalEntity<S, Name> : unknown))
-            ]: WithClientFields<
-              (T & (Name extends keyof Definitions<S> ? LocalEntity<S, Name> : unknown))[K],
-              S,
-              [...Depth, 0]
-            >;
+            ]: Name extends keyof Definitions<S>
+              ? Definitions<S>[Name] extends { view: infer V extends DataView<any> }
+                ? K extends keyof ViewFieldConfig<V> & keyof LocalEntity<S, Name>
+                  ? ViewFieldConfig<V>[K] extends true | { kind: 'computed' }
+                    ? LocalEntity<S, Name>[K]
+                    : WithClientFields<LocalEntity<S, Name>[K], S, [...Depth, 0]>
+                  : K extends keyof T
+                    ? WithClientFields<T[K], S, [...Depth, 0]>
+                    : never
+                : never
+              : K extends keyof T
+                ? WithClientFields<T[K], S, [...Depth, 0]>
+                : never;
           }
         : T extends object
           ? { [K in keyof T]: WithClientFields<T[K], S, [...Depth, 0]> }

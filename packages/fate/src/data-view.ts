@@ -52,9 +52,6 @@ type NormalizeComputedSelect<Select> = {
   [Key in keyof Select]: NormalizeComputedSelection<Select[Key], Key & string>;
 };
 
-// Client relationships are stored as references. Only infer scalar leaves.
-type ComputedLeaf<Value> = Value extends object ? unknown : Value;
-
 type ComputedPathValue<Item, Path extends string> = string extends Path
   ? unknown
   : Item extends null | undefined
@@ -66,7 +63,7 @@ type ComputedPathValue<Item, Path extends string> = string extends Path
           ? ComputedPathValue<Item[Name], Rest> | undefined
           : unknown
         : Path extends keyof Item
-          ? ComputedLeaf<Item[Path]>
+          ? Item[Path]
           : unknown;
 
 type ComputedDependency<Item, Selection> = Selection extends CountSelection

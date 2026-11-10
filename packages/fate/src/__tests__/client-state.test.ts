@@ -274,6 +274,96 @@ test('computed dependencies are masked, subscribed, memoized and invalidated', a
   expect(summary.mock.calls.length).toBe(before + 2);
 });
 
+test('computed object dependencies preserve scalar types and class results', async () => {
+  class Decoded {
+    #value: number;
+    constructor(value: number) {
+      this.#value = value;
+    }
+    value() {
+      return this.#value;
+    }
+  }
+  type Item = {
+    __typename: 'Item';
+    decoded: Decoded;
+    history: readonly [number, string] | null;
+    id: string;
+    state: { values: ReadonlyArray<number> };
+  };
+  const resolve = vi.fn((value: number) => new Decoded(value));
+  const client = createClient({
+    roots: { item: clientRoot<Item, 'Item'>('Item') },
+    types: [{ fields: { history: 'scalar', state: 'scalar' }, type: 'Item' }],
+  }).registerClientSchema(
+    clientSchema({
+      typeExtensions: {
+        Item: {
+          defaults: () => ({}),
+          view: dataView<Item>('Item')({
+            decoded: computed({
+              resolve: (_item: Item, { history, state }) => {
+                expectTypeOf(state).toEqualTypeOf<Item['state']>();
+                expectTypeOf(history).toEqualTypeOf<Item['history']>();
+                return resolve(state.values[0] + (history?.[0] ?? 0));
+              },
+              select: { history: true, state: true },
+            }),
+            doubled: computed({
+              resolve: (_item: Item, { decoded }) => {
+                expectTypeOf(decoded).toEqualTypeOf<Decoded>();
+                return decoded.value() * 2;
+              },
+              select: { decoded: true },
+            }),
+          }),
+        },
+      },
+    }),
+  );
+  type ExtendedItem = EntityOf<typeof client, 'Item'>;
+  expectTypeOf<ExtendedItem['decoded']>().toExtend<Decoded>();
+  const ItemView = view<ExtendedItem>()({ decoded: true, doubled: true });
+  client.write(
+    'Item',
+    { history: [3, 'saved'], id: 'a', state: { values: [2] } },
+    new Set(['id', 'history', 'state']),
+  );
+  const ref = client.ref('Item', 'a', ItemView);
+  const first = (await client.readView(ItemView, ref)).data;
+  expect(first.decoded).toBeInstanceOf(Decoded);
+  expect(first.decoded.value()).toBe(5);
+  expect(first.doubled).toBe(10);
+  expect((await client.readView(ItemView, ref)).data.decoded).toBe(first.decoded);
+  expect(resolve).toHaveBeenCalledTimes(1);
+  client.write('Item', { id: 'a', state: { values: [7] } }, new Set(['id', 'state']));
+  expect((await client.readView(ItemView, ref)).data.doubled).toBe(20);
+  expect(resolve).toHaveBeenCalledTimes(2);
+});
+
+test('whole relationship dependencies must select fields instead of exposing references', () => {
+  const person = dataView<{ id: string; name: string }>('Person')({ id: true, name: true });
+  expect(() =>
+    createClient().registerClientSchema(
+      clientSchema({
+        types: {
+          Item: {
+            defaults: () => ({ person: { id: 'p', name: 'Ada' } }),
+            view: dataView<{ person: { id: string; name: string } }>('Item')({
+              label: computed({
+                resolve: (_item: { person: { name: string } }, { person }) => person.name,
+                select: { person: true },
+              }),
+              person,
+            }),
+          },
+          Person: { defaults: (id) => ({ id, name: '' }), view: person },
+        },
+      }),
+    ),
+  ).toThrow("Dependency 'person' on 'Item.label' must select a field of the relationship");
+});
+
 test('equivalent computed arguments share results across independent views', async () => {
   const resolve = vi.fn((_item: { value: number }, { value }, _context, args) => ({
     value: value * (args?.factor ?? 1),

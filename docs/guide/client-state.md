@@ -189,7 +189,9 @@ Computed fields run when they are read. fate reuses the result until a dependenc
 
 Just like a view, `select` uses `true` to select a field by name. Use `field('path')` to give a dependency a different name or read through a relationship. For example, `field('tasks.done')` returns an array of completion values when the task list is available.
 
-The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths and arrays.
+The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths, arrays, and stored JSON objects. Computed results keep their types too, including class instances such as a parsed game map.
+
+A dependency must select a value, rather than a whole relationship. Use `field('author.name')` to read the author's name. fate validates this against the client schema so the resolver receives the selected data instead of a record reference. Treat object dependencies and computed results as read-only: other components share those values.
 
 Dependencies read fields with their default arguments. If a view selects `title` with `{ locale: 'ja' }` alongside a computation that depends on `title`, fate loads both values. The computation uses the default title.
 

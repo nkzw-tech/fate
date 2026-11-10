@@ -244,6 +244,24 @@ export default class ClientState {
         const next = new Set(visiting).add(key);
         const deps = Object.values(definition.select ?? {}).map((dependency: any) => {
           if (dependency.kind === 'field') {
+            let owner = current;
+            const segments = dependency.path.split('.');
+            for (const [index, segment] of segments.entries()) {
+              const descriptor = this.client.getTypeConfig(owner).fields?.[segment];
+              if (descriptor && descriptor !== 'scalar') {
+                if (index === segments.length - 1) {
+                  throw new Error(
+                    `fate: Dependency '${dependency.path}' on '${key}' must select a field of the relationship.`,
+                  );
+                }
+                const child = relationType(descriptor);
+                if (child) {
+                  owner = child;
+                  continue;
+                }
+              }
+              break;
+            }
             return dependency.path as string;
           }
           if (dependency.kind === 'count' && !dependency.where) {
