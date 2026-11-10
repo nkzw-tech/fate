@@ -193,7 +193,20 @@ The resolver receives the selected values in its second argument. Annotating the
 
 A dependency must select a value, rather than a whole relationship. Use `field('author.name')` to read the author's name. fate validates this against the client schema so the resolver receives the selected data instead of a record reference. Treat object dependencies and computed results as read-only: other components share those values.
 
-Dependencies read fields with their default arguments. If a view selects `title` with `{ locale: 'ja' }` alongside a computation that depends on `title`, fate loads both values. The computation uses the default title.
+Dependencies read fields with their default arguments unless we specify `args`. If a view selects `title` with `{ locale: 'ja' }` alongside a computation that depends on `title: true`, fate loads both values. The computation uses the default title.
+
+To compute from a particular variant, select its arguments:
+
+```ts
+localizedTitle: computed({
+  resolve: (_post: PostData, { title }) => title.toUpperCase(),
+  select: { title: { args: { locale: 'ja' } } },
+}),
+```
+
+Arguments can also depend on the computed field's arguments. For example, `select: { title: { args: ({ locale }) => ({ locale }) } }` lets a component select `localizedTitle: { args: { locale: 'ja' } }`. fate fetches and caches the matching title. Two components selecting the same arguments share the computed result, even when they define separate views.
+
+For a named dependency or relationship path, use `field('author.name', { args: { locale: 'ja' } })`. These arguments apply to `name`. Argument functions must be pure, just like the computation itself. Parameterized dependencies are supported in client schemas.
 
 Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client computed fields.
 

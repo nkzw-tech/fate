@@ -1939,65 +1939,86 @@ test('passes arguments to a shared union field without treating them as root arg
   }
 });
 
-test('client computed dependencies retain GraphQL union branches', async () => {
-  const schema = buildSchema(`
+test.each([false, true])(
+  'client computed dependencies retain GraphQL union branches (arguments: %s)',
+  async (parameterized) => {
+    const schema = buildSchema(`
     type Query { result: Result! }
     union Result = Post | User
-    type Post { id: ID!, title: String! }
+    type Post { id: ID!, title(locale: String): String! }
     type User { id: ID!, name: String! }
   `);
-  const metadata = createGraphQLArgumentSchema(schema);
-  const types = graphQLOutputRelations(metadata);
-  type Post = { __typename: 'Post'; id: string; title: string };
-  type User = { __typename: 'User'; id: string; name: string };
-  let result: Post | User = { __typename: 'Post', id: 'p', title: 'Hello' };
-  const fetch = vi.fn(async (_url, init) => {
-    const { query, variables } = JSON.parse(String(init?.body));
-    return jsonResponse(
-      await graphql({ rootValue: { result }, schema, source: query, variableValues: variables }),
-    );
-  });
-  const client = createClient({
-    roots: { result: clientRoot<Post | User, 'Result'>('Result') },
-    transport: createGraphQLTransport({
-      fetch,
-      live: false,
-      roots: { result: { type: 'Result' } },
-      schema: metadata,
+    const metadata = createGraphQLArgumentSchema(schema);
+    const types = graphQLOutputRelations(metadata);
+    type Post = { __typename: 'Post'; id: string; title: string };
+    type User = { __typename: 'User'; id: string; name: string };
+    let result: Post | User = { __typename: 'Post', id: 'p', title: 'Hello' };
+    const fetch = vi.fn(async (_url, init) => {
+      const current = result;
+      const { query, variables } = JSON.parse(String(init?.body));
+      return jsonResponse(
+        await graphql({
+          rootValue: {
+            result:
+              current.__typename === 'Post'
+                ? {
+                    ...current,
+                    title: ({ locale }: { locale?: string }) => locale ?? current.title,
+                  }
+                : result,
+          },
+          schema,
+          source: query,
+          variableValues: variables,
+        }),
+      );
+    });
+    const client = createClient({
+      roots: { result: clientRoot<Post | User, 'Result'>('Result') },
+      transport: createGraphQLTransport({
+        fetch,
+        live: false,
+        roots: { result: { type: 'Result' } },
+        schema: metadata,
+        types,
+        url: '/graphql',
+      }),
       types,
-      url: '/graphql',
-    }),
-    types,
-  }).registerClientSchema(
-    clientSchema({
-      typeExtensions: {
-        Post: {
-          defaults: () => ({}),
-          view: dataView<{ title: string }>('Post')({
-            displayTitle: computed<{ title: string }, string>({
-              resolve: (_item, { title }) => `Title: ${title}`,
-              select: { title: field('title') },
+    }).registerClientSchema(
+      clientSchema({
+        typeExtensions: {
+          Post: {
+            defaults: () => ({}),
+            view: dataView<{ title: string }>('Post')({
+              displayTitle: computed<{ title: string }, string>({
+                resolve: (_item, { title }) => `Title: ${title}`,
+                select: {
+                  title: field('title', parameterized ? { args: { locale: 'ja' } } : undefined),
+                },
+              }),
             }),
-          }),
+          },
         },
-      },
-    }),
-  );
-  const PostView = view<EntityOf<typeof client, 'Post'>>()({
-    displayTitle: { args: { format: 'summary' } },
-  });
-  const UserView = view<User>()({ name: true });
-  const ResultView = view<EntityOf<typeof client, 'Post'> | User>()({
-    ...viewFor('Post', PostView),
-    ...viewFor('User', UserView),
-  });
-  const request = { result: { view: ResultView } };
-  const first = await client.request(request);
-  expect(first.result).toMatchObject({ __typename: 'Post', id: 'p' });
-  expect((await client.readView(PostView, first.result)).data.displayTitle).toBe('Title: Hello');
-  result = { __typename: 'User', id: 'u', name: 'Ada' };
-  const second = await client.request(request, { mode: 'network-only' });
-  expect(second.result).toMatchObject({ __typename: 'User', id: 'u' });
-  expect((await client.readView(UserView, second.result)).data.name).toBe('Ada');
-  expect(fetch).toHaveBeenCalledTimes(2);
-});
+      }),
+    );
+    const PostView = view<EntityOf<typeof client, 'Post'>>()({
+      displayTitle: { args: { format: 'summary' } },
+    });
+    const UserView = view<User>()({ name: true });
+    const ResultView = view<EntityOf<typeof client, 'Post'> | User>()({
+      ...viewFor('Post', PostView),
+      ...viewFor('User', UserView),
+    });
+    const request = { result: { view: ResultView } };
+    const first = await client.request(request);
+    expect(first.result).toMatchObject({ __typename: 'Post', id: 'p' });
+    expect((await client.readView(PostView, first.result)).data.displayTitle).toBe(
+      parameterized ? 'Title: ja' : 'Title: Hello',
+    );
+    result = { __typename: 'User', id: 'u', name: 'Ada' };
+    const second = await client.request(request, { mode: 'network-only' });
+    expect(second.result).toMatchObject({ __typename: 'User', id: 'u' });
+    expect((await client.readView(UserView, second.result)).data.name).toBe('Ada');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  },
+);

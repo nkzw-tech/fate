@@ -1048,7 +1048,21 @@ export class FateClient<
         fields: Object.entries(definition.view.fields).map(([field, config]) => ({
           field,
           kind: config === true ? 'stored' : config.kind,
-          ...(config !== true && 'select' in config ? { select: config.select } : {}),
+          ...(config !== true && 'select' in config
+            ? {
+                select:
+                  config.kind === 'computed'
+                    ? Object.fromEntries(
+                        Object.entries(config.select ?? {}).map(([name, selection]) => [
+                          name,
+                          isRecord(selection) && typeof selection.args === 'function'
+                            ? { ...selection, args: 'dynamic' }
+                            : selection,
+                        ]),
+                      )
+                    : config.select,
+              }
+            : {}),
           ...(config !== true && 'typeName' in config ? { type: config.typeName } : {}),
         })),
         name,
@@ -2098,6 +2112,7 @@ export class FateClient<
           entity,
           selectionArgs,
           options.plan ? new Set(options.plan.args.keys()) : undefined,
+          options.plan,
         )
       : selectionArgs;
 
@@ -2763,7 +2778,7 @@ export class FateClient<
         type,
         id,
         remotePaths,
-        this.clientState.remoteArgs(type, args),
+        this.clientState.remoteArgs(type, args, undefined, plan),
         {
           onData: (record, liveSelect) => {
             if (this.persistenceDisposal?.signal.aborted || !record || typeof record !== 'object') {
@@ -2854,7 +2869,7 @@ export class FateClient<
         connection.type,
         connectionArgs,
         this.remoteSelection(connection.type, plan.paths, plan),
-        this.clientState.remoteArgs(connection.type, selectionArgs),
+        this.clientState.remoteArgs(connection.type, selectionArgs, undefined, plan),
         {
           onError: (error) => {
             if (!this.persistenceDisposal?.signal.aborted) {
@@ -3712,7 +3727,7 @@ export class FateClient<
       const connectionResult = await this.transport.fetchList(
         connection.field,
         this.remoteSelection(connection.type, plan.paths, plan),
-        this.clientState.remoteArgs(connection.type, argsPayload, new Set(plan.args.keys())),
+        this.clientState.remoteArgs(connection.type, argsPayload, new Set(plan.args.keys()), plan),
         ...(context ? [context] : []),
       );
       this.assertPersistenceActive();
@@ -5334,7 +5349,7 @@ export class FateClient<
   ): Promise<Array<EntityFetchResult>> {
     const config = this.getTypeConfig(type);
     const selection = this.remoteSelection(type, select, plan);
-    const fieldArgs = this.clientState.remoteArgs(type, args);
+    const fieldArgs = this.clientState.remoteArgs(type, args, undefined, plan);
     if (!config.refetch) {
       const context = normalizationReadContext(this.transport, signal ? { signal } : undefined);
       const records = await abortable(
@@ -5710,7 +5725,12 @@ export class FateClient<
         this.transport.fetchQuery!(
           item.procedure,
           this.remoteSelection(item.type, item.plan.paths, item.plan),
-          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
+          this.clientState.remoteArgs(
+            item.type,
+            item.argsPayload,
+            new Set(item.plan.args.keys()),
+            item.plan,
+          ),
           ...(context ? [context] : []),
         ),
         signal,
@@ -5752,7 +5772,12 @@ export class FateClient<
         this.transport.fetchQuery!(
           item.procedure,
           this.remoteSelection(item.type, item.plan.paths, item.plan),
-          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
+          this.clientState.remoteArgs(
+            item.type,
+            item.argsPayload,
+            new Set(item.plan.args.keys()),
+            item.plan,
+          ),
           ...(signal ? [{ signal }] : []),
         ),
         signal,
@@ -5783,7 +5808,12 @@ export class FateClient<
         this.transport.fetchList!(
           item.procedure,
           this.remoteSelection(item.type, item.plan.paths, item.plan),
-          this.clientState.remoteArgs(item.type, item.argsPayload, new Set(item.plan.args.keys())),
+          this.clientState.remoteArgs(
+            item.type,
+            item.argsPayload,
+            new Set(item.plan.args.keys()),
+            item.plan,
+          ),
           ...(context ? [context] : []),
         ),
         signal,

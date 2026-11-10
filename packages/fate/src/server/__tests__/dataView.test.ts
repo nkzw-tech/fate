@@ -616,3 +616,15 @@ test('collectDataViewConfigs reads list order defaults', () => {
   ]);
   expect(config?.view).toBe(postView);
 });
+
+test('server computed fields reject client dependency arguments', () => {
+  const view = dataView<{ title: string }>('Post')({
+    label: computed({
+      resolve: (_post: { title: string }, { title }) => title,
+      select: { title: { args: { locale: 'ja' } } },
+    }),
+  });
+  expect(() => createResolver({ select: ['label'], view })).toThrow(
+    'Parameterized computed dependencies are only supported in client schemas',
+  );
+});

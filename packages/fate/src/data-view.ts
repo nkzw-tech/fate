@@ -21,7 +21,11 @@ type ResolverAuthorize<Item extends AnyRecord, Context> = Bivariant<
   (item: Item, context?: Context, args?: AnyRecord) => Promise<boolean> | boolean
 >;
 
-export type FieldSelection<Path extends string = string> = {
+type ComputedFieldOptions = {
+  args?: AnyRecord | ((args: AnyRecord) => AnyRecord);
+};
+
+export type FieldSelection<Path extends string = string> = ComputedFieldOptions & {
   kind: 'field';
   path: Path;
 };
@@ -43,7 +47,7 @@ export type CountSelection = {
 
 export type ComputedSelection = CountSelection | FieldSelection;
 
-type ComputedSelectInput = Record<string, ComputedSelection | true>;
+type ComputedSelectInput = Record<string, ComputedSelection | ComputedFieldOptions | true>;
 type NormalizeComputedSelection<
   Selection,
   Name extends string,
@@ -280,7 +284,11 @@ export function resolver<Item extends AnyRecord, Result = unknown, Context = unk
   };
 }
 
-export const field = <Path extends string>(path: Path): FieldSelection<Path> => ({
+export const field = <Path extends string>(
+  path: Path,
+  options?: ComputedFieldOptions,
+): FieldSelection<Path> => ({
+  ...options,
   kind: 'field',
   path,
 });
@@ -309,7 +317,11 @@ export function computed<
       select: Object.fromEntries(
         Object.entries(select).map(([name, selection]) => [
           name,
-          selection === true ? field(name) : selection,
+          selection === true
+            ? field(name)
+            : 'kind' in selection
+              ? selection
+              : field(name, selection),
         ]),
       ) as NormalizeComputedSelect<Select>,
     }),

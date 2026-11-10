@@ -14,6 +14,7 @@ import { createPersistence } from '../persistence.ts';
 import type { FateLiveConnectionEvent } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
+import { getSelectionPlan } from '../selection.ts';
 import { computed, dataView, field, list } from '../server/dataView.ts';
 import { ConnectionTag, type ConnectionMetadata } from '../types.ts';
 import { view } from '../view.ts';
@@ -1197,6 +1198,139 @@ test('GraphQL refetches keep computed field arguments on the client', async () =
 });
 
 test.each(['query', 'refetch', 'persisted'] as const)(
+  '%s selects parameterized computed dependencies without mixing argument variants',
+  async (kind) => {
+    type Post = { __typename: 'Post'; id: string; title: string };
+    const schema = buildSchema(`
+      type Post { id: ID!, title(locale: String): String! }
+      type Query { post(id: ID!): Post }
+    `);
+    const types = [
+      { refetch: { args: { id: { field: 'id' } }, root: 'post' }, type: 'Post' },
+    ] as const;
+    const fetch = vi.fn(async (_url, init) => {
+      const { query, variables } = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify(
+          await graphql({
+            rootValue: {
+              post: ({ id }: { id: string }) => ({
+                id,
+                title: ({ locale }: { locale?: string }) => locale ?? 'default',
+              }),
+            },
+            schema,
+            source: query,
+            variableValues: variables,
+          }),
+        ),
+      );
+    });
+    const roots = { post: clientRoot<Post, 'Post'>('Post') };
+    const storage = memoryStorage();
+    const makeClient = () =>
+      createClient<[typeof roots, Record<never, never>]>({
+        persistence:
+          kind === 'persisted'
+            ? createPersistence({ key: 'parameterized-computed', storage })
+            : undefined,
+        roots,
+        transport: createGraphQLTransport({
+          fetch,
+          nodes: false,
+          roots: { post: { type: 'Post' } },
+          schema: createGraphQLArgumentSchema(schema),
+          types,
+          url: '/graphql',
+        }),
+        types,
+      }).registerClientSchema(
+        clientSchema({
+          typeExtensions: {
+            Post: {
+              defaults: () => ({}),
+              view: dataView<Post>('Post')({
+                decorated: computed({
+                  resolve: (_post: Post & { label: string }, { label }) => `${label}!`,
+                  select: { label: { args: (args) => args } },
+                }),
+                english: computed({
+                  resolve: (_post: Post, { title }) => title,
+                  select: { title: field('title', { args: { locale: 'en' } }) },
+                }),
+                label: computed({
+                  resolve: (_post: Post, { title }) => `[${title}]`,
+                  select: { title: { args: ({ locale }) => ({ locale }) } },
+                }),
+                original: computed({
+                  resolve: (_post: Post, { title }) => title,
+                  select: { title: true },
+                }),
+              }),
+            },
+          },
+        }),
+      );
+    let client = makeClient();
+    const PostView = view<EntityOf<typeof client, 'Post'>>()({
+      decorated: { args: { locale: 'ja' } },
+      english: true,
+      fate_dependency_title: alias('title', { args: { locale: 'de' } }),
+      japanese: alias('label', { args: { locale: 'ja' } }),
+      original: true,
+      spanish: alias('label', { args: { locale: 'es' } }),
+      title: { args: { locale: 'fr' } },
+    });
+    try {
+      client.write('Post', { id: 'p' }, new Set(['id']));
+      let ref =
+        kind === 'refetch'
+          ? client.ref('Post', 'p', PostView)
+          : (await client.request({ post: { args: { id: 'p' }, view: PostView } })).post;
+      const expected = {
+        decorated: '[ja]!',
+        english: 'en',
+        fate_dependency_title: 'de',
+        japanese: '[ja]',
+        original: 'default',
+        spanish: '[es]',
+        title: 'fr',
+      };
+      expect((await client.readView(PostView, ref)).data).toMatchObject(expected);
+      if (kind === 'persisted') {
+        await client.persistence!.flush();
+        client.persistence!.dispose();
+        client = makeClient();
+        ref = (await client.request({ post: { args: { id: 'p' }, view: PostView } })).post;
+        expect((await client.readView(PostView, ref)).data).toMatchObject(expected);
+      }
+      expect(fetch).toHaveBeenCalledOnce();
+      client.write('Post', { id: 'p', title: 'updated default' }, new Set(['id', 'title']));
+      expect((await client.readView(PostView, ref)).data).toMatchObject({
+        ...expected,
+        original: 'updated default',
+      });
+      const titlePlan = getSelectionPlan(view<Post>()({ title: { args: { locale: 'ja' } } }), null);
+      client.write(
+        'Post',
+        { id: 'p', title: 'updated Japanese' },
+        new Set(['id', 'title']),
+        titlePlan,
+      );
+      expect((await client.readView(PostView, ref)).data).toMatchObject({
+        ...expected,
+        decorated: '[updated Japanese]!',
+        japanese: '[updated Japanese]',
+        original: 'updated default',
+      });
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      client.persistence?.dispose();
+    }
+  },
+);
+
+test.each(['query', 'refetch', 'persisted'] as const)(
   '%s computes with default dependencies alongside parameterized fields',
   async (kind) => {
     const schema = buildSchema(`
@@ -1336,6 +1470,10 @@ test.each(['field', 'relationship'] as const)(
                 resolve: (_author: Author, { name }) => name,
                 select: { name: true },
               }),
+              translated: computed({
+                resolve: (_author: Author, { name }) => name,
+                select: { name: { args: (args) => args } },
+              }),
             }),
           },
           Post: {
@@ -1355,6 +1493,7 @@ test.each(['field', 'relationship'] as const)(
         ...(kind === 'relationship' && { args: { locale: 'ja' } }),
         label: true,
         name: kind === 'field' ? { args: { locale: 'ja' } } : true,
+        translated: { args: { locale: 'en' } },
       },
       authorName: true,
     });
@@ -1366,6 +1505,7 @@ test.each(['field', 'relationship'] as const)(
         id: kind === 'field' ? 'default' : 'ja',
         label: kind === 'field' ? 'default' : 'ja',
         name: 'ja',
+        translated: 'en',
       },
       authorName: 'default',
     });

@@ -237,6 +237,15 @@ const assignPath = <Context>(
 
   if (isComputedField(field)) {
     if (rest.length === 0) {
+      if (
+        Object.values(field.select ?? {}).some(
+          (selection) => selection.kind === 'field' && selection.args,
+        )
+      ) {
+        throw new Error(
+          'fate: Parameterized computed dependencies are only supported in client schemas.',
+        );
+      }
       node.computeds.set(segment, field);
       selectedPaths.add(nextPath);
     }

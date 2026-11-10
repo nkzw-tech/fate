@@ -1,4 +1,5 @@
 import { responseField, schemaField, typeBranchField, typeCondition } from './alias.ts';
+import { cloneArgs, combineArgsPayload, hashArgs, resolvedArgsFromPlan } from './args.ts';
 import type { ClientStateReference } from './client-persistence.ts';
 import type {
   ClientMutationDefinition,
@@ -56,31 +57,79 @@ const relationType = (field?: RelationDescriptor) =>
 const isComputed = (field: unknown): field is ComputedField<any, any, any, any> =>
   isRecord(field) && field.kind === 'computed';
 
-// Dependencies have no arguments. Alias them when a view selects the same path with arguments.
-const dependencyPath = (path: string, plan: SelectionPlan | undefined, prefix: string): string =>
-  path
+const dependencyPlan = (
+  definition: ComputedField<any, any, any, any>,
+  args?: AnyRecord,
+  resolveArgs = true,
+): SelectionPlan => {
+  const plan: SelectionPlan = { args: new Map(), live: new Map(), paths: new Set() };
+  for (const dependency of Object.values(definition.select ?? {}) as Array<any>) {
+    const path = dependency.kind === 'field' ? dependency.path : `${dependency.relation}.id`;
+    plan.paths.add(path);
+    if (resolveArgs && dependency.args) {
+      const value = cloneArgs(
+        typeof dependency.args === 'function' ? dependency.args(args ?? {}) : dependency.args,
+        path,
+      );
+      plan.args.set(path, { hash: hashArgs(value), value });
+    }
+  }
+  return plan;
+};
+
+const dependencyPath = (
+  path: string,
+  plan: SelectionPlan | undefined,
+  prefix: string,
+  dependencies: SelectionPlan,
+  condition?: string,
+): string => {
+  let dependencyPrefix = '';
+  return path
     .split('.')
-    .map((field) => {
+    .map((field, index) => {
+      dependencyPrefix = dependencyPrefix ? `${dependencyPrefix}.${field}` : field;
+      const args = dependencies.args.get(dependencyPrefix);
+      if (condition && index === 0) {
+        field = typeBranchField(condition, field);
+      }
+      const hash = args?.hash ?? 'object:{}';
       const parent = prefix ? `${prefix}.` : '';
-      if (plan?.args.has(`${parent}${field}`)) {
-        const names = new Set(
-          [...plan.paths]
-            .filter((path) => path.startsWith(parent))
-            .map((path) => responseField(path.slice(parent.length).split('.')[0])),
-        );
-        const base = `fate_dependency_${responseField(field)}`;
-        let name = base;
-        let index = 0;
-        while (names.has(name)) {
-          name = `${base}_${++index}`;
+      if (plan) {
+        const occupied = (candidate: string) =>
+          plan.args.has(`${parent}${candidate}`) ||
+          [...plan.paths].some(
+            (path) => path === `${parent}${candidate}` || path.startsWith(`${parent}${candidate}.`),
+          );
+        if (occupied(field) && (plan.args.get(`${parent}${field}`)?.hash ?? 'object:{}') !== hash) {
+          const names = new Set(
+            [...plan.paths]
+              .filter((path) => path.startsWith(parent))
+              .map((path) => responseField(path.slice(parent.length).split('.')[0])),
+          );
+          const base = `fate_dependency_${responseField(field)}`;
+          let name = base;
+          let index = 0;
+          const condition = typeCondition(field);
+          const alias = (name: string) =>
+            `${name}:${schemaField(field)}${condition ? `:${condition}` : ''}`;
+          while (
+            names.has(name) ||
+            (occupied(alias(name)) && plan.args.get(`${parent}${alias(name)}`)?.hash !== hash)
+          ) {
+            name = `${base}_${++index}`;
+          }
+          field = alias(name);
         }
-        const condition = typeCondition(field);
-        field = `${name}:${schemaField(field)}${condition ? `:${condition}` : ''}`;
+        if (args || field.includes(':')) {
+          plan.args.set(`${parent}${field}`, args ?? { hash, value: {} });
+        }
       }
       prefix = `${parent}${field}`;
       return field;
     })
     .join('.');
+};
 
 type ComputedValue = { key: string; result: unknown; values: Array<unknown> };
 
@@ -269,15 +318,20 @@ export default class ClientState {
           }
           throw new Error(`fate: Unsupported client dependency on '${key}'.`);
         });
-        for (const dependency of this.expand(current, deps, remote, undefined, '', next)) {
-          const [field, ...tail] = dependency.split('.');
-          result.add(
-            dependencyPath(
-              condition ? [typeBranchField(condition, field), ...tail].join('.') : dependency,
-              plan,
-              prefix,
-            ),
-          );
+        const dependencies = dependencyPlan(
+          definition,
+          plan?.args.get(prefix ? `${prefix}.${segment}` : segment)?.value,
+          Boolean(plan),
+        );
+        for (const dependency of this.expand(
+          current,
+          deps,
+          remote,
+          plan ? dependencies : undefined,
+          '',
+          next,
+        )) {
+          result.add(dependencyPath(dependency, plan, prefix, dependencies, condition));
         }
         continue;
       }
@@ -322,8 +376,12 @@ export default class ClientState {
     type: string,
     args?: AnyRecord,
     paths?: ReadonlySet<string>,
+    plan?: SelectionPlan,
     prefix = '',
   ): AnyRecord | undefined {
+    if (!prefix) {
+      args = combineArgsPayload(args, resolvedArgsFromPlan(plan));
+    }
     if (!args || !this.definitions.size || type === '__value__') {
       return args;
     }
@@ -333,6 +391,13 @@ export default class ClientState {
       const name = schemaField(key);
       const path = `${prefix}${key}`;
       if (
+        plan?.args.get(path)?.hash === 'object:{}' &&
+        isRecord(value) &&
+        !Object.keys(value).length
+      ) {
+        continue;
+      }
+      if (
         this.isLocalField(current, name) &&
         (!paths || [...paths].some((field) => field === path || field.startsWith(`${path}.`)))
       ) {
@@ -340,7 +405,7 @@ export default class ClientState {
       }
       const child = relationType(this.client.getTypeConfig(current).fields?.[name]);
       result[key] =
-        child && isRecord(value) ? this.remoteArgs(child, value, paths, `${path}.`) : value;
+        child && isRecord(value) ? this.remoteArgs(child, value, paths, plan, `${path}.`) : value;
     }
     return Object.keys(result).length ? result : undefined;
   }
@@ -403,10 +468,18 @@ export default class ClientState {
     }
     stack = new Set(stack).add(cacheKey);
     const values: Array<unknown> = [];
-    const dependencyPlan = plan.args.size ? { ...plan, args: new Map() } : plan;
+    const args = plan.args.get(path)?.value;
+    const dependencies = dependencyPlan(definition, args);
     const read = (owner: EntityId, segments: Array<string>, index = 0): unknown => {
       const name = segments[index];
-      const value = this.readField(owner, name, dependencyPlan, name, coverage, stack);
+      const value = this.readField(
+        owner,
+        name,
+        dependencies,
+        segments.slice(0, index + 1).join('.'),
+        coverage,
+        stack,
+      );
       return readValue(value, segments, index + 1);
     };
     const readValue = (value: unknown, segments: Array<string>, index: number): unknown => {
@@ -439,7 +512,6 @@ export default class ClientState {
         values.push(deps[name]);
       }
     }
-    const args = plan.args.get(path)?.value;
     const cached = this.computedCache.get(id);
     const previous =
       cached && !('key' in cached) ? cached.get(key) : cached?.key === key ? cached : undefined;
