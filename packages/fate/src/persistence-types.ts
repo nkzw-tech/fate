@@ -53,7 +53,7 @@ export interface PersistenceRuntime extends PersistenceSession {
   changed(change?: StoreChange): void;
   clientRecordCollected?(id: EntityId, record: AnyRecord | undefined): void;
   fetched(request: RequestDescriptor, options?: RequestPersistenceOptions): void;
-  mutate(command: MutationCommand): Promise<unknown>;
+  mutate(command: MutationCommand, onPersisted: () => void): Promise<unknown>;
   mutateClient?<T>(run: (commit: (apply: () => void) => Promise<void>) => Promise<T>): Promise<T>;
   restoreRequest(request: RequestDescriptor): Promise<void>;
   /** @internal */

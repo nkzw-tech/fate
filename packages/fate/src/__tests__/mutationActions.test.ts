@@ -52,6 +52,8 @@ test('expands action selections without changing the original action', async () 
   const expanded = title.with(AuthorView).with({ author: { id: true } });
   const submission = expanded(null, { input, optimistic: { title: 'Optimistic' } });
   expect(client.store.read(toEntityId('Note', '1'))?.title).toBe('Optimistic');
+  expectTypeOf(submission.locallyPersisted).toEqualTypeOf<Promise<void>>();
+  await expect(submission.locallyPersisted).rejects.toThrow('not persisted');
   const response = await submission;
   expect(response).toEqual({ error: undefined, result: note });
   expect(new Set(mutate.mock.calls[0][2])).toEqual(

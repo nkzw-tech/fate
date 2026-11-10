@@ -2029,21 +2029,29 @@ export class FateClient<
   }
 
   /** @internal */
-  persistMutation(command: MutationCommand): Promise<unknown> {
+  persistMutation(command: MutationCommand, onPersisted: () => void): Promise<unknown> {
     if (!this.persistenceRuntime) {
       throw new Error('fate: Persistence is not configured.');
     }
     this.requireDurableMutationTransport(command.key);
-    return this.persistenceRuntime.mutate(command);
+    return this.persistenceRuntime.mutate(command, onPersisted);
   }
 
   /** @internal */
   persistClientMutation<T>(
     run: (commit: (apply: () => void) => void | Promise<void>) => Promise<T>,
+    persistence: Pick<PromiseWithResolvers<void>, 'reject' | 'resolve'>,
   ) {
-    return this.persistenceRuntime?.mutateClient
-      ? this.persistenceRuntime.mutateClient(run)
-      : run((apply) => apply());
+    if (!this.persistenceRuntime?.mutateClient) {
+      persistence.reject(new Error('fate: This mutation is not persisted locally.'));
+      return run((apply) => apply());
+    }
+    return this.persistenceRuntime.mutateClient((commit) =>
+      run(async (apply) => {
+        await commit(apply);
+        persistence.resolve();
+      }),
+    );
   }
 
   /** @internal */

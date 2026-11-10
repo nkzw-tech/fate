@@ -109,6 +109,27 @@ Mutations are delivered in the order they were saved, one at a time per persiste
 
 The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
+### Waiting for Local Persistence
+
+Sometimes we want to continue once a change is saved on the device, even if the user is offline. Each mutation promise has a `locallyPersisted` promise for this:
+
+```tsx
+const pending = fate.mutations.post.edit({
+  input: { id: post.id, title },
+  optimistic: { title },
+});
+
+void reportResult(pending);
+await pending.locallyPersisted;
+closeEditor();
+```
+
+Here, `reportResult` is the app's handler for the eventual mutation result, including returned errors and rejected promises. `locallyPersisted` resolves once storage has committed the mutation and the data needed to recover it after a reload. Awaiting `pending` still waits for server confirmation. A later server rejection doesn't change the completed local save.
+
+For [client mutations](/guide/client-state#reading-and-updating-state), `locallyPersisted` waits for the client data to be saved. The same property is available when calling `fate.actions` directly, including actions bound with `.with()`.
+
+If validation or storage fails before the save, `locallyPersisted` rejects. It also rejects when the call isn't persisted, including `persist: false`, missing persistence, or a remote mutation without durable delivery. Handle that failure before continuing with work that depends on the save. Waiting for one mutation doesn't make it atomic with a later mutation.
+
 ### Skipping Persistence
 
 For a call that should not be saved or retried, pass `persist: false`:

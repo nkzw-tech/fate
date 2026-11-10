@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from 'vite-plus/test';
+import { afterEach, expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { GraphQLRequestError } from '../graphql-error.ts';
 import { mutation } from '../mutation.ts';
@@ -67,6 +67,118 @@ const setup = (
 const queued = async (session: PersistenceSession, count = 1) => {
   await vi.waitFor(() => expect(session.getSnapshot().mutations).toHaveLength(count));
 };
+
+test.each(['mutation', 'action'] as const)(
+  'a %s exposes durable admission before offline delivery and survives reload',
+  async (kind) => {
+    const first = setup();
+    await first.session.ready;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const write = first.storage.writeBatch;
+    first.storage.writeBatch = async (entries) => {
+      if (entries.some(([key]) => key.includes('journal'))) {
+        entered.resolve();
+        await release.promise;
+      }
+      await write(entries);
+    };
+    const options = {
+      input: { id: '1', title: 'Saved offline' },
+      optimistic: { title: 'Saved offline' },
+    };
+    const submission =
+      kind === 'action'
+        ? first.client.actions.edit.with(NoteView)(null, options)
+        : first.client.mutations.edit(options);
+    expectTypeOf(submission.locallyPersisted).toEqualTypeOf<Promise<void>>();
+    const confirmed = vi.fn();
+    const completion = submission.then(confirmed, () => {});
+    const persisted = vi.fn();
+    void submission.locallyPersisted.then(persisted);
+    await entered.promise;
+    expect(persisted).not.toHaveBeenCalled();
+    release.resolve();
+    await submission.locallyPersisted;
+    expect(confirmed).not.toHaveBeenCalled();
+    expect(first.mutate).not.toHaveBeenCalled();
+    first.session.dispose();
+    await completion;
+
+    const reopened = setup({ online: () => true, storage: first.storage });
+    await reopened.session.ready;
+    await vi.waitFor(() => expect(reopened.mutate).toHaveBeenCalledOnce());
+    await queued(reopened.session, 0);
+    expect(reopened.mutate.mock.calls[0][1]).toEqual(options.input);
+    expect(reopened.client.store.read(noteId)?.title).toBe('Saved offline');
+  },
+);
+
+test('failed durable admission rejects the local milestone and permits a later retry', async () => {
+  const current = setup();
+  await current.session.ready;
+  const write = current.storage.writeBatch;
+  current.storage.writeBatch = async (entries) => {
+    if (entries.some(([key]) => key.includes('journal'))) {
+      throw new Error('Disk full');
+    }
+    await write(entries);
+  };
+  const submission = current.client.mutations.edit({ input: { id: '1', title: 'Unsaved' } });
+  await Promise.all([
+    expect(submission.locallyPersisted).rejects.toThrow('Disk full'),
+    expect(submission).rejects.toThrow('Disk full'),
+  ]);
+  expect(current.mutate).not.toHaveBeenCalled();
+  expect(current.session.getSnapshot().mutations).toHaveLength(0);
+  current.storage.writeBatch = write;
+  const retry = current.client.mutations.edit({ input: { id: '1', title: 'Retry' } });
+  const completion = retry.catch(() => {});
+  await retry.locallyPersisted;
+  current.session.dispose();
+  await completion;
+});
+
+test('invalid durable input rejects the local milestone before storage or delivery', async () => {
+  const current = setup();
+  await current.session.ready;
+  const write = vi.spyOn(current.storage, 'writeBatch');
+  const submission = current.client.mutations.edit({
+    input: { id: '1', title: (() => {}) as unknown as string },
+  });
+  await Promise.all([
+    expect(submission.locallyPersisted).rejects.toThrow(),
+    expect(submission).rejects.toThrow(),
+  ]);
+  expect(write).not.toHaveBeenCalled();
+  expect(current.mutate).not.toHaveBeenCalled();
+});
+
+test('remote rejection does not undo an already committed local milestone', async () => {
+  const current = setup({
+    mutate: async () => {
+      throw new FateRequestError('BAD_REQUEST', 'Rejected');
+    },
+    online: () => true,
+  });
+  const submission = current.client.mutations.edit({ input: { id: '1', title: 'Rejected' } });
+  await expect(submission.locallyPersisted).resolves.toBeUndefined();
+  expect((await submission).error?.message).toBe('Rejected');
+  await expect(submission.locallyPersisted).resolves.toBeUndefined();
+});
+
+test.each([false, undefined])(
+  'non-durable calls reject the local milestone (persist=%s)',
+  async (persist) => {
+    const current = setup({ durableMutations: [] });
+    const submission = current.client.mutations.edit({
+      input: { id: '1', title: 'Online' },
+      persist,
+    });
+    await expect(submission.locallyPersisted).rejects.toThrow('not persisted');
+    expect((await submission).result?.title).toBe('Online');
+  },
+);
 
 test('LRU-only flushes do not rewrite pending mutation recovery graphs', async () => {
   const current = setup();

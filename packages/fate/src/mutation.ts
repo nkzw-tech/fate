@@ -213,7 +213,34 @@ export type MutationOptions<Identifier extends MutationIdentifier<any, any, any>
  */
 type MutationResponse<Result> = Promise<
   { error: undefined; result: Result } | { error: Error; result: undefined }
->;
+> & {
+  /** Resolves after local storage commits this mutation; rejects if it is not persisted. */
+  readonly locallyPersisted: Promise<void>;
+};
+
+type LocalPersistence = Pick<PromiseWithResolvers<void>, 'reject' | 'resolve'>;
+
+function createMutationResponse<Result>(
+  run: (persistence: LocalPersistence) => Promise<Awaited<MutationResponse<Result>>>,
+): MutationResponse<Result> {
+  const persistence = Promise.withResolvers<void>();
+  // Most callers only await the result. The optional milestone must not produce
+  // an unhandled rejection when persistence is unavailable or admission fails.
+  void persistence.promise.catch(() => {});
+  const execute = async () => {
+    try {
+      const response = await run(persistence);
+      if (response.error) {
+        persistence.reject(response.error);
+      }
+      return response;
+    } catch (error) {
+      persistence.reject(error);
+      throw error;
+    }
+  };
+  return Object.assign(execute(), { locallyPersisted: persistence.promise });
+}
 
 export type MutationFunction<I extends MutationIdentifier<any, any, any>> = I extends {
   readonly [GraphQLSelectionBrand]: unknown;
@@ -297,15 +324,14 @@ export function wrapAction<I extends MutationIdentifier<any, any, any>>(
     getSelectionPlan(view, null);
   }
   return Object.assign(
-    async (
-      _previousState: unknown,
-      options: MutationOptions<I> | 'reset' = {} as MutationOptions<I>,
-    ) => {
+    (_previousState: unknown, options: MutationOptions<I> | 'reset' = {} as MutationOptions<I>) => {
       if (options === 'reset') {
-        return null;
+        return Promise.resolve(null);
       }
       if (view && ('view' in options || 'select' in options)) {
-        throw new Error('fate: An action selection bound with .with() cannot be overridden.');
+        return createMutationResponse(async () => {
+          throw new Error('fate: An action selection bound with .with() cannot be overridden.');
+        });
       }
       const invoke = mutation as (
         options: MutationOptions<I>,
@@ -609,7 +635,7 @@ export function wrapMutation<
   const config =
     identifier.entity === '__value__' ? undefined : client.getTypeConfig(identifier.entity);
 
-  return (async (
+  return ((
     {
       args,
       delete: deleteRecord,
@@ -622,84 +648,88 @@ export function wrapMutation<
       select,
       view,
     }: MutationOptions<I> = {} as MutationOptions<I>,
-  ) => {
-    const command: MutationCommand = {
-      args,
-      delete: deleteRecord,
-      entity: identifier.entity,
-      input,
-      insert: client.resolveMutationInsertion(identifier.entity, insert),
-      ...(invalidate && client.resolveMutationInvalidation(invalidate)),
-      key: identifier.key,
-      optimistic: optimistic as AnyRecord | undefined,
-      plan: view
-        ? getSelectionPlan(view, null)
-        : select
-          ? getSelectionPlan(select as View<any, any>, null)
-          : undefined,
-      ...(remove && { remove: client.resolveMutationRemoval(remove) }),
-    };
-    // Durable admission can await restoration and disk writes before preparation
-    // acquires its own pins. Keep the caller's targets alive throughout that gap.
-    const release = client.persistence ? client.retainMutationTargets(command) : undefined;
-    try {
-      const local = client.isClientMutation(identifier.key);
-      if (
-        !local &&
-        (persist ??
-          (client.persistence !== undefined && client.supportsDurableMutations(identifier.key)))
-      ) {
-        try {
-          const result = (await client.withPersistenceLifecycle(() =>
-            client.persistMutation(command),
-          )) as MutationResult<I>;
-          return { error: undefined, result };
-        } catch (error) {
-          return handleMutationError(identifier.key, error);
-        }
-      }
-
-      if (client.persistence) {
-        await client.withPersistenceLifecycle(() => client.persistence!.ready);
-      }
-      const run = async (commit: (apply: () => void) => void | Promise<void>) => {
-        client.assertPersistenceActive();
-        // Preparation failures reject directly, as they did before persistence.
-        const operation = prepareMutation(client, command, config);
-        const performMutation = async () => {
+  ) =>
+    createMutationResponse<MutationResult<I>>(async (persistence) => {
+      const command: MutationCommand = {
+        args,
+        delete: deleteRecord,
+        entity: identifier.entity,
+        input,
+        insert: client.resolveMutationInsertion(identifier.entity, insert),
+        ...(invalidate && client.resolveMutationInvalidation(invalidate)),
+        key: identifier.key,
+        optimistic: optimistic as AnyRecord | undefined,
+        plan: view
+          ? getSelectionPlan(view, null)
+          : select
+            ? getSelectionPlan(select as View<any, any>, null)
+            : undefined,
+        ...(remove && { remove: client.resolveMutationRemoval(remove) }),
+      };
+      // Durable admission can await restoration and disk writes before preparation
+      // acquires its own pins. Keep the caller's targets alive throughout that gap.
+      const release = client.persistence ? client.retainMutationTargets(command) : undefined;
+      try {
+        const local = client.isClientMutation(identifier.key);
+        if (
+          !local &&
+          (persist ??
+            (client.persistence !== undefined && client.supportsDurableMutations(identifier.key)))
+        ) {
           try {
-            const execution = operation.execute();
-            const result = (
-              execution && typeof execution === 'object' && 'then' in execution
-                ? await execution
-                : execution
-            ) as MutationResult<I>;
-            client.assertPersistenceActive();
-            const saved = commit(() => operation.commit(result));
-            if (saved) {
-              await saved;
-            }
+            const result = (await client.withPersistenceLifecycle(() =>
+              client.persistMutation(command, persistence.resolve),
+            )) as MutationResult<I>;
             return { error: undefined, result };
           } catch (error) {
-            operation.rollback();
             return handleMutationError(identifier.key, error);
           }
-        };
-        const mutationPromise = client.trackPendingRequest(performMutation);
-
-        if (operation.entityId) {
-          client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
         }
 
-        return await mutationPromise;
-      };
-      return await (client.persistence && persist !== false && local
-        ? client.persistClientMutation(run)
-        : run((apply) => apply()));
-    } finally {
-      release?.();
-    }
-  }) as MutationFunction<I>;
+        if (!local || !client.persistence || persist === false) {
+          persistence.reject(new Error('fate: This mutation is not persisted locally.'));
+        }
+        if (client.persistence) {
+          await client.withPersistenceLifecycle(() => client.persistence!.ready);
+        }
+        const run = async (commit: (apply: () => void) => void | Promise<void>) => {
+          client.assertPersistenceActive();
+          // Preparation failures reject directly, as they did before persistence.
+          const operation = prepareMutation(client, command, config);
+          const performMutation = async () => {
+            try {
+              const execution = operation.execute();
+              const result = (
+                execution && typeof execution === 'object' && 'then' in execution
+                  ? await execution
+                  : execution
+              ) as MutationResult<I>;
+              client.assertPersistenceActive();
+              const saved = commit(() => operation.commit(result));
+              if (saved) {
+                await saved;
+              }
+              return { error: undefined, result };
+            } catch (error) {
+              operation.rollback();
+              return handleMutationError(identifier.key, error);
+            }
+          };
+          const mutationPromise = client.trackPendingRequest(performMutation);
+
+          if (operation.entityId) {
+            client.registerPendingOptimisticMutation(operation.entityId, mutationPromise);
+          }
+
+          return await mutationPromise;
+        };
+        return await (client.persistence && persist !== false && local
+          ? client.persistClientMutation(run, persistence)
+          : run((apply) => apply()));
+      } finally {
+        release?.();
+      }
+    })) as MutationFunction<I>;
 }
 
 const handleMutationError = (key: string, error: unknown): { error: Error; result: undefined } => {

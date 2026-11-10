@@ -1629,6 +1629,27 @@ Mutations are delivered in the order they were saved, one at a time per persiste
 
 The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
+#### Waiting for Local Persistence
+
+Sometimes we want to continue once a change is saved on the device, even if the user is offline. Each mutation promise has a `locallyPersisted` promise for this:
+
+```tsx
+const pending = fate.mutations.post.edit({
+  input: { id: post.id, title },
+  optimistic: { title },
+});
+
+void reportResult(pending);
+await pending.locallyPersisted;
+closeEditor();
+```
+
+Here, `reportResult` is the app's handler for the eventual mutation result, including returned errors and rejected promises. `locallyPersisted` resolves once storage has committed the mutation and the data needed to recover it after a reload. Awaiting `pending` still waits for server confirmation. A later server rejection doesn't change the completed local save.
+
+For [client mutations](/docs/guide/client-state.md#mutations), `locallyPersisted` waits for the client data to be saved. The same property is available when calling `fate.actions` directly, including actions bound with `.with()`.
+
+If validation or storage fails before the save, `locallyPersisted` rejects. It also rejects when the call isn't persisted, including `persist: false`, missing persistence, or a remote mutation without durable delivery. Handle that failure before continuing with work that depends on the save. Waiting for one mutation doesn't make it atomic with a later mutation.
+
 #### Skipping Persistence
 
 For a call that should not be saved or retried, pass `persist: false`:
@@ -1683,7 +1704,35 @@ const server = createFateServer({
 
 Your app supplies the database and receipt helpers. Lock each `(scope, id)` across server processes, and use `ctx.db` for mutation writes so they share the receipt's transaction. See the [complete SQLite example](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts).
 
-Keep receipts for as long as an offline client might retry. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
+Keep receipts until their expiry, with a margin for clock differences. See [Receipt Retention](#receipt-retention) before deleting them. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
+
+### Receipt Retention
+
+Let's say a user likes a post, but closes the app before receiving the server response. When they return, fate retries the mutation with the same ID. The server reads its saved receipt and returns the result without adding another like.
+
+By default, a queued mutation expires after **30 days**, including time spent offline. We can change this with `mutationMaxAge` on `createPersistence`. The server's `createMutationIdempotency` also defaults to 30 days through its `maxAge` option. To allow a longer lifetime, configure both sides.
+
+The mutation ID includes its creation time and expiry. Retries and page reloads keep the same ID, so changing the configuration only affects new mutations. The server rejects mutations from a client clock more than five minutes ahead. A clock that is behind gives the mutation less time to reach the server.
+
+#### Cleaning Up Receipts
+
+Save the receipt's optional `expiresAt` timestamp with its result. We can delete expired receipts once every server handling these mutations enforces expiry. Allow some extra time for differences between server clocks. For example, a daily job could delete receipts that expired more than a day ago.
+
+This is why mutations have a fixed deadline. If we deleted a receipt while its mutation could still be retried, the server would have no way to know that it had already applied the change. Rejecting expired mutations lets us clean up receipts without applying the same mutation again.
+
+Native HTTP delivery uses protocol version 3 for expiring mutations. Older native servers reject these requests before executing them. Custom durable transports must also enforce expiry and preserve the `MUTATION_EXPIRED` error (HTTP 410).
+
+#### Handling Expired Mutations
+
+When a mutation expires, the server returns `MUTATION_EXPIRED`, even if its receipt has already been deleted. fate rolls back the optimistic update and keeps the input in persistence with `status: 'failed'` and `failureReason: 'expired'`.
+
+For our like button, the server may have applied the like before the user closed the app. We should refresh the post before deciding whether to offer another attempt. fate doesn't assign a new ID or retry the expired mutation automatically. After handling the failure, call `session.discard(id)` to remove it from the queue.
+
+Receipt deduplication allows at most one committed database execution for each mutation ID within its lifetime. It doesn't guarantee delivery, and effects outside the receipt transaction still need their own idempotency support.
+
+#### Existing Receipts
+
+Older mutation IDs have no expiry. `createMutationIdempotency` accepts them by default, so their receipts need to stay saved. After retiring older clients, set `allowLegacyIdentities: false` to reject these mutations with the same expiry error. Once all server instances use that setting, their receipts can be deleted too.
 
 ### tRPC, GraphQL, and Custom Transports
 

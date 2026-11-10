@@ -7,6 +7,82 @@ import { createPersistence } from '../persistence.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 
+test.each(['saved', 'failed', 'skipped', 'unconfigured'] as const)(
+  'client mutation local persistence milestone: %s',
+  async (outcome) => {
+    const storage = memoryStorage();
+    const schema = clientSchema({
+      roots: { note: { id: 'main', type: 'Note' } },
+      types: {
+        Note: {
+          defaults: (id) => ({ id, title: 'Default' }),
+          view: dataView<{ id: string; title: string }>('Note')({ id: true, title: true }),
+        },
+      },
+    });
+    const open = () =>
+      createClient({
+        persistence:
+          outcome === 'unconfigured' ? undefined : createPersistence({ key: 'milestone', storage }),
+      }).registerClientSchema(schema, ({ mutation }) => ({
+        save: mutation('Note', {
+          resolve: ({ store }) => store.update('Note', 'main', { title: 'Saved' }),
+        }),
+      }));
+    const client = open();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    try {
+      await client.persistence?.ready;
+      const write = storage.writeBatch;
+      storage.writeBatch = async (entries) => {
+        entered.resolve();
+        await release.promise;
+        if (outcome === 'failed') {
+          throw new Error('Disk full');
+        }
+        await write(entries);
+      };
+      const submission = client.mutations.save({
+        persist: outcome === 'skipped' ? false : undefined,
+      });
+      const completion = submission.catch(() => {});
+      expectTypeOf(submission.locallyPersisted).toEqualTypeOf<Promise<void>>();
+      if (outcome === 'skipped' || outcome === 'unconfigured') {
+        await expect(submission.locallyPersisted).rejects.toThrow('not persisted');
+        expect((await submission).result?.title).toBe('Saved');
+      } else {
+        const persisted = vi.fn();
+        const milestone = submission.locallyPersisted.then(persisted, () => {});
+        await entered.promise;
+        expect(persisted).not.toHaveBeenCalled();
+        release.resolve();
+        if (outcome === 'failed') {
+          await expect(submission.locallyPersisted).rejects.toThrow('Disk full');
+          await expect(submission).rejects.toThrow('Disk full');
+        } else {
+          await submission.locallyPersisted;
+          expect((await submission).result?.title).toBe('Saved');
+        }
+        await milestone;
+        const reopened = open();
+        try {
+          await reopened.persistence!.ready;
+          expect(reopened.store.read('Note:main')?.title).toBe(
+            outcome === 'saved' ? 'Saved' : 'Default',
+          );
+        } finally {
+          reopened.persistence!.dispose();
+        }
+      }
+      await completion;
+    } finally {
+      release.resolve();
+      client.persistence?.dispose();
+    }
+  },
+);
+
 test('appends typed local records in the same durable transaction and preserves list order', async () => {
   const storage = memoryStorage();
   const note = dataView<{ id: string; text: string }>('Note')({ id: true, text: true });
