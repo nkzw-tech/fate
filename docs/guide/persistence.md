@@ -109,6 +109,8 @@ Mutations are delivered in the order they were saved, one at a time per persiste
 
 The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
+Adding client fields or changing memo definitions doesn't invalidate queued remote mutations. Their recovery data contains remote fields, while saved client fields use [client-state migrations](/guide/client-state#migrations). If the remote schema scope changes or a mutation is removed, fate preserves its input as a failed entry instead of delivering an incompatible command.
+
 ### Waiting for Local Persistence
 
 Sometimes we want to continue once a change is saved on the device, even if the user is offline. Each mutation promise has a `locallyPersisted` promise for this:

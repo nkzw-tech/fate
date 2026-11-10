@@ -1,5 +1,7 @@
 import { afterEach, expect, expectTypeOf, test, vi } from 'vite-plus/test';
+import { clientSchema } from '../client-schema.ts';
 import { createClient } from '../client.ts';
+import { dataView, memo } from '../data-view.ts';
 import { GraphQLRequestError } from '../graphql-error.ts';
 import { mutation } from '../mutation.ts';
 import type { MutationIdentity, PersistenceSession } from '../persistence-types.ts';
@@ -111,6 +113,129 @@ test.each(['mutation', 'action'] as const)(
     await queued(reopened.session, 0);
     expect(reopened.mutate.mock.calls[0][1]).toEqual(options.input);
     expect(reopened.client.store.read(noteId)?.title).toBe('Saved offline');
+  },
+);
+
+test.each(['current', 'legacy'] as const)(
+  '%s journal survives client field and memo changes while preserving offline recovery',
+  async (format) => {
+    const storage = memoryStorage();
+    let online = false;
+    const deliver = vi.fn(async (_name: string, input: any) => ({ ...input, __typename: 'Note' }));
+    const mutations = { edit: mutation<Note, { id: string; title: string }, Note>('Note') };
+    const roots = { note: clientRoot('Note') };
+    const makeClient = (updated: boolean) => {
+      const client = createClient<[typeof roots, typeof mutations]>({
+        mutations,
+        persistence: createPersistence({ key: 'schema-evolution', online: () => online, storage }),
+        roots,
+        transport: { fetchById: async () => [], mutateDurably: deliver },
+        types: [{ fields: { title: 'scalar' }, type: 'Note' }],
+      }).registerClientSchema(
+        clientSchema({
+          typeExtensions: {
+            Note: {
+              defaults: () => ({ annotation: '', ...(updated ? { newField: 'Default' } : {}) }),
+              view: dataView<Note & { annotation: string; newField?: string }>('Note')({
+                annotation: true,
+                ...(updated
+                  ? {
+                      label: memo({
+                        resolve: (_note: Note, { title }) => `[${title}]`,
+                        select: { title: true },
+                      }),
+                      newField: true as const,
+                    }
+                  : {}),
+              }),
+            },
+          },
+        }),
+      );
+      sessions.push(client.persistence!);
+      return client;
+    };
+    const first = makeClient(false);
+    await first.persistence!.ready;
+    first.write('Note', { id: '1', title: 'Server' }, new Set(['id', 'title']));
+    const legacyScope = first.dehydrate().scope;
+    const pending = first.mutations.edit({
+      input: { id: '1', title: 'Offline' },
+      optimistic: { title: 'Offline' },
+    });
+    const completion = pending.catch(() => {});
+    await pending.locallyPersisted;
+    first.persistence!.dispose();
+    await completion;
+    if (format === 'legacy') {
+      const entries = await storage.scan(`${JSON.stringify(['schema-evolution', 'journal'])}:`);
+      await storage.writeBatch(
+        entries.map(({ key, value }) => {
+          const saved = value as { entry: { base: { scope: string }; scope: string } };
+          saved.entry.scope = legacyScope;
+          saved.entry.base.scope = legacyScope;
+          return [key, saved];
+        }),
+      );
+    }
+    const reopened = makeClient(true);
+    await reopened.persistence!.ready;
+    expect(deliver).not.toHaveBeenCalled();
+    expect(reopened.store.read(noteId)?.title).toBe('Offline');
+    const Selected = view<Note & { label: string; newField: string }>()({
+      label: true,
+      newField: true,
+    });
+    expect(
+      (await reopened.readView(Selected, reopened.ref('Note', '1', Selected))).data,
+    ).toMatchObject({
+      label: '[Offline]',
+      newField: 'Default',
+    });
+    online = true;
+    reopened.persistence!.retry();
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
+    await queued(reopened.persistence!, 0);
+    expect(deliver.mock.calls[0][1]).toEqual({ id: '1', title: 'Offline' });
+    expect(reopened.store.read(noteId)?.title).toBe('Offline');
+  },
+);
+
+test.each(['scope', 'mutation'] as const)(
+  'incompatible remote %s preserves the failed input without delivering it',
+  async (change) => {
+    const first = setup();
+    const pending = first.client.mutations.edit({ input: { id: '1', title: 'Offline' } });
+    const completion = pending.catch(() => {});
+    await pending.locallyPersisted;
+    first.session.dispose();
+    await completion;
+    const deliver = vi.fn();
+    const reopened = createClient({
+      ...(change === 'scope' ? { hydrationScope: 'different-backend' } : {}),
+      mutations:
+        change === 'mutation'
+          ? {}
+          : { edit: mutation<Note, { id: string; title: string }, Note>('Note') },
+      persistence: createPersistence({
+        key: 'account:1',
+        online: () => true,
+        storage: first.storage,
+      }),
+      roots: { note: clientRoot('Note') },
+      transport: { fetchById: async () => [], mutateDurably: deliver },
+      types: [{ fields: { title: 'scalar' }, type: 'Note' }],
+    });
+    sessions.push(reopened.persistence!);
+    await reopened.persistence!.ready;
+    await vi.waitFor(() =>
+      expect(reopened.persistence!.getSnapshot().mutations[0]?.status).toBe('failed'),
+    );
+    expect(reopened.persistence!.getSnapshot().mutations[0]?.input).toEqual({
+      id: '1',
+      title: 'Offline',
+    });
+    expect(deliver).not.toHaveBeenCalled();
   },
 );
 

@@ -928,6 +928,7 @@ export class FateClient<
   private readonly operationLifetime: OperationLifetime;
   private readonly hydrationLimits: HydrationLimits;
   private hydrationScope: HydrationScope;
+  private readonly persistenceScope: string;
   private readonly types: Map<string, TypeConfig>;
   private readonly clientState = new ClientState(this);
   private remoteWriteDepth = 0;
@@ -958,6 +959,7 @@ export class FateClient<
       throw new Error(`fate: Hydration scope must be a non-empty string.`);
     }
     this.hydrationScope = hydrationScope as HydrationScope;
+    this.persistenceScope = hydrationScope;
     this.roots = { ...options.roots } as Roots;
     this.types = new Map(
       (options.types ?? []).map((entity) => [entity.type, { getId, ...entity }]),
@@ -1327,7 +1329,12 @@ export class FateClient<
 
   /** @internal */
   getPersistenceScope() {
-    return this.hydrationScope;
+    return this.persistenceScope;
+  }
+
+  /** @internal Remote recovery data never includes client-owned fields. */
+  isPersistenceScopeCompatible(scope: string) {
+    return scope === this.persistenceScope || scope.startsWith(`${this.persistenceScope}|client:`);
   }
 
   /** @internal */

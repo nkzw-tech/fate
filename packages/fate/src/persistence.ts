@@ -377,7 +377,7 @@ class Session implements PersistenceRuntime {
     }
     for (const entry of data.mutations) {
       if (isPendingMutation(entry)) {
-        if (entry.base && entry.base.scope === this.client.getPersistenceScope()) {
+        if (entry.base && this.client.isPersistenceScopeCompatible(entry.base.scope)) {
           this.cache.restoreBase(decodeClientHydrationState(entry.base.data));
         }
       }
@@ -427,7 +427,7 @@ class Session implements PersistenceRuntime {
               ? decodeHydrationValue(entry.result)
               : undefined;
           operation?.commit(result);
-          if (entry.cacheUpdates && entry.scope === this.client.getPersistenceScope()) {
+          if (entry.cacheUpdates && this.client.isPersistenceScopeCompatible(entry.scope)) {
             this.needsCacheRecovery = true;
           }
           this.waiters.get(entry.id)?.resolve(result);
@@ -447,7 +447,7 @@ class Session implements PersistenceRuntime {
         this.waiters.delete(entry.id);
       } else if (
         !this.operations.has(entry.id) &&
-        entry.scope === this.client.getPersistenceScope()
+        this.client.isPersistenceScopeCompatible(entry.scope)
       ) {
         if (entry.base) {
           this.cache.restoreBase(decodeClientHydrationState(entry.base.data));
@@ -673,9 +673,8 @@ class Session implements PersistenceRuntime {
   }
 
   private confirmedCacheEntries(data: Data): Array<readonly [id: string, updates: Encoded]> {
-    const scope = this.client.getPersistenceScope();
     return data.mutations.flatMap((entry) =>
-      entry.status === 'confirmed' && entry.scope === scope
+      entry.status === 'confirmed' && this.client.isPersistenceScopeCompatible(entry.scope)
         ? [[entry.id, entry.cacheUpdates] as const]
         : [],
     );
@@ -694,8 +693,12 @@ class Session implements PersistenceRuntime {
     ) {
       return;
     }
-    const scope = this.client.getPersistenceScope();
-    if (!data.mutations.some((entry) => isPendingMutation(entry) && entry.scope === scope)) {
+    if (
+      !data.mutations.some(
+        (entry) =>
+          isPendingMutation(entry) && this.client.isPersistenceScopeCompatible(entry.scope),
+      )
+    ) {
       this.baseCheckpointRevision = revision;
       for (const id of cacheUpdateIds) {
         this.checkpointedCacheUpdates.add(id);
@@ -703,7 +706,7 @@ class Session implements PersistenceRuntime {
       return;
     }
     for (const entry of data.mutations) {
-      if (isPendingMutation(entry) && entry.scope === scope) {
+      if (isPendingMutation(entry) && this.client.isPersistenceScopeCompatible(entry.scope)) {
         entry.base = await this.cache.mutationBase(this.command(entry), entry.base);
       }
     }
@@ -907,7 +910,7 @@ class Session implements PersistenceRuntime {
         command: current.command,
         id: current.id,
         result: encodedResult,
-        scope: current.scope,
+        scope: this.client.getPersistenceScope(),
         status: 'confirmed',
       }));
     });
@@ -986,7 +989,7 @@ class Session implements PersistenceRuntime {
           }
           const command = this.command(entry);
           if (
-            entry.scope !== this.client.getPersistenceScope() ||
+            !this.client.isPersistenceScopeCompatible(entry.scope) ||
             !this.client.hasMutation(command.key, command.entity)
           ) {
             await this.fail(
