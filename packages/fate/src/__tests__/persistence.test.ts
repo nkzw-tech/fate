@@ -1363,3 +1363,23 @@ test('keeps previously queued mutations when the adapter stops supporting them',
   expect(restored.mutate).not.toHaveBeenCalled();
   expect(restored.session.getSnapshot().mutations).toHaveLength(1);
 });
+
+test('cache-only observers restore saved requests without fetching on a miss', async () => {
+  const original = setup();
+  const request = { note: { id: '1', view: NoteView } };
+  await original.client.request(request);
+  await original.session.flush();
+  original.session.dispose();
+  const restored = setup({ storage: original.storage });
+  const observer = restored.client.observeRequest(request, { mode: 'cache-only' });
+  const unsubscribe = observer.subscribe(() => {});
+  await vi.waitFor(() => expect(observer.getSnapshot().data?.note.id).toBe('1'));
+  expect(restored.fetchById).not.toHaveBeenCalled();
+  unsubscribe();
+  const empty = setup();
+  const missing = empty.client.observeRequest(request, { mode: 'cache-only' });
+  const stop = missing.subscribe(() => {});
+  await vi.waitFor(() => expect(missing.getSnapshot().status).toBe('missing'));
+  expect(empty.fetchById).not.toHaveBeenCalled();
+  stop();
+});

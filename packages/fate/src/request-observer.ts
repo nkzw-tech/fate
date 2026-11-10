@@ -21,6 +21,7 @@ export type RequestObserver<T> = Readonly<{
 export const createRequestObserver = <T>({
   options,
   read,
+  restore,
   retain,
   start,
   subscribe,
@@ -28,6 +29,7 @@ export const createRequestObserver = <T>({
   options: RequestStateOptions;
   /** Returns the same result identity until its request data changes. */
   read: () => T | undefined;
+  restore?: () => Promise<void>;
   retain: () => { dispose: () => void };
   start: (refresh: boolean) => Promise<T>;
   subscribe: (listener: () => void) => () => void;
@@ -57,7 +59,7 @@ export const createRequestObserver = <T>({
           ? 'ready'
           : requestError !== undefined
             ? 'error'
-            : cacheOnly || (completed && !fetching)
+            : (cacheOnly && !fetching && (!restore || started)) || (completed && !fetching)
               ? 'missing'
               : 'pending',
     };
@@ -119,6 +121,22 @@ export const createRequestObserver = <T>({
       if (listeners.size === 1 && enabled) {
         retained = retain();
         unsubscribe = subscribe(notify);
+        if (!started && cacheOnly && restore) {
+          started = true;
+          fetching = true;
+          const restoreCache = async () => {
+            try {
+              await restore();
+            } catch (error) {
+              requestError = error;
+            } finally {
+              fetching = false;
+              notify();
+            }
+          };
+          void restoreCache();
+          notify();
+        }
         if (!started && !cacheOnly) {
           // Automatic work reports failures through the snapshot; explicit refetches reject.
           void execute(false).catch(() => {});

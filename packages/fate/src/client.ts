@@ -4137,6 +4137,14 @@ export class FateClient<
         const data = this.getRequestResultFromDescriptor(descriptor) as RequestResult<Roots, R>;
         return options.mode === 'cache-only' ? this.cacheOnlyRequestResult(descriptor, data) : data;
       },
+      restore: this.persistenceRuntime
+        ? async () => {
+            await this.withPersistenceLifecycle(async () => {
+              await this.persistenceRuntime!.ready;
+              await this.persistenceRuntime!.restoreRequest(descriptor);
+            });
+          }
+        : undefined,
       retain: () => this.retain(request),
       start: (refresh) =>
         this.requestWithDescriptor(
