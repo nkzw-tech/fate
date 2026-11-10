@@ -17,13 +17,10 @@ import { parseEntityId, toEntityId } from './ref.ts';
 import type { SelectionPlan } from './selection.ts';
 import type { AnyRecord, EntityId, RelationDescriptor, TypeConfig } from './types.ts';
 
-export type ClientStateWrite = {
-  data: AnyRecord | null;
-  id: EntityId;
-  plan?: SelectionPlan;
-  prefix?: string;
-  remote?: boolean;
-};
+export type ClientStateWrite = { id: EntityId } & (
+  | { append: { field: string; members: ReadonlySet<EntityId> } }
+  | { data: AnyRecord | null; plan?: SelectionPlan; prefix?: string; remote?: boolean }
+);
 
 export const recordPaths = (
   record: AnyRecord,
@@ -711,23 +708,25 @@ export default class ClientState {
       const members = Array.isArray(previous)
         ? previous.filter((ref) => isNodeRef(ref) && patches.get(getNodeRefId(ref))?.data !== null)
         : [];
+      const size = members.length;
       const seen = new Set(members.map(getNodeRefId));
-      const originalSize = members.length;
+      const added = new Set<EntityId>();
       for (const memberId of ids) {
         const member = toEntityId(descriptor.listOf, memberId);
-        if (!seen.has(member)) {
+        if (!seen.has(member) && !added.has(member)) {
           if (!has(descriptor.listOf, memberId)) {
             throw new Error(
               `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
             );
           }
-          seen.add(member);
           members.push(createNodeRef(member));
         }
+        added.add(member);
       }
-      if (members.length !== originalSize) {
-        stage(type, id, { [field]: members });
+      if (members.length !== size) {
+        patches.set(owner, { data: { ...staged, [field]: members } });
       }
+      writes.push({ append: { field, members: added }, id: owner });
     };
     const execute = () =>
       definition.resolve({

@@ -2139,8 +2139,45 @@ export class FateClient<
             { normalization: NormalizationContext; paths: Map<string, Set<string>> }
           >()
         : undefined;
-    for (const { data, id: entityId, plan, prefix, remote } of writes) {
+    for (const operation of writes) {
+      const { id: entityId } = operation;
       const { id, type } = parseEntityId(entityId);
+      if ('append' in operation) {
+        const { field, members } = operation.append;
+        const record = this.store.confirmedRecord(entityId);
+        if (!record) {
+          throw new Error(`fate: Cannot update missing client record '${entityId}'.`);
+        }
+        const previous = record[field];
+        const next = Array.isArray(previous) ? previous.filter(isNodeRef) : [];
+        const seen = new Set(next.map(getNodeRefId));
+        const size = next.length;
+        for (const member of members) {
+          if (!seen.has(member)) {
+            if (!this.store.confirmedRecord(member)) {
+              throw new Error(
+                `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
+              );
+            }
+            next.push(createNodeRef(member));
+          }
+        }
+        if (next.length !== size) {
+          this.writeEntity(
+            type,
+            { [field]: next, id: record.id ?? id },
+            new Set([field]),
+            undefined,
+            null,
+            undefined,
+            undefined,
+            undefined,
+            id,
+          );
+        }
+        continue;
+      }
+      const { data, plan, prefix, remote } = operation;
       if (data === null) {
         this.deleteRecord(type, id);
         continue;

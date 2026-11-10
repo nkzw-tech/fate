@@ -144,6 +144,32 @@ const makeClient = () =>
         store.update('UI', 'main', { count: (store.get('UI', 'main')?.count ?? 0) + input.amount }),
     }),
   }));
+
+test('overlapping client mutations append to the confirmed list in commit order', async () => {
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    append: mutation('Todo', {
+      input: z.object({ id: z.enum(['first', 'second']) }),
+      resolve: async ({ input: { id }, store }) => {
+        store.create('Todo', { id, title: id });
+        store.append('UI', 'main', 'todos', id, id);
+        expect(store.get('UI', 'main')?.todos?.map((todo) => todo.id)).toEqual([id]);
+        await (id === 'first' ? first.promise : second.promise);
+      },
+    }),
+  }));
+  const firstAppend = client.mutations.append({ input: { id: 'first' } });
+  const secondAppend = client.mutations.append({ input: { id: 'second' } });
+  second.resolve();
+  await secondAppend;
+  first.resolve();
+  await firstAppend;
+
+  const { ui } = await client.request({ ui: { view: UIView } });
+  const { data } = await client.readView(UIView, ui);
+  expect(data.todos.map((todo) => todo.id)).toEqual(['second', 'first']);
+});
 type UI = EntityOf<ReturnType<typeof makeClient>, 'UI'>;
 const UIView = view<UI>()({
   count: true,
