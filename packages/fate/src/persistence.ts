@@ -220,7 +220,6 @@ class Session implements PersistenceRuntime {
       client.validatePersistence();
     } catch (error) {
       this.mutationError = error instanceof Error ? error : new Error(String(error));
-      this.snapshot = { ...this.snapshot, error: this.mutationError };
     }
     this.ready = this.restore().catch((error: unknown) => {
       if (!this.disposed) {
@@ -256,8 +255,15 @@ class Session implements PersistenceRuntime {
 
   private publish(data?: Data) {
     if (data) {
+      const deliveryError =
+        this.mutationError && data.mutations.some(isPendingMutation)
+          ? this.mutationError
+          : undefined;
       this.snapshot = {
         ...this.snapshot,
+        error:
+          deliveryError ??
+          (this.snapshot.error === this.mutationError ? undefined : this.snapshot.error),
         mutations: data.mutations
           .filter((entry) => entry.status !== 'confirmed')
           .map((entry) => ({
@@ -291,7 +297,7 @@ class Session implements PersistenceRuntime {
   }
 
   private clearError() {
-    if (!this.mutationError && this.snapshot.error) {
+    if (this.snapshot.error && this.snapshot.error !== this.mutationError) {
       this.snapshot = { ...this.snapshot, error: undefined };
       this.publish();
     }
@@ -353,7 +359,7 @@ class Session implements PersistenceRuntime {
         }
       }
     }
-    this.snapshot = { error: this.mutationError, mutations: [], status: 'ready' };
+    this.snapshot = { mutations: [], status: 'ready' };
     await this.reconcile(data);
     if (this.needsCacheRecovery) {
       // Reapply the small confirmed-write journal before serving saved reads.

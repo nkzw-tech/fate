@@ -27,7 +27,7 @@ const setup = (send: () => Promise<Note>) => {
   return { client, mutate };
 };
 
-test.each([undefined, false, true])(
+test.each([undefined, false])(
   'without persistence, persist=%s preserves synchronous optimism and ordinary delivery',
   async (persist) => {
     const { promise, resolve } = Promise.withResolvers<Note>();
@@ -41,6 +41,15 @@ test.each([undefined, false, true])(
     expect(client.store.read(noteId)?.title).toBe('Confirmed');
   },
 );
+
+test('requiring durability without persistence fails before applying optimism', async () => {
+  const { client, mutate } = setup(async () => ({ ...input, __typename: 'Note' }));
+  await expect(
+    client.mutations.edit({ input, optimistic: { title: 'Optimistic' }, persist: true }),
+  ).rejects.toThrow('Persistence is not configured');
+  expect(mutate).not.toHaveBeenCalled();
+  expect(client.store.read(noteId)?.title).toBe('Original');
+});
 
 test.each([
   [400, false],

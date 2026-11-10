@@ -1990,11 +1990,17 @@ export class FateClient<
     }
   }
 
+  /** @internal Whether server mutations can safely be journaled and retried. */
+  supportsDurableMutations(): boolean {
+    return typeof this.transport.mutateDurably === 'function';
+  }
+
   /** @internal */
   persistMutation(command: MutationCommand): Promise<unknown> {
     if (!this.persistenceRuntime) {
       throw new Error('fate: Persistence is not configured.');
     }
+    this.requireDurableMutationTransport();
     return this.persistenceRuntime.mutate(command);
   }
 
@@ -2031,7 +2037,7 @@ export class FateClient<
   }
 
   private requireDurableMutationTransport(): void {
-    if (!this.transport.mutateDurably) {
+    if (!this.supportsDurableMutations()) {
       throw new FateRequestError(
         'BAD_REQUEST',
         'fate: Persisted mutations require transport.mutateDurably connected to a server idempotency handler. Configure that adapter, or use persist: false for immediate calls. Cache persistence remains available.',

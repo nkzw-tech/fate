@@ -643,7 +643,11 @@ export function wrapMutation<
     // acquires its own pins. Keep the caller's targets alive throughout that gap.
     const release = client.persistence ? client.retainMutationTargets(command) : undefined;
     try {
-      if (client.persistence && persist !== false && !client.isClientMutation(identifier.key)) {
+      const local = client.isClientMutation(identifier.key);
+      if (
+        !local &&
+        (persist ?? (client.persistence !== undefined && client.supportsDurableMutations()))
+      ) {
         try {
           const result = (await client.withPersistenceLifecycle(() =>
             client.persistMutation(command),
@@ -688,9 +692,7 @@ export function wrapMutation<
 
         return await mutationPromise;
       };
-      return await (client.persistence &&
-      persist !== false &&
-      client.isClientMutation(identifier.key)
+      return await (client.persistence && persist !== false && local
         ? client.persistClientMutation(run)
         : run((apply) => apply()));
     } finally {

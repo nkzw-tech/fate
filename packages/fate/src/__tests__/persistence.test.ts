@@ -358,6 +358,26 @@ test('persist false uses the existing action API without journaling or identity'
   expect(session.getSnapshot().mutations).toHaveLength(0);
 });
 
+test('defaults to immediate delivery without a durable adapter and still restores saved reads', async () => {
+  const first = setup({ durable: false, online: () => true });
+  const request = { note: { id: '1', view: NoteView } };
+  await first.session.ready;
+  expect(first.session.getSnapshot().error).toBeUndefined();
+
+  const result = await first.client.mutations.edit({ input: { id: '1', title: 'Immediate' } });
+  expect(result.result?.title).toBe('Immediate');
+  expect(first.mutate).toHaveBeenCalledOnce();
+  expect(first.mutate.mock.calls[0][3]).toBeUndefined();
+  expect(first.session.getSnapshot().mutations).toHaveLength(0);
+
+  await first.client.request(request, { mode: 'network-only' });
+  await first.session.flush();
+  const reopened = setup({ durable: false, storage: first.storage });
+  const { note } = await reopened.client.request(request);
+  expect((await reopened.client.readView(NoteView, note)).data.title).toBe('Server');
+  expect(reopened.fetchById).not.toHaveBeenCalled();
+});
+
 test('explicit GraphQL client errors fail durable delivery once and roll back optimism', async () => {
   const error = new GraphQLRequestError(
     [{ extensions: { http: { status: 409 } }, message: 'ongoing-invasion' }],
@@ -442,7 +462,10 @@ test('a local commit failure is terminal and is not accepted by a receipt retry'
 
 test('unsupported transport fails before executing and account keys isolate the journal', async () => {
   const first = setup({ durable: false, online: () => true });
-  const response = await first.client.mutations.edit({ input: { id: '1', title: 'A' } });
+  const response = await first.client.mutations.edit({
+    input: { id: '1', title: 'A' },
+    persist: true,
+  });
   expect(response.error?.message).toMatch(/idempotency/i);
   expect(first.mutate).not.toHaveBeenCalled();
   expect(first.session.getSnapshot().mutations).toEqual([]);
@@ -710,6 +733,7 @@ test('missing durable adapter preserves restored commands and still restores the
   expect(next.fetchById).not.toHaveBeenCalled();
   expect(next.mutate).not.toHaveBeenCalled();
   expect(next.session.getSnapshot().mutations[0].status).toBe('queued');
+  expect(next.session.getSnapshot().error?.message).toMatch(/idempotency/i);
   expect(await first.storage.read('account:1')).toEqual(stored);
   next.session.dispose();
   const repaired = setup({ online: () => true, storage: first.storage });
