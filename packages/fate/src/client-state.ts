@@ -8,7 +8,7 @@ import type {
   ClientTypeDefinition,
 } from './client-schema.ts';
 import type { FateClient } from './client.ts';
-import type { MemoField } from './data-view.ts';
+import type { MemoField, MemoSelection } from './data-view.ts';
 import { getFieldKey } from './field-key.ts';
 import type { MutationOptions } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
@@ -58,21 +58,18 @@ const isComputed = (field: unknown): field is MemoField<any, any, any, any> =>
   isRecord(field) && field.kind === 'computed';
 
 const dependencyPlan = (
-  definition: MemoField<any, any, any, any>,
+  dependency: MemoSelection,
   args?: AnyRecord,
   resolveArgs = true,
 ): SelectionPlan => {
-  const plan: SelectionPlan = { args: new Map(), live: new Map(), paths: new Set() };
-  for (const dependency of Object.values(definition.select ?? {}) as Array<any>) {
-    const path = dependency.kind === 'field' ? dependency.path : `${dependency.relation}.id`;
-    plan.paths.add(path);
-    if (resolveArgs && dependency.args) {
-      const value = cloneArgs(
-        typeof dependency.args === 'function' ? dependency.args(args ?? {}) : dependency.args,
-        path,
-      );
-      plan.args.set(path, { hash: hashArgs(value), value });
-    }
+  const path = dependency.kind === 'field' ? dependency.path : `${dependency.relation}.id`;
+  const plan: SelectionPlan = { args: new Map(), live: new Map(), paths: new Set([path]) };
+  if (resolveArgs && dependency.kind === 'field' && dependency.args) {
+    const value = cloneArgs(
+      typeof dependency.args === 'function' ? dependency.args(args ?? {}) : dependency.args,
+      path,
+    );
+    plan.args.set(path, { hash: hashArgs(value), value });
   }
   return plan;
 };
@@ -291,7 +288,7 @@ export default class ClientState {
           throw new Error(`fate: Cyclic client computation at '${key}'.`);
         }
         const next = new Set(visiting).add(key);
-        const deps = Object.values(definition.select ?? {}).map((dependency: any) => {
+        for (const dependency of Object.values(definition.select ?? {}) as Array<MemoSelection>) {
           if (dependency.kind === 'field') {
             let owner = current;
             const segments = dependency.path.split('.');
@@ -311,27 +308,24 @@ export default class ClientState {
               }
               break;
             }
-            return dependency.path as string;
+          } else if (dependency.where) {
+            throw new Error(`fate: Unsupported client dependency on '${key}'.`);
           }
-          if (dependency.kind === 'count' && !dependency.where) {
-            return `${dependency.relation}.id`;
+          const dependencies = dependencyPlan(
+            dependency,
+            plan?.args.get(prefix ? `${prefix}.${segment}` : segment)?.value,
+            Boolean(plan),
+          );
+          for (const dependency of this.expand(
+            current,
+            dependencies.paths,
+            remote,
+            plan ? dependencies : undefined,
+            '',
+            next,
+          )) {
+            result.add(dependencyPath(dependency, plan, prefix, dependencies, condition));
           }
-          throw new Error(`fate: Unsupported client dependency on '${key}'.`);
-        });
-        const dependencies = dependencyPlan(
-          definition,
-          plan?.args.get(prefix ? `${prefix}.${segment}` : segment)?.value,
-          Boolean(plan),
-        );
-        for (const dependency of this.expand(
-          current,
-          deps,
-          remote,
-          plan ? dependencies : undefined,
-          '',
-          next,
-        )) {
-          result.add(dependencyPath(dependency, plan, prefix, dependencies, condition));
         }
         continue;
       }
@@ -469,7 +463,7 @@ export default class ClientState {
     stack = new Set(stack).add(cacheKey);
     const values: Array<unknown> = [];
     const args = plan.args.get(path)?.value;
-    const dependencies = dependencyPlan(definition, args);
+    let dependencies: SelectionPlan;
     const read = (owner: EntityId, segments: Array<string>, index = 0): unknown => {
       const name = segments[index];
       const value = this.readField(
@@ -498,6 +492,7 @@ export default class ClientState {
     for (const [name, dependency] of Object.entries(definition.select ?? {}) as Array<
       [string, any]
     >) {
+      dependencies = dependencyPlan(dependency, args);
       const value = read(
         id,
         (dependency.kind === 'field' ? dependency.path : dependency.relation).split('.'),

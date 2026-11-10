@@ -1266,6 +1266,23 @@ test.each(['query', 'refetch', 'persisted'] as const)(
                   resolve: (_post: Post, { title }) => title,
                   select: { title: true },
                 }),
+                translatedLabels: memo({
+                  resolve: (_post: Post & { label: string }, { english, japanese }) =>
+                    `${english}/${japanese}`,
+                  select: {
+                    english: field('label', { args: { locale: 'en' } }),
+                    japanese: field('label', { args: { locale: 'ja' } }),
+                  },
+                }),
+                translations: memo({
+                  resolve: (_post: Post, { english, japanese, original }) =>
+                    [english, japanese, original].join('/'),
+                  select: {
+                    english: field('title', { args: { locale: 'en' } }),
+                    japanese: field('title', { args: { locale: 'ja' } }),
+                    original: field('title'),
+                  },
+                }),
               }),
             },
           },
@@ -1280,6 +1297,8 @@ test.each(['query', 'refetch', 'persisted'] as const)(
       original: true,
       spanish: alias('label', { args: { locale: 'es' } }),
       title: { args: { locale: 'fr' } },
+      translatedLabels: true,
+      translations: true,
     });
     try {
       client.write('Post', { id: 'p' }, new Set(['id']));
@@ -1295,6 +1314,8 @@ test.each(['query', 'refetch', 'persisted'] as const)(
         original: 'default',
         spanish: '[es]',
         title: 'fr',
+        translatedLabels: '[en]/[ja]',
+        translations: 'en/ja/default',
       };
       expect((await client.readView(PostView, ref)).data).toMatchObject(expected);
       if (kind === 'persisted') {
@@ -1309,6 +1330,7 @@ test.each(['query', 'refetch', 'persisted'] as const)(
       expect((await client.readView(PostView, ref)).data).toMatchObject({
         ...expected,
         original: 'updated default',
+        translations: 'en/ja/updated default',
       });
       const titlePlan = getSelectionPlan(view<Post>()({ title: { args: { locale: 'ja' } } }), null);
       client.write(
@@ -1322,6 +1344,8 @@ test.each(['query', 'refetch', 'persisted'] as const)(
         decorated: '[updated Japanese]!',
         japanese: '[updated Japanese]',
         original: 'updated default',
+        translatedLabels: '[en]/[updated Japanese]',
+        translations: 'en/updated Japanese/updated default',
       });
       expect(fetch).toHaveBeenCalledOnce();
     } finally {
