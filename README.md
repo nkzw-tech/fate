@@ -1606,7 +1606,7 @@ Pending mutations are never evicted to make room for cached data. If a new mutat
 
 ### Actions & Mutations
 
-With persistence configured, fate saves mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/docs/guide/actions.md):
+With persistence and a durable mutation transport configured, fate saves server mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/docs/guide/actions.md):
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
@@ -1712,7 +1712,7 @@ return idempotency.execute({
 
 Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-Without a durable adapter, saved reads and `persist: false` calls still work, but new durable mutations fail before being queued.
+Without a durable adapter, server mutations send immediately by default. Use `persist: true` to require durable delivery. The call fails before sending if persistence or the adapter is missing. Existing queued mutations stay saved and report a delivery error until the adapter is available again. Remote read caching and client state persistence work independently of the adapter.
 
 For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.
 
