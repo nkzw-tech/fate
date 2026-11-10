@@ -274,6 +274,52 @@ test('computed dependencies are masked, subscribed, memoized and invalidated', a
   expect(summary.mock.calls.length).toBe(before + 2);
 });
 
+test('equivalent computed arguments share results across independent views', async () => {
+  const resolve = vi.fn((_item: { value: number }, { value }, _context, args) => ({
+    value: value * (args?.factor ?? 1),
+  }));
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      types: {
+        Item: {
+          defaults: () => ({ value: 2 }),
+          view: dataView<{ value: number }>('Item')({
+            derived: computed({ resolve, select: { value: true } }),
+            value: true,
+          }),
+        },
+      },
+    }),
+    ({ mutation }) => ({
+      change: mutation('Item', {
+        resolve: ({ store }) => store.update('Item', 'a', { value: 3 }),
+      }),
+    }),
+  );
+  client.write('Item', { id: 'a' }, new Set(['id']));
+  type Item = EntityOf<typeof client, 'Item'>;
+  const First = view<Item>()({ derived: { args: { factor: 2, options: { enabled: true } } } });
+  const Second = view<Item>()({
+    derived: { args: { factor: 2, options: { enabled: true } } },
+    id: true,
+  });
+  const Other = view<Item>()({ derived: { args: { factor: 3 } } });
+  const read = async (selection: typeof First | typeof Second | typeof Other) =>
+    (await client.readView(selection, client.ref('Item', 'a', selection))).data.derived;
+  const first = await read(First);
+  expect(first).toEqual({ value: 4 });
+  expect(await read(Second)).toBe(first);
+  expect(resolve).toHaveBeenCalledTimes(1);
+  expect(await read(Other)).toEqual({ value: 6 });
+  expect(await read(First)).toBe(first);
+  expect(resolve).toHaveBeenCalledTimes(2);
+  await client.mutations.change();
+  const changed = await read(Second);
+  expect(changed).toEqual({ value: 6 });
+  expect(await read(First)).toBe(changed);
+  expect(resolve).toHaveBeenCalledTimes(3);
+});
+
 test('a graph mutation publishes only its final state and failed resolvers publish nothing', async () => {
   const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
     'ui.change': mutation('UI', {

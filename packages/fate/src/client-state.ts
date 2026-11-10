@@ -422,7 +422,6 @@ export default class ClientState {
       }
     }
     const args = plan.args.get(path)?.value;
-    values.push(args);
     const cached = this.computedCache.get(id);
     const previous =
       cached && !('key' in cached) ? cached.get(key) : cached?.key === key ? cached : undefined;
