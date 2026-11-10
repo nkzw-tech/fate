@@ -1,10 +1,12 @@
 # Client State
 
-fate can manage shared application state, such as bookmarks, drafts, and selected items. You can add client fields to server data or build an app entirely with client state. Components read it through [Views](/guide/views) and update it through [Actions](/guide/actions), using the same APIs as server data.
+**_fate_** can manage client state alongside data from your server. For example, you might want to keep a bookmark on a post, save a draft, or share a selection between components. You can also build an app entirely with client state.
+
+Client state uses the same [Views](/guide/views), [Requests](/guide/requests), and [Actions](/guide/actions) as server data. Components declare which fields they need, and fate updates them when those fields change. A view can select client and server fields together, so components don't need to know where each field comes from.
 
 ## Client Setup
 
-Use `clientSchema` to define your client types and their defaults. For example, a counter needs an ID and a value:
+Let's start with a counter that we want to share between two components. We define its fields with `dataView`, then use `clientSchema` to give it an initial value and make it available through a root:
 
 ```ts
 import { clientSchema, createClient, dataView, type EntityOf } from 'react-fate';
@@ -41,13 +43,11 @@ declare module '@nkzw/fate' {
 }
 ```
 
-`types` declares the data fate manages on the client. `roots` makes a specific object available to `useRequest`. Here, `counter` refers to the `Counter` with ID `main`. The `defaults` function supplies missing stored values for each object.
+The `counter` root refers to a `Counter` with ID `main`. Its `defaults` function gives it an initial value of `0`. The `counter.increment` mutation reads the current value and increases it by one.
 
-Call `registerClientSchema` before making requests or writing data. It registers the schema and mutations on the client and returns the same instance with the updated types.
+`registerClientSchema` adds these definitions to the client and returns the same instance with the updated types. Call it before making requests or writing data. `ClientRegistration` makes those types available to the hooks, and `EntityOf` gives us the `Counter` type for our views. In a monorepo, keep each app's registration in its own TypeScript project.
 
-Register your client type once with `ClientRegistration` so hooks know which requests and mutations are available. Export entity types with `EntityOf` for use in your views. In a monorepo, keep each app's registration in its own TypeScript project.
-
-A client-only app needs no transport, Vite plugin, or code generation. Pass the client to the `FateClient` provider:
+Now we can pass the client to the `FateClient` provider and render two counter panels:
 
 ```tsx
 import { Suspense } from 'react';
@@ -69,11 +69,11 @@ export function App() {
 }
 ```
 
-The definition helpers are shared with `@nkzw/fate/server` and are also available from `@nkzw/fate` and `vue-fate`. Vue apps use the same definitions with their [Vue provider and hooks](/guide/vue).
+This app runs entirely in the browser. It doesn't need a transport, fate's Vite plugin, or code generation. The definition helpers are shared with `@nkzw/fate/server` and are also available from `@nkzw/fate` and `vue-fate`. You can use the same definitions in a Vue app with the [Vue provider and hooks](/guide/vue).
 
 ## Reading and Updating State
 
-Define a view and read it with `useView`, just as you would for server data:
+Now that we have defined the counter, let's build `CounterPanel`. We select the counter's `value`, request it with `useRequest`, and read it with `useView`:
 
 ```tsx
 import { useFateClient, useRequest, useView, view } from 'react-fate';
@@ -94,15 +94,17 @@ export function CounterPanel() {
 }
 ```
 
-Both panels read the same counter. Clicking either button updates both components. Components that select other fields do not re-render.
+Both panels refer to the same counter. Clicking either button increments its value and re-renders both components. As with server data, a component only re-renders when a field selected by its view changes.
 
-Mutations with no input fields can be called without arguments. You can still pass options, such as `fate.mutations.counter.increment({ view: CounterView })`. Mutations that declare input fields require an `input` object, even when all of those fields are optional.
+Our mutation doesn't take any input, so we can call `fate.mutations.counter.increment()` without arguments. We can still pass options, such as `{ view: CounterView }`. Mutations that declare input fields require an `input` object, even when all of those fields are optional.
 
-Synchronous client mutations update the data immediately, before their returned promise settles. You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`; no `input` property is needed. See [Actions](/guide/actions).
+Without persistence, synchronous client mutations update the data immediately, before their returned promise settles. With [persistence](#persisting-client-state), fate saves the changes before making the confirmed state available to views.
+
+You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`. See [Actions](/guide/actions).
 
 ## Client Queries
 
-Use `clientQuery` to define a root that looks up a record from arguments. Add the query to `roots` alongside any fixed roots.
+The counter above always refers to the same object. Let's say we are building a task list and want to look up a task by ID instead. We can define a root with `clientQuery`:
 
 ```ts
 import { clientQuery } from 'react-fate';
@@ -114,20 +116,20 @@ const task = clientQuery('Task', {
 });
 ```
 
-Request the root and read its view as usual.
+Add `task` to the schema's `roots`, alongside any fixed roots. Now a component can request an individual task and read its view:
 
 ```tsx
 const { task } = useRequest({ task: { args: { id: taskId }, view: TaskView } });
 const data = useView(TaskView, task);
 ```
 
-The resolver returns the ID of a record of the declared type or `null`. A missing record also resolves to `null`. The request updates when a matching record is created or deleted.
+The resolver returns a task ID or `null`. If the task doesn't exist, the request also returns `null`. Creating or deleting a matching task updates the request automatically.
 
-For lookups by fields such as a slug, use `read(view, type, id)` in the resolver to read a view of a client-owned record. fate tracks those dependencies and reruns the lookup when they change. Resolvers run synchronously and read from the store. The requested view can include server relationships, which fate loads when needed.
+For a lookup by another field, such as a slug, the resolver can use `read(view, type, id)` to read a view of a client object. fate tracks the selected fields and reruns the lookup when they change. Query resolvers are synchronous. The view requested by the component can also include relationships to server objects, which fate loads when needed.
 
 ## Extending Server Data
 
-Use `typeExtensions` to add fields to an existing server type. For example, you can keep a local bookmark on each post:
+Client state can also extend data from your server. Let's say we want to bookmark posts in our blog without adding a field to the database. We can add `bookmarked` to the existing `Post` type with `typeExtensions`:
 
 ```ts
 import { clientSchema, dataView, type EntityOf } from 'react-fate';
@@ -157,15 +159,15 @@ const fate = createFateClient(options).registerClientSchema(schema, ({ mutation 
 export type Post = EntityOf<typeof fate, 'Post'>;
 ```
 
-`Post` now includes the server fields and `bookmarked`. Components can select both in the same view, and all views of the same post share its bookmark. Register the extended client with `ClientRegistration` as in [Client Setup](#client-setup).
+The `Post` type now includes both the server fields and `bookmarked`. We can select `title` and `bookmarked` in the same view, and call `fate.mutations.post.bookmark({ input: { id: post.id } })` to toggle the bookmark. All components reading that post's bookmark update together. Register the extended client with `ClientRegistration` as in [Client Setup](#client-setup).
 
-fate initializes client fields when a post first enters the cache. Refetching or receiving a live update preserves its bookmark. Client fields are not requested from the server, and server responses cannot overwrite them.
+When a post first enters the cache, fate supplies the missing client fields from `defaults`. Refetching the post or receiving a live update preserves its bookmark. fate only requests server fields from the backend.
 
 Choose field names that do not already exist on the server. The `input` parser can be any object with a `parse(unknown)` method, such as a Zod schema.
 
 ## Computed Fields
 
-Use `computed` to derive a value from other fields. For example, add `doubled` to the counter definition:
+Let's extend our counter with a field that shows twice its value. We can define this with `computed` and select the fields it depends on:
 
 ```ts
 import { computed, dataView } from 'react-fate';
@@ -181,9 +183,13 @@ const counter = dataView<CounterData>('Counter')({
 });
 ```
 
-A view can select `doubled` without selecting `value`. fate tracks the dependency, so incrementing the counter updates components that read `doubled` too. You only provide initial values for stored fields; computed fields are calculated when read.
+A component can now select `doubled: true` in its view. fate reads `value` for the computation, calculates `doubled`, and makes the result available to the component. Incrementing the counter updates components that select `doubled` too, even if they don't select `value` themselves.
 
-Set a dependency to `true` to read a field by the same name. Use `field('path')` to give a dependency a different name or read through a relationship, such as `tasks.done`. Dependencies can also refer to other computed fields. The resolver receives dependency values in its second argument. Annotate the first argument with your data type and let TypeScript infer the dependency types from the selection. A path through a list, such as `field('tasks.done')`, gives you an array of the selected values when the list is available. fate reuses the result until a dependency or field argument changes.
+Computed fields run when they are read. fate reuses the result until a dependency or field argument changes, so we don't need to keep the derived value in sync ourselves or provide a default for it. Computed fields can also depend on other computed fields.
+
+Just like a view, `select` uses `true` to select a field by name. Use `field('path')` to give a dependency a different name or read through a relationship. For example, `field('tasks.done')` returns an array of completion values when the task list is available.
+
+The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths and arrays.
 
 Dependencies read fields with their default arguments. If a view selects `title` with `{ locale: 'ja' }` alongside a computation that depends on `title`, fate loads both values. The computation uses the default title.
 
@@ -191,26 +197,26 @@ Client computations must be synchronous. Circular dependencies are rejected when
 
 ## Relationships
 
-Use another data view for a relationship and `list(childView)` for an array of related objects. Register each client type in `types`. Relationships can also point to existing server objects by ID; fate fetches any missing server fields selected by a view.
+Client objects can have relationships just like server objects. Use another data view for a single object and `list(childView)` for a list of related objects, and register each client type in `types`. A relationship can also point to a server object by ID. fate fetches any missing server fields selected by a view.
 
-Inside a mutation, use `store.create(type, { id, ...fields })` to create a client object with its defaults, `store.update(type, id, patch)` to change stored client fields, and `store.delete(type, id)` to remove a client object. Update the parent's relationship when adding or removing an item. Use remote mutations to change server fields.
-
-For a list relationship, use `store.append(type, id, field, ...memberIds)` to add records without reading the list. The members must already exist or have been created earlier in the mutation. IDs already in the list keep their position. The new records and list membership commit together. Use `store.has(type, id)` to check whether a record exists without reading its fields.
+Inside a mutation, `store.create` creates a client object with its defaults, `store.update` changes its stored client fields, and `store.delete` removes it. For example, we can create a task and add it to a board in the same mutation:
 
 ```ts
 store.create('Task', { id: taskId, title: 'Pack for the trip' });
 store.append('Board', boardId, 'tasks', taskId);
 ```
 
-`store.get(type, id)` returns a copy of the object's stored fields, including changes made earlier in the current mutation. It can return partial data or `undefined` if the object is missing. It does not fetch missing fields or calculate computed values; use views to read computed fields.
+`store.append` adds the task without requiring us to read and copy the board's task list. The task and its list membership commit together. Appends preserve additions from other mutations, and an ID already in the list keeps its position. The objects being appended must already exist or have been created earlier in the mutation.
+
+Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate computed values. Use views to read computed fields and remote mutations to change server fields.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
 
-The resolver's return value is the action result. Changes to the graph come from `store.create`, `store.update`, `store.delete`, and staged `remote` responses. Returning an earlier snapshot does not write it back over newer edits.
+The resolver's return value becomes the action result. fate applies the changes made through the store and `mutateRemote`. Returning a copy of an object from earlier in the mutation won't overwrite later edits to that object.
 
 ## Combining Client and Server Updates
 
-A client mutation can call an existing server mutation with `mutateRemote`. To like a post and bookmark it in one action, add this mutation to the post example:
+Now let's say we want to like a post on the server and bookmark it on the client with a single action. We can call the existing `post.like` server mutation through `mutateRemote`:
 
 ```ts
 'post.likeAndBookmark': mutation('Post', {
@@ -223,7 +229,7 @@ A client mutation can call an existing server mutation with `mutateRemote`. To l
 }),
 ```
 
-The like and bookmark appear together after the resolver succeeds. If it throws, fate discards the pending cache changes and uses the usual [mutation error handling](/guide/actions). Existing optimistic update, insertion, removal, and invalidation options still work.
+The like and bookmark appear together after the mutation succeeds. If the resolver throws, fate discards its pending cache changes and follows the usual [mutation error handling](/guide/actions). We can use the same optimistic update, insertion, removal, and invalidation options as with other mutations.
 
 This applies to the client cache. A failure cannot undo a server transaction that has already committed.
 
@@ -231,15 +237,15 @@ Calls to a remote mutation for the same entity inherit the action's selection an
 
 ## State Lifetime
 
-Local roots and the objects they reference stay in memory for the client instance's lifetime. Other objects, including client fields on server data, follow the usual [cache lifetime rules](/guide/requests#cache-lifetime). Each client has its own state.
+Each fate client has its own state. Client roots and the objects they reference stay in memory for that client's lifetime. Other objects, including client fields on server data, follow the usual [cache lifetime rules](/guide/requests#cache-lifetime).
 
 For SSR, create a separate client for each request. `dehydrate()` and `hydrate()` include client data. Hydration replaces untouched defaults while preserving later client edits under the default merge policy. See [SSR and Hydration](/guide/requests#ssr-and-hydration).
 
-fate checks schema metadata when restoring a snapshot. Change `hydrationScope` when making other incompatible changes to stored data.
+fate checks schema metadata when restoring a hydration snapshot. Change `hydrationScope` for incompatible changes that aren't reflected in that metadata. For saved client data, use [migrations](#migrations) to carry existing values forward when the schema changes.
 
 ## Persisting Client State
 
-Pass IndexedDB persistence when creating the client to keep client data across reloads. Install the adapter with `vp add @nkzw/fate-indexeddb`.
+Our counter resets when we reload the page. To keep its value, we can save client state in IndexedDB. Install the adapter with `vp add @nkzw/fate-indexeddb`, then add persistence when creating the client:
 
 ```ts
 import { createIndexedDBStorage } from '@nkzw/fate-indexeddb';
@@ -254,15 +260,19 @@ const fate = createClient({
 }).registerClientSchema(schema, defineMutations);
 ```
 
-Use a stable key for each app or account. fate restores client records and client fields on server records before serving views. They survive cache expiration, schema changes, and `clearCache()`. Server fields still follow the ordinary read cache lifetime.
+Use a stable `key` for each app or account. When we open the app again, fate restores the counter before its views render. The same setup also saves client fields on server objects, such as our post bookmarks.
 
-Client mutations save changed records and lists in a single transaction, including deletions. fate publishes the confirmed state after the write commits. If the write fails, the mutation reports the error and you can retry from the last confirmed state. Use `persist: false` to keep a mutation's changes in memory. Client mutations share a lock across tabs and check for newer saves before running.
+Saved client state survives remote cache expiration and `clearCache()`. Adding fields with defaults preserves existing values. For other changes to saved data, we can define a [migration](#migrations). Server fields still follow the ordinary [read cache lifetime](/guide/persistence#cache-lifetime).
+
+When a mutation changes client data, fate saves the changed objects and lists in a single transaction, including deletions. Views receive the confirmed state after the save succeeds. If saving fails, the mutation reports the error and keeps the previous confirmed state. We can still use optimistic updates to show a change while it is being saved.
+
+Updating the counter writes the changed data rather than the entire saved graph. Tabs sharing the same persistence key coordinate their writes and check for newer saves before running a client mutation. Pass `persist: false` for a mutation whose changes should only stay in memory.
 
 Set `clientState.maxBytes` to configure the saved graph's storage budget separately from the read cache. It defaults to the value of `maxBytes` (25 MiB by default). Use `clientState.limits` to adjust serialization limits per entry, such as `maxStringLength` for a long serialized document.
 
 ### Migrations
 
-Adding a field with a default preserves existing data. When changing the shape of saved data, increment `clientState.version` and add a migration for that version. Versions start at 1.
+Let's say our app originally stored a task's text in a `label` field, and we want to rename it to `title`. We can keep existing tasks by incrementing `clientState.version` and adding a migration. Versions start at 1, so our first upgrade is version 2:
 
 ```ts
 const persistence = createPersistence({
@@ -283,24 +293,28 @@ const persistence = createPersistence({
 });
 ```
 
-Migrations run in order before views can read the saved data. Each step is synchronous, and fate commits the complete upgrade atomically. `renameField` also renames persisted list membership. `mapRecords` can transform saved values and remove old fields while preserving the record's identity.
+This migration renames `label` to `title` and removes whitespace around each title. `mapRecords` lets us change saved values or remove old fields while keeping each object's identity. `renameField` also handles saved list membership when renaming a relationship.
 
-If an upgrade fails, the previous saved version stays on disk. A tab running an older version reports an error when opening or writing a graph that has been upgraded. New installations start at the configured version.
+fate runs migrations in order before views read the saved data, then saves the complete upgrade in one transaction. Migration functions must be synchronous. Adding a field with a default doesn't require a migration.
 
-If you used an earlier build with scope-keyed client persistence, fate imports the graph for the current scope on first open. If the schema has already changed, set `clientState.legacyScope` to the previous client's `dehydrate().scope` to import that graph. The import treats the old graph as version 1 and leaves the original copy intact. Close tabs running that earlier build before importing.
+If a migration fails, the previous saved version stays on disk. A tab running an older version reports an error if it tries to open or write data that has already been upgraded. New installations start at the configured version.
+
+_If you tested a development build that saved client state under its hydration scope, fate imports data for the current scope on first open. If the schema has changed since then, set `clientState.legacyScope` to the previous client's `dehydrate().scope`. The import treats that data as version 1 and keeps the original copy. Close tabs running the earlier build before importing._
 
 ## Client-only Template
 
-Start a React app with Void Pages Routing and IndexedDB persistence.
+You can start with a complete client-only app using `create-fate`:
 
 ```sh
 vp create fate -- --template client-only
 ```
 
-Add `--framework vue` for the Vue version. Both templates include a task list that keeps edits across reloads. Run `vp run build` for static output in `dist/client/`, or see the [Cloudflare deployment instructions](/integrations/cloudflare#client-only-apps).
+The template includes React, Void Pages Routing, and a task list saved in IndexedDB. Add `--framework vue` for the Vue version. Try adding or completing a task, then reload the page to see the saved state.
+
+Run `vp run build` to create static files in `dist/client/`. You can deploy them to a static host or directly to [Cloudflare](/integrations/cloudflare#client-only-apps).
 
 From the fate repository, run `vp run dev:state` and open `http://localhost:6011` to try the React starter.
 
 ## Example
 
-Run `vp run dev` from the repository root to try the mixed client and server example. **Bookmark** toggles a client field shared across views of the post. **Like & bookmark** also updates the server's like count. Refetching the post preserves its bookmark.
+To try client state alongside server data, run `vp run dev` from the repository root. Click **Bookmark** on a post and watch other views of that post update. **Like & bookmark** also changes the server's like count. Refetch the post to see that its bookmark stays in place.

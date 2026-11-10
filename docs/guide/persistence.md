@@ -2,6 +2,8 @@
 
 fate can keep data across page reloads and save mutations while a user is offline. When they come back, their views can show previously loaded data and their pending changes continue where they left off.
 
+The same persistence setup can save [Client State](/guide/client-state#persisting-client-state), such as drafts or bookmarks. Client data stays saved when the remote cache expires or is cleared. You can use [migrations](/guide/client-state#migrations) to update its shape as your app changes.
+
 ## Client Setup
 
 For a browser app, install the IndexedDB adapter:
@@ -90,7 +92,7 @@ Pending mutations are never evicted to make room for cached data. If a new mutat
 
 ## Actions & Mutations
 
-With persistence and a durable mutation transport configured, fate saves server mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/guide/actions):
+Let's say a user wants to like a post while offline. With persistence and a [durable mutation transport](#server-deduplication) configured, fate saves the mutation before applying its optimistic update or sending it to the server. We can use the same API as for regular [Actions](/guide/actions):
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
@@ -198,7 +200,9 @@ Forward the entire identity on every attempt. When `identity.replayOnly` is true
 
 For a GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
 
-Without a durable adapter, server mutations send immediately by default. Use `persist: true` to require durable delivery. The call fails before sending if persistence or the adapter is missing. Existing queued mutations stay saved and report a delivery error until the adapter is available again. Remote read caching and client state persistence work independently of the adapter.
+You can use persistence for cached reads and client state before adding a durable mutation adapter. Server mutations send immediately by default in that setup. Pass `persist: true` when a call must be saved before delivery. It fails before sending if persistence or the adapter is missing.
+
+Mutations that were already queued stay saved and report a delivery error until the adapter is available again.
 
 For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.
 
@@ -253,7 +257,7 @@ To remove the saved read cache, call `clearCache()`:
 await fate.persistence!.clearCache();
 ```
 
-This leaves in-memory data and queued mutations intact.
+This leaves in-memory data, queued mutations, and saved client state intact. For example, clearing cached posts keeps the bookmarks defined in your client schema.
 
 Change `hydrationScope` when deploying incompatible data models or mutation inputs. Incompatible saved reads are discarded; incompatible queued mutations remain visible as failures so the app can handle them.
 

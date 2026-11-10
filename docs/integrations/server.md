@@ -527,7 +527,7 @@ For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` in
 
 ## Data View Resolvers
 
-fate data views support computed fields. Use `computed` to describe the hidden data needed to resolve a public field.
+Data views can define computed fields with their own data dependencies. Let's say we want to show a user's email only to that user, and include a comment count on each post. We can define both fields with `computed`:
 
 ```tsx
 import { computed, count } from '@nkzw/fate/server';
@@ -554,7 +554,9 @@ export const postDataView = dataView<PostItem>('Post')({
 });
 ```
 
-Set a dependency to `true` to select a field by the same name. Use `field('path')` for aliases or nested paths and `count('relation')` for relation counts. The adapters fetch these dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
+The `select` object describes what each resolver needs. `email: true` selects the user's stored email, and `count('comments')` asks the adapter to count the post's comments. The resolver receives those values in its second argument. Annotating the first argument with `UserItem` or `PostItem` lets TypeScript infer the dependency types.
+
+Use `field('path')` to give a dependency a different name or read through a relationship. The adapters fetch the dependencies for you, while the client only receives the computed field's result. The same `dataView` and `computed` helpers are available for [client computed fields](/guide/client-state#computed-fields).
 
 ## Connecting the Client
 

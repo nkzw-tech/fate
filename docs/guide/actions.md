@@ -7,6 +7,8 @@ fate does not provide hooks for mutations like traditional data fetching librari
 
 fate's Vite plugin makes your server mutations available on the client. The API works the same way with native HTTP, tRPC, GraphQL, and Void.
 
+You can also define mutations for [Client State](/guide/client-state). Components call them through the same `fate.actions` and `fate.mutations` APIs.
+
 If you have a mutation named `post.like`, a `LikeButton` component using fate Actions and an async component library could look like this:
 
 ```tsx
@@ -120,6 +122,8 @@ const result = await fate.mutations.comment.add({
 ```
 
 The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise. Handle pending state and errors in the calling code.
+
+If a mutation doesn't take any input, you can omit the arguments entirely. For example, our [client counter](/guide/client-state#reading-and-updating-state) increments with `fate.mutations.counter.increment()`. You can still pass options such as `{ view: CounterView }`. Actions take an options object, so dispatch the same mutation with `increment({})` inside a React Action or transition. Mutations that declare input fields still require `input`, even if every field is optional.
 
 ## Mutation Server Implementation
 

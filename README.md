@@ -71,7 +71,7 @@ Explore the [fate stack](https://fate.technology/#stack) to see the tools includ
 
 Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default. Choose Vue in the selector or pass `--framework vue`.
 
-Choose **Client Only** or pass `--template client-only` to start with a static Void app that saves its data in IndexedDB. See [Persisting Client State](/docs/guide/client-state.md#persisting-client-state).
+If you want to build an app entirely with client state, choose **Client Only** or pass `--template client-only`. This template includes Void Pages Routing and a task list saved in IndexedDB. Try editing a task and reloading the page to see persistence in action. See [Client State](/docs/guide/client-state.md).
 
 ### Manual Installation
 
@@ -1239,6 +1239,8 @@ fate does not provide hooks for mutations like traditional data fetching librari
 
 fate's Vite plugin makes your server mutations available on the client. The API works the same way with native HTTP, tRPC, GraphQL, and Void.
 
+You can also define mutations for [Client State](/docs/guide/client-state.md). Components call them through the same `fate.actions` and `fate.mutations` APIs.
+
 If you have a mutation named `post.like`, a `LikeButton` component using fate Actions and an async component library could look like this:
 
 ```tsx
@@ -1352,6 +1354,8 @@ const result = await fate.mutations.comment.add({
 ```
 
 The options are the same as for Actions, including `optimistic`, `insert`, `remove`, `invalidate`, and `view`. The call returns a promise. Handle pending state and errors in the calling code.
+
+If a mutation doesn't take any input, you can omit the arguments entirely. For example, our [client counter](/docs/guide/client-state.md#reading-and-updating-state) increments with `fate.mutations.counter.increment()`. You can still pass options such as `{ view: CounterView }`. Actions take an options object, so dispatch the same mutation with `increment({})` inside a React Action or transition. Mutations that declare input fields still require `input`, even if every field is optional.
 
 ### Mutation Server Implementation
 
@@ -1518,6 +1522,8 @@ When the mutation succeeds, fate marks the post's cached fields stale. A `cache-
 
 fate can keep data across page reloads and save mutations while a user is offline. When they come back, their views can show previously loaded data and their pending changes continue where they left off.
 
+The same persistence setup can save [Client State](/docs/guide/client-state.md#persisting-client-state), such as drafts or bookmarks. Client data stays saved when the remote cache expires or is cleared. You can use [migrations](/docs/guide/client-state.md#migrations) to update its shape as your app changes.
+
 ### Client Setup
 
 For a browser app, install the IndexedDB adapter:
@@ -1606,7 +1612,7 @@ Pending mutations are never evicted to make room for cached data. If a new mutat
 
 ### Actions & Mutations
 
-With persistence and a durable mutation transport configured, fate saves server mutations before applying their optimistic updates or sending them to the server. The API is the same as for regular [Actions](/docs/guide/actions.md):
+Let's say a user wants to like a post while offline. With persistence and a [durable mutation transport](#server-deduplication) configured, fate saves the mutation before applying its optimistic update or sending it to the server. We can use the same API as for regular [Actions](/docs/guide/actions.md):
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
@@ -1712,7 +1718,11 @@ return idempotency.execute({
 
 Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-Without a durable adapter, server mutations send immediately by default. Use `persist: true` to require durable delivery. The call fails before sending if persistence or the adapter is missing. Existing queued mutations stay saved and report a delivery error until the adapter is available again. Remote read caching and client state persistence work independently of the adapter.
+For a GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
+
+You can use persistence for cached reads and client state before adding a durable mutation adapter. Server mutations send immediately by default in that setup. Pass `persist: true` when a call must be saved before delivery. It fails before sending if persistence or the adapter is missing.
+
+Mutations that were already queued stay saved and report a delivery error until the adapter is available again.
 
 For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.
 
@@ -1767,7 +1777,7 @@ To remove the saved read cache, call `clearCache()`:
 await fate.persistence!.clearCache();
 ```
 
-This leaves in-memory data and queued mutations intact.
+This leaves in-memory data, queued mutations, and saved client state intact. For example, clearing cached posts keeps the bookmarks defined in your client schema.
 
 Change `hydrationScope` when deploying incompatible data models or mutation inputs. Incompatible saved reads are discarded; incompatible queued mutations remain visible as failures so the app can handle them.
 
@@ -3109,7 +3119,7 @@ For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` in
 
 ### Data View Resolvers
 
-fate data views support computed fields. Use `computed` to describe the hidden data needed to resolve a public field.
+Data views can define computed fields with their own data dependencies. Let's say we want to show a user's email only to that user, and include a comment count on each post. We can define both fields with `computed`:
 
 ```tsx
 import { computed, count } from '@nkzw/fate/server';
@@ -3136,7 +3146,9 @@ export const postDataView = dataView<PostItem>('Post')({
 });
 ```
 
-Set a dependency to `true` to select a field by the same name. Use `field('path')` for aliases or nested paths and `count('relation')` for relation counts. The adapters fetch these dependencies for you. This keeps private fields like `email` available to the resolver without exposing them to the client selection.
+The `select` object describes what each resolver needs. `email: true` selects the user's stored email, and `count('comments')` asks the adapter to count the post's comments. The resolver receives those values in its second argument. Annotating the first argument with `UserItem` or `PostItem` lets TypeScript infer the dependency types.
+
+Use `field('path')` to give a dependency a different name or read through a relationship. The adapters fetch the dependencies for you, while the client only receives the computed field's result. The same `dataView` and `computed` helpers are available for [client computed fields](/docs/guide/client-state.md#computed-fields).
 
 ### Connecting the Client
 
@@ -3571,9 +3583,9 @@ See [Void's Cloudflare deployment guide](https://void.cloud/integrations/cloudfl
 
 ### Client-only Apps
 
-Choose `--template client-only` when creating the app. The template uses Void Pages Routing and prerenders both routes as static shells. IndexedDB stores application data in each browser.
+You can also deploy an app built entirely with [Client State](/docs/guide/client-state.md). Choose `--template client-only` when creating the app. The template includes Void Pages Routing and saves each user's data in their browser with IndexedDB.
 
-Run `vp exec void deploy --platform cloudflare` from the generated app to deploy the assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
+Run `vp exec void deploy --platform cloudflare` from the generated app to deploy its static pages and assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
 
 ### Migrating from cf-fate
 

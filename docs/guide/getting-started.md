@@ -14,7 +14,7 @@ Explore the [fate stack](https://fate.technology/#stack) to see the tools includ
 
 Choose a backend in the template selector: Void, tRPC with Drizzle or Prisma, GraphQL with Prisma, or a client for an existing GraphQL server. React is the default. Choose Vue in the selector or pass `--framework vue`.
 
-Choose **Client Only** or pass `--template client-only` to start with a static Void app that saves its data in IndexedDB. See [Persisting Client State](/guide/client-state#persisting-client-state).
+If you want to build an app entirely with client state, choose **Client Only** or pass `--template client-only`. This template includes Void Pages Routing and a task list saved in IndexedDB. Try editing a task and reloading the page to see persistence in action. See [Client State](/guide/client-state).
 
 ## Manual Installation
 

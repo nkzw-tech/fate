@@ -31,9 +31,9 @@ See [Void's Cloudflare deployment guide](https://void.cloud/integrations/cloudfl
 
 ## Client-only Apps
 
-Choose `--template client-only` when creating the app. The template uses Void Pages Routing and prerenders both routes as static shells. IndexedDB stores application data in each browser.
+You can also deploy an app built entirely with [Client State](/guide/client-state). Choose `--template client-only` when creating the app. The template includes Void Pages Routing and saves each user's data in their browser with IndexedDB.
 
-Run `vp exec void deploy --platform cloudflare` from the generated app to deploy the assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
+Run `vp exec void deploy --platform cloudflare` from the generated app to deploy its static pages and assets. You can also run `vp run build` and serve `dist/client/` from another static host that supports clean URLs.
 
 ## Migrating from cf-fate
 
