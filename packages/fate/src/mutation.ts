@@ -449,6 +449,15 @@ export type MutationCommand = {
   remove?: ReadonlyArray<ResolvedRemoval>;
 };
 
+const validateMutationCommand = (command: MutationCommand, config: TypeConfig | undefined) => {
+  if (!config && (command.delete || command.optimistic)) {
+    throw new Error(`fate: Value mutation '${command.key}' does not support entity updates.`);
+  }
+  if (config && command.delete && maybeGetId(config.getId, command.input) == null) {
+    throw new Error(`fate: Mutation '${command.key}' requires an 'id' to delete.`);
+  }
+};
+
 /** @internal Creates the same optimistic/confirmation machinery for live and restored calls. */
 export function prepareMutation(
   client: FateClient<any, any>,
@@ -468,10 +477,8 @@ export function prepareMutation(
     remove,
   } = command;
   const position = typeof insert === 'string' ? insert : 'none';
+  validateMutationCommand(command, config);
   if (!config) {
-    if (deleteRecord || optimistic) {
-      throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
-    }
     const release = client.retainMutationTargets(command);
     let settle: ReturnType<typeof client.store.optimisticUpdate> | undefined;
     try {
@@ -524,9 +531,6 @@ export function prepareMutation(
     ? collectImplicitSelectedPaths(optimisticRecord)
     : undefined;
   const selection = new Set([...(plan?.paths ?? []), ...(optimisticSelection ?? [])]);
-  if (deleteRecord && id == null) {
-    throw new Error(`fate: Mutation '${key}' requires an 'id' to delete.`);
-  }
   const local = client.prepareClientMutation(key, input, selection, plan, args);
   const release = client.retainMutationTargets(command);
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
@@ -666,6 +670,7 @@ export function wrapMutation<
             : undefined,
         ...(remove && { remove: client.resolveMutationRemoval(remove) }),
       };
+      validateMutationCommand(command, config);
       // Durable admission can await restoration and disk writes before preparation
       // acquires its own pins. Keep the caller's targets alive throughout that gap.
       const release = client.persistence ? client.retainMutationTargets(command) : undefined;

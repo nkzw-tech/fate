@@ -154,6 +154,32 @@ test('invalid durable input rejects the local milestone before storage or delive
   expect(current.mutate).not.toHaveBeenCalled();
 });
 
+test('invalid durable delete rejects local admission without saving a journal entry', async () => {
+  const storage = memoryStorage();
+  const mutations = { remove: mutation<Note, { slug: string }, Note>('Note') };
+  const deliver = vi.fn();
+  const client = createClient<[Record<never, never>, typeof mutations]>({
+    mutations,
+    persistence: createPersistence({ key: 'invalid-delete', online: () => false, storage }),
+    transport: { fetchById: async () => [], mutateDurably: deliver },
+    types: [{ type: 'Note' }],
+  });
+  sessions.push(client.persistence!);
+  await client.persistence!.ready;
+  const write = vi.spyOn(storage, 'writeBatch');
+  const pending = client.mutations.remove({ delete: true, input: { slug: 'hello' } });
+  const completion = pending.catch((error: unknown) => error);
+  const persisted = pending.locallyPersisted.then(
+    () => true,
+    () => false,
+  );
+  await completion;
+  expect(await persisted).toBe(false);
+  expect(write).not.toHaveBeenCalled();
+  expect(deliver).not.toHaveBeenCalled();
+  expect(client.persistence!.getSnapshot().mutations).toEqual([]);
+});
+
 test('remote rejection does not undo an already committed local milestone', async () => {
   const current = setup({
     mutate: async () => {

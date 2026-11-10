@@ -571,7 +571,6 @@ class Session implements PersistenceRuntime {
     // Failed admission must not prevent the next invocation from being saved.
     this.mutationAdmission = admission.catch(() => {});
     const base = await admission;
-    onPersisted();
     this.assertActive();
     this.cache.restoreBase(decodeClientHydrationState(base.data));
     const result = new Promise((resolve, reject) => this.waiters.set(id, { reject, resolve }));
@@ -579,6 +578,7 @@ class Session implements PersistenceRuntime {
       if (!this.operations.has(id)) {
         this.operations.set(id, this.prepareOperation(decodeCommand(encoded)));
       }
+      onPersisted();
     } catch (error) {
       await this.fail(id, error);
     }
