@@ -189,24 +189,35 @@ Computed fields run when they are read. fate reuses the result until a dependenc
 
 Just like a view, `select` uses `true` to select a field by name. Use `field('path')` to give a dependency a different name or read through a relationship. For example, `field('tasks.done')` returns an array of completion values when the task list is available.
 
-The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths, arrays, and stored JSON objects. Computed results keep their types too, including class instances such as a parsed game map.
+The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths, arrays, and stored JSON objects. The result keeps its TypeScript type, including when we return a class instance.
 
-A dependency must select a value, rather than a whole relationship. Use `field('author.name')` to read the author's name. fate validates this against the client schema so the resolver receives the selected data instead of a record reference. Treat object dependencies and computed results as read-only: other components share those values.
+Other components reading the same field share its result. Treat objects received by or returned from the resolver as read-only. To read a field from a related object, select its path, such as `field('author.name')`. Selecting the whole `author` relationship as a dependency is not supported.
 
-Dependencies read fields with their default arguments unless we specify `args`. If a view selects `title` with `{ locale: 'ja' }` alongside a computation that depends on `title: true`, fate loads both values. The computation uses the default title.
+### Field Arguments
 
-To compute from a particular variant, select its arguments:
+Let's say our blog supports multiple languages and we want to display a post's title in English. We can pass arguments to the dependency just like we do in a view:
 
 ```ts
 localizedTitle: computed({
   resolve: (_post: PostData, { title }) => title.toUpperCase(),
-  select: { title: { args: { locale: 'ja' } } },
+  select: { title: { args: { locale: 'en' } } },
 }),
 ```
 
-Arguments can also depend on the computed field's arguments. For example, `select: { title: { args: ({ locale }) => ({ locale }) } }` lets a component select `localizedTitle: { args: { locale: 'ja' } }`. fate fetches and caches the matching title. Two components selecting the same arguments share the computed result, even when they define separate views.
+Now `localizedTitle` reads the English title, even if another component requests `title` in a different language. Without `args`, the dependency reads the title with its default arguments.
 
-For a named dependency or relationship path, use `field('author.name', { args: { locale: 'ja' } })`. These arguments apply to `name`. Argument functions must be pure, just like the computation itself. Parameterized dependencies are supported in client schemas.
+We can also let the component choose the language by passing the computed field's arguments through to `title`:
+
+```ts
+localizedTitle: computed({
+  resolve: (_post: PostData, { title }) => title.toUpperCase(),
+  select: { title: { args: ({ locale }) => ({ locale }) } },
+}),
+```
+
+A component can now select `localizedTitle: { args: { locale: 'en' } }`. Components reading the same post with the same arguments share the result, including when they use different views. If a `network-only` request updates that title, components reading `localizedTitle` update too. The calculation runs when the field is read, so unused computed fields don't run just because data was fetched.
+
+For a dependency with a different name or a relationship path, use `field('author.name', { args: { locale: 'en' } })`. These arguments apply to `name`. Argument functions must be pure. Selecting dependencies with arguments is currently supported in client schemas.
 
 Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client computed fields.
 
