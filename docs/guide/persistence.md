@@ -179,6 +179,14 @@ An expired identity receives `MUTATION_EXPIRED` (HTTP 410), even if its receipt 
 
 Native HTTP delivery uses protocol version 3 for expiring identities. Older native servers reject these requests before execution. Custom durable transports must also enforce expiry and preserve the HTTP 410 error.
 
+### Why Mutations Expire
+
+Receipt retention limits are common in idempotent APIs. [Stripe](https://docs.stripe.com/api/idempotent_requests) allows receipt removal after 24 hours and treats a reused key as a new request after removal. An offline queue can retry much later, so fate includes a fixed deadline in its mutation identity and rejects delivery after that deadline. Deleting the receipt cannot make that same identity executable again.
+
+The lifetime starts when the client queues the mutation, including time spent offline. A device clock that is behind can shorten its remaining lifetime; one more than five minutes ahead is rejected. Keep server clocks synchronized and choose a cleanup margin larger than their possible clock differences. Custom transports must preserve the identity and use a server implementation that enforces these rules.
+
+This gives each identity at most one committed database execution within the configured lifetime. It does not guarantee that every queued mutation succeeds, or deduplicate effects outside the receipt transaction. Applications handle expired mutations by checking the current state and deciding how to reconcile the original intent.
+
 ### Existing Receipts
 
 Older identities have no expiry. By default, `createMutationIdempotency` continues to accept them, and their receipts must remain saved. Set `allowLegacyIdentities: false` after retiring older clients to reject those identities with the same expiry error. Once all server instances enforce that policy, you can retire their receipts as well. Never assign an expiry to an old receipt while a server can still execute its identity after deletion.
