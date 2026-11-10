@@ -22,6 +22,7 @@ afterEach(() => {
 const setup = (
   options: {
     durable?: boolean;
+    durableMutations?: ReadonlyArray<'edit'>;
     key?: string;
     maxBytes?: number;
     mutate?: (
@@ -50,7 +51,12 @@ const setup = (
       storage,
     }),
     roots,
-    transport: { fetchById, mutate, mutateDurably: options.durable === false ? undefined : mutate },
+    transport: {
+      durableMutations: options.durableMutations,
+      fetchById,
+      mutate,
+      mutateDurably: options.durable === false ? undefined : mutate,
+    },
     types: [{ fields: { title: 'scalar' }, type: 'Note' }],
   });
   sessions.push(client.persistence!);
@@ -1326,3 +1332,34 @@ test.each([false, true])(
     expect(restored.client.store.read(noteId)?.title).toBe('Latest');
   },
 );
+
+test('only journals mutations supported by a partial durable adapter', async () => {
+  const current = setup({ durableMutations: [] });
+  const result = await current.client.mutations.edit({ input: { id: '1', title: 'Immediate' } });
+  expect(result.result?.title).toBe('Immediate');
+  expect(current.mutate.mock.calls[0][3]).toBeUndefined();
+  expect(current.session.getSnapshot().mutations).toEqual([]);
+  const required = await current.client.mutations.edit({
+    input: { id: '1', title: 'Required' },
+    persist: true,
+  });
+  expect(required.error?.message).toMatch(/idempotency/i);
+  expect(current.mutate).toHaveBeenCalledTimes(1);
+});
+
+test('keeps previously queued mutations when the adapter stops supporting them', async () => {
+  const original = setup({ durableMutations: ['edit'] });
+  const pending = original.client.mutations
+    .edit({ input: { id: '1', title: 'Pending' } })
+    .catch(() => {});
+  await queued(original.session);
+  original.session.dispose();
+  await pending;
+  const restored = setup({ durableMutations: [], online: () => true, storage: original.storage });
+  await restored.session.ready;
+  await vi.waitFor(() =>
+    expect(restored.session.getSnapshot().error?.message).toMatch(/idempotency/i),
+  );
+  expect(restored.mutate).not.toHaveBeenCalled();
+  expect(restored.session.getSnapshot().mutations).toHaveLength(1);
+});

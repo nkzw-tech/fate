@@ -53,6 +53,7 @@ type LiveConnectionEventHandlers = Readonly<{
  * mutations with the provided selections.
  */
 export interface Transport<Mutations extends TransportMutations = EmptyTransportMutations> {
+  durableMutations?: ReadonlyArray<string>;
   fetchById(
     type: string,
     ids: Array<string | number>,

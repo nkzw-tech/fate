@@ -868,6 +868,7 @@ const hydrationScope = ${JSON.stringify(getHydrationScope(moduleName, argumentSc
 export const createFateClient = (options: {
   decodeNodeId?: (type: string, id: string | number) => string | number;
   encodeNodeId?: (type: string, id: string | number) => string | number;
+  durableMutations?: Parameters<typeof createGraphQLTransport<GraphQLTransportMutations>>[0]['durableMutations'];
   eventSource?: Parameters<typeof createGraphQLTransport>[0]['eventSource'];
   fetch?: typeof fetch;
   headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
@@ -888,6 +889,7 @@ export const createFateClient = (options: {
       ${graphQLConfig.byId ? 'byId: graphQL.byId,' : ''}
       decodeNodeId: options.decodeNodeId,
       encodeNodeId: options.encodeNodeId,
+      durableMutations: options.durableMutations,
       eventSource: options.eventSource,
       fetch: options.fetch,
       headers: options.headers,

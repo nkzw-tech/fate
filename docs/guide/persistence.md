@@ -196,6 +196,8 @@ return idempotency.execute({
 
 Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
+For a GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
+
 Without a durable adapter, server mutations send immediately by default. Use `persist: true` to require durable delivery. The call fails before sending if persistence or the adapter is missing. Existing queued mutations stay saved and report a delivery error until the adapter is available again. Remote read caching and client state persistence work independently of the adapter.
 
 For GraphQL, return a standard `extensions.code` or numeric `extensions.http.status` for terminal client errors. Unrecognized execution errors remain retryable for saved mutations.

@@ -646,7 +646,8 @@ export function wrapMutation<
       const local = client.isClientMutation(identifier.key);
       if (
         !local &&
-        (persist ?? (client.persistence !== undefined && client.supportsDurableMutations()))
+        (persist ??
+          (client.persistence !== undefined && client.supportsDurableMutations(identifier.key)))
       ) {
         try {
           const result = (await client.withPersistenceLifecycle(() =>

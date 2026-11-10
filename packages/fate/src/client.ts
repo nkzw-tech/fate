@@ -1998,15 +1998,20 @@ export class FateClient<
   }
 
   /** @internal Validates local wiring without requiring network connectivity. */
-  validatePersistence(): void {
+  validatePersistence(key?: string): void {
     if (this.mutationEntities?.size) {
-      this.requireDurableMutationTransport();
+      this.requireDurableMutationTransport(key);
     }
   }
 
   /** @internal Whether server mutations can safely be journaled and retried. */
-  supportsDurableMutations(): boolean {
-    return typeof this.transport.mutateDurably === 'function';
+  supportsDurableMutations(key?: string): boolean {
+    return (
+      typeof this.transport.mutateDurably === 'function' &&
+      (key === undefined ||
+        !this.transport.durableMutations ||
+        this.transport.durableMutations.includes(key))
+    );
   }
 
   /** @internal */
@@ -2014,7 +2019,7 @@ export class FateClient<
     if (!this.persistenceRuntime) {
       throw new Error('fate: Persistence is not configured.');
     }
-    this.requireDurableMutationTransport();
+    this.requireDurableMutationTransport(command.key);
     return this.persistenceRuntime.mutate(command);
   }
 
@@ -2050,8 +2055,8 @@ export class FateClient<
     this.liveSubscriptions.clear();
   }
 
-  private requireDurableMutationTransport(): void {
-    if (!this.supportsDurableMutations()) {
+  private requireDurableMutationTransport(key?: string): void {
+    if (!this.supportsDurableMutations(key)) {
       throw new FateRequestError(
         'BAD_REQUEST',
         'fate: Persisted mutations require transport.mutateDurably connected to a server idempotency handler. Configure that adapter, or use persist: false for immediate calls. Cache persistence remains available.',
@@ -2066,7 +2071,7 @@ export class FateClient<
     options: { args?: AnyRecord; identity?: MutationIdentity; plan?: SelectionPlan } = {},
   ): Promise<unknown> {
     if (options.identity) {
-      this.requireDurableMutationTransport();
+      this.requireDurableMutationTransport(key);
     } else if (!this.transport.mutate) {
       throw new Error(
         `fate: transport does not support mutations. Please provide a 'mutate' implementation in your transport.`,

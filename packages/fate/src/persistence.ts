@@ -969,6 +969,7 @@ class Session implements PersistenceRuntime {
           if (!operation) {
             throw new Error(`fate: Missing restored mutation operation '${entry.id}'.`);
           }
+          this.client.validatePersistence(command.key);
           const claimed = await this.claim(entry);
           if (this.disposed) {
             return;

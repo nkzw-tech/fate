@@ -111,6 +111,7 @@ export type GraphQLTransportOptions<
 > = {
   byId?: Readonly<Record<string, GraphQLByIdConfig>>;
   decodeNodeId?: (type: string, id: string | number) => string | number;
+  durableMutations?: ReadonlyArray<Extract<keyof Mutations, string>>;
   encodeNodeId?: (type: string, id: string | number) => string | number;
   eventSource?: EventSourceConstructor;
   fetch?: FetchLike;
@@ -898,6 +899,7 @@ export function createGraphQLTransport<
 >({
   byId,
   decodeNodeId = defaultDecodeNodeId,
+  durableMutations,
   encodeNodeId = defaultEncodeNodeId,
   fetch: fetchImpl = defaultFetch,
   headers,
@@ -1151,6 +1153,7 @@ export function createGraphQLTransport<
   };
 
   const transport: Transport<Mutations> = {
+    durableMutations,
     fetchById(type, ids, select, args, context) {
       if (!ids.length) {
         return Promise.resolve([]);
