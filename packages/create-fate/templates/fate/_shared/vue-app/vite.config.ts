@@ -12,6 +12,14 @@ const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
 
 export default defineConfig({
   /* __BUILD_CONFIG__ */
+  environments: {
+    void_worker: {
+      optimizeDeps: {
+        // Keep SSR and component dependencies on the same Vue runtime from the first request.
+        include: ['vue', 'vue/server-renderer'],
+      },
+    },
+  },
   optimizeDeps: {
     exclude: ['@nkzw/fate/client', 'vue-fate/client'],
   },
