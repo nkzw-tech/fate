@@ -1,4 +1,4 @@
-import { computed, count, createSourcePlan, dataView, list } from '@nkzw/fate/server';
+import { memo, count, createSourcePlan, dataView, list } from '@nkzw/fate/server';
 import { createPrismaSourceAdapter } from '@nkzw/fate/server/prisma';
 import { expect, test, vi } from 'vite-plus/test';
 import type { AppContext } from '../context.ts';
@@ -11,7 +11,7 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
     'Event',
   )({
     attendees: list(attendeeView),
-    goingCount: computed<{ id: string }, number>({
+    goingCount: memo<{ id: string }, number>({
       resolve: (_item, deps) => (deps.count as number) ?? 0,
       select: {
         count: count('attendees', {
@@ -20,7 +20,7 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
       },
     }),
     id: true,
-    waitlistCount: computed<{ id: string }, number>({
+    waitlistCount: memo<{ id: string }, number>({
       resolve: (_item, deps) => (deps.count as number) ?? 0,
       select: {
         count: count('attendees', {

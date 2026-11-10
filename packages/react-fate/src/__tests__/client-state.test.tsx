@@ -2,7 +2,6 @@
 import {
   clientQuery,
   clientSchema,
-  computed,
   createClient,
   dataView,
   field,
@@ -14,6 +13,7 @@ import { act, startTransition, Suspense, useActionState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test } from 'vite-plus/test';
 import { FateClient } from '../context.tsx';
+import { memo } from '../index.tsx';
 import { useRequest } from '../useRequest.tsx';
 import { useView } from '../useView.tsx';
 
@@ -23,7 +23,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 test('ordinary requests, views and actions share local state across React components', async () => {
   const state = dataView<{ count: number; id: string }>('Counter')({
     count: true,
-    doubled: computed<{ count: number }, number>({
+    doubled: memo<{ count: number }, number>({
       resolve: (_item, { count }) => Number(count) * 2,
       select: { count: field('count') },
     }),

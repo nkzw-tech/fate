@@ -127,4 +127,4 @@ export {
   type ClientRegistration,
   type RegisteredClient,
 } from './client-schema.ts';
-export { dataView, list, computed, field } from './data-view.ts';
+export { dataView, list, memo, computed, field } from './data-view.ts';

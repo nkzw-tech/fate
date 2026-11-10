@@ -61,7 +61,7 @@ export type ClientSchema = {
   types?: Record<string, ClientTypeDefinition>;
 };
 
-/** Declare client data with the same dataView, list, field and computed definitions as the server. */
+/** Declare client data with the same dataView, list, field and memo definitions as the server. */
 export function clientSchema<const S extends ClientSchema>(schema: S): S {
   return schema;
 }

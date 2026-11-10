@@ -50,7 +50,7 @@ vp test bench client-state --run
 
 It covers setup, cached reads, leaf and parent mutations, changed and unchanged
 relationship replacement, create/delete cycles, and initializing, reading, and
-collecting many computed entities, at 100, 1,000, and 5,000 records. The collection
+collecting many memo entities, at 100, 1,000, and 5,000 records. The collection
 case includes preparation and reads; it is not an isolated GC latency measurement.
 
 For minified production browser bundles and allocation/retention measurements:
@@ -76,11 +76,11 @@ FATE_BENCH_BASELINE=5a733e6 node scripts/benchmark-client-state.mjs node 1000 10
 ```
 
 The fixture contains a parent with a scalar counter, related task records, and a
-computed aggregate of task titles. Mutations use the public API, including input
+memo aggregate of task titles. Mutations use the public API, including input
 validation where applicable. The changed replacement alternates every task's
 `done` value. The unchanged replacement repeatedly supplies the same rows. One
 case has 100 store listeners that increment a counter. Correctness checks verify
-related records, computed values, invalidation, and notification counts.
+related records, memo values, invalidation, and notification counts.
 
 Schema/view declarations and payloads are prepared before timing. Setup constructs
 fresh clients with warm code, excluding download, module parsing, and initial JIT
@@ -101,7 +101,7 @@ operation count. Retained heap is measured before and after an unprofiled pass,
 with three forced collections in separate event-loop turns at each boundary.
 Allocation is an estimate, not peak RSS or retained memory. Small retained-heap
 deltas can include JIT/GC noise and may be negative; they are not a leak test.
-Forced-GC regression tests independently verify that collected computed results
+Forced-GC regression tests independently verify that collected memo results
 and committed/rolled-back mutation payloads become unreachable, even when a
 settled mutation context remains reachable.
 
@@ -120,7 +120,7 @@ per operation for **5,000 related records**:
 | Leaf mutation + read invalidated graph |            6.60 |           4.55 |          7.00 |         4.00 |
 
 At 1,000 records, parent scalar mutation medians improved from 0.90 to 0.16 ms in
-Chromium and 0.63 to 0.11 ms in WebKit. Cached scalar, computed, and graph reads
+Chromium and 0.63 to 0.11 ms in WebKit. Cached scalar, memo, and graph reads
 remained below 0.001 ms, comparable to the core client without a schema. Leaf
 mutations remained below 0.007 ms. Small schema registration with seven mutations
 and an empty root remained about 0.01 ms; registering 100 types with 20 fields each
@@ -154,7 +154,7 @@ shared by rollback snapshots and copied before mutation. Read paths reuse
 selection entries within a read and avoid temporary relationship arrays.
 Computed results are indexed by entity, with a compact single-result entry and a
 field map only when needed, so collecting one entity no longer scans the entire
-computed cache. No persistent cache of materialized mutation snapshots is added.
+memo cache. No persistent cache of materialized mutation snapshots is added.
 
 Parent snapshots and whole-relationship replacement still scale with the graph.
 Changing 5,000 related records took 12.3/14.0 ms median and 13.3/17.0 ms p95 in

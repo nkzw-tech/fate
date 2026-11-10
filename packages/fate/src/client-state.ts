@@ -8,7 +8,7 @@ import type {
   ClientTypeDefinition,
 } from './client-schema.ts';
 import type { FateClient } from './client.ts';
-import type { ComputedField } from './data-view.ts';
+import type { MemoField } from './data-view.ts';
 import { getFieldKey } from './field-key.ts';
 import type { MutationOptions } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
@@ -54,11 +54,11 @@ const relationType = (field?: RelationDescriptor) =>
         ? field.listOf
         : undefined;
 
-const isComputed = (field: unknown): field is ComputedField<any, any, any, any> =>
+const isComputed = (field: unknown): field is MemoField<any, any, any, any> =>
   isRecord(field) && field.kind === 'computed';
 
 const dependencyPlan = (
-  definition: ComputedField<any, any, any, any>,
+  definition: MemoField<any, any, any, any>,
   args?: AnyRecord,
   resolveArgs = true,
 ): SelectionPlan => {
@@ -179,7 +179,7 @@ export default class ClientState {
         }
         if (isComputed(field) && field.authorize) {
           throw new Error(
-            `fate: Client computed field '${name}.${key}' cannot use server authorization.`,
+            `fate: Client memo field '${name}.${key}' cannot use server authorization.`,
           );
         }
         if (field === true || isComputed(field)) {
@@ -191,7 +191,7 @@ export default class ClientState {
               : { type: String(field.typeName) };
         } else {
           throw new Error(
-            `fate: Client field '${name}.${key}' must be stored data, a relationship, or a synchronous computed field.`,
+            `fate: Client field '${name}.${key}' must be stored data, a relationship, or a synchronous memo field.`,
           );
         }
       }
@@ -529,7 +529,7 @@ export default class ClientState {
       args,
     );
     if (result && typeof result === 'object' && 'then' in result) {
-      throw new Error(`fate: Client computed field '${type}.${field}' must be synchronous.`);
+      throw new Error(`fate: Client memo field '${type}.${field}' must be synchronous.`);
     }
     const next = { key, result, values };
     if (cached && !('key' in cached)) {

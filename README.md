@@ -3119,13 +3119,13 @@ For Prisma, pass Prisma query options such as `{ where: { ... } }` in `extra` in
 
 ### Data View Resolvers
 
-Data views can define computed fields with their own data dependencies. Let's say we want to show a user's email only to that user, and include a comment count on each post. We can define both fields with `computed`:
+Data views can define memo fields with their own data dependencies. Let's say we want to show a user's email only to that user, and include a comment count on each post. We can define both fields with `memo`:
 
 ```tsx
-import { computed, count } from '@nkzw/fate/server';
+import { memo, count } from '@nkzw/fate/server';
 
 export const userDataView = dataView<UserItem>('User')({
-  email: computed({
+  email: memo({
     authorize: ({ id }, context?: AppContext) => context?.sessionUser?.id === id,
     select: {
       email: true,
@@ -3136,7 +3136,7 @@ export const userDataView = dataView<UserItem>('User')({
 });
 
 export const postDataView = dataView<PostItem>('Post')({
-  commentCount: computed({
+  commentCount: memo({
     select: {
       count: count('comments'),
     },
@@ -3148,7 +3148,7 @@ export const postDataView = dataView<PostItem>('Post')({
 
 The `select` object describes what each resolver needs. `email: true` selects the user's stored email, and `count('comments')` asks the adapter to count the post's comments. The resolver receives those values in its second argument. Annotating the first argument with `UserItem` or `PostItem` lets TypeScript infer the dependency types.
 
-Use `field('path')` to give a dependency a different name or read through a relationship. The adapters fetch the dependencies for you, while the client only receives the computed field's result. The same `dataView` and `computed` helpers are available for [client computed fields](/docs/guide/client-state.md#computed-fields).
+Use `field('path')` to give a dependency a different name or read through a relationship. The adapters fetch the dependencies for you, while the client only receives the memo field's result. The same `dataView` and `memo` helpers are available for [client memo fields](/docs/guide/client-state.md#memo-fields).
 
 ### Connecting the Client
 

@@ -15,7 +15,7 @@ import type { FateLiveConnectionEvent } from '../protocol.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
 import { getSelectionPlan } from '../selection.ts';
-import { computed, dataView, field, list } from '../server/dataView.ts';
+import { memo, dataView, field, list } from '../server/dataView.ts';
 import { ConnectionTag, type ConnectionMetadata } from '../types.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
@@ -26,11 +26,11 @@ type UIData = { count: number; id: string; todos: Array<{ id: string; title: str
 const ui = dataView<UIData>('UI')({
   count: true,
   id: true,
-  summary: computed<{ id: string }, string>({
+  summary: memo<{ id: string }, string>({
     resolve: summary,
     select: { count: field('count') },
   }),
-  titles: computed({
+  titles: memo({
     resolve: (_item: UIData, { titles = [] }) => {
       expectTypeOf(titles).toEqualTypeOf<Array<string>>();
       return titles.join(', ');
@@ -180,7 +180,7 @@ const UIView = view<UI>()({
   todos: { id: true, title: true },
 });
 
-test('client-only roots, mutations, computed views, relationships and GC need no transport', async () => {
+test('client-only roots, mutations, memo views, relationships and GC need no transport', async () => {
   const client = makeClient();
   const { ui } = await client.request({ ui: { view: UIView } });
   expect((await client.readView(UIView, ui)).data).toMatchObject({
@@ -260,7 +260,7 @@ test('views can select an entire object-valued client field', async () => {
   expect(data.snapshot).toEqual(snapshot);
 });
 
-test('computed dependencies are masked, subscribed, memoized and invalidated', async () => {
+test('memo dependencies are masked, subscribed, memoized and invalidated', async () => {
   const client = makeClient();
   const ComputedView = view<UI>()({ summary: true });
   const ref = client.ref<UI>('UI', 'main', ComputedView);
@@ -275,7 +275,7 @@ test('computed dependencies are masked, subscribed, memoized and invalidated', a
   expect(summary.mock.calls.length).toBe(before + 2);
 });
 
-test('computed object dependencies preserve scalar types and class results', async () => {
+test('memo object dependencies preserve scalar types and class results', async () => {
   class Decoded {
     #value: number;
     constructor(value: number) {
@@ -302,7 +302,7 @@ test('computed object dependencies preserve scalar types and class results', asy
         Item: {
           defaults: () => ({}),
           view: dataView<Item>('Item')({
-            decoded: computed({
+            decoded: memo({
               resolve: (_item: Item, { history, state }) => {
                 expectTypeOf(state).toEqualTypeOf<Item['state']>();
                 expectTypeOf(history).toEqualTypeOf<Item['history']>();
@@ -310,7 +310,7 @@ test('computed object dependencies preserve scalar types and class results', asy
               },
               select: { history: true, state: true },
             }),
-            doubled: computed({
+            doubled: memo({
               resolve: (_item: Item, { decoded }) => {
                 expectTypeOf(decoded).toEqualTypeOf<Decoded>();
                 return decoded.value() * 2;
@@ -351,7 +351,7 @@ test('whole relationship dependencies must select fields instead of exposing ref
           Item: {
             defaults: () => ({ person: { id: 'p', name: 'Ada' } }),
             view: dataView<{ person: { id: string; name: string } }>('Item')({
-              label: computed({
+              label: memo({
                 resolve: (_item: { person: { name: string } }, { person }) => person.name,
                 select: { person: true },
               }),
@@ -365,7 +365,7 @@ test('whole relationship dependencies must select fields instead of exposing ref
   ).toThrow("Dependency 'person' on 'Item.label' must select a field of the relationship");
 });
 
-test('equivalent computed arguments share results across independent views', async () => {
+test('equivalent memo arguments share results across independent views', async () => {
   const resolve = vi.fn((_item: { value: number }, { value }, _context, args) => ({
     value: value * (args?.factor ?? 1),
   }));
@@ -375,7 +375,7 @@ test('equivalent computed arguments share results across independent views', asy
         Item: {
           defaults: () => ({ value: 2 }),
           view: dataView<{ value: number }>('Item')({
-            derived: computed({ resolve, select: { value: true } }),
+            derived: memo({ resolve, select: { value: true } }),
             value: true,
           }),
         },
@@ -468,7 +468,7 @@ test('staged child updates take precedence over a returned parent snapshot', asy
 
 type ServerPost = { __typename: 'Post'; id: string; title: string };
 const postFields = dataView<{ draft: string | null; expanded: boolean }>('Post')({
-  displayTitle: computed<{ draft: string | null; expanded: boolean }, string>({
+  displayTitle: memo<{ draft: string | null; expanded: boolean }, string>({
     resolve: (_post, deps) => String(deps.draft ?? deps.title),
     select: { draft: true, title: true },
   }),
@@ -559,7 +559,7 @@ test('dependency-free client computations fetch uncached server entities once', 
       typeExtensions: {
         Post: {
           defaults: () => ({}),
-          view: dataView<ServerPost>('Post')({ constant: computed({ resolve: () => 42 }) }),
+          view: dataView<ServerPost>('Post')({ constant: memo({ resolve: () => 42 }) }),
         },
       },
     }),
@@ -756,11 +756,11 @@ test('local deletion updates relationships and garbage collection releases detac
   expect(client.store.read('Todo:a')).toBeUndefined();
 });
 
-test('computed cycles and undeclared defaults fail during setup', () => {
+test('memo cycles and undeclared defaults fail during setup', () => {
   const cyclic = dataView<{ id: string }>('Cycle')({
     id: true,
-    left: computed<{ id: string }, number>({ resolve: () => 0, select: { value: field('right') } }),
-    right: computed<{ id: string }, number>({ resolve: () => 0, select: { value: field('left') } }),
+    left: memo<{ id: string }, number>({ resolve: () => 0, select: { value: field('right') } }),
+    right: memo<{ id: string }, number>({ resolve: () => 0, select: { value: field('left') } }),
   });
   expect(() =>
     createClient().registerClientSchema(
@@ -800,12 +800,12 @@ test('remote normalization preserves trusted nested client defaults', async () =
   expect(client.store.read('Note:injected')).toBeUndefined();
 });
 
-test('local computed dependencies fetch through local-to-server relationships', async () => {
+test('local memo dependencies fetch through local-to-server relationships', async () => {
   type Person = { __typename: 'Person'; id: string; name: string };
   const person = dataView<Person>('Person')({ id: true, name: true });
   const selection = dataView<{ id: string; person: Person }>('Selection')({
     id: true,
-    label: computed<{ id: string }, string>({
+    label: memo<{ id: string }, string>({
       resolve: (_item, { name }) => `Selected: ${name}`,
       select: { name: field('person.name') },
     }),
@@ -1159,7 +1159,7 @@ test('mixed mutations stage concrete results of polymorphic remote mutations', a
   expect(client.store.read('Node:p')).toBeUndefined();
 });
 
-test('GraphQL refetches keep computed field arguments on the client', async () => {
+test('GraphQL refetches keep memo field arguments on the client', async () => {
   const schema = buildSchema(`
     type Post { id: ID!, title: String! }
     type Query { post(id: ID!): Post }
@@ -1198,7 +1198,7 @@ test('GraphQL refetches keep computed field arguments on the client', async () =
 });
 
 test.each(['query', 'refetch', 'persisted'] as const)(
-  '%s selects parameterized computed dependencies without mixing argument variants',
+  '%s selects parameterized memo dependencies without mixing argument variants',
   async (kind) => {
     type Post = { __typename: 'Post'; id: string; title: string };
     const schema = buildSchema(`
@@ -1232,7 +1232,7 @@ test.each(['query', 'refetch', 'persisted'] as const)(
       createClient<[typeof roots, Record<never, never>]>({
         persistence:
           kind === 'persisted'
-            ? createPersistence({ key: 'parameterized-computed', storage })
+            ? createPersistence({ key: 'parameterized-memo', storage })
             : undefined,
         roots,
         transport: createGraphQLTransport({
@@ -1250,19 +1250,19 @@ test.each(['query', 'refetch', 'persisted'] as const)(
             Post: {
               defaults: () => ({}),
               view: dataView<Post>('Post')({
-                decorated: computed({
+                decorated: memo({
                   resolve: (_post: Post & { label: string }, { label }) => `${label}!`,
                   select: { label: { args: (args) => args } },
                 }),
-                english: computed({
+                english: memo({
                   resolve: (_post: Post, { title }) => title,
                   select: { title: field('title', { args: { locale: 'en' } }) },
                 }),
-                label: computed({
+                label: memo({
                   resolve: (_post: Post, { title }) => `[${title}]`,
                   select: { title: { args: ({ locale }) => ({ locale }) } },
                 }),
-                original: computed({
+                original: memo({
                   resolve: (_post: Post, { title }) => title,
                   select: { title: true },
                 }),
@@ -1363,7 +1363,7 @@ test.each(['query', 'refetch', 'persisted'] as const)(
     const makeClient = () =>
       createClient<[typeof roots, Record<never, never>]>({
         persistence:
-          kind === 'persisted' ? createPersistence({ key: 'computed-args', storage }) : undefined,
+          kind === 'persisted' ? createPersistence({ key: 'memo-args', storage }) : undefined,
         roots,
         transport: createGraphQLTransport({
           fetch,
@@ -1417,7 +1417,7 @@ test.each(['query', 'refetch', 'persisted'] as const)(
 );
 
 test.each(['field', 'relationship'] as const)(
-  'computed relationship dependencies keep their default %s arguments',
+  'memo relationship dependencies keep their default %s arguments',
   async (kind) => {
     type Author = { __typename: 'Author'; id: string; name: string };
     type Post = { __typename: 'Post'; author: Author; id: string };
@@ -1466,11 +1466,11 @@ test.each(['field', 'relationship'] as const)(
           Author: {
             defaults: () => ({}),
             view: dataView<Author>('Author')({
-              label: computed({
+              label: memo({
                 resolve: (_author: Author, { name }) => name,
                 select: { name: true },
               }),
-              translated: computed({
+              translated: memo({
                 resolve: (_author: Author, { name }) => name,
                 select: { name: { args: (args) => args } },
               }),
@@ -1479,7 +1479,7 @@ test.each(['field', 'relationship'] as const)(
           Post: {
             defaults: () => ({}),
             view: dataView<Post>('Post')({
-              authorName: computed({
+              authorName: memo({
                 resolve: (_post: Post, { name }) => name,
                 select: { name: field('author.name') },
               }),
@@ -1612,7 +1612,7 @@ test.each(['query', 'list'] as const)(
     const person = dataView<Person>('Person')({ id: true, name: true });
     const post = dataView<{ selected: Person }>('Post')({
       selected: person,
-      selectedName: computed<{ selected: Person }, string>({
+      selectedName: memo<{ selected: Person }, string>({
         resolve: (_item, { name }) => `Selected: ${name}`,
         select: { name: field('selected.name') },
       }),
@@ -1921,7 +1921,7 @@ test('mutation reads copy Date values and preserve them in nested patches', asyn
   const clock = dataView<{ history: Array<{ at: Date }>; id: string; timestamp: Date }>('Clock')({
     history: true,
     id: true,
-    nextTimestamp: computed({
+    nextTimestamp: memo({
       resolve: () => new Date(timestamp.getTime() + 1),
     }),
     timestamp: true,

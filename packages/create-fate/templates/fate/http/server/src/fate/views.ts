@@ -1,4 +1,4 @@
-import { computed, count, dataView, list, type Entity } from '@nkzw/fate/server';
+import { memo, count, dataView, list, type Entity } from '@nkzw/fate/server';
 import type { CommentRow, PostRow, UserRow } from '../drizzle/schema.ts';
 
 export type CommentItem = CommentRow & {
@@ -19,7 +19,7 @@ export const userDataView = dataView<UserRow>('User')({
 
 const basePost = {
   author: userDataView,
-  commentCount: computed<PostItem, number>({
+  commentCount: memo<PostItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('comments'),

@@ -1,10 +1,4 @@
-import type {
-  ComputedField,
-  ComputedSelection,
-  DataField,
-  DataView,
-  ResolverField,
-} from '../data-view.ts';
+import type { MemoField, MemoSelection, DataField, DataView, ResolverField } from '../data-view.ts';
 import { isRecord } from '../record.ts';
 import { AnyRecord } from '../types.ts';
 import { isConnectionResult, toConnectionResult, type ConnectionResult } from './connection.ts';
@@ -16,7 +10,7 @@ const computedStateKey = Symbol('__fate__ComputedState');
 
 type SelectedViewNode<Context> = {
   args?: AnyRecord;
-  computeds: Map<string, ComputedField<AnyRecord, any, Context>>;
+  computeds: Map<string, MemoField<AnyRecord, any, Context>>;
   path: string | null;
   relations: Map<string, SelectedViewNode<Context>>;
   resolvers: Map<string, ResolverField<AnyRecord, any, Context>>;
@@ -43,7 +37,7 @@ const isResolverField = <Item extends AnyRecord, Context>(
 
 const isComputedField = <Item extends AnyRecord, Context>(
   field: DataField<Item>,
-): field is ComputedField<Item, unknown, Context> =>
+): field is MemoField<Item, unknown, Context> =>
   Boolean(field) && typeof field === 'object' && 'kind' in field && field.kind === 'computed';
 
 const isDataViewField = (field: DataField<AnyRecord>): field is DataView<AnyRecord> =>
@@ -89,7 +83,7 @@ export const attachComputedState = <Item extends AnyRecord>(
 const getComputedDeps = (
   item: AnyRecord,
   field: string,
-  select?: Record<string, ComputedSelection>,
+  select?: Record<string, MemoSelection>,
 ): Record<string, unknown> => {
   const attached = getComputedState(item)?.[field] ?? {};
   const deps: Record<string, unknown> = { ...attached };
@@ -243,7 +237,7 @@ const assignPath = <Context>(
         )
       ) {
         throw new Error(
-          'fate: Parameterized computed dependencies are only supported in client schemas.',
+          'fate: Parameterized memo dependencies are only supported in client schemas.',
         );
       }
       node.computeds.set(segment, field);

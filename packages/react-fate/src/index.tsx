@@ -72,6 +72,7 @@ export {
   dataView,
   list,
   computed,
+  memo,
   field,
   type ClientSchema,
   type EntityOf,

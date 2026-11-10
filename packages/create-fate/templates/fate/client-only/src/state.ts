@@ -1,6 +1,6 @@
 import {
   clientSchema,
-  computed,
+  memo,
   createClient,
   dataView,
   field,
@@ -17,7 +17,7 @@ type WorkspaceData = { id: string; tasks: Array<TaskData> };
 const task = dataView<TaskData>('Task')({ done: true, id: true, title: true });
 const workspace = dataView<WorkspaceData>('Workspace')({
   id: true,
-  progress: computed({
+  progress: memo({
     resolve: (_item: WorkspaceData, { done = [] }) =>
       `${done.filter(Boolean).length} of ${done.length} complete`,
     select: { done: field('tasks.done') },

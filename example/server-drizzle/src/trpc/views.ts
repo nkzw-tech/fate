@@ -1,4 +1,4 @@
-import { computed, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
+import { memo, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
 import { ilike, or } from 'drizzle-orm';
 import getMixedSearchPage from '../../../mixedSearch.ts';
 import type {
@@ -12,7 +12,7 @@ import { post, user, type CategoryRow, type TagRow, type UserRow } from '../driz
 import type { AppContext } from './context.ts';
 
 export const userDataView = dataView<UserRow>('User')({
-  email: computed<UserRow, string | null, AppContext>({
+  email: memo<UserRow, string | null, AppContext>({
     authorize: ({ id }, context) => context?.sessionUser?.id === id,
     resolve: (_item, deps) => (deps.email as string | null) ?? null,
     select: {
@@ -38,7 +38,7 @@ export const categorySummaryDataView = dataView<CategoryRow>('Category')({
 const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
-  commentCount: computed<PostItem, number>({
+  commentCount: memo<PostItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('comments'),
@@ -72,7 +72,7 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
-  postCount: computed<CategoryItem, number>({
+  postCount: memo<CategoryItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('posts'),
@@ -90,7 +90,7 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 
 export const eventDataView = dataView<EventItem>('Event')({
   attendees: list(eventAttendeeDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
-  attendingCount: computed<EventItem, number>({
+  attendingCount: memo<EventItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('attendees', {

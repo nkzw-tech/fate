@@ -1,21 +1,13 @@
 /** @vitest-environment happy-dom */
-import {
-  clientSchema,
-  computed,
-  createClient,
-  dataView,
-  field,
-  view,
-  type EntityOf,
-} from '@nkzw/fate';
+import { clientSchema, createClient, dataView, field, view, type EntityOf } from '@nkzw/fate';
 import { expect, test } from 'vite-plus/test';
 import { createApp, defineComponent, h, nextTick } from 'vue';
-import { FateClient, useView } from '../index.ts';
+import { FateClient, memo, useView } from '../index.ts';
 
-test('Vue views subscribe to local computed dependencies across components', async () => {
+test('Vue views subscribe to local memo dependencies across components', async () => {
   const state = dataView<{ count: number; id: string }>('Counter')({
     count: true,
-    doubled: computed<{ count: number }, number>({
+    doubled: memo<{ count: number }, number>({
       resolve: (_item, { count }) => Number(count) * 2,
       select: { count: field('count') },
     }),

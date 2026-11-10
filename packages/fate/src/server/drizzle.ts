@@ -33,12 +33,7 @@ import { isRecord } from '../record.ts';
 import type { AnyRecord } from '../types.ts';
 import { withConnection } from './connection.ts';
 import type { ConnectionResult } from './connection.ts';
-import {
-  attachComputedState,
-  isDataView,
-  type ComputedSelection,
-  type DataView,
-} from './dataView.ts';
+import { attachComputedState, isDataView, type MemoSelection, type DataView } from './dataView.ts';
 import {
   createSourceRegistry,
   resolveSourceById,
@@ -344,7 +339,7 @@ const addColumnField = (fields: Set<string>, field: string) => {
 
 const addComputedSelectionColumns = (
   fields: Set<string>,
-  select?: Record<string, ComputedSelection>,
+  select?: Record<string, MemoSelection>,
 ) => {
   if (!select) {
     return;

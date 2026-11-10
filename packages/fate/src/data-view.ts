@@ -21,11 +21,11 @@ type ResolverAuthorize<Item extends AnyRecord, Context> = Bivariant<
   (item: Item, context?: Context, args?: AnyRecord) => Promise<boolean> | boolean
 >;
 
-type ComputedFieldOptions = {
+type MemoFieldOptions = {
   args?: AnyRecord | ((args: AnyRecord) => AnyRecord);
 };
 
-export type FieldSelection<Path extends string = string> = ComputedFieldOptions & {
+export type FieldSelection<Path extends string = string> = MemoFieldOptions & {
   kind: 'field';
   path: Path;
 };
@@ -45,58 +45,57 @@ export type CountSelection = {
   where?: CountWhere;
 };
 
-export type ComputedSelection = CountSelection | FieldSelection;
+export type MemoSelection = CountSelection | FieldSelection;
 
-type ComputedSelectInput = Record<string, ComputedSelection | ComputedFieldOptions | true>;
-type NormalizeComputedSelection<
-  Selection,
-  Name extends string,
-> = Selection extends ComputedSelection ? Selection : FieldSelection<Name>;
-type NormalizeComputedSelect<Select> = {
-  [Key in keyof Select]: NormalizeComputedSelection<Select[Key], Key & string>;
+type MemoSelectInput = Record<string, MemoSelection | MemoFieldOptions | true>;
+type NormalizeMemoSelection<Selection, Name extends string> = Selection extends MemoSelection
+  ? Selection
+  : FieldSelection<Name>;
+type NormalizeMemoSelect<Select> = {
+  [Key in keyof Select]: NormalizeMemoSelection<Select[Key], Key & string>;
 };
 
-type ComputedPathValue<Item, Path extends string> = string extends Path
+type MemoPathValue<Item, Path extends string> = string extends Path
   ? unknown
   : Item extends null | undefined
     ? Item | undefined
     : Item extends ReadonlyArray<infer Entry>
-      ? Array<ComputedPathValue<Entry, Path>>
+      ? Array<MemoPathValue<Entry, Path>>
       : Path extends `${infer Name}.${infer Rest}`
         ? Name extends keyof Item
-          ? ComputedPathValue<Item[Name], Rest> | undefined
+          ? MemoPathValue<Item[Name], Rest> | undefined
           : unknown
         : Path extends keyof Item
           ? Item[Path]
           : unknown;
 
-type ComputedDependency<Item, Selection> = Selection extends CountSelection
+type MemoDependency<Item, Selection> = Selection extends CountSelection
   ? number
   : Selection extends FieldSelection<infer Path>
-    ? ComputedPathValue<Item, Path>
+    ? MemoPathValue<Item, Path>
     : unknown;
 
-type ComputedDeps<Item, Select extends Record<string, ComputedSelection> | undefined> =
-  Select extends Record<string, ComputedSelection>
-    ? { [Key in keyof Select]: ComputedDependency<Item, Select[Key]> }
+type MemoDeps<Item, Select extends Record<string, MemoSelection> | undefined> =
+  Select extends Record<string, MemoSelection>
+    ? { [Key in keyof Select]: MemoDependency<Item, Select[Key]> }
     : Record<string, unknown>;
 
-type ComputedResolve<
+type MemoResolve<
   Item extends AnyRecord,
   Result,
-  Select extends Record<string, ComputedSelection> | undefined,
+  Select extends Record<string, MemoSelection> | undefined,
   Context,
 > = Bivariant<
   (
     item: Item,
-    deps: ComputedDeps<Item, Select>,
+    deps: MemoDeps<Item, Select>,
     context?: Context,
     args?: AnyRecord,
   ) => Promise<Result> | Result
 >;
 
 /**
- * Field configuration for selecting and resolving a computed value on the backend.
+ * Field configuration for selecting and resolving a value on the backend.
  */
 export type ResolverField<Item extends AnyRecord, Result, Context> = {
   authorize?: ResolverAuthorize<Item, Context>;
@@ -105,21 +104,22 @@ export type ResolverField<Item extends AnyRecord, Result, Context> = {
   select?: ResolverSelect<Context>;
 };
 
-export type ComputedField<
+export type MemoField<
   Item extends AnyRecord,
   Result,
   Context,
-  Select extends Record<string, ComputedSelection> | undefined = Record<string, ComputedSelection>,
+  Select extends Record<string, MemoSelection> | undefined = Record<string, MemoSelection>,
 > = {
   authorize?: ResolverAuthorize<Item, Context>;
+  /** @hidden */
   kind: 'computed';
-  resolve: ComputedResolve<Item, Result, Select, Context>;
+  resolve: MemoResolve<Item, Result, Select, Context>;
   select?: Select;
 };
 
 export type DataField<Item extends AnyRecord> =
   | true
-  | ComputedField<Item, any, any, any>
+  | MemoField<Item, any, any, any>
   | DataView<AnyRecord>
   | ResolverField<Item, any, any>;
 
@@ -286,7 +286,7 @@ export function resolver<Item extends AnyRecord, Result = unknown, Context = unk
 
 export const field = <Path extends string>(
   path: Path,
-  options?: ComputedFieldOptions,
+  options?: MemoFieldOptions,
 ): FieldSelection<Path> => ({
   ...options,
   kind: 'field',
@@ -299,16 +299,20 @@ export const count = (relation: string, options?: { where?: CountWhere }): Count
   where: options?.where,
 });
 
-export function computed<
+/**
+ * Defines a field from selected dependencies. Client views share its result until
+ * a dependency changes; server data views resolve it from the selected source data.
+ */
+export function memo<
   Item extends AnyRecord,
   Result = unknown,
   Context = unknown,
-  const Select extends ComputedSelectInput | undefined = ComputedSelectInput,
+  const Select extends MemoSelectInput | undefined = MemoSelectInput,
 >(config: {
   authorize?: ResolverAuthorize<Item, Context>;
-  resolve: ComputedResolve<Item, Result, NormalizeComputedSelect<Select>, Context>;
+  resolve: MemoResolve<Item, Result, NormalizeMemoSelect<Select>, Context>;
   select?: Select;
-}): ComputedField<Item, Result, Context, NormalizeComputedSelect<Select>> {
+}): MemoField<Item, Result, Context, NormalizeMemoSelect<Select>> {
   const { select, ...definition } = config;
   return {
     kind: 'computed' as const,
@@ -323,10 +327,16 @@ export function computed<
               ? selection
               : field(name, selection),
         ]),
-      ) as NormalizeComputedSelect<Select>,
+      ) as NormalizeMemoSelect<Select>,
     }),
   };
 }
+
+/**
+ * @deprecated Use `memo` instead.
+ * @hidden
+ */
+export const computed = memo;
 
 type NonNullish<T> = Exclude<T, null | undefined>;
 
@@ -345,8 +355,8 @@ type ResolverResult<Field> =
       : Awaited<ReturnType<Field['resolve']>>
     : never;
 
-type ComputedResult<Field> =
-  Field extends ComputedField<AnyRecord, any, any, any>
+type MemoResult<Field> =
+  Field extends MemoField<AnyRecord, any, any, any>
     ? Field['authorize'] extends ResolverAuthorize<any, any>
       ? Awaited<ReturnType<Field['resolve']>> | null
       : Awaited<ReturnType<Field['resolve']>>
@@ -375,8 +385,8 @@ type RawFieldResult<
     ? Key extends keyof Item
       ? RelationResult<Item[Key], Field>
       : never
-    : Field extends ComputedField<Item, any, any, any>
-      ? ComputedResult<Field>
+    : Field extends MemoField<Item, any, any, any>
+      ? MemoResult<Field>
       : Field extends ResolverField<Item, any, any>
         ? ResolverResult<Field>
         : never;
@@ -401,3 +411,20 @@ export type Entity<
   Name extends string,
   Replacements extends Record<string, unknown> = Record<never, never>,
 > = WithTypename<Omit<DataViewResult<TView>, keyof Replacements> & Replacements, Name>;
+
+/**
+ * @deprecated Use `MemoField` instead.
+ * @hidden
+ */
+export type ComputedField<
+  Item extends AnyRecord,
+  Result,
+  Context,
+  Select extends Record<string, MemoSelection> | undefined = Record<string, MemoSelection>,
+> = MemoField<Item, Result, Context, Select>;
+
+/**
+ * @deprecated Use `MemoSelection` instead.
+ * @hidden
+ */
+export type ComputedSelection = MemoSelection;

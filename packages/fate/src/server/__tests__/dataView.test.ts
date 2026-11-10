@@ -3,7 +3,7 @@ import { SelectionOf, ViewData } from '../../types.ts';
 import { view } from '../../view.ts';
 import {
   attachComputedState,
-  computed,
+  memo,
   count,
   createResolver,
   createViewPlan,
@@ -72,10 +72,10 @@ test('resolvers can add prisma selections and compute values', async () => {
   expect(item).toEqual({ id: 'cat-1', postCount: 4 });
 });
 
-test('computed fields can resolve hidden source dependencies', async () => {
+test('memo fields can resolve hidden source dependencies', async () => {
   type User = { email: string; id: string; name: string };
   const view = dataView<User>('User')({
-    email: computed({
+    email: memo({
       resolve: (_item: User, { email }) => {
         expectTypeOf(email).toEqualTypeOf<string>();
         return email;
@@ -108,10 +108,10 @@ test('computed fields can resolve hidden source dependencies', async () => {
   });
 });
 
-test('computed dependency paths project scalar values across relation lists', async () => {
+test('memo dependency paths project scalar values across relation lists', async () => {
   type Project = { id: string; tasks: Array<{ done: boolean }> };
   const view = dataView<Project>('Project')({
-    completed: computed({
+    completed: memo({
       resolve: (_item: Project, { done, total }) => {
         expectTypeOf(done).toEqualTypeOf<Array<boolean> | undefined>();
         expectTypeOf(total).toEqualTypeOf<number>();
@@ -132,9 +132,9 @@ test('computed dependency paths project scalar values across relation lists', as
   await expect(selection.resolve(project)).resolves.toEqual({ completed: '1 of 2', id: 'p1' });
 });
 
-test('computed fields can resolve conflicting relation counts from attached state', async () => {
+test('memo fields can resolve conflicting relation counts from attached state', async () => {
   const view = dataView<{ id: string }>('Event')({
-    goingCount: computed<{ id: string }, number>({
+    goingCount: memo<{ id: string }, number>({
       resolve: (_item, deps) => (deps.count as number) ?? 0,
       select: {
         count: count('attendees', {
@@ -143,7 +143,7 @@ test('computed fields can resolve conflicting relation counts from attached stat
       },
     }),
     id: true,
-    waitlistCount: computed<{ id: string }, number>({
+    waitlistCount: memo<{ id: string }, number>({
       resolve: (_item, deps) => (deps.count as number) ?? 0,
       select: {
         count: count('attendees', {
@@ -617,14 +617,14 @@ test('collectDataViewConfigs reads list order defaults', () => {
   expect(config?.view).toBe(postView);
 });
 
-test('server computed fields reject client dependency arguments', () => {
+test('server memo fields reject client dependency arguments', () => {
   const view = dataView<{ title: string }>('Post')({
-    label: computed({
+    label: memo({
       resolve: (_post: { title: string }, { title }) => title,
       select: { title: { args: { locale: 'ja' } } },
     }),
   });
   expect(() => createResolver({ select: ['label'], view })).toThrow(
-    'Parameterized computed dependencies are only supported in client schemas',
+    'Parameterized memo dependencies are only supported in client schemas',
   );
 });

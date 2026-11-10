@@ -165,16 +165,16 @@ When a post first enters the cache, fate supplies the missing client fields from
 
 Choose field names that do not already exist on the server. The `input` parser can be any object with a `parse(unknown)` method, such as a Zod schema.
 
-## Computed Fields
+## Memo Fields
 
-Let's extend our counter with a field that shows twice its value. We can define this with `computed` and select the fields it depends on:
+Let's extend our counter with a field that shows twice its value. We can define this with `memo` and select the fields it depends on:
 
 ```ts
-import { computed, dataView } from 'react-fate';
+import { memo, dataView } from 'react-fate';
 
 type CounterData = { id: string; value: number };
 const counter = dataView<CounterData>('Counter')({
-  doubled: computed({
+  doubled: memo({
     resolve: (_item: CounterData, { value }) => value * 2,
     select: { value: true },
   }),
@@ -185,7 +185,7 @@ const counter = dataView<CounterData>('Counter')({
 
 A component can now select `doubled: true` in its view. fate reads `value` for the computation, calculates `doubled`, and makes the result available to the component. Incrementing the counter updates components that select `doubled` too, even if they don't select `value` themselves.
 
-Computed fields run when they are read. fate reuses the result until a dependency or field argument changes, so we don't need to keep the derived value in sync ourselves or provide a default for it. Computed fields can also depend on other computed fields.
+Memo fields run when they are read. fate reuses the result until a dependency or field argument changes, so we don't need to keep the derived value in sync ourselves or provide a default for it. Memo fields can also depend on other memo fields.
 
 Just like a view, `select` uses `true` to select a field by name. Use `field('path')` to give a dependency a different name or read through a relationship. For example, `field('tasks.done')` returns an array of completion values when the task list is available.
 
@@ -198,7 +198,7 @@ Other components reading the same field share its result. Treat objects received
 Let's say our blog supports multiple languages and we want to display a post's title in English. We can pass arguments to the dependency just like we do in a view:
 
 ```ts
-localizedTitle: computed({
+localizedTitle: memo({
   resolve: (_post: PostData, { title }) => title.toUpperCase(),
   select: { title: { args: { locale: 'en' } } },
 }),
@@ -206,20 +206,20 @@ localizedTitle: computed({
 
 Now `localizedTitle` reads the English title, even if another component requests `title` in a different language. Without `args`, the dependency reads the title with its default arguments.
 
-We can also let the component choose the language by passing the computed field's arguments through to `title`:
+We can also let the component choose the language by passing the memo field's arguments through to `title`:
 
 ```ts
-localizedTitle: computed({
+localizedTitle: memo({
   resolve: (_post: PostData, { title }) => title.toUpperCase(),
   select: { title: { args: ({ locale }) => ({ locale }) } },
 }),
 ```
 
-A component can now select `localizedTitle: { args: { locale: 'en' } }`. Components reading the same post with the same arguments share the result, including when they use different views. If a `network-only` request updates that title, components reading `localizedTitle` update too. The calculation runs when the field is read, so unused computed fields don't run just because data was fetched.
+A component can now select `localizedTitle: { args: { locale: 'en' } }`. Components reading the same post with the same arguments share the result, including when they use different views. If a `network-only` request updates that title, components reading `localizedTitle` update too. The calculation runs when the field is read, so unused memo fields don't run just because data was fetched.
 
 For a dependency with a different name or a relationship path, use `field('author.name', { args: { locale: 'en' } })`. These arguments apply to `name`. Argument functions must be pure. Selecting dependencies with arguments is currently supported in client schemas.
 
-Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client computed fields.
+Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client memo fields.
 
 ## Relationships
 
@@ -234,7 +234,7 @@ store.append('Board', boardId, 'tasks', taskId);
 
 `store.append` adds the task without requiring us to read and copy the board's task list. The task and its list membership commit together. Appends preserve additions from other mutations, and an ID already in the list keeps its position. The objects being appended must already exist or have been created earlier in the mutation.
 
-Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate computed values. Use views to read computed fields and remote mutations to change server fields.
+Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate memo values. Use views to read memo fields and remote mutations to change server fields.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
 

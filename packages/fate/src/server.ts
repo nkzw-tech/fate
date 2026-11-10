@@ -10,6 +10,8 @@
 export type {
   ComputedField,
   ComputedSelection,
+  MemoField,
+  MemoSelection,
   CountSelection,
   CountWhere,
   DataViewListOptions,
@@ -48,6 +50,7 @@ export type { FateServer, FateServerManifest, InferFateAPI, NativeFateAPI } from
 export { FateRequestError } from './protocol.ts';
 export {
   computed,
+  memo,
   count,
   createResolver,
   dataView,

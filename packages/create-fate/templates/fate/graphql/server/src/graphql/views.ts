@@ -1,4 +1,4 @@
-import { computed, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
+import { memo, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,
@@ -39,7 +39,7 @@ export type EventItem = PrismaEvent & {
 };
 
 export const userDataView = dataView<PrismaUser>('User')({
-  email: computed<PrismaUser, string | null, AppContext>({
+  email: memo<PrismaUser, string | null, AppContext>({
     authorize: ({ id }, context) => context?.sessionUser?.id === id,
     resolve: (_item, deps) => (deps.email as string | null) ?? null,
     select: {
@@ -65,7 +65,7 @@ export const categorySummaryDataView = dataView<PrismaCategory>('Category')({
 const basePost = {
   author: userDataView,
   category: categorySummaryDataView,
-  commentCount: computed<PostItem, number>({
+  commentCount: memo<PostItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('comments'),
@@ -99,7 +99,7 @@ export const categoryDataView = dataView<CategoryItem>('Category')({
   description: true,
   id: true,
   name: true,
-  postCount: computed<CategoryItem, number>({
+  postCount: memo<CategoryItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('posts'),
@@ -117,7 +117,7 @@ export const eventAttendeeDataView = dataView<EventAttendeeItem>('EventAttendee'
 
 export const eventDataView = dataView<EventItem>('Event')({
   attendees: list(eventAttendeeDataView, { orderBy: { createdAt: 'asc', id: 'asc' } }),
-  attendingCount: computed<EventItem, number>({
+  attendingCount: memo<EventItem, number>({
     resolve: (_item, deps) => (deps.count as number) ?? 0,
     select: {
       count: count('attendees', {
