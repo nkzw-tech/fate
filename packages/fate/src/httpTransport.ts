@@ -244,7 +244,7 @@ const responseError = async (response: Response): Promise<Error> => {
 const assertProtocolResponse = (value: unknown): FateProtocolResponse => {
   if (
     !isRecord(value) ||
-    (value.version !== 1 && value.version !== 2) ||
+    (value.version !== 1 && value.version !== 2 && value.version !== 3) ||
     !Array.isArray(value.results) ||
     value.results.some((entry) => !isRecord(entry) || typeof entry.id !== 'string')
   ) {
@@ -341,7 +341,11 @@ export function createHTTPTransport<
         ...(control ? { signal: control.signal } : {}),
         body: JSON.stringify({
           operations: batch.map((entry) => entry.operation),
-          version: batch.some((entry) => entry.operation.mutation) ? 2 : 1,
+          version: batch.some((entry) => entry.operation.mutation?.id.startsWith('fate:'))
+            ? 3
+            : batch.some((entry) => entry.operation.mutation)
+              ? 2
+              : 1,
         } satisfies FateProtocolRequest),
         headers: requestHeadersValue,
         method: 'POST',

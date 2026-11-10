@@ -19,7 +19,10 @@ afterEach(() => {
     db.close();
   }
 });
-const setup = (enabled = true) => {
+const setup = (
+  enabled = true,
+  options: { allowLegacyIdentities?: boolean; maxAge?: number } = {},
+) => {
   const db = new DatabaseSync(':memory:');
   databases.push(db);
   db.exec(
@@ -69,7 +72,11 @@ const setup = (enabled = true) => {
     }
     return { id: 'counter', value: ctx.db.prepare('SELECT value FROM counter').get()!.value };
   });
-  const idempotency = createMutationIdempotency({ scope: (ctx: Context) => ctx.scope, store });
+  const idempotency = createMutationIdempotency({
+    ...options,
+    scope: (ctx: Context) => ctx.scope,
+    store,
+  });
   const server = createFateServer({
     context: () => ({ db, scope: 'account:1' }),
     idempotency: enabled ? idempotency : undefined,
@@ -266,7 +273,7 @@ test('receipt-only recovery never executes an absent mutation and replays an exi
   ]);
 });
 
-test.each([1, 3])(
+test.each([1, 4])(
   'receipt-only metadata rejects unsupported protocol version %s',
   async (version) => {
     const { fetch, resolve } = setup();
@@ -291,3 +298,110 @@ test.each([1, 3])(
     expect(resolve).not.toHaveBeenCalled();
   },
 );
+
+test('expired identities cannot execute again after their receipts are pruned', async () => {
+  const now = Date.now();
+  const current = setup();
+  const id = `fate:1:${now}:${now + 1000}:${crypto.randomUUID()}`;
+  const identity = { id, scope: 'account:1' };
+  await current.transport.mutateDurably!('increment', {}, new Set(['value']), identity);
+  const receipt = JSON.parse(String(current.db.prepare('SELECT value FROM receipts').get()!.value));
+  expect(receipt.expiresAt).toBe(now + 1000);
+  current.db.exec('DELETE FROM receipts');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 1000);
+  try {
+    await expect(
+      current.transport.mutateDurably!('increment', {}, new Set(['value']), identity),
+    ).rejects.toMatchObject({ code: 'MUTATION_EXPIRED', status: 410 });
+    await expect(
+      current.transport.mutateDurably!('increment', {}, new Set(['value']), {
+        ...identity,
+        replayOnly: true,
+      }),
+    ).rejects.toMatchObject({ status: 410 });
+    expect(current.resolve).toHaveBeenCalledTimes(1);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test('rejects future clocks, excessive lifetimes, malformed identities, and retired legacy identities', async () => {
+  const now = Date.now();
+  const current = setup(true, { allowLegacyIdentities: false, maxAge: 1000 });
+  for (const id of [
+    'old-key',
+    'fate:1:invalid',
+    `fate:1:${now}:${now + 1001}:${crypto.randomUUID()}`,
+    `fate:1:${now + 600_000}:${now + 600_001}:${crypto.randomUUID()}`,
+  ]) {
+    await expect(
+      current.transport.mutateDurably!('increment', {}, new Set(['value']), {
+        id,
+        scope: 'account:1',
+      }),
+    ).rejects.toThrow();
+  }
+  expect(current.resolve).not.toHaveBeenCalled();
+});
+
+test('bounded identities fail closed against servers that only support unbounded receipts', async () => {
+  const effect = vi.fn();
+  const transport = createHTTPTransport<{
+    mutations: { increment: { input: object; output: object } };
+  }>({
+    fetch: async (_url, init) => {
+      const request = JSON.parse(String(init?.body));
+      if (request.version !== 2) {
+        return Response.json({ error: 'Unsupported protocol.' }, { status: 400 });
+      }
+      effect();
+      return Response.json({ results: [], version: 2 });
+    },
+    url: 'http://old.test/',
+  });
+  const now = Date.now();
+  await expect(
+    transport.mutateDurably!('increment', {}, new Set(), {
+      id: `fate:1:${now}:${now + 1000}:${crypto.randomUUID()}`,
+      scope: 'account:1',
+    }),
+  ).rejects.toThrow();
+  expect(effect).not.toHaveBeenCalled();
+});
+
+test('rechecks expiry after waiting for the receipt lock', async () => {
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  const resolve = vi.fn(async () => 'saved');
+  const write = vi.fn();
+  const idempotency = createMutationIdempotency({
+    scope: () => 'account:1',
+    store: {
+      transaction: async (context, _scope, _id, run) =>
+        run({
+          context,
+          read: async () => {
+            clock.mockReturnValue(now + 1000);
+            return undefined;
+          },
+          write,
+        }),
+    },
+  });
+  try {
+    await expect(
+      idempotency.execute({
+        ctx: {},
+        identity: { id: `fate:1:${now}:${now + 1000}:${crypto.randomUUID()}`, scope: 'account:1' },
+        input: {},
+        name: 'increment',
+        resolve,
+        select: [],
+      }),
+    ).rejects.toMatchObject({ code: 'MUTATION_EXPIRED', status: 410 });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    clock.mockRestore();
+  }
+});

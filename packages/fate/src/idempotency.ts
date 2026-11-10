@@ -1,4 +1,11 @@
 import { decodeHydrationValue, encodeHydrationValue } from './hydration.ts';
+import {
+  defaultMutationMaxAge,
+  expiredMutation,
+  mutationClockSkew,
+  readMutationLifetime,
+  validateMutationMaxAge,
+} from './mutation-identity.ts';
 import { FateRequestError } from './protocol.ts';
 import type {
   MutationIdempotency,
@@ -12,6 +19,7 @@ export type {
 } from './server/idempotency-types.ts';
 
 export type MutationReceipt = Readonly<{
+  expiresAt?: number;
   fingerprint: string;
   result: ReturnType<typeof encodeHydrationValue>;
 }>;
@@ -19,7 +27,9 @@ export type MutationReceipt = Readonly<{
 /**
  * All methods and the resolver run in ONE application database transaction.
  * The adapter must serialize concurrent calls for the same scope and ID,
- * including calls from different processes. Receipts must not expire.
+ * including calls from different processes. Bounded receipts may be deleted after
+ * expiresAt plus a clock-skew margin. Legacy receipts must remain while legacy
+ * identities are accepted.
  */
 export interface IdempotencyStore<Context, TransactionContext extends Context = Context> {
   transaction<T>(
@@ -39,9 +49,13 @@ export function createMutationIdempotency<
   Context,
   TransactionContext extends Context = Context,
 >(options: {
+  allowLegacyIdentities?: boolean;
+  maxAge?: number;
   scope(context: Context): string | Promise<string>;
   store: IdempotencyStore<Context, TransactionContext>;
 }): MutationIdempotency<Context> {
+  const maxAge = options.maxAge ?? defaultMutationMaxAge;
+  validateMutationMaxAge(maxAge);
   return {
     async execute<Result>({
       ctx,
@@ -65,11 +79,35 @@ export function createMutationIdempotency<
       ) {
         throw new FateRequestError('BAD_REQUEST', 'Invalid mutation identity.');
       }
+      const lifetime = readMutationLifetime(identity.id);
+      if (!lifetime && options.allowLegacyIdentities === false) {
+        throw expiredMutation();
+      }
+      const validateLifetime = () => {
+        if (!lifetime) {
+          return;
+        }
+        if (lifetime.expiresAt <= Date.now()) {
+          throw expiredMutation();
+        }
+        if (
+          lifetime.createdAt > Date.now() + mutationClockSkew ||
+          lifetime.expiresAt - lifetime.createdAt > maxAge
+        ) {
+          throw new FateRequestError(
+            'BAD_REQUEST',
+            'Mutation lifetime exceeds the server policy or the client clock is ahead.',
+          );
+        }
+      };
+      validateLifetime();
       const fingerprint = JSON.stringify(
         encodeHydrationValue(sortObjectKeys({ input, name, select: [...select].sort() })),
       );
       return options.store.transaction(ctx, scope, identity.id, async (transaction) => {
+        validateLifetime();
         const receipt = await transaction.read();
+        validateLifetime();
         if (receipt) {
           if (receipt.fingerprint !== fingerprint) {
             throw new FateRequestError(
@@ -84,7 +122,11 @@ export function createMutationIdempotency<
         }
         const result = await resolve(transaction.context);
         const encoded = encodeHydrationValue(result);
-        await transaction.write({ fingerprint, result: encoded });
+        await transaction.write({
+          ...(lifetime && { expiresAt: lifetime.expiresAt }),
+          fingerprint,
+          result: encoded,
+        });
         return result;
       });
     },

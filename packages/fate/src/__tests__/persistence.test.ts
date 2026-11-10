@@ -29,6 +29,7 @@ const setup = (
       input: { id: string; title: string },
       identity?: MutationIdentity,
     ) => Promise<unknown>;
+    mutationMaxAge?: number;
     online?: () => boolean;
     storage?: PersistenceStorage;
   } = {},
@@ -46,6 +47,7 @@ const setup = (
     persistence: createPersistence({
       key: options.key ?? 'account:1',
       maxBytes: options.maxBytes,
+      mutationMaxAge: options.mutationMaxAge,
       online: options.online ?? (() => false),
       retryDelay: 20,
       storage,
@@ -1382,4 +1384,50 @@ test('cache-only observers restore saved requests without fetching on a miss', a
   await vi.waitFor(() => expect(missing.getSnapshot().status).toBe('missing'));
   expect(empty.fetchById).not.toHaveBeenCalled();
   stop();
+});
+
+test('expired mutations survive reload as inspectable failures without getting a new identity', async () => {
+  const original = setup({ mutationMaxAge: 1000 });
+  await original.client.request({ note: { id: '1', view: NoteView } });
+  const pending = original.client.mutations
+    .edit({ input: { id: '1', title: 'Old' }, optimistic: { title: 'Old' } })
+    .catch(() => {});
+  await queued(original.session);
+  const saved = original.session.getSnapshot().mutations[0];
+  expect(saved.expiresAt).toBeGreaterThan(Date.now());
+  original.session.dispose();
+  await pending;
+  const next = setup({
+    mutate: async (_input, identity) => {
+      expect(identity?.id).toBe(saved.id);
+      throw new GraphQLRequestError([{ message: 'Expired' }], { status: 410 });
+    },
+    online: () => true,
+    storage: original.storage,
+  });
+  await vi.waitFor(() =>
+    expect(next.session.getSnapshot().mutations[0]).toMatchObject({
+      failureReason: 'expired',
+      id: saved.id,
+      input: { id: '1', title: 'Old' },
+      status: 'failed',
+    }),
+  );
+  expect(
+    (await next.client.readView(NoteView, next.client.ref('Note', '1', NoteView))).data.title,
+  ).toBe('Server');
+  next.session.retry();
+  expect(next.mutate).toHaveBeenCalledTimes(1);
+  next.session.dispose();
+  const again = setup({ online: () => true, storage: original.storage });
+  await again.session.ready;
+  expect(again.session.getSnapshot().mutations[0]).toMatchObject({
+    expiresAt: saved.expiresAt,
+    failureReason: 'expired',
+    id: saved.id,
+    status: 'failed',
+  });
+  expect(again.mutate).not.toHaveBeenCalled();
+  await again.session.discard(saved.id);
+  expect(again.session.getSnapshot().mutations).toEqual([]);
 });

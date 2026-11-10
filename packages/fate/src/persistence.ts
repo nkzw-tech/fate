@@ -10,6 +10,12 @@ import {
   encodeHydrationValue,
 } from './hydration.ts';
 import {
+  createMutationId,
+  defaultMutationMaxAge,
+  readMutationLifetime,
+  validateMutationMaxAge,
+} from './mutation-identity.ts';
+import {
   getErrorStatusCode,
   isResolvedMutationInsertion,
   isResolvedMutationRemoval,
@@ -96,6 +102,8 @@ export type PersistenceOptions = Readonly<{
   maxAge?: number;
   /** Encoded storage budget, including the mutation journal. Defaults to 25 MiB. */
   maxBytes?: number;
+  /** Validity of newly queued mutations. Defaults to 30 days. Retries keep the original expiry. */
+  mutationMaxAge?: number;
   /** Override connectivity for native runtimes or controlled offline testing. */
   online?: () => boolean;
   retryDelay?: number;
@@ -140,6 +148,7 @@ export function createPersistence({
   key,
   maxAge = 86_400_000,
   maxBytes = 25 * 1024 * 1024,
+  mutationMaxAge = defaultMutationMaxAge,
   online = () => typeof navigator === 'undefined' || navigator.onLine,
   retryDelay = 1000,
   storage,
@@ -160,10 +169,21 @@ export function createPersistence({
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error('fate: Persistence maxBytes must be a positive safe integer.');
   }
+  validateMutationMaxAge(mutationMaxAge);
   const clientStateOptions = resolveClientStateOptions(clientState, maxBytes);
   return {
     attach: (client) =>
-      new Session(client, storage, key, online, retryDelay, maxAge, maxBytes, clientStateOptions),
+      new Session(
+        client,
+        storage,
+        key,
+        online,
+        retryDelay,
+        maxAge,
+        maxBytes,
+        clientStateOptions,
+        mutationMaxAge,
+      ),
   };
 }
 
@@ -210,6 +230,7 @@ class Session implements PersistenceRuntime {
     maxAge: number,
     maxBytes: number,
     clientStateOptions: ReturnType<typeof resolveClientStateOptions>,
+    private readonly mutationMaxAge: number,
   ) {
     this.journal = new PersistenceJournal(storage, key, (entry) => {
       decodeCommand(entry.command);
@@ -268,6 +289,8 @@ class Session implements PersistenceRuntime {
           .filter((entry) => entry.status !== 'confirmed')
           .map((entry) => ({
             error: entry.error?.message,
+            expiresAt: readMutationLifetime(entry.id)?.expiresAt,
+            ...(entry.error?.status === 410 && { failureReason: 'expired' as const }),
             id: entry.id,
             input: this.commands.get(entry.id)!.input,
             name: this.command(entry).key,
@@ -411,9 +434,13 @@ class Session implements PersistenceRuntime {
         } else {
           operation?.rollback();
           this.waiters.get(entry.id)?.reject(
-            new FateRequestError('BAD_REQUEST', entry.error?.message ?? 'Mutation failed.', {
-              status: entry.error?.status ?? 400,
-            }),
+            new FateRequestError(
+              entry.error?.status === 410 ? 'MUTATION_EXPIRED' : 'BAD_REQUEST',
+              entry.error?.message ?? 'Mutation failed.',
+              {
+                status: entry.error?.status ?? 400,
+              },
+            ),
           );
         }
         this.operations.delete(entry.id);
@@ -520,7 +547,7 @@ class Session implements PersistenceRuntime {
     const encoded = encodeCommand(command);
     await this.ready;
     this.assertActive();
-    const id = crypto.randomUUID();
+    const id = createMutationId(this.mutationMaxAge);
     const admission = this.mutationAdmission.then(async () => {
       if (this.needsCheckpoint) {
         await this.flushCache().catch((error: unknown) => this.report(error));
@@ -813,11 +840,16 @@ class Session implements PersistenceRuntime {
       if (this.disposed) {
         return;
       }
-      if (!(error instanceof Error) || getErrorStatusCode(error) !== 404) {
+      if (!(error instanceof Error) || ![404, 410].includes(getErrorStatusCode(error) ?? 0)) {
         throw error;
       }
       operation.rollback(false);
-      this.waiters.get(id)?.reject(mutationDiscardedError());
+      this.waiters
+        .get(id)
+        ?.reject(getErrorStatusCode(error) === 410 ? error : mutationDiscardedError());
+      if (getErrorStatusCode(error) === 410) {
+        this.report(error);
+      }
     }
     this.forgetOperation(id);
   }

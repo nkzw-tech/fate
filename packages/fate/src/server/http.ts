@@ -402,7 +402,7 @@ const operationKinds = new Set(['byId', 'list', 'mutation', 'query']);
 const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
   if (
     !isRecord(value) ||
-    (value.version !== 1 && value.version !== 2) ||
+    (value.version !== 1 && value.version !== 2 && value.version !== 3) ||
     !Array.isArray(value.operations)
   ) {
     throw new FateRequestError('BAD_REQUEST', 'Invalid Fate protocol request.');
@@ -422,7 +422,7 @@ const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
 
     if (
       operation.mutation !== undefined &&
-      (value.version !== 2 ||
+      ((value.version !== 2 && value.version !== 3) ||
         operation.kind !== 'mutation' ||
         !isRecord(operation.mutation) ||
         (operation.mutation.replayOnly !== undefined && operation.mutation.replayOnly !== true) ||

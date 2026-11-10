@@ -20,6 +20,8 @@ export interface Persistence {
 
 export type PersistedMutationStatus = Readonly<{
   error?: string;
+  expiresAt?: number;
+  failureReason?: 'expired';
   id: string;
   input: unknown;
   name: string;

@@ -1,8 +1,8 @@
 import type { MutationIdentity } from './persistence-types.ts';
 import type { Pagination } from './types.ts';
 
-/** Version 2 requires support for durable mutation identities and receipt-only recovery. */
-export type FateProtocolVersion = 1 | 2;
+/** Version 2 requires durable identities; version 3 also requires enforcement of identity expiry. */
+export type FateProtocolVersion = 1 | 2 | 3;
 
 export type FateOperationKind = 'byId' | 'list' | 'mutation' | 'query';
 
@@ -141,6 +141,7 @@ export type FateProtocolErrorCode =
   | 'FORBIDDEN'
   | 'INTERNAL_ERROR'
   | 'NOT_FOUND'
+  | 'MUTATION_EXPIRED'
   | 'UNAUTHORIZED'
   | 'VALIDATION_ERROR';
 
@@ -180,6 +181,8 @@ export const statusFromErrorCode = (code: FateProtocolErrorCode): number => {
       return 403;
     case 'NOT_FOUND':
       return 404;
+    case 'MUTATION_EXPIRED':
+      return 410;
     case 'INTERNAL_ERROR':
       return 500;
   }
@@ -197,6 +200,9 @@ export const errorCodeFromStatus = (status: number): FateProtocolErrorCode => {
   }
   if (status === 404) {
     return 'NOT_FOUND';
+  }
+  if (status === 410) {
+    return 'MUTATION_EXPIRED';
   }
   return 'INTERNAL_ERROR';
 };

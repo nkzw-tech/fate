@@ -163,7 +163,25 @@ const server = createFateServer({
 
 Your app supplies the database and receipt helpers. Lock each `(scope, id)` across server processes, and use `ctx.db` for mutation writes so they share the receipt's transaction. See the [complete SQLite example](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts).
 
-Keep receipts for as long as an offline client might retry. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
+Keep receipts until their expiry, with a margin for clock differences. See [Receipt Retention](#receipt-retention) before deleting them. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
+
+## Receipt Retention
+
+Let's say a user changes a setting, but closes the app before receiving the server response. When they return, fate retries the same mutation identity. The server can return its saved result without applying the setting again.
+
+New mutations have a fixed lifetime of **30 days**, starting when they enter the queue. You can set `mutationMaxAge` on `createPersistence` to choose a shorter lifetime. The server's `createMutationIdempotency` accepts `maxAge` to limit the lifetime it will accept, also defaulting to 30 days. Configure both sides when choosing a longer lifetime.
+
+The creation time and expiry are part of the opaque mutation ID. Retries and page reloads keep that ID. Increasing the configured lifetime only affects new mutations; it cannot extend an existing mutation's expiry. The server allows a client clock to be up to five minutes ahead and rejects larger differences.
+
+Save the receipt's optional `expiresAt` timestamp alongside its result. Once it has passed, you can delete the receipt. Allow a retention margin for differences between server clocks; for example, run a daily job that deletes receipts which expired more than a day ago. Every server accepting these mutations must enforce expiry before you enable cleanup.
+
+An expired identity receives `MUTATION_EXPIRED` (HTTP 410), even if its receipt has already been deleted. fate rolls back its optimistic update and keeps the input in persistence with `status: 'failed'` and `failureReason: 'expired'`. It does not give the mutation a new identity or send it again. The server may have applied the mutation before its response was lost, so refresh current server state before deciding what to do next. After handling it, use `session.discard(id)` to remove the failed entry.
+
+Native HTTP delivery uses protocol version 3 for expiring identities. Older native servers reject these requests before execution. Custom durable transports must also enforce expiry and preserve the HTTP 410 error.
+
+### Existing Receipts
+
+Older identities have no expiry. By default, `createMutationIdempotency` continues to accept them, and their receipts must remain saved. Set `allowLegacyIdentities: false` after retiring older clients to reject those identities with the same expiry error. Once all server instances enforce that policy, you can retire their receipts as well. Never assign an expiry to an old receipt while a server can still execute its identity after deletion.
 
 ## tRPC, GraphQL, and Custom Transports
 
