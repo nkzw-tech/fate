@@ -9,6 +9,9 @@ beforeEach(() => {
   vi.stubGlobal('navigator', {
     locks: {
       request<T>(key: string, run: () => Promise<T>) {
+        if (key.length > 1024) {
+          throw new DOMException('Lock name exceeds 1024 characters', 'NotSupportedError');
+        }
         const next = (locks.get(key) ?? Promise.resolve()).then(run);
         locks.set(
           key,

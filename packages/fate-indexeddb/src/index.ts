@@ -80,16 +80,29 @@ export function createIndexedDBStorage({
           'fate(indexeddb): Web Locks are required for safe durable writes across tabs.',
         );
       }
-      return navigator.locks.request(`fate:${JSON.stringify([name, key])}`, async () => {
-        // A cache traversal performs many small transactions. Reuse its database
-        // connection for the lock's lifetime, and close it when all work finishes.
-        connectionLeases++;
-        try {
-          return await run();
-        } finally {
-          releaseDatabase();
-        }
-      });
+      const lockName = `fate:${JSON.stringify([name, key])}`;
+      const request = (lockName: string) =>
+        navigator.locks.request(lockName, async () => {
+          // A cache traversal performs many small transactions. Reuse its database
+          // connection for the lock's lifetime, and close it when all work finishes.
+          connectionLeases++;
+          try {
+            return await run();
+          } finally {
+            releaseDatabase();
+          }
+        });
+      return lockName.length <= 1024
+        ? request(lockName)
+        : crypto.subtle
+            .digest('SHA-256', new TextEncoder().encode(lockName))
+            .then((digest) =>
+              request(
+                `fate:sha256:${Array.from(new Uint8Array(digest), (byte) =>
+                  byte.toString(16).padStart(2, '0'),
+                ).join('')}`,
+              ),
+            );
     },
     async read(key) {
       const db = await acquireDatabase();

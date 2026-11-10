@@ -48,6 +48,34 @@ test('uses a database-scoped Web Lock and refuses unsafe fallback', async () => 
   expect(() => storage.exclusive('key', async () => {})).toThrow(/Web Locks/);
 });
 
+test('long lock names fit Safari limits and preserve database and key isolation', async () => {
+  const request = vi.fn(async (key: string, run: () => Promise<unknown>) => {
+    if (key.length > 1024) {
+      throw new DOMException('Lock name exceeds 1024 characters', 'NotSupportedError');
+    }
+    return run();
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  const key = 'schema:'.repeat(1024);
+  const first = createIndexedDBStorage({ name: 'first' });
+  const second = createIndexedDBStorage({ name: 'first' });
+  const other = createIndexedDBStorage({ name: 'other' });
+  await expect(first.exclusive(key, async () => 42)).resolves.toBe(42);
+  await second.exclusive(key, async () => {});
+  await second.exclusive(key + ':other', async () => {});
+  await other.exclusive(key, async () => {});
+  await createIndexedDBStorage({ name: key }).exclusive('short', async () => {});
+  const names = request.mock.calls.map(([name]) => name);
+  expect(names[0]).toBe(names[1]);
+  expect(new Set(names).size).toBe(4);
+  expect(names.every((name) => name.length <= 1024)).toBe(true);
+  await expect(
+    first.exclusive(key, async () => {
+      throw new Error('failed');
+    }),
+  ).rejects.toThrow('failed');
+});
+
 test('bounded scans are ordered and isolated, and batches support deletion', async () => {
   const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
   await storage.writeBatch([
