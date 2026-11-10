@@ -34,6 +34,7 @@ const guideSidebar = [
       { link: '/guide/requests', text: 'Requests' },
       { link: '/guide/deferred-views', text: 'Deferred Views' },
       { link: '/guide/vue', text: 'Vue' },
+      { link: '/guide/devtools', text: 'Devtools' },
     ],
     text: 'Guide',
   },

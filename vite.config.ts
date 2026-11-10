@@ -121,6 +121,7 @@ export default defineConfig({
           'vp run --filter react-fate build',
           'vp run --filter vue-fate build',
           'vp run --filter void-fate build',
+          "vp run --filter '@nkzw/fate-devtools' build",
           "vp run --filter '@nkzw/fate-server' dev:setup",
           "vp run --filter '@nkzw/fate-server-graphql' dev:setup",
           'vp run fate:generate',

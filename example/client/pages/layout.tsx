@@ -1,4 +1,5 @@
 import '../src/App.css';
+import { FateDevtools } from '@nkzw/fate-devtools/react';
 import Stack from '@nkzw/stack';
 import { httpBatchLink } from '@trpc/client';
 import { ReactNode, Suspense, useMemo } from 'react';
@@ -14,6 +15,18 @@ import Section from '../src/ui/Section.tsx';
 import AuthClient from '../src/user/AuthClient.tsx';
 
 const transport = import.meta.env.VITE_FATE_TRANSPORT;
+
+// Void renders HTML on the server, so Vite DevTools cannot inject its dock. Load it manually.
+if (
+  import.meta.env.DEV &&
+  typeof document !== 'undefined' &&
+  !document.querySelector('script[src="/__devtools/embedded.js"]')
+) {
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.src = '/__devtools/embedded.js';
+  document.head.insertAdjacentElement('beforeend', script);
+}
 
 const Thinking = () => (
   <Section>
@@ -77,6 +90,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <Thinking />
         ) : (
           <FateClient client={fate} key={userId}>
+            {import.meta.env.DEV && <FateDevtools />}
             <ErrorBoundary
               fallbackRender={({ error }) => (
                 <Section>
