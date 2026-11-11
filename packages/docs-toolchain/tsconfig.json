@@ -3,6 +3,8 @@
   "exclude": ["../**/src/**/__tests__/**", "../**/src/**/*.test.ts"],
   "include": [
     "../fate/src/**/*.ts",
+    "../fate-devtools/src/**/*.ts",
+    "../fate-devtools/src/**/*.tsx",
     "../fate-indexeddb/src/**/*.ts",
     "../react-fate/src/**/*.tsx",
     "../vue-fate/src/**/*.ts"

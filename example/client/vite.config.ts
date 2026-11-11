@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { fateDevtools } from '@nkzw/fate-devtools/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { voidReact } from '@void/react/plugin';
 import dotenv from 'dotenv';
@@ -28,12 +29,14 @@ const lazyClientPlugins = (): Array<PluginOption> => [
 export default defineConfig({
   build: { outDir: join(root, '../dist/client') },
   cacheDir: join(root, 'node_modules/.vite/default'),
+  devtools: true,
   plugins: [
     ...(lazyPlugins(lazyClientPlugins) ?? []),
     fate({
       module: '@nkzw/fate-server/src/trpc/router.ts',
       transport: process.env.VITE_FATE_TRANSPORT === 'native' ? 'native' : 'trpc',
     }),
+    fateDevtools(),
   ],
   resolve: { conditions: ['@nkzw/source'] },
   server: { port: 6001 },
