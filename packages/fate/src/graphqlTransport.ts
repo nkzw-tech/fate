@@ -16,10 +16,11 @@ import {
   withNormalizationInput,
   type NormalizationInput,
 } from './normalization-input.ts';
+import type { MutationIdentity } from './persistence-types.ts';
 import { abortable, batchReadControl } from './read-control.ts';
 import { isDate, isRecord } from './record.ts';
 import { encodeRefetchArgs, getRefetchFields } from './refetch.ts';
-import type { ReadContext, Transport } from './transport.ts';
+import type { ReadContext, ResolvedArgsPayload, Transport } from './transport.ts';
 import type { AnyRecord, Entity, MutationShape, Pagination, TypeConfig } from './types.ts';
 
 type TransportMutations = Record<string, MutationShape>;
@@ -134,6 +135,7 @@ type GraphQLResponse = {
 
 type PendingOperation = {
   alias: string;
+  identity?: MutationIdentity;
   kind: 'mutation' | 'query';
   reject: (error: unknown) => void;
   resolve: (value: unknown) => void;
@@ -820,6 +822,7 @@ const normalizeGraphQLValue = ({
 const graphQLRequest = async ({
   fetchImpl,
   headers,
+  identity,
   query,
   signal,
   streaming,
@@ -828,6 +831,7 @@ const graphQLRequest = async ({
 }: {
   fetchImpl: FetchLike;
   headers: HeadersFactory | undefined;
+  identity?: MutationIdentity;
   query: string;
   signal?: AbortSignal;
   streaming?: boolean;
@@ -847,7 +851,11 @@ const graphQLRequest = async ({
   signal?.throwIfAborted();
   const response = await fetchImpl(url, {
     ...(signal ? { signal } : {}),
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({
+      ...(identity && { extensions: { fateMutation: identity } }),
+      query,
+      variables,
+    }),
     headers: requestHeadersValue,
     method: 'POST',
   });
@@ -937,7 +945,8 @@ export function createGraphQLTransport<
   }
   let nextId = 0;
   let nextVariableId = 0;
-  const operationArguments = () => {
+  const operationArguments = (durable = false) => {
+    let nextDurableVariableId = 0;
     const variables: NonNullable<PendingOperation['variables']> = {};
     const argumentsForField: ArgumentsForField = (type, field, args, resultType) => {
       if (!schema) {
@@ -974,7 +983,7 @@ export function createGraphQLTransport<
           : args;
       const values = validateGraphQLArguments(schema, definitions, fieldArgs, `${type}.${field}`);
       const entries = Object.entries(values).map(([key, value]) => {
-        const name = `v${++nextVariableId}`;
+        const name = `v${durable ? ++nextDurableVariableId : ++nextVariableId}`;
         variables[name] = { type: definitions[key].type, value };
         return `${key}: $${name}`;
       });
@@ -992,7 +1001,7 @@ export function createGraphQLTransport<
       new Promise<unknown>((resolve, reject) => {
         pending.push({
           ...operation,
-          alias: `f${++nextId}`,
+          alias: operation.identity ? 'result' : `f${++nextId}`,
           reject,
           resolve,
         });
@@ -1016,7 +1025,7 @@ export function createGraphQLTransport<
     if (!operations.length) {
       return;
     }
-    const kind = operations[0].kind;
+    const { identity, kind } = operations[0];
     const control = batchReadControl(operations);
     try {
       const variables = Object.assign(
@@ -1031,7 +1040,8 @@ export function createGraphQLTransport<
       const response = await graphQLRequest({
         fetchImpl,
         headers,
-        query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions} { ${operations
+        identity,
+        query: `${kind} Fate${kind === 'query' ? 'Query' : 'Mutation'}${variableDefinitions}${identity ? ' @fateDurable' : ''} { ${operations
           .map((entry) =>
             incremental
               ? `... @defer(label: "${entry.alias}") { ${entry.alias}: ${entry.selection} }`
@@ -1150,6 +1160,56 @@ export function createGraphQLTransport<
         }
       })(),
     ]);
+  };
+
+  const mutate = <K extends Extract<keyof Mutations, string>>(
+    name: K,
+    input: Mutations[K]['input'],
+    select: Set<string>,
+    selectionArgs?: ResolvedArgsPayload,
+    identity?: MutationIdentity,
+  ) => {
+    const mutation = mutations?.[name];
+    if (!mutation) {
+      throw new Error(`fate(graphql): Missing mutation mapping for '${name}'.`);
+    }
+
+    const { argumentsForField, variables } = operationArguments(Boolean(identity));
+    const field = assertIdentifier(mutation.field, 'mutation');
+    const tree = buildSelectionTree(select);
+    const args =
+      mutation.inputArg === false
+        ? ((input ?? {}) as Record<string, unknown>)
+        : { [mutation.inputArg ?? 'input']: input };
+    const selection =
+      mutation.entity === '__value__' && !mutation.type
+        ? ''
+        : buildRecordSelection({
+            args: selectionArgs,
+            argumentsForField,
+            embedded: mutation.entity === '__value__',
+            path: '',
+            schema,
+            tree,
+            type: mutation.type ?? mutation.entity,
+            types,
+          });
+
+    return enqueue({
+      identity,
+      kind: 'mutation',
+      selection: `${field}${argumentsForField(schema?.mutationType ?? 'Mutation', field, args)}${selection ? ` { ${selection} }` : ''}`,
+      transform: (value) =>
+        normalizeGraphQLValue({
+          decodeNodeId,
+          selection: tree,
+          shape: selection ? 'record' : 'scalar',
+          type: mutation.type ?? mutation.entity,
+          types,
+          value,
+        }),
+      variables,
+    }) as Promise<Mutations[K]['output']>;
   };
 
   const transport: Transport<Mutations> = {
@@ -1320,49 +1380,13 @@ export function createGraphQLTransport<
         variables,
       });
     },
-    mutate(name, input, select, selectionArgs) {
-      const mutation = mutations?.[name as Extract<keyof Mutations, string>];
-      if (!mutation) {
-        throw new Error(`fate(graphql): Missing mutation mapping for '${name}'.`);
-      }
-
-      const { argumentsForField, variables } = operationArguments();
-      const field = assertIdentifier(mutation.field, 'mutation');
-      const tree = buildSelectionTree(select);
-      const args =
-        mutation.inputArg === false
-          ? ((input ?? {}) as Record<string, unknown>)
-          : { [mutation.inputArg ?? 'input']: input };
-      const selection =
-        mutation.entity === '__value__' && !mutation.type
-          ? ''
-          : buildRecordSelection({
-              args: selectionArgs,
-              argumentsForField,
-              embedded: mutation.entity === '__value__',
-              path: '',
-              schema,
-              tree,
-              type: mutation.type ?? mutation.entity,
-              types,
-            });
-
-      return enqueue({
-        kind: 'mutation',
-        selection: `${field}${argumentsForField(schema?.mutationType ?? 'Mutation', field, args)}${selection ? ` { ${selection} }` : ''}`,
-        transform: (value) =>
-          normalizeGraphQLValue({
-            decodeNodeId,
-            selection: tree,
-            shape: selection ? 'record' : 'scalar',
-            type: mutation.type ?? mutation.entity,
-            types,
-            value,
-          }),
-        variables,
-      }) as Promise<Mutations[Extract<keyof Mutations, string>]['output']>;
-    },
-    mutateDurably,
+    mutate,
+    mutateDurably:
+      mutateDurably ??
+      (durableMutations?.length
+        ? (name, input, select, identity, selectionArgs) =>
+            mutate(name, input, select, selectionArgs, identity)
+        : undefined),
     separateMutationSelectionArgs: true,
     supportsAliases: true,
   };

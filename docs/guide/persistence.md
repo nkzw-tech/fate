@@ -249,7 +249,9 @@ return idempotency.execute({
 
 Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-For a GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
+To deliver durable mutations through your existing GraphQL route, set `durableMutations` without a custom `mutateDurably` adapter. Fate sends each listed mutation separately with `@fateDurable` on the operation and its identity in `extensions.fateMutation`. Install server support before enabling this option. Declare `directive @fateDurable on MUTATION` and have your execution middleware wrap the single mutation in `createMutationIdempotency`. Return the saved GraphQL result for receipt-only requests. A server that does not declare the directive rejects the operation during GraphQL validation.
+
+For a custom GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
 
 You can use persistence for cached reads and client state before adding a durable mutation adapter. Server mutations send immediately by default in that setup. Pass `persist: true` when a call must be saved before delivery. It fails before sending if persistence or the adapter is missing.
 

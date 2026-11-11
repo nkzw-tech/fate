@@ -187,6 +187,62 @@ test('fetches custom scalar roots declared in the GraphQL schema', async () => {
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
+test('delivers durable mutations on the GraphQL route with a stable operation and identity', async () => {
+  const schema = buildSchema(`
+    directive @fateDurable on MUTATION
+    type Query { ok: Boolean }
+    type Mutation { change(value: String!): String! }
+  `);
+  const requests: Array<{
+    extensions?: { fateMutation: { id: string; replayOnly?: true; scope: string } };
+    query: string;
+    variables: Record<string, unknown>;
+  }> = [];
+  const change = vi.fn(({ value }: { value: string }) => value);
+  const transport = createGraphQLTransport<{
+    change: { input: { value: string }; output: string };
+  }>({
+    durableMutations: ['change'],
+    fetch: async (url, init) => {
+      expect(url).toBe('/graphql');
+      const body = JSON.parse(String(init?.body));
+      requests.push(body);
+      return jsonResponse(
+        await graphql({
+          rootValue: { change },
+          schema,
+          source: body.query,
+          variableValues: body.variables,
+        }),
+      );
+    },
+    live: false,
+    mutations: { change: { entity: '__value__', field: 'change', inputArg: false } },
+    schema: createGraphQLArgumentSchema(schema),
+    types: [],
+    url: '/graphql',
+  });
+  const identity = { id: 'receipt', scope: 'user' };
+  const input = { value: 'saved' };
+  await expect(
+    Promise.all([
+      transport.mutateDurably!('change', input, new Set(), identity),
+      transport.mutate!('change', { value: 'immediate' }, new Set()),
+    ]),
+  ).resolves.toEqual(['saved', 'immediate']);
+  await expect(
+    transport.mutateDurably!('change', input, new Set(), { ...identity, replayOnly: true }),
+  ).resolves.toBe('saved');
+  expect(requests).toHaveLength(3);
+  expect(requests[0].query).toContain('@fateDurable');
+  expect(requests[0].extensions).toEqual({ fateMutation: identity });
+  expect(requests[1].extensions).toBeUndefined();
+  expect(requests[2]).toEqual({
+    ...requests[0],
+    extensions: { fateMutation: { ...identity, replayOnly: true } },
+  });
+});
+
 test('returns scalar mutation results without requiring an entity record', async () => {
   const fetch = vi.fn(async () => jsonResponse({ data: { f1: false } }));
   const transport = createGraphQLTransport<{ endGame: { input: { id: string }; output: boolean } }>(
