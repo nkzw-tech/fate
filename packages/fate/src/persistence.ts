@@ -578,12 +578,20 @@ class Session implements PersistenceRuntime {
       if (!this.operations.has(id)) {
         this.operations.set(id, this.prepareOperation(decodeCommand(encoded)));
       }
-      onPersisted();
     } catch (error) {
       await this.fail(id, error);
+      return result;
     }
-    void this.refresh().catch((error: unknown) => this.report(error));
-    this.retry();
+    void result.catch(() => {});
+    try {
+      await this.refresh();
+      this.assertActive();
+    } catch (error) {
+      this.report(error);
+      this.retry();
+      throw error;
+    }
+    onPersisted();
     return result;
   }
 

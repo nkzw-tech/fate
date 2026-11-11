@@ -102,6 +102,9 @@ test.each(['mutation', 'action'] as const)(
     expect(persisted).not.toHaveBeenCalled();
     release.resolve();
     await submission.locallyPersisted;
+    expect(first.session.getSnapshot().mutations).toMatchObject([
+      { input: options.input, name: 'edit', status: 'queued' },
+    ]);
     expect(confirmed).not.toHaveBeenCalled();
     expect(first.mutate).not.toHaveBeenCalled();
     first.session.dispose();

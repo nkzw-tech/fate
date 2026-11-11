@@ -126,7 +126,7 @@ await pending.locallyPersisted;
 closeEditor();
 ```
 
-Here, `reportResult` is the app's handler for the eventual mutation result, including returned errors and rejected promises. `locallyPersisted` resolves once storage has committed the mutation and the data needed to recover it after a reload. Awaiting `pending` still waits for server confirmation. A later server rejection doesn't change the completed local save.
+Here, `reportResult` is the app's handler for the eventual mutation result, including returned errors and rejected promises. `locallyPersisted` resolves once storage has committed the mutation and the data needed to recover it after a reload. While the mutation awaits delivery, it is also visible in the persistence snapshot when `locallyPersisted` resolves. Awaiting `pending` still waits for server confirmation. A later server rejection doesn't change the completed local save.
 
 For [client mutations](/guide/client-state#reading-and-updating-state), `locallyPersisted` waits for the client data to be saved. The same property is available when calling `fate.actions` directly, including actions bound with `.with()`.
 
