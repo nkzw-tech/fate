@@ -260,6 +260,40 @@ test('views can select an entire object-valued client field', async () => {
   expect(data.snapshot).toEqual(snapshot);
 });
 
+test('views preserve recursive JSON fields without expanding recursive array selections', async () => {
+  type Json = string | number | boolean | null | Array<Json> | { [key: string]: Json };
+  type Document = { __typename: 'Document'; content: Record<string, Json>; id: string };
+  const content: Document['content'] = {
+    nested: { items: [1, null, { title: 'Draft' }, [true, ['text']]] },
+  };
+  const DocumentView = view<Document>()({ content: true });
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      roots: { document: { id: 'main', type: 'Document' } },
+      types: {
+        Document: {
+          defaults: (id) => ({ content, id }),
+          view: dataView<Omit<Document, '__typename'>>('Document')({ content: true, id: true }),
+        },
+      },
+    }),
+    ({ mutation }) => ({
+      update: mutation('Document', {
+        resolve: ({ store }) => store.update('Document', 'main', { content }),
+      }),
+    }),
+  );
+  const LocalView = view<EntityOf<typeof client, 'Document'>>()({ content: true });
+  await client.mutations.update();
+  const ref = client.ref('Document', 'main', { ...DocumentView, ...LocalView });
+  const { data } = await client.readView(DocumentView, ref);
+  expectTypeOf(data.content).toEqualTypeOf<Record<string, Json>>();
+  expect(data.content).toEqual(content);
+  const local = await client.readView(LocalView, ref);
+  expectTypeOf(local.data.content).toEqualTypeOf<Record<string, Json>>();
+  expect(local.data.content).toEqual(content);
+});
+
 test('memo dependencies are masked, subscribed, memoized and invalidated', async () => {
   const client = makeClient();
   const ComputedView = view<UI>()({ summary: true });

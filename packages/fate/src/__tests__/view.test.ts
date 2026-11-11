@@ -10,6 +10,24 @@ type Post = {
   title: string;
 };
 
+test('recursive scalar fields allow whole values and finite nested selections', () => {
+  type Json = string | null | Array<Json> | { [key: string]: Json };
+  type Document = {
+    __typename: 'Document';
+    content: Record<string, Json>;
+    details: { title: string };
+  };
+  const Whole = view<Document>()({ content: true });
+  const Nested = view<Document>()({ content: { child: true }, details: { title: true } });
+  expect(getViewPayloads(Whole, null)[0].select).toEqual({ content: true });
+  expect(getViewPayloads(Nested, null)[0].select).toEqual({
+    content: { child: true },
+    details: { title: true },
+  });
+  // @ts-expect-error Unknown fields on finite objects remain invalid.
+  view<Document>()({ details: { missing: true } });
+});
+
 test('defines View types with the narrowed selection', () => {
   const FullPostView = view<Post>()({});
 

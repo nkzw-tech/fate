@@ -178,9 +178,12 @@ export type Deferred<T> = Readonly<{
 /** Base shape shared by all entities fetched by fate. */
 export type Entity = { __typename: string };
 
-type PlainObjectSelectionField<V> =
-  V extends Array<infer U>
-    ? PlainObjectSelectionField<U> | true
+// Array unions such as JSON can reach the same array type before encountering an
+// object. Stop that cycle; mapped object selections remain lazily recursive.
+type PlainObjectSelectionField<V, Seen = never> = V extends Seen
+  ? true
+  : V extends Array<infer U>
+    ? PlainObjectSelectionField<U, Seen | V> | true
     : V extends AnyRecord
       ? PlainObjectSelection<V> | true
       : true;
