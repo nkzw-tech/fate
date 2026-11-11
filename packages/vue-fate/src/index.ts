@@ -82,5 +82,8 @@ export {
   memo,
   field,
   type ClientSchema,
+  type ClientStore,
+  type ClientMutationBuilder,
+  type ClientMutationContext,
   type EntityOf,
 } from '@nkzw/fate';

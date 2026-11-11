@@ -102,6 +102,34 @@ Without persistence, synchronous client mutations update the data immediately, b
 
 You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`. See [Actions](/guide/actions).
 
+## Typed Mutation Helpers
+
+`ClientStore`, `ClientMutationBuilder`, and `ClientMutationContext` are public types in
+`@nkzw/fate`, `react-fate`, and `vue-fate`. Use them to extract helpers from schema registration:
+
+```ts
+import type { ClientMutationBuilder, ClientStore } from 'react-fate';
+
+type Empty = Record<never, never>;
+type CounterStore = ClientStore<{ Counter: Counter }, typeof schema>;
+type Builder = ClientMutationBuilder<Empty, Empty, typeof schema>;
+
+const increment = (store: CounterStore) =>
+  store.update('Counter', 'main', {
+    value: (store.get('Counter', 'main')?.value ?? 0) + 1,
+  });
+
+const defineMutations = ({ mutation }: Builder) => ({
+  'counter.increment': mutation('Counter', {
+    resolve: ({ store }) => increment(store),
+  }),
+});
+```
+
+The builder's first two parameters describe existing roots and mutations; use empty
+records for a client-only app. The store's entity map describes the records available
+to the helper, while the schema determines which fields and lists it can change.
+
 ## Client Queries
 
 The counter above always refers to the same object. Let's say we are building a task list and want to look up a task by ID instead. We can define a root with `clientQuery`:
