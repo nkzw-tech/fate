@@ -23,4 +23,4 @@ fate({
 });
 ```
 
-fate generates client types from the schema. Server data views in `src/graphql/views.ts` handle live updates, authorization, and memo fields.
+fate generates client types from the schema. Server data views in `src/graphql/views.ts` handle live updates, authorization, and computed fields.

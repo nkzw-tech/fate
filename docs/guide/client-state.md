@@ -104,8 +104,7 @@ You can also use `fate.actions.counter.increment` with React's `useActionState`.
 
 ### Reading Without Suspense
 
-In React, pass `mode: 'cache-only'` to render the currently cached client data without
-suspending or fetching missing server fields:
+Let's say we want our counter panel to show a placeholder when its data isn't available, without suspending. In React, we can pass `mode: 'cache-only'` to `useRequest`:
 
 ```tsx
 export function CachedCounterPanel() {
@@ -120,21 +119,13 @@ export function CachedCounterPanel() {
 }
 ```
 
-The request returns `undefined` when its selection is unavailable. Call `useView`
-unconditionally with the optional ref, then render the missing-data state. Both hooks
-stay subscribed, so the panel updates when mutations or persistence restoration make
-the data available. For a by-ID root, an available query with no matching record returns
-`null` for that root instead.
+The request returns `undefined` when the selected data is missing. We pass the optional ref to `useView` before checking the result, so both hooks run on every render. The panel updates when a mutation or persistence restoration supplies the data. For a root that looks up a task by ID, the root returns `null` when no task matches.
 
-The default remains `cache-first`. Client data can require asynchronous persistence
-restoration, and views can select relationships to server data that must be fetched.
-For these reads, put a `Suspense` boundary around the panel that may load and keep the
-rest of the application shell outside that boundary. Use `cache-only` when the panel
-should handle unavailable data itself. See [request modes](/guide/requests#request-modes).
+With `cache-only`, fate reads the cached data without fetching missing server fields or suspending. The default is still `cache-first`, which can suspend while restoring saved data or loading a server relationship. Wrap the panel in `Suspense` to show a loading state while keeping the rest of the app visible. See [Request Modes](/guide/requests#request-modes).
 
 ### Synchronous Reads Outside Components
 
-Commands and keyboard handlers can use `peekView` to read a cached view synchronously:
+We can also read the counter outside a component. For example, a keyboard handler can use `peekView` to read its current value synchronously:
 
 ```ts
 const ref = fate.ref('Counter', 'main', CounterView);
@@ -142,19 +133,13 @@ const snapshot = fate.peekView(CounterView, ref);
 const value = snapshot?.data.value;
 ```
 
-`peekView` returns the same masked snapshot shape as `readView`, including memo fields
-and visible optimistic updates. It returns `undefined` when the record or selected
-fields are unavailable, or persistence is not ready. It never starts a fetch, restores
-data from disk, subscribes, or retains records. Deferred fields remain deferred. Invalid
-references and errors from memo computations still throw synchronously.
+`peekView` returns the same snapshot as `readView`, including computed fields and optimistic updates. If the object or selected fields are missing, or persistence isn't ready, it returns `undefined`. It reads from memory without fetching or restoring saved data. The same method works with cached server data and relationships.
 
-Use `await fate.readView(CounterView, ref)` when the command should load missing data.
-`peekView` also works with cached server data and relationships.
+A peek doesn't subscribe to changes or keep the object in memory. Deferred fields stay deferred, and invalid refs or errors in a computation still throw. Use `await fate.readView(CounterView, ref)` when we want to load missing data.
 
 ## Typed Mutation Helpers
 
-`ClientStore`, `ClientMutationBuilder`, and `ClientMutationContext` are public types in
-`@nkzw/fate`, `react-fate`, and `vue-fate`. Use them to extract helpers from schema registration:
+Let's move our counter's increment into a separate function. We can use `ClientStore` to type its store parameter and `ClientMutationBuilder` to define the mutations outside `registerClientSchema`:
 
 ```ts
 import type { ClientMutationBuilder, ClientStore } from 'react-fate';
@@ -175,11 +160,11 @@ const defineMutations = ({ mutation }: Builder) => ({
 });
 ```
 
-The builder's first two parameters describe existing roots and mutations; use empty
-records for a client-only app. The store's entity map describes the records available
-to the helper, while the schema determines which fields and lists it can change.
+`CounterStore` describes the counter records our helper can read. The schema determines which fields it can change. The builder's first two type parameters describe existing roots and mutations. Our app has no server data, so we pass empty records for both.
 
-If your factory requires an explicit return annotation, use `ClientOf`:
+These types, along with `ClientMutationContext` for the full resolver context, are available from `@nkzw/fate`, `react-fate`, and `vue-fate`.
+
+If we want to give `createAppClient` an explicit return type, we can use `ClientOf`:
 
 ```ts
 import type { ClientOf } from 'react-fate';
@@ -190,10 +175,7 @@ export const createAppClient = (): AppClient =>
   createClient().registerClientSchema(schema, defineMutations);
 ```
 
-Omit the second parameter when there are no added mutations. For a client with server
-roots and mutations, pass its type as the third parameter:
-`ClientOf<typeof schema, ReturnType<typeof defineMutations>, BaseClient>`. This preserves
-its server roots, mutations, and hydration scope while adding the client schema.
+Without added mutations, we can use `ClientOf<typeof schema>`. For a client with server data, pass the original client type as the third parameter: `ClientOf<typeof schema, ReturnType<typeof defineMutations>, BaseClient>`. The resulting type includes its server roots, mutations, and hydration scope alongside the client schema.
 
 ## Client Queries
 
@@ -212,9 +194,9 @@ const { task } = useRequest({ task: { args: { id: taskId }, view: TaskView } });
 const data = useView(TaskView, task);
 ```
 
-`clientQuery.byId` accepts `{ id: string | number }` and validates that the ID is a string or finite number. If the task doesn't exist, the request returns `null`. Creating or deleting a matching task updates the request automatically. The helper is also available from `@nkzw/fate` and `vue-fate`.
+The root accepts a string or finite number as its `id`. If the task doesn't exist, the request also returns `null`. Creating or deleting a matching task updates the request automatically.
 
-For custom argument validation or a different lookup, use `clientQuery(type, { args, resolve })`. For example, this root accepts only string IDs:
+We can still use `clientQuery` to define our own arguments and resolver. For example, to accept only string IDs:
 
 ```ts
 import { z } from 'zod';
@@ -225,7 +207,7 @@ const task = clientQuery('Task', {
 });
 ```
 
-A custom resolver returns a record ID or `null`.
+The resolver returns a task ID or `null`.
 
 For a lookup by another field, such as a slug, the resolver can use `read(view, type, id)` to read a view of a client object. fate tracks the selected fields and reruns the lookup when they change. Query resolvers are synchronous. The view requested by the component can also include relationships to server objects, which fate loads when needed.
 
@@ -266,13 +248,12 @@ The `Post` type now includes both the server fields and `bookmarked`. We can sel
 When a post first enters the cache, fate supplies the missing client fields from `defaults`. Refetching the post or receiving a live update preserves its bookmark. fate only requests server fields from the backend.
 
 Choose field names that do not already exist on the server. The `input` parser can be any object with a `parse(unknown)` method, such as a Zod schema.
-When the parser exposes Standard Schema input metadata, as Zod does, callers use its input
-type and the resolver receives its parsed output. For example, `z.object({ amount:
-z.number().default(1) })` accepts `{ input: {} }` at the call site and gives the resolver a
-required numeric `input.amount`. Transforms likewise accept the original value at the call
-site. Parse-only validators without input metadata use their parsed output type for callers.
 
-## Memo Fields
+With Zod, we can give an input field a default. For example, `z.object({ amount: z.number().default(1) })` lets us call the mutation with `{ input: {} }`. The resolver receives `input.amount` as a number. Transforms work the same way: the caller passes the original value, and the resolver receives the parsed result.
+
+fate uses Standard Schema input types when the parser provides them. For a parser with only a `parse` method, callers use the same type as its parsed result.
+
+## Computed Fields
 
 Let's extend our counter with a field that shows twice its value. We can define this with `memo` and select the fields it depends on:
 
@@ -292,13 +273,13 @@ const counter = dataView<CounterData>('Counter')({
 
 A component can now select `doubled: true` in its view. fate reads `value` for the computation, calculates `doubled`, and makes the result available to the component. Incrementing the counter updates components that select `doubled` too, even if they don't select `value` themselves.
 
-Memo fields run when they are read. fate reuses the result until a dependency or field argument changes, so we don't need to keep the derived value in sync ourselves or provide a default for it. Memo fields can also depend on other memo fields.
+Computed fields run when they are read. fate reuses the result until a dependency or field argument changes, so we don't need to keep the derived value in sync ourselves or provide a default for it. Computed fields can also depend on other computed fields.
 
 Just like a view, `select` uses `true` to select a field by name. Use `field('path')` to give a dependency a different name or read through a relationship. For example, `field('tasks.done')` returns an array of completion values when the task list is available.
 
 The resolver receives the selected values in its second argument. Annotating the first argument with `CounterData` lets TypeScript infer that `value` is a number. The same inference works for relationship paths, arrays, and stored JSON objects. The result keeps its TypeScript type, including when we return a class instance.
 
-Other components reading the same field share its result. Treat objects received by or returned from the resolver as read-only. To read a field from a related object, select its path, such as `field('author.name')`. Selecting the whole `author` relationship as a dependency is not supported.
+Other components reading the same field share its result, so treat objects received by or returned from the resolver as read-only. To read a field from a related object, select its path, such as `field('author.name')`. Selecting the whole `author` relationship as a dependency is not supported.
 
 ### Field Arguments
 
@@ -313,7 +294,7 @@ localizedTitle: memo({
 
 Now `localizedTitle` reads the English title, even if another component requests `title` in a different language. Without `args`, the dependency reads the title with its default arguments.
 
-We can also let the component choose the language by passing the memo field's arguments through to `title`:
+We can also let the component choose the language by passing the computed field's arguments through to `title`:
 
 ```ts
 localizedTitle: memo({
@@ -322,11 +303,11 @@ localizedTitle: memo({
 }),
 ```
 
-A component can now select `localizedTitle: { args: { locale: 'en' } }`. Components reading the same post with the same arguments share the result, including when they use different views. If a `network-only` request updates that title, components reading `localizedTitle` update too. The calculation runs when the field is read, so unused memo fields don't run just because data was fetched.
+A component can now select `localizedTitle: { args: { locale: 'en' } }`. Components reading the same post with the same arguments share the result, including when they use different views. If a `network-only` request updates that title, components reading `localizedTitle` update too. The calculation runs when the field is read, so unused computed fields don't run just because data was fetched.
 
 For a dependency with a different name or a relationship path, use `field('author.name', { args: { locale: 'en' } })`. These arguments apply to `name`. Argument functions must be pure. Selecting dependencies with arguments is currently supported in client schemas.
 
-Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client memo fields.
+Client computations must be synchronous. Circular dependencies are rejected when the schema is registered. Server authorization, asynchronous resolvers, and filtered database counts are not supported in client computed fields.
 
 ## Relationships
 
@@ -341,15 +322,11 @@ store.append('Board', boardId, 'tasks', taskId);
 
 `store.append` adds the task without requiring us to read and copy the board's task list. The task and its list membership commit together. Appends preserve additions from other mutations, and an ID already in the list keeps its position. The objects being appended must already exist or have been created earlier in the mutation.
 
-Use `store.remove('Board', boardId, 'tasks', taskId)` to remove a task from that list
-without deleting its record. It accepts multiple IDs, ignores missing members and
-duplicates, and preserves the order of the remaining tasks. Removals are visible to
-later reads inside the mutation and commit together with its other writes. Both
-`append` and `remove` apply to the current list at commit time, preserving unrelated
-membership changes from overlapping mutations. Use `store.delete` when the record
-itself should be deleted.
+To remove the task from the board, use `store.remove('Board', boardId, 'tasks', taskId)`. The task stays in the store, and the other tasks keep their order. We can pass several IDs; missing IDs and duplicates are ignored. Use `store.delete` to delete the task itself.
 
-Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate memo values. Use views to read memo fields and remote mutations to change server fields.
+Later reads inside the mutation see the removal, and it commits together with the other changes. Like `append`, `remove` applies to the list when the mutation commits, preserving unrelated additions and removals from other mutations.
+
+Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate computed values. Use views to read computed fields and remote mutations to change server fields.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
 

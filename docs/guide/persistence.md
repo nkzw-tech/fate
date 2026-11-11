@@ -109,11 +109,11 @@ Mutations are delivered in the order they were saved, one at a time per persiste
 
 The mutation promise stays pending until confirmation, which can take until the user is back online. After a reload, use [Persistence State](#persistence-state) to show pending or failed changes.
 
-Adding client fields or changing memo definitions doesn't invalidate queued remote mutations. Their recovery data contains remote fields, while saved client fields use [client-state migrations](/guide/client-state#migrations). If the remote schema scope changes or a mutation is removed, fate preserves its input as a failed entry instead of delivering an incompatible command.
+We can add client fields or change computations without invalidating saved server mutations. Their recovery data contains server fields; saved client fields use [migrations](/guide/client-state#migrations). If the server schema scope changes or a mutation is removed, fate keeps the mutation's input and marks it as failed.
 
 ### Waiting for Local Persistence
 
-Sometimes we want to continue once a change is saved on the device, even if the user is offline. Each mutation promise has a `locallyPersisted` promise for this:
+Let's say we want to close our post editor once the change is saved on the device, even while offline. Each mutation promise has a `locallyPersisted` promise that we can wait for:
 
 ```tsx
 const pending = fate.mutations.post.edit({
@@ -126,11 +126,13 @@ await pending.locallyPersisted;
 closeEditor();
 ```
 
-Here, `reportResult` is the app's handler for the eventual mutation result, including returned errors and rejected promises. `locallyPersisted` resolves once storage has committed the mutation and the data needed to recover it after a reload. While the mutation awaits delivery, it is also visible in the persistence snapshot when `locallyPersisted` resolves. Awaiting `pending` still waits for server confirmation. A later server rejection doesn't change the completed local save.
+Our editor closes after fate saves the mutation and the data needed to restore it after a reload. If the mutation is still waiting to be sent, it is also available in the [persistence state](#persistence-state) at this point. Awaiting `pending` waits for the server response instead.
+
+The server can still reject the change after it was saved locally. Replace `reportResult` with your app's handler for the eventual result, including returned errors and rejected promises. A later rejection doesn't change the resolved `locallyPersisted` promise.
 
 For [client mutations](/guide/client-state#reading-and-updating-state), `locallyPersisted` waits for the client data to be saved. The same property is available when calling `fate.actions` directly, including actions bound with `.with()`.
 
-If validation or storage fails before the save, `locallyPersisted` rejects. It also rejects when the call isn't persisted, including `persist: false`, missing persistence, or a remote mutation without durable delivery. Handle that failure before continuing with work that depends on the save. Waiting for one mutation doesn't make it atomic with a later mutation.
+If validation or storage fails, `locallyPersisted` rejects, so our editor can stay open and show the error. It also rejects if the mutation isn't saved: when using `persist: false`, without persistence configured, or for a server mutation without durable delivery. Each mutation is saved separately; waiting for one save doesn't combine it with a later mutation.
 
 ### Skipping Persistence
 
@@ -186,7 +188,7 @@ const server = createFateServer({
 
 Your app supplies the database and receipt helpers. Lock each `(scope, id)` across server processes, and use `ctx.db` for mutation writes so they share the receipt's transaction. See the [complete SQLite example](https://github.com/nkzw-tech/fate/blob/main/example/persistence/server.ts).
 
-Keep receipts until their expiry, with a margin for clock differences. See [Receipt Retention](#receipt-retention) before deleting them. For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
+Keep receipts for as long as an offline client might retry. For mutations with an expiry, we can clean up their receipts as described in [Receipt Retention](#receipt-retention). For effects outside the database, such as payments or emails, use the destination's idempotency support and a transactional outbox.
 
 ## Receipt Retention
 
@@ -210,7 +212,7 @@ When a mutation expires, the server returns `MUTATION_EXPIRED`, even if its rece
 
 For our like button, the server may have applied the like before the user closed the app. We should refresh the post before deciding whether to offer another attempt. fate doesn't assign a new ID or retry the expired mutation automatically. After handling the failure, call `session.discard(id)` to remove it from the queue.
 
-Receipt deduplication allows at most one committed database execution for each mutation ID within its lifetime. It doesn't guarantee delivery, and effects outside the receipt transaction still need their own idempotency support.
+When the receipt and database changes share a transaction, the server applies each mutation ID at most once within its lifetime. A mutation can still expire before reaching the server. Effects outside that transaction need their own idempotency support.
 
 ### Existing Receipts
 
@@ -249,7 +251,9 @@ return idempotency.execute({
 
 Forward the entire identity on every attempt. When `identity.replayOnly` is true, the endpoint must return the saved result or a 404 without running the mutation. `createMutationIdempotency` handles this for you.
 
-To deliver durable mutations through your existing GraphQL route, set `durableMutations` without a custom `mutateDurably` adapter. Fate sends each listed mutation separately with `@fateDurable` on the operation and its identity in `extensions.fateMutation`. Install server support before enabling this option. Declare `directive @fateDurable on MUTATION` and have your execution middleware wrap the single mutation in `createMutationIdempotency`. Return the saved GraphQL result for receipt-only requests. A server that does not declare the directive rejects the operation during GraphQL validation.
+We can also send saved mutations through an existing GraphQL route. Set `durableMutations` to the supported mutation names without passing a custom `mutateDurably` adapter. fate sends each listed mutation separately, adding `@fateDurable` to the operation and its identity to `extensions.fateMutation`.
+
+Set up the server before enabling this option. Declare `directive @fateDurable on MUTATION`, then wrap the single mutation with `createMutationIdempotency` in your execution middleware. For requests with `identity.replayOnly`, return the saved GraphQL result or a 404 without running the mutation. A server without the directive rejects the operation during GraphQL validation.
 
 For a custom GraphQL adapter that supports only some mutations, pass `durableMutations: ['setLocale', 'updateSettings']` alongside `mutateDurably`. Other mutations send immediately. Explicit `persist: true` fails for an unsupported mutation, and previously queued calls remain saved if the adapter stops supporting them. Omitting the list means the adapter supports every mutation.
 
