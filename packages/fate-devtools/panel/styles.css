@@ -268,7 +268,7 @@ code,
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 1px 4px;
   border-bottom: 1px solid var(--border);
 }
 
