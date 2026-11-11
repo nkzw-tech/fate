@@ -122,6 +122,7 @@ export {
   clientQuery,
   clientSchema,
   type ClientSchema,
+  type ClientOf,
   type ClientStore,
   type ClientMutationBuilder,
   type ClientMutationContext,

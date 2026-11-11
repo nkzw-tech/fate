@@ -75,6 +75,7 @@ export {
   memo,
   field,
   type ClientSchema,
+  type ClientOf,
   type ClientStore,
   type ClientMutationBuilder,
   type ClientMutationContext,

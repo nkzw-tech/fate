@@ -130,6 +130,22 @@ The builder's first two parameters describe existing roots and mutations; use em
 records for a client-only app. The store's entity map describes the records available
 to the helper, while the schema determines which fields and lists it can change.
 
+If your factory requires an explicit return annotation, use `ClientOf`:
+
+```ts
+import type { ClientOf } from 'react-fate';
+
+type AppClient = ClientOf<typeof schema, ReturnType<typeof defineMutations>>;
+
+export const createAppClient = (): AppClient =>
+  createClient().registerClientSchema(schema, defineMutations);
+```
+
+Omit the second parameter when there are no added mutations. For a client with server
+roots and mutations, pass its type as the third parameter:
+`ClientOf<typeof schema, ReturnType<typeof defineMutations>, BaseClient>`. This preserves
+its server roots, mutations, and hydration scope while adding the client schema.
+
 ## Client Queries
 
 The counter above always refers to the same object. Let's say we are building a task list and want to look up a task by ID instead. We can define a root with `clientQuery`:

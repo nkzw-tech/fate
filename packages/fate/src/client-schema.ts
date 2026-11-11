@@ -315,6 +315,22 @@ export type ExtendedClient<
   readonly [ClientEntities]: SchemaEntities<R, S, M>;
 };
 
+/** Name a configured client without referring to the return type of its factory. */
+export type ClientOf<
+  S extends ClientSchema,
+  Added extends FateMutations = Record<never, never>,
+  Base extends { readonly [ClientDefinition]: ClientDefinitionShape } = FateClient<
+    Record<never, never>,
+    Record<never, never>
+  >,
+> = ExtendedClient<
+  ClientDefinitionOf<Base>['roots'],
+  ClientDefinitionOf<Base>['mutations'],
+  ClientDefinitionOf<Base>['hydrationScope'],
+  S,
+  Added
+>;
+
 export const clientMutationBuilder = {
   mutation: (
     entity: string,
