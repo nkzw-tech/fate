@@ -10,6 +10,14 @@ const maxStringLength = 2000;
  * values are summarized instead of throwing.
  */
 export function toJSONValue(value: unknown, depth = 0, seen = new WeakSet<object>()): JSONValue {
+  try {
+    return serialize(value, depth, seen);
+  } catch {
+    return '[Unserializable]';
+  }
+}
+
+function serialize(value: unknown, depth: number, seen: WeakSet<object>): JSONValue {
   switch (typeof value) {
     case 'string':
       return value.length > maxStringLength

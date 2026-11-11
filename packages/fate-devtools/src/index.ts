@@ -544,11 +544,8 @@ function attach(client: InspectableClient, options: FateDevtoolsOptions): () => 
     }
     switch (message.type) {
       case 'watch': {
-        const isNew = !watchers.has(message.panelId);
         watchers.set(message.panelId, Date.now());
-        if (isNew) {
-          sendSnapshot();
-        }
+        scheduleSnapshot();
         break;
       }
       case 'unwatch':

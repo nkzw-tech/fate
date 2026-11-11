@@ -106,9 +106,15 @@ export function fateDevtools({
           response.end();
           return;
         }
-        const file = normalize(
-          join(directory, decodeURIComponent(url.slice(mountPath.length)) || 'index.html'),
-        );
+        let path: string;
+        try {
+          path = decodeURIComponent(url.slice(mountPath.length));
+        } catch {
+          response.statusCode = 400;
+          response.end();
+          return;
+        }
+        const file = normalize(join(directory, path || 'index.html'));
         if (!file.startsWith(directory.endsWith(sep) ? directory : directory + sep)) {
           response.statusCode = 403;
           response.end();

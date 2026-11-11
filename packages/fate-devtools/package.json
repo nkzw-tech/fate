@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/fate-devtools",
-  "version": "1.16.1",
+  "version": "2.0.0",
   "description": "Devtools for fate, with a Vite DevTools panel.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "license": "MIT",
@@ -41,9 +41,9 @@
     "vite-plus": "catalog:"
   },
   "peerDependencies": {
-    "@nkzw/fate": "^1.16.0",
+    "@nkzw/fate": "^2.0.0",
     "react": "^19.2.0",
-    "react-fate": "^1.16.0",
+    "react-fate": "^2.0.0",
     "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {

@@ -121,7 +121,8 @@ code,
   max-width: 240px;
   padding: 2px 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 16px;
+  corner-shape: squircle;
   background: var(--bg);
 }
 
@@ -130,7 +131,8 @@ code,
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 12px;
+  corner-shape: squircle;
   background: var(--accent);
   color: white;
   font:
@@ -142,7 +144,7 @@ code,
 .logo.large {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 28px;
   font-size: 44px;
   padding-right: 6px;
 }
@@ -164,7 +166,8 @@ code,
   gap: 6px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 16px;
+  corner-shape: squircle;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
@@ -184,7 +187,8 @@ code,
 .count {
   min-width: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: 12px;
+  corner-shape: squircle;
   background: var(--bg-hover);
   color: var(--text-muted);
   font-size: 11px;
@@ -206,7 +210,8 @@ code,
 .button-group button {
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 16px;
+  corner-shape: squircle;
   background: var(--bg);
   cursor: pointer;
   white-space: nowrap;
@@ -249,7 +254,8 @@ code,
   width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 16px;
+  corner-shape: squircle;
   background: var(--bg-subtle);
   outline: none;
 }
@@ -272,7 +278,8 @@ code,
   gap: 4px;
   padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
+  corner-shape: squircle;
   background: none;
   cursor: pointer;
   font-size: 12px;
@@ -383,19 +390,22 @@ code,
 }
 
 .section {
+  overflow: hidden;
   margin-top: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 24px;
+  corner-shape: squircle;
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 10px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-subtle);
-  border-radius: 8px 8px 0 0;
+  border-radius: 24px 24px 0 0;
+  corner-shape: squircle;
 }
 
 .section-header h3 {
@@ -408,7 +418,7 @@ code,
 }
 
 .section-body {
-  padding: 8px 10px;
+  padding: 10px 14px;
   overflow-x: auto;
 }
 
@@ -423,7 +433,8 @@ code,
 .badge {
   display: inline-block;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: 12px;
+  corner-shape: squircle;
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
@@ -477,7 +488,8 @@ code,
 
 .kind {
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: 8px;
+  corner-shape: squircle;
   background: var(--bg-hover);
   color: var(--text-muted);
   font-size: 10px;
@@ -508,7 +520,8 @@ code,
 
 .path {
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: 8px;
+  corner-shape: squircle;
   background: var(--bg-hover);
   font-family: var(--mono);
   font-size: 11.5px;
@@ -522,7 +535,8 @@ code,
 .ref {
   padding: 0 5px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 8px;
+  corner-shape: squircle;
   background: var(--blue-bg);
   color: var(--blue);
   font-family: var(--mono);
@@ -704,7 +718,8 @@ code,
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 24px;
+  corner-shape: squircle;
   background: var(--bg-subtle);
   font-family: var(--mono);
   font-size: 12px;

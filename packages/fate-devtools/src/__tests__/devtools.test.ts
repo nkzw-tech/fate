@@ -259,3 +259,53 @@ test(`'toJSONValue' turns fate values into plain JSON`, () => {
     undefined: null,
   });
 });
+
+test(`'connectFateDevtools' refreshes retainers without cache or network activity`, async () => {
+  const { client } = createPostClient();
+  const { id, panel } = await connect(client);
+  await panel.snapshot();
+  const request = { post: { id: '1', view: PostView } };
+  const retained = client.retain(request);
+  cleanup.push(() => retained.dispose());
+  panel.watch(id);
+  const snapshot = await panel.snapshot(({ requests }) =>
+    requests.some(({ retainers }) => retainers === 1),
+  );
+  expect(snapshot.operations).toEqual([]);
+  expect(snapshot.changes).toEqual([]);
+
+  retained.dispose();
+  panel.watch(id);
+  await panel.snapshot(({ requests }) => requests.every(({ retainers }) => retainers === 0));
+});
+
+test(`'toJSONValue' isolates inspection failures`, () => {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  expect(toJSONValue({ value: proxy })).toEqual({ value: '[Unserializable]' });
+  expect(
+    toJSONValue({
+      get [Symbol.toStringTag]() {
+        throw new Error('Cannot inspect');
+      },
+    }),
+  ).toBe('[Unserializable]');
+});
+
+test(`'connectFateDevtools' preserves transport calls with uninspectable inputs`, async () => {
+  const { client, transport } = createPostClient();
+  const { panel } = await connect(client);
+  await panel.snapshot();
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  const instrumented = (
+    client as unknown as { transport: { mutate: (...args: Array<unknown>) => Promise<unknown> } }
+  ).transport;
+  await expect(instrumented.mutate('post.like', proxy, new Set(['id']))).rejects.toThrow('Nope.');
+  expect(transport.mutate).toHaveBeenCalledTimes(1);
+  expect((transport.mutate.mock.calls as Array<Array<unknown>>)[0][1] === proxy).toBe(true);
+  const snapshot = await panel.snapshot(({ operations }) =>
+    operations.some(({ status }) => status === 'error'),
+  );
+  expect(snapshot.operations[0]).toMatchObject({ error: 'Nope.', input: '[Unserializable]' });
+});
