@@ -2373,6 +2373,22 @@ export class FateClient<
     return this.readViewInternal(view, ref, undefined);
   }
 
+  /** Read a complete cached snapshot synchronously, without fetching or restoring persisted data. */
+  peekView<V extends View<any, any>>(
+    view: V,
+    ref: ViewRef<ViewEntityName<V>>,
+  ): ViewSnapshot<ViewEntity<V>, ViewSelection<V>> | undefined;
+  peekView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): ViewSnapshot<T, S> | undefined;
+  peekView<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+  ): ViewSnapshot<T, S> | undefined {
+    return this.readViewInternal<T, S, V>(view, ref, undefined, true)?.value;
+  }
+
   /** @internal Keeps failures stable across discarded React render attempts. */
   readViewForRender<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
     view: V,
@@ -2415,10 +2431,25 @@ export class FateClient<
     view: V,
     ref: ViewRef<T['__typename']>,
     renderScope: object | null | undefined,
-  ): FateThenable<ViewSnapshot<T, S>> {
+  ): FateThenable<ViewSnapshot<T, S>>;
+  private readViewInternal<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+    renderScope: object | null | undefined,
+    cacheOnly: boolean,
+  ): FateThenable<ViewSnapshot<T, S>> | undefined;
+  private readViewInternal<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+    view: V,
+    ref: ViewRef<T['__typename']>,
+    renderScope: object | null | undefined,
+    cacheOnly = false,
+  ): FateThenable<ViewSnapshot<T, S>> | undefined {
     view = resolveView(view, ref);
     const persistence = this.persistence;
     if (persistence && persistence.getSnapshot().status !== 'ready') {
+      if (cacheOnly) {
+        return undefined;
+      }
       const key = `restore:${ref.__typename}:${ref.id}:${[...getViewNames(view)].sort().join(',')}`;
       return this.renderReadErrors.read(view, ref, renderScope, key, () =>
         this.pendingViewSnapshot(
@@ -2463,6 +2494,7 @@ export class FateClient<
           getViewNames(view),
         ),
         renderScope,
+        cacheOnly,
       );
     }
     const viewNames = getViewNames(view);
@@ -2477,7 +2509,7 @@ export class FateClient<
     }
 
     const cached = this.viewDataCache.get(entityId, view, ref);
-    if (cached) {
+    if (cached && !cacheOnly) {
       this.renderReadErrors.clear(view, ref);
       return cached as FateThenable<ViewSnapshot<T, S>>;
     }
@@ -2485,6 +2517,17 @@ export class FateClient<
     const plan = getSelectionPlan(view, ref);
     const selectedPaths = plan.paths;
     const missing = this.missingForSelection(entityId, selectedPaths, plan);
+
+    if (cacheOnly) {
+      // Ordinary reads can cache incomplete snapshots after a stalled fetch.
+      // A synchronous peek promises a complete snapshot, even on a cache hit.
+      if (!this.store.read(entityId) || missing.size > 0) {
+        return undefined;
+      }
+      if (cached) {
+        return cached as FateThenable<ViewSnapshot<T, S>>;
+      }
+    }
 
     const resolveSnapshot = () => {
       this.renderReadErrors.clear(view, ref);

@@ -102,6 +102,25 @@ Without persistence, synchronous client mutations update the data immediately, b
 
 You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`. See [Actions](/guide/actions).
 
+### Synchronous Reads Outside Components
+
+Commands and keyboard handlers can use `peekView` to read a cached view synchronously:
+
+```ts
+const ref = fate.ref('Counter', 'main', CounterView);
+const snapshot = fate.peekView(CounterView, ref);
+const value = snapshot?.data.value;
+```
+
+`peekView` returns the same masked snapshot shape as `readView`, including memo fields
+and visible optimistic updates. It returns `undefined` when the record or selected
+fields are unavailable, or persistence is not ready. It never starts a fetch, restores
+data from disk, subscribes, or retains records. Deferred fields remain deferred. Invalid
+references and errors from memo computations still throw synchronously.
+
+Use `await fate.readView(CounterView, ref)` when the command should load missing data.
+`peekView` also works with cached server data and relationships.
+
 ## Typed Mutation Helpers
 
 `ClientStore`, `ClientMutationBuilder`, and `ClientMutationContext` are public types in
