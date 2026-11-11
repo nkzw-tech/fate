@@ -1,6 +1,6 @@
 # Devtools
 
-_fate_ comes with devtools that show what your client is doing while you build your app. They work like TanStack Query's devtools and run as a panel in [Vite DevTools](https://devtools.vite.dev/), next to the other tools for your app.
+_fate_ comes with devtools that show what your client is doing while you build your app. They run as a panel in [Vite DevTools](https://devtools.vite.dev/), next to the other tools for your app.
 
 <p align="center">
   <img alt="The fate devtools panel in Vite DevTools" src="/public/devtools.png#gh-light-mode-only" width="100%">
