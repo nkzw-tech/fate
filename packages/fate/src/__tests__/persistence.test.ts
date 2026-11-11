@@ -3,6 +3,7 @@ import { clientSchema } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { dataView, memo } from '../data-view.ts';
 import { GraphQLRequestError } from '../graphql-error.ts';
+import { createGraphQLTransport } from '../graphqlTransport.ts';
 import { mutation } from '../mutation.ts';
 import type { MutationIdentity, PersistenceSession } from '../persistence-types.ts';
 import { createPersistence, type PersistenceStorage } from '../persistence.ts';
@@ -1651,6 +1652,85 @@ test('cache-only observers restore saved requests without fetching on a miss', a
   expect(empty.fetchById).not.toHaveBeenCalled();
   stop();
 });
+
+test.each(['code', 'http'] as const)(
+  'GraphQL expiry via %s rolls back optimism and allows the next saved mutation to complete',
+  async (kind) => {
+    let online = false;
+    const delivered: Array<string> = [];
+    const mutations = { edit: mutation<Note, { id: string; title: string }, Note>('Note') };
+    const client = createClient<[Record<never, never>, typeof mutations]>({
+      mutations,
+      persistence: createPersistence({
+        key: 'graphql-expiry',
+        online: () => online,
+        retryDelay: 20,
+        storage: memoryStorage(),
+      }),
+      transport: createGraphQLTransport({
+        durableMutations: ['edit'],
+        fetch: async (_url, init) => {
+          const { extensions } = JSON.parse(String(init?.body));
+          const id = extensions.fateMutation.id as string;
+          delivered.push(id);
+          return new Response(
+            JSON.stringify(
+              id === delivered[0]
+                ? {
+                    data: { result: null },
+                    errors: [
+                      {
+                        extensions:
+                          kind === 'code'
+                            ? { code: 'MUTATION_EXPIRED' }
+                            : { http: { status: 410 } },
+                        message: 'Expired',
+                        path: ['result'],
+                      },
+                    ],
+                  }
+                : { data: { result: { __typename: 'Note', id: '2', title: 'Saved' } } },
+            ),
+            { status: 200 },
+          );
+        },
+        live: false,
+        mutations: { edit: { entity: 'Note', field: 'edit' } },
+        types: [{ type: 'Note' }],
+        url: '/graphql',
+      }),
+      types: [{ type: 'Note' }],
+    });
+    const session = client.persistence!;
+    sessions.push(session);
+    await session.ready;
+    client.write('Note', { id: '1', title: 'Original' }, new Set(['id', 'title']));
+    const first = client.mutations.edit({
+      input: { id: '1', title: 'Expired edit' },
+      optimistic: { title: 'Expired edit' },
+    });
+    const second = client.mutations.edit({ input: { id: '2', title: 'Saved' } });
+    const completions = [first.catch(() => {}), second.catch(() => {})];
+    try {
+      await Promise.all([first.locallyPersisted, second.locallyPersisted]);
+      const [expired, next] = session.getSnapshot().mutations;
+      expect(client.store.read(noteId)?.title).toBe('Expired edit');
+      online = true;
+      session.retry();
+      await vi.waitFor(() =>
+        expect(session.getSnapshot().mutations).toMatchObject([
+          { failureReason: 'expired', id: expired.id, status: 'failed' },
+        ]),
+      );
+      expect(client.store.read(noteId)?.title).toBe('Original');
+      expect((await second).result?.title).toBe('Saved');
+      expect(delivered).toEqual([expired.id, next.id]);
+    } finally {
+      session.dispose();
+      await Promise.all(completions);
+    }
+  },
+);
 
 test('expired mutations survive reload as inspectable failures without getting a new identity', async () => {
   const original = setup({ mutationMaxAge: 1000 });

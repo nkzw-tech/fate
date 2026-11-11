@@ -767,6 +767,7 @@ const graphQLErrorStatuses = new Map<string, number>([
   ['NOT_FOUND', 404],
   ['TIMEOUT', 408],
   ['CONFLICT', 409],
+  ['MUTATION_EXPIRED', 410],
   ['PRECONDITION_FAILED', 412],
   ['UNPROCESSABLE_CONTENT', 422],
   ['TOO_MANY_REQUESTS', 429],
