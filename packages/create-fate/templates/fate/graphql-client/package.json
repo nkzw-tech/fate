@@ -24,7 +24,7 @@
   "dependencies": {
     "@nkzw/fate": "latest",
     "@void/react": "^1.7.0",
-    "fbtee": "^5.0.0",
+    "fbtee": "^6.0.0",
     "graphql-sse": "^2.6.3",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
@@ -35,9 +35,9 @@
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
-    "@nkzw/fbtee-compiler": "^5.0.0",
+    "@nkzw/fbtee-compiler": "^6.0.0",
     "@nkzw/oxlint-config": "^2.0.1",
-    "@nkzw/vite-plugin-fbtee": "^5.0.0",
+    "@nkzw/vite-plugin-fbtee": "^6.0.0",
     "@oxc-node/core": "^1.0.1",
     "@swc/core": "^1.16.20",
     "@tailwindcss/vite": "^4.3.3",

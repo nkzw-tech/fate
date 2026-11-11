@@ -121,7 +121,7 @@ Common commands from the project root:
 
 ## Translations
 
-The React app uses fbtee 5 with its native Oxc Vite plugin and CLI. Setup and builds generate the runtime translation files automatically.
+The React app uses fbtee 6 with its native Oxc Vite plugin and CLI. Setup and builds generate the runtime translation files automatically.
 
 - Wrap UI text in `<fbt desc="Translator context">Text</fbt>`; use `fbs('Text', 'Translator context')` from `fbtee` for string attributes such as placeholders.
 - Run `vp run fbtee:collect` in `client/` to extract strings, then `vp run fbtee:prepare` to update the editable German and Japanese files in `translations/`.

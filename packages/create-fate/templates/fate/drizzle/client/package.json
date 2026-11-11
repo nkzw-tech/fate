@@ -32,7 +32,7 @@
     "better-auth": "^1.7.14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "fbtee": "^5.0.0",
+    "fbtee": "^6.0.0",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -42,8 +42,8 @@
     "void": "^1.7.0"
   },
   "devDependencies": {
-    "@nkzw/fbtee-compiler": "^5.0.0",
-    "@nkzw/vite-plugin-fbtee": "^5.0.0",
+    "@nkzw/fbtee-compiler": "^6.0.0",
+    "@nkzw/vite-plugin-fbtee": "^6.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@trpc/server": "^11.19.0",
     "@types/node": "^26.6.5",
