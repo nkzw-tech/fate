@@ -48,7 +48,7 @@ or pnpm:
 pnpm create fate
 ```
 
-The CLI gives you options for the UI library, backend, or if you want to build a client-only app.
+The CLI gives you options for the UI library, backend, [i18n via fbtee](https://github.com/nkzw-tech/fbtee/releases/tag/v6.0.0) and can set up a client-only app.
 
 ---
 
@@ -269,6 +269,6 @@ We've also improved how _fate_ processes responses. GraphQL responses are writte
 
 ## Make your own _fate_
 
-I spent the past several years across [Nakazawa Tech](https://nakazawa.tech), [VoidZero](https://voidzero.dev) and [Cloudflare](https://cloudflare.com) on making app development easier. The stack presented in [Building Scalable Applications](https://www.youtube.com/watch?v=rxPTEko8J7c) over a year ago was the right direction, but the wrong implementation for agents. Now we have [Vite+](https://viteplus.dev), Void, _fate_, and Astryx and there is no easier way to build a great app than telling an agent to use `vp create fate` and then `void deploy` it to Cloudflare. I go over this in my interview with [TECH WORLD](https://www.youtube.com/watch?v=P30_ec_t0Y8).
+I spent the past several years across [Nakazawa Tech](https://nakazawa.tech), [VoidZero](https://voidzero.dev) and [Cloudflare](https://cloudflare.com) on making app development easier. The stack presented in [Building Scalable Applications](https://www.youtube.com/watch?v=rxPTEko8J7c) over a year ago was the right direction, but the wrong implementation for agents. Now we have [Vite+](https://viteplus.dev), Void, _fate_, and Astryx and there is no easier way to build a great app than telling an agent to use `vp create fate` and then `void deploy` it to Cloudflare. I go over this journey in my interview with [TECH WORLD](https://www.youtube.com/watch?v=P30_ec_t0Y8).
 
-Please give _fate_ a try and share your feedback to make it even better!
+Please test your _fate_ and share your feedback to make it even better!
