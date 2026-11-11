@@ -102,6 +102,36 @@ Without persistence, synchronous client mutations update the data immediately, b
 
 You can also use `fate.actions.counter.increment` with React's `useActionState`. Dispatch it with `increment({})`, or pass options such as `increment({ view: CounterView })`. See [Actions](/guide/actions).
 
+### Reading Without Suspense
+
+In React, pass `mode: 'cache-only'` to render the currently cached client data without
+suspending or fetching missing server fields:
+
+```tsx
+export function CachedCounterPanel() {
+  const result = useRequest({ counter: { view: CounterView } }, { mode: 'cache-only' });
+  const data = useView(CounterView, result?.counter);
+
+  if (!data) {
+    return <p>Counter data is not available yet.</p>;
+  }
+
+  return <span>Count: {data.value}</span>;
+}
+```
+
+The request returns `undefined` when its selection is unavailable. Call `useView`
+unconditionally with the optional ref, then render the missing-data state. Both hooks
+stay subscribed, so the panel updates when mutations or persistence restoration make
+the data available. For a by-ID root, an available query with no matching record returns
+`null` for that root instead.
+
+The default remains `cache-first`. Client data can require asynchronous persistence
+restoration, and views can select relationships to server data that must be fetched.
+For these reads, put a `Suspense` boundary around the panel that may load and keep the
+rest of the application shell outside that boundary. Use `cache-only` when the panel
+should handle unavailable data itself. See [request modes](/guide/requests#request-modes).
+
 ### Synchronous Reads Outside Components
 
 Commands and keyboard handlers can use `peekView` to read a cached view synchronously:
