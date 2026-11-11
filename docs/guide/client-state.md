@@ -208,6 +208,11 @@ The `Post` type now includes both the server fields and `bookmarked`. We can sel
 When a post first enters the cache, fate supplies the missing client fields from `defaults`. Refetching the post or receiving a live update preserves its bookmark. fate only requests server fields from the backend.
 
 Choose field names that do not already exist on the server. The `input` parser can be any object with a `parse(unknown)` method, such as a Zod schema.
+When the parser exposes Standard Schema input metadata, as Zod does, callers use its input
+type and the resolver receives its parsed output. For example, `z.object({ amount:
+z.number().default(1) })` accepts `{ input: {} }` at the call site and gives the resolver a
+required numeric `input.amount`. Transforms likewise accept the original value at the call
+site. Parse-only validators without input metadata use their parsed output type for callers.
 
 ## Memo Fields
 

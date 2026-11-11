@@ -276,6 +276,13 @@ export type ClientMutationDefinition = {
   resolve: (context: ClientMutationContext<any, any, any, any>) => unknown;
 };
 
+type ClientInputParser = { parse(value: unknown): any };
+type ClientInput<P extends ClientInputParser> = P extends {
+  readonly '~standard': { readonly types?: { readonly input: infer Input } };
+}
+  ? Input
+  : ReturnType<P['parse']>;
+
 export type ClientMutationBuilder<
   R extends FateRoots,
   M extends FateMutations,
@@ -295,13 +302,19 @@ export type ClientMutationBuilder<
     Awaited<Result>
   > &
     ClientMutationDefinition;
-  mutation<N extends keyof SchemaEntities<R, S, M> & string, I, Result>(
+  mutation<N extends keyof SchemaEntities<R, S, M> & string, P extends ClientInputParser, Result>(
     type: N,
     definition: {
-      input: { parse(value: unknown): I };
-      resolve: (context: ClientMutationContext<SchemaEntities<R, S, M>, M, I, S>) => Result;
+      input: P;
+      resolve: (
+        context: ClientMutationContext<SchemaEntities<R, S, M>, M, ReturnType<P['parse']>, S>,
+      ) => Result;
     },
-  ): MutationDefinition<Extract<SchemaEntities<R, S, M>[N], Entity>, I, Awaited<Result>> &
+  ): MutationDefinition<
+    Extract<SchemaEntities<R, S, M>[N], Entity>,
+    ClientInput<P>,
+    Awaited<Result>
+  > &
     ClientMutationDefinition;
 };
 
