@@ -2177,24 +2177,28 @@ export class FateClient<
     for (const operation of writes) {
       const { id: entityId } = operation;
       const { id, type } = parseEntityId(entityId);
-      if ('append' in operation) {
-        const { field, members } = operation.append;
+      if ('append' in operation || 'remove' in operation) {
+        const { field, members } = 'append' in operation ? operation.append : operation.remove;
         const record = this.store.confirmedRecord(entityId);
         if (!record) {
           throw new Error(`fate: Cannot update missing client record '${entityId}'.`);
         }
         const previous = record[field];
-        const next = Array.isArray(previous) ? previous.filter(isNodeRef) : [];
-        const seen = new Set(next.map(getNodeRefId));
+        let next = Array.isArray(previous) ? previous.filter(isNodeRef) : [];
         const size = next.length;
-        for (const member of members) {
-          if (!seen.has(member)) {
-            if (!this.store.confirmedRecord(member)) {
-              throw new Error(
-                `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
-              );
+        if ('remove' in operation) {
+          next = next.filter((ref) => !members.has(getNodeRefId(ref)));
+        } else {
+          const seen = new Set(next.map(getNodeRefId));
+          for (const member of members) {
+            if (!seen.has(member)) {
+              if (!this.store.confirmedRecord(member)) {
+                throw new Error(
+                  `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
+                );
+              }
+              next.push(createNodeRef(member));
             }
-            next.push(createNodeRef(member));
           }
         }
         if (next.length !== size) {

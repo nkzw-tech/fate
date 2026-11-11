@@ -20,6 +20,7 @@ import type { AnyRecord, EntityId, RelationDescriptor, TypeConfig } from './type
 
 export type ClientStateWrite = { id: EntityId } & (
   | { append: { field: string; members: ReadonlySet<EntityId> } }
+  | { remove: { field: string; members: ReadonlySet<EntityId> } }
   | { data: AnyRecord | null; plan?: SelectionPlan; prefix?: string; remote?: boolean }
 );
 
@@ -762,7 +763,8 @@ export default class ClientState {
       stage(type, id, data);
       return get(type, id);
     };
-    const append = (
+    const changeList = (
+      operation: 'append' | 'remove',
       type: string,
       id: string | number,
       field: string,
@@ -789,28 +791,36 @@ export default class ClientState {
         staged && Object.hasOwn(staged, field)
           ? staged[field]
           : this.client.store.confirmedRecord(owner)?.[field];
-      const members = Array.isArray(previous)
+      let members = Array.isArray(previous)
         ? previous.filter((ref) => isNodeRef(ref) && patches.get(getNodeRefId(ref))?.data !== null)
         : [];
       const size = members.length;
-      const seen = new Set(members.map(getNodeRefId));
-      const added = new Set<EntityId>();
-      for (const memberId of ids) {
-        const member = toEntityId(descriptor.listOf, memberId);
-        if (!seen.has(member) && !added.has(member)) {
-          if (!has(descriptor.listOf, memberId)) {
-            throw new Error(
-              `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
-            );
+      const changed = new Set(ids.map((id) => toEntityId(descriptor.listOf, id)));
+      if (operation === 'remove') {
+        members = members.filter((ref) => !changed.has(getNodeRefId(ref)));
+      } else {
+        const seen = new Set(members.map(getNodeRefId));
+        for (const memberId of ids) {
+          const member = toEntityId(descriptor.listOf, memberId);
+          if (!seen.has(member)) {
+            if (!has(descriptor.listOf, memberId)) {
+              throw new Error(
+                `fate: Cannot append missing record '${member}' to '${type}.${field}'.`,
+              );
+            }
+            members.push(createNodeRef(member));
+            seen.add(member);
           }
-          members.push(createNodeRef(member));
         }
-        added.add(member);
       }
       if (members.length !== size) {
         patches.set(owner, { data: { ...staged, [field]: members } });
       }
-      writes.push({ append: { field, members: added }, id: owner });
+      writes.push(
+        operation === 'append'
+          ? { append: { field, members: changed }, id: owner }
+          : { id: owner, remove: { field, members: changed } },
+      );
     };
     const execute = () =>
       definition.resolve({
@@ -828,7 +838,7 @@ export default class ClientState {
           return result as any;
         },
         store: {
-          append,
+          append: (type, id, field, ...ids) => changeList('append', type, id, field, ...ids),
           create: (type, data) => {
             if (!this.localTypes.has(type)) {
               throw new Error(`fate: Cannot create server type '${type}' locally.`);
@@ -853,6 +863,7 @@ export default class ClientState {
           },
           get,
           has,
+          remove: (type, id, field, ...ids) => changeList('remove', type, id, field, ...ids),
           update,
         },
       });

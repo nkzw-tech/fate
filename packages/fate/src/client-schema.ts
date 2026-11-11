@@ -246,6 +246,16 @@ export type ClientStore<Entities, S extends ClientSchema> = {
     id: string | number,
   ): Readonly<Partial<Entities[N]>> | undefined;
   has<N extends keyof Entities & string>(type: N, id: string | number): boolean;
+  /** Remove list membership by ID without deleting the entities. Missing members are ignored. */
+  remove<
+    N extends keyof Entities & string,
+    K extends Extract<ListKeys<S, NoInfer<N>>, keyof Entities[N] & string>,
+  >(
+    type: N,
+    id: string | number,
+    field: K,
+    ...ids: Array<ListMemberId<Entities[N][K]>>
+  ): void;
   update<N extends keyof Entities & string>(
     type: N,
     id: string | number,

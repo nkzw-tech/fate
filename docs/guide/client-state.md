@@ -283,6 +283,14 @@ store.append('Board', boardId, 'tasks', taskId);
 
 `store.append` adds the task without requiring us to read and copy the board's task list. The task and its list membership commit together. Appends preserve additions from other mutations, and an ID already in the list keeps its position. The objects being appended must already exist or have been created earlier in the mutation.
 
+Use `store.remove('Board', boardId, 'tasks', taskId)` to remove a task from that list
+without deleting its record. It accepts multiple IDs, ignores missing members and
+duplicates, and preserves the order of the remaining tasks. Removals are visible to
+later reads inside the mutation and commit together with its other writes. Both
+`append` and `remove` apply to the current list at commit time, preserving unrelated
+membership changes from overlapping mutations. Use `store.delete` when the record
+itself should be deleted.
+
 Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate memo values. Use views to read memo fields and remote mutations to change server fields.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
