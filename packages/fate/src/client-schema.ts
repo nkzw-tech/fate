@@ -1,6 +1,7 @@
 import type { FateClient } from './client.ts';
 import type { DataView, RawDataViewResult, ViewFieldConfig } from './data-view.ts';
 import type { FateMutations, MutationOptions } from './mutation.ts';
+import { isRecord } from './record.ts';
 import type {
   AnyRecord,
   Entity,
@@ -52,6 +53,26 @@ export function clientQuery<
 >(type: Type, definition: Omit<ClientQuery<Type, Args>, 'type'>): ClientQuery<Type, Args> {
   return { ...definition, type };
 }
+
+/** Define a client root accepting a string or finite numeric ID, returning null for missing records. */
+clientQuery.byId = <const Type extends string>(
+  type: Type,
+): ClientQuery<Type, { id: string | number }> =>
+  clientQuery(type, {
+    args: {
+      parse(value: unknown) {
+        if (
+          !isRecord(value) ||
+          (typeof value.id !== 'string' &&
+            (typeof value.id !== 'number' || !Number.isFinite(value.id)))
+        ) {
+          throw new Error('fate: A by-ID client query requires a string or finite numeric id.');
+        }
+        return { id: value.id };
+      },
+    },
+    resolve: ({ args }) => args.id,
+  });
 
 export type ClientRoot = { id: string | number; type: string } | ClientQuery<string, any>;
 

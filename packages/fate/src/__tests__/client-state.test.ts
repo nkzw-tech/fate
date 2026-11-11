@@ -53,10 +53,7 @@ test('client queries resolve typed arguments and track records and lookup depend
         ...schema,
         roots: {
           ...schema.roots,
-          task: clientQuery('Todo', {
-            args: z.object({ id: z.string() }),
-            resolve: ({ args }) => args.id,
-          }),
+          task: clientQuery.byId('Todo'),
           taskByTitle: clientQuery('Todo', {
             args: z.object({ title: z.string() }),
             resolve: ({ args, read }) =>

@@ -167,16 +167,12 @@ its server roots, mutations, and hydration scope while adding the client schema.
 
 ## Client Queries
 
-The counter above always refers to the same object. Let's say we are building a task list and want to look up a task by ID instead. We can define a root with `clientQuery`:
+The counter above always refers to the same object. Let's say we are building a task list and want to look up a task by ID instead. We can define a root with `clientQuery.byId`:
 
 ```ts
 import { clientQuery } from 'react-fate';
-import { z } from 'zod';
 
-const task = clientQuery('Task', {
-  args: z.object({ id: z.string() }),
-  resolve: ({ args }) => args.id,
-});
+const task = clientQuery.byId('Task');
 ```
 
 Add `task` to the schema's `roots`, alongside any fixed roots. Now a component can request an individual task and read its view:
@@ -186,7 +182,20 @@ const { task } = useRequest({ task: { args: { id: taskId }, view: TaskView } });
 const data = useView(TaskView, task);
 ```
 
-The resolver returns a task ID or `null`. If the task doesn't exist, the request also returns `null`. Creating or deleting a matching task updates the request automatically.
+`clientQuery.byId` accepts `{ id: string | number }` and validates that the ID is a string or finite number. If the task doesn't exist, the request returns `null`. Creating or deleting a matching task updates the request automatically. The helper is also available from `@nkzw/fate` and `vue-fate`.
+
+For custom argument validation or a different lookup, use `clientQuery(type, { args, resolve })`. For example, this root accepts only string IDs:
+
+```ts
+import { z } from 'zod';
+
+const task = clientQuery('Task', {
+  args: z.object({ id: z.string() }),
+  resolve: ({ args }) => args.id,
+});
+```
+
+A custom resolver returns a record ID or `null`.
 
 For a lookup by another field, such as a slug, the resolver can use `read(view, type, id)` to read a view of a client object. fate tracks the selected fields and reruns the lookup when they change. Query resolvers are synchronous. The view requested by the component can also include relationships to server objects, which fate loads when needed.
 
