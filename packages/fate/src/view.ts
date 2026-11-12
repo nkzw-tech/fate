@@ -22,6 +22,7 @@ const ParameterizedViewTag = Symbol('fate.parameterized-view');
 const boundViews = new WeakMap<ViewPayload<any, any>, View<any, any>>();
 const branchViewNames = new WeakMap<ReadonlySet<string>, Map<string, ReadonlySet<string>>>();
 const namePayloads = new WeakMap<ReadonlySet<string>, Map<string, ViewPayload<any, any>>>();
+const viewNames = new WeakMap<View<any, any>, ReadonlySet<ViewTag>>();
 
 export type ParameterizedView<T extends Entity, P extends object, S extends Selection<T>> = View<
   T,
@@ -80,13 +81,18 @@ export const getViewPayloads = <T extends Entity, S extends Selection<T>, V exte
  */
 export const getViewNames = <T extends Entity, S extends Selection<T>, V extends View<T, S>>(
   view: V,
-): Set<ViewTag> => {
+): ReadonlySet<ViewTag> => {
   view = resolveView(view, null);
-  const result = new Set<ViewTag>();
-  for (const [key, payload] of Object.entries(view)) {
-    if (isViewTag(key)) {
-      addViewName(result, key, payload);
+  let result = viewNames.get(view);
+  if (!result) {
+    const names = new Set<ViewTag>();
+    for (const [key, payload] of Object.entries(view)) {
+      if (isViewTag(key)) {
+        addViewName(names, key, payload);
+      }
     }
+    result = names;
+    viewNames.set(view, result);
   }
   return result;
 };
