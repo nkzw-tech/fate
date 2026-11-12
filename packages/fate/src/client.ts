@@ -167,6 +167,44 @@ import { resolveConditionalSelection } from './when.ts';
 /**
  * Strategy used when resolving a request.
  */
+const viewNamesKeys = new WeakMap<ReadonlySet<string>, string>();
+const getViewNamesKey = (names: ReadonlySet<string>) => {
+  let key = viewNamesKeys.get(names);
+  if (key === undefined) {
+    key = [...names].sort().join(',');
+    viewNamesKeys.set(names, key);
+  }
+  return key;
+};
+
+const splitPaths = new Map<string, ReadonlyArray<string>>();
+const splitPath = (path: string) => {
+  let parts = splitPaths.get(path);
+  if (!parts) {
+    parts = path.split('.');
+    splitPaths.set(path, parts);
+  }
+  return parts;
+};
+
+const selectionEntries = new WeakMap<object, ReadonlyArray<[string, unknown]>>();
+
+type NestedSelection = Readonly<{ hasArgsOnly: boolean; nextSelection: AnyRecord }>;
+const nestedSelections = new WeakMap<AnyRecord, NestedSelection>();
+const getNestedSelection = (selection: AnyRecord): NestedSelection => {
+  let nested = nestedSelections.get(selection);
+  if (!nested) {
+    const { args, ...withoutArgs } = selection;
+    const hasFields = Object.keys(withoutArgs).length > 0;
+    nested = {
+      hasArgsOnly: Boolean(args) && typeof args === 'object' && !hasFields,
+      nextSelection: hasFields ? withoutArgs : selection,
+    };
+    nestedSelections.set(selection, nested);
+  }
+  return nested;
+};
+
 export type RequestMode =
   /** (default) Use cached data if present, otherwise fetch. */
   | 'cache-first'
@@ -2317,6 +2355,17 @@ export class FateClient<
     });
   }
 
+  private ownerRef(entityId: EntityId): ViewRef<string> {
+    const existing = this.stableRefs.get(entityId)?.get('');
+    if (existing) {
+      return existing;
+    }
+    const { id, type } = parseEntityId(entityId);
+    const ref = this.stableRefWithViewNames(type, id, emptySet);
+    this.stableRefs.get(entityId)!.set('', ref);
+    return ref;
+  }
+
   private stableRefWithViewNames<TName extends string>(
     type: TName,
     id: string | number,
@@ -2324,7 +2373,7 @@ export class FateClient<
   ): ViewRef<TName> {
     const entityId = toEntityId(type, id);
     const names = viewNamesForType(viewNames, type);
-    const key = `${typeof id}:${String(id)}:${[...names].sort().join(',')}`;
+    const key = `${typeof id}:${String(id)}:${getViewNamesKey(names)}`;
     let refs = this.stableRefs.get(entityId);
     if (!refs) {
       refs = new Map();
@@ -4884,6 +4933,7 @@ export class FateClient<
     revalidate = false,
   ): Set<string> {
     const { type } = parseEntityId(entityId);
+    const rootType = type;
     const selection = expandRefetchSelection(
       this.types,
       type,
@@ -4903,14 +4953,20 @@ export class FateClient<
       return missing;
     }
     const missing = new Set<string>();
-    const covered = (id: EntityId, parts: ReadonlyArray<string>, prefix: string): boolean => {
+    const covered = (
+      id: EntityId,
+      parts: ReadonlyArray<string>,
+      index: number,
+      prefix: string,
+    ): boolean => {
       dependencies?.add(`entity:${id}`);
       const record = this.store.read(id);
       if (!record) {
         return false;
       }
-      const field = parts[0];
-      const { type } = parseEntityId(id);
+      const field = parts[index];
+      const last = index === parts.length - 1;
+      const type = id === entityId ? rootType : parseEntityId(id).type;
       if (plan.hasTypeBranches && !fieldAppliesTo(field, type)) {
         return true;
       }
@@ -4921,7 +4977,7 @@ export class FateClient<
         this.store.hasStaleRecord(id) &&
         this.store.hasStalePath(
           id,
-          parts.length === 1 ? storageKey : getStoragePath(parts.join('.'), plan, prefix),
+          last ? storageKey : getStoragePath(parts.slice(index).join('.'), plan, prefix),
         )
       ) {
         return false;
@@ -4937,7 +4993,7 @@ export class FateClient<
           return true;
         }
         if (isNodeRef(value)) {
-          return parts.length === 1 || covered(getNodeRefId(value), parts.slice(1), path);
+          return last || covered(getNodeRefId(value), parts, index + 1, path);
         }
         if (Array.isArray(value) && 'listOf' in relation) {
           const args = plan.args.get(path);
@@ -4956,11 +5012,10 @@ export class FateClient<
           if (!childrenCovered && !dependencies) {
             return false;
           }
-          if (parts.length === 1) {
+          if (last) {
             return childrenCovered;
           }
           const children = list ? getListEntries(getListWindow(list, args?.value)) : value;
-          const childPaths = parts.slice(1);
           for (const child of children) {
             const childId = list
               ? (child as { id: EntityId }).id
@@ -4971,7 +5026,7 @@ export class FateClient<
               continue;
             }
             // Keep collecting dependencies even if an earlier child is missing.
-            if (!covered(childId, childPaths, path)) {
+            if (!covered(childId, parts, index + 1, path)) {
               if (!dependencies) {
                 return false;
               }
@@ -4983,18 +5038,18 @@ export class FateClient<
       }
       return this.store.hasCoverage(
         id,
-        parts.length === 1 ? storageKey : getStoragePath(parts.join('.'), plan, prefix),
+        last ? storageKey : getStoragePath(parts.slice(index).join('.'), plan, prefix),
       );
     };
     for (const path of selection) {
-      if (!covered(entityId, path.split('.'), '')) {
+      if (!covered(entityId, splitPath(path), 0, '')) {
         missing.add(path);
       }
     }
     // Masked node views can leave only the connection arguments in this plan.
     // Its membership and boundary cursors still need to be covered.
     for (const [path, args] of plan.args) {
-      if (path && args.ignoreKeys && !covered(entityId, path.split('.'), '')) {
+      if (path && args.ignoreKeys && !covered(entityId, splitPath(path), 0, '')) {
         missing.add(path);
       }
     }
@@ -6683,17 +6738,12 @@ export class FateClient<
     const record = cached ?? { id: ref.id };
 
     const coverageById = new Map<EntityId, Set<string>>();
-    // A selection repeats for every row. Keep its entries only for this read,
-    // avoiding per-row entry arrays without retaining view metadata globally.
-    const entriesBySelection = new Map<object, Array<[string, unknown]>>();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
     const getViewTags = (target: ViewResult, parentId: EntityId) => {
       if (!target[ViewsTag]) {
         assignViewTag(target, new Set());
-        const { id, type } = parseEntityId(parentId);
-        const ownerRef =
-          parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
+        const ownerRef = parentId === entityId ? ref : this.ownerRef(parentId);
         this.optimisticRefOwners.set(target, this.optimisticRefOwners.get(ownerRef) ?? ownerRef);
       }
       return target[ViewsTag]!;
@@ -6706,12 +6756,23 @@ export class FateClient<
       parentId: EntityId,
       prefix: string | null,
     ) => {
-      let entries = entriesBySelection.get(viewPayload);
+      let entries = selectionEntries.get(viewPayload);
       if (!entries) {
         entries = Object.entries(viewPayload);
-        entriesBySelection.set(viewPayload, entries);
+        selectionEntries.set(viewPayload, entries);
       }
       const parentType = parseEntityId(parentId).type;
+      let parentCoverage: Set<string> | undefined;
+      const cover = (storageKey: string) => {
+        if (!parentCoverage) {
+          parentCoverage = coverageById.get(parentId);
+          if (!parentCoverage) {
+            parentCoverage = new Set();
+            coverageById.set(parentId, parentCoverage);
+          }
+        }
+        parentCoverage.add(storageKey);
+      };
       for (const [key, conditionalSelection] of entries) {
         const rawSelection = resolveConditionalSelection(conditionalSelection);
         if (rawSelection === undefined) {
@@ -6760,7 +6821,7 @@ export class FateClient<
         const storageKey = getFieldKey(fieldPath, plan);
         if (isDeferredSelection(selectionKind)) {
           const { id, type } = parseEntityId(parentId);
-          coverageById.set(parentId, (coverageById.get(parentId) ?? new Set()).add(storageKey));
+          cover(storageKey);
           const deferred = createDeferred({
             field,
             id,
@@ -6769,8 +6830,7 @@ export class FateClient<
             type,
           });
           this.deferredTargets.set(deferred, JSON.stringify([getWindowScope(), fieldPath]));
-          const ownerRef =
-            parentId === entityId ? ref : this.stableRefWithViewNames(type, id, emptySet);
+          const ownerRef = parentId === entityId ? ref : this.ownerRef(parentId);
           this.optimisticRefOwners.set(
             deferred,
             this.optimisticRefOwners.get(ownerRef) ?? ownerRef,
@@ -6779,7 +6839,7 @@ export class FateClient<
           continue;
         }
 
-        coverageById.set(parentId, (coverageById.get(parentId) ?? new Set()).add(storageKey));
+        cover(storageKey);
 
         const selectionType = typeof selectionKind;
         if (selectionType === 'boolean' && selectionKind) {
@@ -6798,11 +6858,7 @@ export class FateClient<
           );
         } else if (selectionKind && selectionType === 'object') {
           const selectionValue = selectionKind as AnyRecord;
-          const { args: selectionArgs, ...selectionWithoutArgs } = selectionValue;
-          const hasArgsOnly =
-            Boolean(selectionArgs) &&
-            typeof selectionArgs === 'object' &&
-            Object.keys(selectionWithoutArgs).length === 0;
+          const { hasArgsOnly, nextSelection } = getNestedSelection(selectionValue);
 
           if (hasArgsOnly) {
             const value = this.clientState.isComputed(parentType, field)
@@ -6826,10 +6882,6 @@ export class FateClient<
           if (!Object.hasOwn(target, key)) {
             setRecordValue(target, key, {});
           }
-
-          const nextSelection = Object.keys(selectionWithoutArgs).length
-            ? selectionWithoutArgs
-            : selectionValue;
 
           const value = this.clientState.isComputed(parentType, field)
             ? this.clientState.readField(parentId, field, plan, fieldPath, coverageById)

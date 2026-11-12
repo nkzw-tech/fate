@@ -45,9 +45,55 @@ const isConnectionSelection = (value: AnyRecord): boolean =>
  * Flattens a view into a `SelectionPlan`, expanding composed views and
  * partitioning nested args so the client can fetch exactly what is declared.
  */
+type CachedPlan = Readonly<{
+  plan: SelectionPlan;
+  probes: ReadonlyArray<readonly [string, boolean]>;
+}>;
+
+const plans = new WeakMap<object, Array<CachedPlan>>();
+const nestedPlans = new WeakMap<object, Array<CachedPlan>>();
+
 export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V extends View<T, S>>(
   viewComposition: V,
   ref: ViewRef<T['__typename']> | null,
+  options?: { includeNestedViews?: boolean },
+): SelectionPlan => {
+  const names = ref?.[ViewsTag];
+  const hasView = (tag: string) => !ref || Boolean(names?.has(tag));
+  if (typeof viewComposition !== 'object' || viewComposition === null) {
+    return createSelectionPlan(viewComposition, ref, hasView, options);
+  }
+  const cache = options?.includeNestedViews ? nestedPlans : plans;
+  let entries = cache.get(viewComposition);
+  let cached = entries?.find(({ probes }) =>
+    probes.every(([tag, included]) => hasView(tag) === included),
+  );
+  if (!cached) {
+    const probes: Array<readonly [string, boolean]> = [];
+    const plan = createSelectionPlan(
+      viewComposition,
+      ref,
+      (tag) => {
+        const included = hasView(tag);
+        probes.push([tag, included]);
+        return included;
+      },
+      options,
+    );
+    cached = { plan, probes };
+    if (!entries) {
+      entries = [];
+      cache.set(viewComposition, entries);
+    }
+    entries.push(cached);
+  }
+  return { ...cached.plan, args: new Map(cached.plan.args) };
+};
+
+const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends View<T, S>>(
+  viewComposition: V,
+  ref: ViewRef<T['__typename']> | null,
+  hasView: (tag: string) => boolean,
   options?: { includeNestedViews?: boolean },
 ): SelectionPlan => {
   const args = new Map<
@@ -167,7 +213,7 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
       }
 
       if (isViewTag(key)) {
-        if (type || options?.includeNestedViews || !ref || ref[ViewsTag]?.has(key)) {
+        if (type || options?.includeNestedViews || hasView(key)) {
           walk((value as { select: AnyRecord }).select, prefix, context, namespace, type);
         }
         continue;
@@ -220,7 +266,12 @@ export const getSelectionPlan = <T extends Entity, S extends Selection<T>, V ext
     }
   };
 
-  const payloads = getViewPayloads(viewComposition, ref);
+  const payloads =
+    typeof viewComposition === 'object'
+      ? Object.entries(viewComposition)
+          .filter(([key]) => isViewTag(key) && hasView(key))
+          .map(([, payload]) => payload)
+      : getViewPayloads(viewComposition, ref);
   if (payloads.length === 0 && isRecord(viewComposition)) {
     walk(viewComposition, null);
   } else {

@@ -23,6 +23,7 @@ const boundViews = new WeakMap<ViewPayload<any, any>, View<any, any>>();
 const branchViewNames = new WeakMap<ReadonlySet<string>, Map<string, ReadonlySet<string>>>();
 const namePayloads = new WeakMap<ReadonlySet<string>, Map<string, ViewPayload<any, any>>>();
 const viewNames = new WeakMap<View<any, any>, ReadonlySet<ViewTag>>();
+const viewPayloads = new WeakMap<View<any, any>, ReadonlyArray<[string, ViewPayload<any, any>]>>();
 
 export type ParameterizedView<T extends Entity, P extends object, S extends Selection<T>> = View<
   T,
@@ -32,6 +33,9 @@ export type ParameterizedView<T extends Entity, P extends object, S extends Sele
 
 export const addViewName = (names: Set<string>, name: string, payload: ViewPayload<any, any>) => {
   names.add(name);
+  if (payload?.definition === undefined) {
+    return;
+  }
   let payloads = namePayloads.get(names);
   if (!payloads) {
     payloads = new Map();
@@ -67,9 +71,15 @@ export const getViewPayloads = <T extends Entity, S extends Selection<T>, V exte
   ref: ViewRef<T['__typename']> | null,
 ): ReadonlyArray<ViewPayload<T, S>> => {
   view = resolveView(view, ref);
+  let payloads = viewPayloads.get(view);
+  if (!payloads) {
+    payloads = Object.entries(view).filter(([key]) => isViewTag(key));
+    viewPayloads.set(view, payloads);
+  }
+  const names = ref?.[ViewsTag];
   const result: Array<ViewPayload<T, S>> = [];
-  for (const [key, value] of Object.entries(view)) {
-    if (isViewTag(key) && (!ref || ref[ViewsTag]?.has(key))) {
+  for (const [key, value] of payloads) {
+    if (!ref || names?.has(key)) {
       result.push(value);
     }
   }
