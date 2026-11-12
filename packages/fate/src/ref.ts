@@ -41,12 +41,18 @@ export function assignViewTag(target: AnyRecord, value: ReadonlySet<string>) {
   });
 }
 
-export const getRootViewNames = (view: View<any, any>) => {
-  const payloads = getViewPayloads(view, null);
-  const names = new Set<string>();
-  collectSelectionViewNames(names, view);
-  for (const payload of payloads) {
-    collectSelectionViewNames(names, payload.select);
+const rootViewNames = new WeakMap<View<any, any>, ReadonlySet<string>>();
+
+export const getRootViewNames = (view: View<any, any>): ReadonlySet<string> => {
+  let names = rootViewNames.get(view);
+  if (!names) {
+    const result = new Set<string>();
+    collectSelectionViewNames(result, view);
+    for (const payload of getViewPayloads(view, null)) {
+      collectSelectionViewNames(result, payload.select);
+    }
+    names = result;
+    rootViewNames.set(view, names);
   }
   return names;
 };
