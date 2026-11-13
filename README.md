@@ -3197,7 +3197,20 @@ export const fate = createDrizzleFate<AppContext, typeof procedure>({
 });
 ```
 
-The Drizzle adapter loads the selected fields and relations for you. Nested pagination runs up to 10 child queries at a time; set `nestedPaginationConcurrency` to adjust that limit for your database pool.
+The Drizzle adapter loads the selected fields and relations for you. Nested
+pagination groups parents into window queries, including cursor-based and
+many-to-many pages. Each query returns at most the requested page size plus one
+row per parent. Large parent sets are split into bounded batches.
+
+Independent sibling relations load concurrently. Nested hydration shares a limit
+of 10 active database queries across sibling and recursive relations in each
+source fetch; set `nestedPaginationConcurrency` to match your database pool. Query slots are released
+before recursively hydrating children.
+
+Grouped pagination requires database window functions. Set
+`nestedPaginationBatching: false` to use individual parent queries on older
+databases, or when indexed per-parent queries perform better for very large child
+collections. Both paths preserve the same ordering, cursors, and page metadata.
 
 Count filters can use equality objects or Drizzle predicates such as `(columns) => eq(columns.status, 'GOING')`.
 
