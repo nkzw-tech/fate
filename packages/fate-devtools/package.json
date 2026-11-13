@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/fate-devtools",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Devtools for fate, with a Vite DevTools panel.",
   "homepage": "https://github.com/nkzw-tech/fate",
   "license": "MIT",
