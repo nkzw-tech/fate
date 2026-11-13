@@ -1174,3 +1174,93 @@ test.each(['scoped', 'global'])(
     expect(stop).toHaveBeenCalledOnce();
   },
 );
+
+test('unsubscribes after an in-flight native registration reaches the server', async () => {
+  const registration = Promise.withResolvers<void>();
+  const active = new Set<string>();
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const { operations } = JSON.parse(String(init?.body)) as {
+      operations: Array<{ id: string; kind: string }>;
+    };
+    for (const { id, kind } of operations) {
+      if (kind === 'unsubscribe') {
+        active.delete(id);
+      } else {
+        if (id === '2') {
+          await registration.promise;
+        }
+        active.add(id);
+      }
+    }
+    return jsonResponse({
+      results: operations.map(({ id }) => ({ data: null, id, ok: true })),
+      version: 1,
+    });
+  });
+  const transport = createHTTPTransport({
+    eventSource: resetMockEventSource(),
+    fetch,
+    url: 'http://local/fate',
+  });
+  const handlers = { onData: vi.fn() };
+  const keep = transport.subscribeById!('Post', 'keep', ['id'], undefined, handlers);
+  const source = await openLiveStream();
+  const dispose = transport.subscribeById!('Post', 'temporary', ['id'], undefined, handlers);
+  try {
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    registration.resolve();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(active).toEqual(new Set(['1']));
+    expect(source.closed).toBe(false);
+  } finally {
+    registration.resolve();
+    dispose();
+    keep();
+  }
+});
+
+test('reopens the native live stream if a disposed registration never settles', async () => {
+  const pending = Promise.withResolvers<Response>();
+  const fetch = liveControlFetch();
+  const transport = createHTTPTransport({
+    eventSource: resetMockEventSource(),
+    fetch,
+    url: 'http://local/fate',
+  });
+  const handlers = { onData: vi.fn() };
+  const keep = transport.subscribeById!('Post', 'keep', ['id'], undefined, handlers);
+  const source = await openLiveStream();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  source.emit('message', {
+    data: JSON.stringify({ event: { data: { id: 'keep' } }, id: '1', kind: 'next' }),
+    lastEventId: 'last-seen',
+  } as MessageEvent);
+  fetch.mockReturnValueOnce(pending.promise);
+  const dispose = transport.subscribeById!('Post', 'temporary', ['id'], undefined, handlers);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+  vi.useFakeTimers();
+  try {
+    dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(source.closed).toBe(true);
+    const reopened = MockEventSource.instances[1]!;
+    expect(new URL(reopened.url).searchParams.get('connectionId')).not.toBe(
+      new URL(source.url).searchParams.get('connectionId'),
+    );
+    reopened.emit('open');
+    await vi.advanceTimersByTimeAsync(0);
+    const init = fetch.mock.calls[2]?.[1];
+    expect(JSON.parse(String(init?.body)).operations).toEqual([
+      expect.objectContaining({ entityId: 'keep', id: '1', lastEventId: 'last-seen' }),
+    ]);
+    expect(fetch.mock.calls[1]?.[1]?.signal?.aborted).toBe(true);
+  } finally {
+    pending.resolve(jsonResponse({ results: [], version: 1 }));
+    keep();
+    vi.useRealTimers();
+  }
+});

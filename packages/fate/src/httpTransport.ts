@@ -96,6 +96,11 @@ type VoidLiveClientEvent<Data = unknown> = {
   type?: string;
 };
 
+const liveRegistrationCleanupTimeout = 10_000;
+const createLiveConnectionId = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
 const reportSubscriptionError = (subscription: LiveSubscription, error: unknown) => {
   subscription.handlers.onError?.(error);
 };
@@ -488,14 +493,15 @@ export function createHTTPTransport<
         throw new Error('fate(http): EventSource is required for live views.');
       }
 
-      const connectionId =
-        globalThis.crypto?.randomUUID?.() ??
-        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      let connectionId = createLiveConnectionId();
       const operations = new Map<
         string,
         FateLiveConnectionSubscribeOperation | FateLiveSubscribeOperation
       >();
       const lastEventIds = new Map<string, string>();
+      const registering = new Map<string, number>();
+      const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+      let controlController = new AbortController();
       // Closing the stream ends all of its subscriptions on the server, which
       // then rejects requests for this connection.
       let closed = false;
@@ -506,21 +512,33 @@ export function createHTTPTransport<
         liveEndpointUrl,
         typeof globalThis.location === 'object' ? globalThis.location.href : 'http://local',
       );
-      sourceUrl.searchParams.set('connectionId', connectionId);
-      const source = new EventSourceCtor(sourceUrl.href, { withCredentials: true });
+      const clearCleanupTimer = (id: string) => {
+        clearTimeout(cleanupTimers.get(id));
+        cleanupTimers.delete(id);
+      };
+      const resetControl = () => {
+        controlController.abort();
+        controlController = new AbortController();
+        registering.clear();
+        for (const id of cleanupTimers.keys()) {
+          clearCleanupTimer(id);
+        }
+      };
 
       const control = async (controlOperations: Array<FateLiveControlOperation>) => {
         if (closed || !connected) {
           return;
         }
         const connectionGeneration = generation;
+        const { signal } = controlController;
         const isCurrentConnection = () =>
-          !closed && connected && connectionGeneration === generation;
+          !closed && !signal.aborted && connected && connectionGeneration === generation;
+        let registrations: Array<string> | undefined;
 
         try {
-          const controlHeaders = await requestHeaders(
-            { 'content-type': 'application/json' },
-            headers,
+          const controlHeaders = await abortable(
+            requestHeaders({ 'content-type': 'application/json' }, headers),
+            signal,
           );
           if (!isCurrentConnection()) {
             return;
@@ -532,20 +550,31 @@ export function createHTTPTransport<
             return;
           }
 
-          const response = await fetchImpl(liveEndpointUrl, {
-            body: JSON.stringify({
-              connectionId,
-              operations: activeOperations,
-              version: 1,
-            } satisfies FateLiveControlRequest),
-            headers: controlHeaders,
-            method: 'POST',
-          });
+          registrations = [];
+          for (const { id, kind } of activeOperations) {
+            if (kind !== 'unsubscribe') {
+              registrations.push(id);
+              registering.set(id, (registering.get(id) ?? 0) + 1);
+            }
+          }
+          const response = await abortable(
+            fetchImpl(liveEndpointUrl, {
+              body: JSON.stringify({
+                connectionId,
+                operations: activeOperations,
+                version: 1,
+              } satisfies FateLiveControlRequest),
+              headers: controlHeaders,
+              method: 'POST',
+              signal,
+            }),
+            signal,
+          );
           if (!response.ok) {
-            throw await responseError(response);
+            throw await abortable(responseError(response), signal);
           }
 
-          const payload = assertProtocolResponse(await response.json());
+          const payload = assertProtocolResponse(await abortable(response.json(), signal));
           for (const result of payload.results) {
             resultValue(result);
           }
@@ -554,6 +583,19 @@ export function createHTTPTransport<
           // must not reach subscriptions on a replacement connection.
           if (isCurrentConnection()) {
             throw error;
+          }
+        } finally {
+          for (const id of signal.aborted ? [] : (registrations ?? [])) {
+            const remaining = registering.get(id)! - 1;
+            if (remaining) {
+              registering.set(id, remaining);
+              continue;
+            }
+            registering.delete(id);
+            clearCleanupTimer(id);
+            if (!operations.has(id)) {
+              void control([{ id, kind: 'unsubscribe' }]).catch(reportError);
+            }
           }
         }
       };
@@ -567,7 +609,7 @@ export function createHTTPTransport<
         return lastEventId ? { ...operation, lastEventId } : operation;
       };
 
-      source.addEventListener('open', () => {
+      const handleOpen = () => {
         if (closed) {
           return;
         }
@@ -585,7 +627,7 @@ export function createHTTPTransport<
         if (resubscribe.length > 0) {
           void control(resubscribe).catch(reportError);
         }
-      });
+      };
       const handleLiveMessage = (event: Event) => {
         const message = JSON.parse((event as MessageEvent).data as string) as FateLiveMessage;
         const subscription = liveSubscriptions.get(message.id);
@@ -622,7 +664,7 @@ export function createHTTPTransport<
         }
       };
 
-      source.addEventListener('error', (event) => {
+      const handleError = (event: Event) => {
         if (closed) {
           return;
         }
@@ -633,10 +675,23 @@ export function createHTTPTransport<
 
         connected = false;
         reportError(event);
-      });
-      source.addEventListener('message', handleLiveMessage);
-      source.addEventListener('next', handleLiveMessage);
-      source.addEventListener('connection', handleLiveMessage);
+      };
+      const openSource = () => {
+        sourceUrl.searchParams.set('connectionId', connectionId);
+        const stream = new EventSourceCtor(sourceUrl.href, { withCredentials: true });
+        const whileCurrent = (handler: (event: Event) => void) => (event: Event) => {
+          if (!closed && stream === source) {
+            handler(event);
+          }
+        };
+        stream.addEventListener('open', whileCurrent(handleOpen));
+        stream.addEventListener('error', whileCurrent(handleError));
+        for (const type of ['message', 'next', 'connection']) {
+          stream.addEventListener(type, whileCurrent(handleLiveMessage));
+        }
+        return stream;
+      };
+      let source = openSource();
 
       nativeLiveClient = {
         add(operation) {
@@ -648,12 +703,30 @@ export function createHTTPTransport<
           lastEventIds.delete(id);
           if (operations.size === 0) {
             closed = true;
+            resetControl();
             source.close();
             nativeLiveClient = undefined;
             return;
           }
 
-          void control([{ id, kind: 'unsubscribe' }]).catch(reportError);
+          // Wait for any posted registrations, including reconnect batches,
+          // so the server cannot apply a subscribe after this unsubscribe.
+          if (!registering.has(id)) {
+            void control([{ id, kind: 'unsubscribe' }]).catch(reportError);
+          } else {
+            cleanupTimers.set(
+              id,
+              setTimeout(() => {
+                // A fresh ID isolates the new stream from late control requests
+                // against the old one. Keep replay cursors for active readers.
+                connected = false;
+                resetControl();
+                source.close();
+                connectionId = createLiveConnectionId();
+                source = openSource();
+              }, liveRegistrationCleanupTimeout),
+            );
+          }
         },
       };
 
