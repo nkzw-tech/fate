@@ -8,18 +8,18 @@ import { createSourcePlan } from '../../source.ts';
 export function paginationFixture(
   count = 100,
   latency = 0,
-  { renameFields = false } = {},
+  { dateKeys = false, renameFields = false } = {},
 ) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`
-    CREATE TABLE Parent (id INTEGER PRIMARY KEY);
+    CREATE TABLE Parent (id INTEGER PRIMARY KEY, relationKey INTEGER);
     CREATE TABLE Child (id INTEGER PRIMARY KEY, parentId INTEGER, rank INTEGER, __fate_parent TEXT, __fate_rank TEXT);
     CREATE TABLE Tag (id INTEGER PRIMARY KEY, rank INTEGER);
     CREATE TABLE ParentTag (parentId INTEGER, tagId INTEGER);
     CREATE INDEX Child_parent ON Child(parentId, rank, id);
     CREATE INDEX ParentTag_parent ON ParentTag(parentId, tagId);
   `);
-  const insertParent = sqlite.prepare('INSERT INTO Parent VALUES (?)');
+  const insertParent = sqlite.prepare('INSERT INTO Parent VALUES (?, ?)');
   const insertChild = sqlite.prepare('INSERT INTO Child VALUES (?, ?, ?, ?, ?)');
   const insertTag = sqlite.prepare('INSERT INTO Tag VALUES (?, ?)');
   const insertLink = sqlite.prepare('INSERT INTO ParentTag VALUES (?, ?)');
@@ -27,7 +27,7 @@ export function paginationFixture(
     insertTag.run(i, i < 3 ? null : Math.floor(i / 2));
   }
   for (let parent = 1; parent <= count; parent++) {
-    insertParent.run(parent);
+    insertParent.run(parent, parent);
     // Include an empty parent and shared many-to-many children.
     if (parent === count) {
       continue;
@@ -45,10 +45,13 @@ export function paginationFixture(
       }
     }
   }
-  const parentTable = sqliteTable('Parent', { id: integer('id').primaryKey() });
+  const parentTable = sqliteTable('Parent', {
+    id: integer('id').primaryKey(),
+    relationKey: integer('relationKey', { mode: 'timestamp' }),
+  });
   const childTable = sqliteTable('Child', {
     id: integer('id').primaryKey(),
-    parentId: integer('parentId'),
+    parentId: dateKeys ? integer('parentId', { mode: 'timestamp' }) : integer('parentId'),
     rank: integer('rank'),
     [renameFields ? 'displayName' : '__fate_parent']: text('__fate_parent'),
     [renameFields ? 'sortName' : '__fate_rank']: text('__fate_rank'),
@@ -121,7 +124,7 @@ export function paginationFixture(
         {
           manyToMany: { tags: linkTable },
           relations: {
-            children: { foreignKey: 'parentId', localKey: 'id' },
+            children: { foreignKey: 'parentId', localKey: dateKeys ? 'relationKey' : 'id' },
             tags: {
               foreignKey: 'id',
               localKey: 'id',

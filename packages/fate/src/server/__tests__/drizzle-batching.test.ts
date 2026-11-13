@@ -57,6 +57,20 @@ test('grouped pagination preserves fields mapped to the generated SQL column nam
   }
 });
 
+test('nested pagination preserves results for date-valued relation keys', async () => {
+  const fixture = paginationFixture(3, 0, { dateKeys: true });
+  try {
+    const before = await fixture.run({ batching: false });
+    const after = await fixture.run({ batching: true });
+    expect(before.result[0]).toMatchObject({
+      children: { items: [{ node: { id: 11 } }, { node: { id: 12 } }] },
+    });
+    expect(after.result).toEqual(before.result);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('grouped pagination bounds the rows fetched and chunks large parent sets', async () => {
   const fixture = paginationFixture(260);
   try {

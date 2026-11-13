@@ -1434,8 +1434,13 @@ export function createDrizzleSourceAdapter<Context>({
     runQuery: RunQuery,
     through?: RegisteredManyToManyConfig,
   ): Promise<Map<unknown, ConnectionResult<AnyRecord>> | undefined> => {
+    if (!nestedPaginationBatching) {
+      return undefined;
+    }
     const keys = compactKeys(items.map((item) => item[relation.localKey]));
-    if (!nestedPaginationBatching || keys.length < 2) {
+    // Drivers can decode equal SQL keys into distinct objects, such as Dates.
+    // Let the database match those keys in the per-parent queries.
+    if (keys.length < 2 || keys.some((key) => typeof key === 'object')) {
       return undefined;
     }
     const config = getSourceConfig(resolveSource(relation.source));
@@ -1494,6 +1499,7 @@ export function createDrizzleSourceAdapter<Context>({
     );
     for (let offset = 0; offset < keys.length; offset += batchSize) {
       const parents = keys.slice(offset, offset + batchSize);
+      const parentKeys = new Set<unknown>(parents);
       let where = inArray(parentColumn, parents);
       if (cursor) {
         const cursorSelection = Object.fromEntries(
@@ -1504,6 +1510,9 @@ export function createDrizzleSourceAdapter<Context>({
             and(where, eq(getColumn(config.columns, node.source.id), cursor)),
           ),
         )) as Array<AnyRecord>;
+        if (cursorRows.some((row) => !parentKeys.has(row[parentField]))) {
+          return undefined;
+        }
         const byParent = new Map(cursorRows.map((row) => [row[parentField], row]));
         where = or(
           ...parents.map((key) => {
@@ -1527,6 +1536,11 @@ export function createDrizzleSourceAdapter<Context>({
           .orderBy(asc(ranked[rankField])),
       )) as Array<AnyRecord>;
       const owners = rows.map((row) => row[parentField]);
+      // A database can match keys that JavaScript compares differently, for
+      // example when the relation uses a case-insensitive collation.
+      if (owners.some((owner) => !parentKeys.has(owner))) {
+        return undefined;
+      }
       const children = rows.map((row) => {
         const child = { ...row };
         if (through) {
