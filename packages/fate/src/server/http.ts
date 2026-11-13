@@ -1358,13 +1358,12 @@ export function createFateServer<
         }
 
         const ctx = await getContext(request, adapterContext);
+        if (request.signal.aborted) {
+          throw new FateRequestError('BAD_REQUEST', 'Live request was aborted.', { status: 499 });
+        }
         const liveController = new AbortController();
         const abortLive = () => liveController.abort();
-        if (request.signal.aborted) {
-          abortLive();
-        } else {
-          request.signal.addEventListener('abort', abortLive, { once: true });
-        }
+        request.signal.addEventListener('abort', abortLive, { once: true });
         cleanupLiveConnection(connectionId);
 
         const stream = new ReadableStream<Uint8Array>({

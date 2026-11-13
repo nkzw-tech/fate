@@ -160,3 +160,33 @@ test('heartbeats do not accumulate behind a blocked stream reader', async () => 
     vi.useRealTimers();
   }
 });
+
+test('does not allocate a live connection when the request aborts during context creation', async () => {
+  vi.useFakeTimers();
+  const controller = new AbortController();
+  const server = createFateServer({
+    context: async () => {
+      controller.abort();
+      return {};
+    },
+    live: createLiveEventBus(),
+    roots: {},
+    sources: { getSource: vi.fn(), registry: createSourceRegistry([]) },
+  });
+  const response = await server.handleLiveRequest(
+    new Request('http://local/fate/live?connectionId=aborted', { signal: controller.signal }),
+  );
+  try {
+    const control = await server.handleLiveRequest(
+      new Request('http://local/fate/live', {
+        body: JSON.stringify({ connectionId: 'aborted', operations: [], version: 1 }),
+        method: 'POST',
+      }),
+    );
+    expect(control.status).toBe(404);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    await response.body?.cancel();
+    vi.useRealTimers();
+  }
+});
