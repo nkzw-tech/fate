@@ -3658,6 +3658,9 @@ export class FateClient<
   }
 
   private resolveEntityId(entityId: EntityId, reference?: object): EntityId {
+    if (this.optimisticEntityResolutions.size === 0) {
+      return entityId;
+    }
     const owner = reference && (this.optimisticRefOwners.get(reference) ?? reference);
     let resolution =
       (owner && this.optimisticRefResolutions.get(owner)) ??
