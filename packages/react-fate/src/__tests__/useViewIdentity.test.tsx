@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 
 import { createClient, type Transport, view, type ViewRef } from '@nkzw/fate';
-import { act, startTransition, Suspense, useLayoutEffect } from 'react';
+import { act, memo, startTransition, Suspense, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { FateClient, useView, useViews } from '../index.tsx';
@@ -324,3 +324,65 @@ test.each([
     }
   },
 );
+
+test('memoized child views skip renders when only their parent changes', async () => {
+  type Group = { __typename: 'Group'; count: number; id: string; users: Array<User> };
+  const GroupView = view<Group>()({ count: true, users: UserView });
+  const client = createClient({
+    types: [
+      { fields: { users: { array: true, listOf: 'User' } }, type: 'Group' },
+      { type: 'User' },
+    ],
+  });
+  client.write(
+    'Group',
+    {
+      count: 0,
+      id: 'g',
+      users: [
+        { id: 'a', name: 'A' },
+        { id: 'b', name: 'B' },
+      ],
+    },
+    new Set(['count', 'users.id', 'users.name']),
+  );
+  const ref = client.ref<Group>('Group', 'g', GroupView);
+  const renders = vi.fn();
+  const Row = memo(function Row({ user }: { user: ViewRef<'User'> }) {
+    const data = useView(UserView, user);
+    renders(data.id);
+    return <span>{data.name}</span>;
+  });
+  function Content() {
+    const data = useView(GroupView, ref);
+    return (
+      <>
+        {data.count}
+        {data.users.map((user) => (
+          <Row key={user.id} user={user} />
+        ))}
+      </>
+    );
+  }
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <FateClient client={client}>
+          <Content />
+        </FateClient>,
+      ),
+    );
+    renders.mockClear();
+    await act(async () => client.write('Group', { count: 1, id: 'g' }, new Set(['count'])));
+    expect(container.textContent).toBe('1AB');
+    expect(renders).not.toHaveBeenCalled();
+    await act(async () => client.write('User', { id: 'a', name: 'Changed' }, new Set(['name'])));
+    expect(container.textContent).toBe('1ChangedB');
+    expect(renders.mock.calls.every(([id]) => id === 'a')).toBe(true);
+    expect(renders).toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

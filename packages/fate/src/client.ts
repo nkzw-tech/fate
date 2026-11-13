@@ -84,6 +84,7 @@ import type {
 import { FateRequestError, type FateLiveConnectionEvent } from './protocol.ts';
 import { abortable, readControl, SharedReads, validateTimeout } from './read-control.ts';
 import { isRecord, setRecordValue } from './record.ts';
+import { recycleViewResult } from './recycle-view.ts';
 import {
   assignViewTag,
   createRefWithViewNames,
@@ -6781,6 +6782,21 @@ export class FateClient<
     }
     const record = cached ?? { id: ref.id };
 
+    const previous = this.viewDataCache.previous(entityId, viewComposition, ref) as
+      | AnyRecord
+      | undefined;
+    const finishNode = (node: ViewResult, before: unknown): ViewResult => {
+      const names = node[ViewsTag];
+      if (names && Object.keys(node).every((key) => key === 'id' || key === '__typename')) {
+        const stable = this.stableRefWithViewNames(
+          node.__typename as string,
+          node.id as string | number,
+          names,
+        );
+        return (this.cacheOnlyRefs.has(ref) ? this.cacheOnlyResult(stable) : stable) as ViewResult;
+      }
+      return recycleViewResult(node, before);
+    };
     const coverageById = new Map<EntityId, Set<string>>();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
@@ -6799,6 +6815,7 @@ export class FateClient<
       target: ViewResult,
       parentId: EntityId,
       prefix: string | null,
+      before?: AnyRecord,
     ) => {
       let entries = selectionEntries.get(viewPayload);
       if (!entries) {
@@ -6818,6 +6835,7 @@ export class FateClient<
         parentCoverage.add(storageKey);
       };
       for (const [key, conditionalSelection] of entries) {
+        const previousValue = before?.[key] as AnyRecord | undefined;
         const rawSelection = resolveConditionalSelection(conditionalSelection);
         if (rawSelection === undefined) {
           setRecordValue(target, key, undefined);
@@ -6970,19 +6988,38 @@ export class FateClient<
                 const node = { __typename: type, id };
 
                 if (record) {
-                  walk(selection.node as AnyRecord, record, node, entityId, fieldPath);
+                  walk(
+                    selection.node as AnyRecord,
+                    record,
+                    node,
+                    entityId,
+                    fieldPath,
+                    (previousValue?.items as Array<AnyRecord> | undefined)?.[index]?.node as
+                      | AnyRecord
+                      | undefined,
+                  );
                 }
 
                 const itemResult: AnyRecord = {
-                  node: record ? node : null,
+                  node: record
+                    ? finishNode(
+                        node,
+                        (previousValue?.items as Array<AnyRecord> | undefined)?.[index]?.node,
+                      )
+                    : null,
                 };
 
                 if (selection.cursor === true) {
                   itemResult.cursor = entry.cursor;
                 }
-                return itemResult;
+                return recycleViewResult(
+                  itemResult,
+                  (previousValue?.items as Array<AnyRecord> | undefined)?.[index],
+                );
               });
-              const connection: AnyRecord = { items };
+              const connection: AnyRecord = {
+                items: recycleViewResult(items, previousValue?.items),
+              };
               if ('pagination' in nextSelection && nextSelection.pagination) {
                 const paginationSelection = nextSelection.pagination as AnyRecord;
                 const storedPagination = listState?.pagination;
@@ -7005,7 +7042,10 @@ export class FateClient<
                     pagination.hasPrevious = storedPagination.hasPrevious;
                   }
                   if (Object.keys(pagination).length > 0) {
-                    connection.pagination = pagination;
+                    connection.pagination = recycleViewResult(
+                      pagination,
+                      previousValue?.pagination,
+                    );
                   }
                 } else {
                   connection.pagination = undefined;
@@ -7021,10 +7061,13 @@ export class FateClient<
               setRecordValue(
                 target,
                 key,
-                metadata ? this.exposeListTarget(connection, metadata) : connection,
+                recycleViewResult(
+                  metadata ? this.exposeListTarget(connection, metadata) : connection,
+                  previousValue,
+                ),
               );
             } else {
-              const items = value.map((item) => {
+              const items = value.map((item, index) => {
                 const entityId = isNodeRef(item) ? getNodeRefId(item) : null;
 
                 if (!entityId) {
@@ -7036,8 +7079,15 @@ export class FateClient<
 
                 if (record) {
                   const node = { __typename: type, id };
-                  walk(nextSelection, record, node, entityId, fieldPath);
-                  return node;
+                  walk(
+                    nextSelection,
+                    record,
+                    node,
+                    entityId,
+                    fieldPath,
+                    previousValue?.[index] as AnyRecord | undefined,
+                  );
+                  return finishNode(node, previousValue?.[index]);
                 }
 
                 return null;
@@ -7052,7 +7102,10 @@ export class FateClient<
               setRecordValue(
                 target,
                 key,
-                metadata ? this.exposeListTarget(items, metadata) : items,
+                recycleViewResult(
+                  metadata ? this.exposeListTarget(items, metadata) : items,
+                  previousValue,
+                ),
               );
             }
           } else if (isNodeRef(value)) {
@@ -7065,10 +7118,26 @@ export class FateClient<
             targetRecord.__typename = type;
 
             if (relatedRecord) {
-              walk(nextSelection, relatedRecord, targetRecord as ViewResult, entityId, fieldPath);
+              walk(
+                nextSelection,
+                relatedRecord,
+                targetRecord as ViewResult,
+                entityId,
+                fieldPath,
+                previousValue,
+              );
+              setRecordValue(target, key, finishNode(targetRecord as ViewResult, previousValue));
             }
           } else {
-            walk(nextSelection, value as AnyRecord, target[key] as ViewResult, entityId, fieldPath);
+            walk(
+              nextSelection,
+              value as AnyRecord,
+              target[key] as ViewResult,
+              entityId,
+              fieldPath,
+              previousValue,
+            );
+            setRecordValue(target, key, recycleViewResult(target[key], previousValue));
           }
         }
       }
@@ -7080,16 +7149,16 @@ export class FateClient<
 
     const payloads = getViewPayloads(viewComposition, ref);
     if (payloads.length === 0 && isRecord(viewComposition)) {
-      walk(viewComposition, record, data, entityId, pathPrefix);
+      walk(viewComposition, record, data, entityId, pathPrefix, previous);
     } else {
       for (const viewPayload of payloads) {
-        walk(viewPayload.select, record, data, entityId, pathPrefix);
+        walk(viewPayload.select, record, data, entityId, pathPrefix, previous);
       }
     }
 
     return {
       coverage: [...coverageById.entries()],
-      data: data as ViewData<T, S>,
+      data: recycleViewResult(data, previous) as ViewData<T, S>,
     };
   }
 

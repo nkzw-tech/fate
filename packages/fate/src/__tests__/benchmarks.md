@@ -290,3 +290,15 @@ snapshot reads dropped from 2,000 to two per write. The store now publishes cach
 invalidations immediately and coalesces subscriber callbacks at synchronous
 response/update boundaries. It does not hold notifications across network awaits
 or deferred response chunks, and failed partial writes still notify readers.
+
+The mounted benchmark also updates a parent counter above memoized rows that
+read masked child views. It measures through the parent layout-effect commit,
+counts row renders, and checks the DOM. With 1,000 rows and ten samples, Chromium
+reported 4.8 ms median at `0344f8d` and 2.3 ms after stable child refs and selection
+result recycling. Row renders dropped from 1,000 to zero per counter update.
+Bulk-write time remained approximately 2.6 ms. These rows deliberately do little
+rendering work; applications with more expensive rows can benefit differently.
+Recycling compares only selected containers, keeps scalar objects opaque, and
+holds invalidated results weakly so unmounted readers do not keep stale graphs
+alive. Inline graph reads still traverse their selections; this change targets
+reference stability and downstream rendering rather than eliminating that walk.

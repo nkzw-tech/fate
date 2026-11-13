@@ -1,5 +1,5 @@
-import { createClient, view } from '@nkzw/fate';
-import { useEffect } from 'react';
+import { createClient, view, type ViewRef } from '@nkzw/fate';
+import { memo, useEffect, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FateClient } from '../context.tsx';
 import { useView } from '../useView.tsx';
@@ -88,11 +88,76 @@ async function benchmark() {
     };
   } finally {
     root.unmount();
-    container.remove();
   }
 }
+async function benchmarkParent() {
+  const client = make();
+  client.write('State', { count: 0, id: 'main', items: rows }, paths);
+  const ItemView = view<Item>()({ title: true });
+  const ParentView = view<State>()({ count: true, items: ItemView });
+  const ref = client.ref<State>('State', 'main', ParentView);
+  let rowRenders = 0;
+  let committed: (() => void) | undefined;
+  const ready = Promise.withResolvers<void>();
+  const Row = memo(function Row({ item }: { item: ViewRef<'Item'> }) {
+    rowRenders++;
+    return <span>{useView(ItemView, item).title}</span>;
+  });
+  function Content() {
+    const data = useView(ParentView, ref);
+    useEffect(() => ready.resolve(), []);
+    useLayoutEffect(() => committed?.(), [data.count]);
+    return (
+      <>
+        <b>{data.count}</b>
+        {data.items.map((item) => (
+          <Row item={item} key={item.id} />
+        ))}
+      </>
+    );
+  }
+  const container = document.getElementById('mount')!;
+  const root = createRoot(container);
+  root.render(
+    <FateClient client={client}>
+      <Content />
+    </FateClient>,
+  );
+  await ready.promise;
+  const elapsed: Array<number> = [];
+  const renders: Array<number> = [];
+  try {
+    for (let i = 1; i <= sampleCount + 3; i++) {
+      await frame();
+      const commit = Promise.withResolvers<void>();
+      committed = () => commit.resolve();
+      rowRenders = 0;
+      const start = performance.now();
+      client.write('State', { count: i, id: 'main' }, new Set(['count']));
+      await commit.promise;
+      const duration = performance.now() - start;
+      if (
+        container.querySelector('b')?.textContent !== String(i) ||
+        container.querySelectorAll('span').length !== recordCount
+      ) {
+        throw new Error('Incorrect parent or row output');
+      }
+      if (i > 3) {
+        elapsed.push(duration);
+        renders.push(rowRenders);
+      }
+    }
+    return { elapsedToCommitMs: summarize(elapsed), rowRenders: renders };
+  } finally {
+    root.unmount();
+  }
+}
+
 try {
-  output.textContent = JSON.stringify(await benchmark());
+  output.textContent = JSON.stringify({
+    ...(await benchmark()),
+    parentUpdate: await benchmarkParent(),
+  });
   output.dataset.status = 'done';
 } catch (error) {
   output.textContent = error instanceof Error ? (error.stack ?? error.message) : String(error);

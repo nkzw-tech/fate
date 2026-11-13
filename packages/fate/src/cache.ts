@@ -12,8 +12,9 @@ import {
 type CachedSnapshot = FateThenable<ViewSnapshot<any, any>>;
 type CacheEntry = {
   dependencies: ReadonlyArray<{ cache: EntityCache; fields: ReadonlySet<string> | null }>;
+  previous?: WeakRef<object>;
   revision: number;
-  thenable: CachedSnapshot;
+  thenable?: CachedSnapshot;
 };
 type EntityCache = {
   fields?: Map<string, number>;
@@ -54,32 +55,46 @@ export default class ViewDataCache {
       return null;
     }
     const entry = viewMap.get(ref);
-    if (!entry) {
+    if (!entry?.thenable) {
       return null;
     }
     if (entry.revision !== this.revision) {
       for (const { cache, fields } of entry.dependencies) {
         if (cache.invalidated > entry.revision) {
-          viewMap.delete(ref);
-          return null;
+          return this.expire(entry);
         }
         if (cache.revision <= entry.revision) {
           continue;
         }
         if (!fields) {
-          viewMap.delete(ref);
-          return null;
+          return this.expire(entry);
         }
         for (const field of fields) {
           if ((cache.fields?.get(field) ?? 0) > entry.revision) {
-            viewMap.delete(ref);
-            return null;
+            return this.expire(entry);
           }
         }
       }
       entry.revision = this.revision;
     }
     return entry.thenable;
+  }
+
+  private expire(entry: CacheEntry): null {
+    const data = entry.thenable?.value?.data;
+    entry.previous = data && typeof data === 'object' ? new WeakRef(data) : undefined;
+    entry.thenable = undefined;
+    entry.dependencies = [];
+    return null;
+  }
+
+  /** Recycle a previous result only while a reader still retains it. */
+  previous(entityId: EntityId, view: View<any, any>, ref: ViewRef<string>) {
+    if (!this.isEnabled()) {
+      return undefined;
+    }
+    const entry = this.cache.get(entityId)?.views?.get(view)?.get(ref);
+    return entry?.thenable?.value?.data ?? entry?.previous?.deref();
   }
 
   set<T extends Entity, S extends Selection<T>, V extends View<T, S>>(

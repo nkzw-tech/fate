@@ -168,3 +168,78 @@ test('relation churn does not retain dependencies on detached children', async (
   expect(next).not.toBe(nested);
   expect(next.data).toMatchObject({ friend: { id: '99', name: 'Maxima' } });
 });
+
+test('parent updates preserve masked refs and unchanged inline subtrees', async () => {
+  type Child = { __typename: 'Child'; id: string; name: string };
+  type Parent = { __typename: 'Parent'; children: Array<Child>; count: number; id: string };
+  const ChildView = view<Child>()({ name: true });
+  const Masked = view<Parent>()({ children: ChildView, count: true });
+  const Inline = view<Parent>()({ children: { id: true, name: true }, count: true });
+  const client = createClient({
+    types: [
+      { fields: { children: { array: true, listOf: 'Child' } }, type: 'Parent' },
+      { type: 'Child' },
+    ],
+  });
+  client.write(
+    'Parent',
+    {
+      children: [
+        { id: 'a', name: 'A' },
+        { id: 'b', name: 'B' },
+      ],
+      count: 0,
+      id: 'p',
+    },
+    new Set(['id', 'count', 'children.id', 'children.name']),
+  );
+  const maskedRef = client.ref<Parent>('Parent', 'p', Masked);
+  const inlineRef = client.ref<Parent>('Parent', 'p', Inline);
+  const masked = (await client.readView(Masked, maskedRef)).data;
+  const inline = (await client.readView(Inline, inlineRef)).data;
+  client.write('Parent', { count: 1, id: 'p' }, new Set(['count']));
+  const nextMasked = (await client.readView(Masked, maskedRef)).data;
+  const nextInline = (await client.readView(Inline, inlineRef)).data;
+  expect(nextMasked.children).toBe(masked.children);
+  expect(nextInline.children).toBe(inline.children);
+  expect(nextMasked.count).toBe(1);
+  client.write('Child', { id: 'a', name: 'Changed' }, new Set(['name']));
+  const changed = (await client.readView(Inline, inlineRef)).data;
+  expect(changed.children[0]).not.toBe(nextInline.children[0]);
+  expect(changed.children[0].name).toBe('Changed');
+  expect(changed.children[1]).toBe(nextInline.children[1]);
+  // Canonical refs survive reordered membership too.
+  client.write(
+    'Parent',
+    {
+      children: [
+        { id: 'b', name: 'B' },
+        { id: 'a', name: 'Changed' },
+      ],
+      id: 'p',
+    },
+    new Set(['children.id', 'children.name']),
+  );
+  const reordered = (await client.readView(Masked, maskedRef)).data;
+  expect(reordered.children[0]).toBe(masked.children[1]);
+  expect(reordered.children[1]).toBe(masked.children[0]);
+});
+
+test('recycling selected containers does not inspect scalar objects', async () => {
+  const selected = view<User>()({ name: true, tags: true });
+  const client = createClient({ types: [{ type: 'User' }] });
+  const ref = client.ref<User>('User', '1', selected);
+  const read = vi.fn(() => {
+    throw new Error('Scalar inspected');
+  });
+  const scalar = {
+    get dangerous() {
+      return read();
+    },
+  };
+  client.write('User', { id: '1', name: 'Before', tags: scalar }, new Set(['name', 'tags']));
+  await client.readView(selected, ref);
+  client.write('User', { id: '1', name: 'After' }, new Set(['name']));
+  expect((await client.readView(selected, ref)).data.tags).toBe(scalar);
+  expect(read).not.toHaveBeenCalled();
+});
