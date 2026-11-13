@@ -58,8 +58,28 @@ const createReader = <V extends View<any, any>>(
     const snapshot = fulfilledThenable({ coverage: [], data: ref });
     return () => snapshot;
   }
+
+  let previous: { ref: ViewRef<string>; snapshot: PromiseLike<Snapshot> } | undefined;
+  const readRef = (ref: ViewRef<string>): PromiseLike<Snapshot> => {
+    // Parents can still render a deleted ref while they update. Keep the last
+    // data and its subscriptions so a rollback can update the reader.
+    if (
+      previous &&
+      previous.ref.__typename === ref.__typename &&
+      previous.ref.id === ref.id &&
+      client.isViewRefDeleted(previous.ref)
+    ) {
+      return previous.snapshot;
+    }
+    const snapshot = client.readViewForRender(view, ref, scope.current);
+    if (isFulfilledThenable(snapshot) && previous?.snapshot !== snapshot) {
+      previous = { ref, snapshot };
+    }
+    return snapshot;
+  };
+
   if (!isDeferred(ref)) {
-    return () => client.readViewForRender(view, ref, scope.current);
+    return () => readRef(ref);
   }
 
   let pendingDeferred: PromiseLike<unknown> | undefined;
@@ -73,16 +93,15 @@ const createReader = <V extends View<any, any>>(
     const deferred = client.readDeferredForRender(ref, scope.current);
     const readResolved = (value: Awaited<typeof deferred>): PromiseLike<Snapshot> => {
       const resolved = value.data;
-      const source: PromiseLike<Snapshot> =
+      if (resolved == null) {
+        previous = undefined;
+      }
+      const source =
         resolved == null
           ? resolved === null
             ? empty
             : absent
-          : client.readViewForRender(
-              view,
-              client.ref(resolved.__typename, resolved.id, resolveView(view, resolved)),
-              scope.current,
-            );
+          : readRef(client.ref(resolved.__typename, resolved.id, resolveView(view, resolved)));
       const sourceKey = isFulfilledThenable(source) ? source.value : source;
       if (sourceKey === mergedSource && sameCoverage(value.coverage, mergedCoverage)) {
         return mergedSnapshot;

@@ -2491,6 +2491,13 @@ export class FateClient<
     return this.stableRefWithViewNames(type, id, getRootViewNames(rootView));
   }
 
+  /** @internal A retained reader can still hold a ref to a deleted record. */
+  isViewRefDeleted(ref: ViewRef<string>) {
+    return this.store.isRecordDeleted(
+      this.resolveEntityId(toEntityId(ref.__typename, ref.id), ref),
+    );
+  }
+
   readView<V extends View<any, any>>(
     view: V,
     ref: ViewRef<ViewEntityName<V>>,

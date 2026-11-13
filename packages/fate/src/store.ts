@@ -49,7 +49,7 @@ export type List = Readonly<{
   windows?: Readonly<Record<string, ListWindow>>;
 }>;
 
-type Snapshot = { mask?: FieldMask; record?: AnyRecord };
+type Snapshot = { deleted: boolean; mask?: FieldMask; record?: AnyRecord };
 type OptimisticWrite = { partial: AnyRecord; paths: Set<string>; replacedPaths?: Set<string> };
 
 type OptimisticLayer = {
@@ -296,6 +296,8 @@ export class Store {
   private recordReferencesByTarget = new Map<EntityId, ReferenceIndex>();
   private records = new Map<EntityId, AnyRecord>();
   private subscriptions: Subscriptions = new Map();
+  // Only retain deletion state while there are readers who may still hold a snapshot.
+  private readonly deletedRecords = new Set<EntityId>();
   private listSubscriptions = new Map<string, Set<() => void>>();
 
   private readonly optimisticLayers = new Set<OptimisticLayer>();
@@ -389,7 +391,7 @@ export class Store {
       this.transactionChanges = undefined;
       this.transactionSubscribers = undefined;
       if (!completed || this.previewing) {
-        for (const [id, { mask, record }] of snapshot.records) {
+        for (const [id, { deleted, mask, record }] of snapshot.records) {
           const current = this.records.get(id);
           if (current !== record) {
             if (current) {
@@ -407,6 +409,7 @@ export class Store {
           } else {
             this.coverage.delete(id);
           }
+          this.restoreRecordDeletion(id, deleted);
           const paths = stale.get(id);
           if (paths) {
             this.stalePaths.set(id, paths);
@@ -574,7 +577,11 @@ export class Store {
     for (const [id, before] of rebase.records) {
       const after = this.records.get(id);
       const mask = this.coverage.get(id);
-      if (Boolean(before.record) !== Boolean(after) || before.mask?.all !== mask?.all) {
+      if (
+        Boolean(before.record) !== Boolean(after) ||
+        before.deleted !== this.deletedRecords.has(id) ||
+        before.mask?.all !== mask?.all
+      ) {
         changes.set(id, undefined);
         continue;
       }
@@ -706,6 +713,7 @@ export class Store {
     if (this.transactionSnapshots && !this.transactionSnapshots.records.has(id)) {
       const mask = this.coverage.get(id);
       this.transactionSnapshots.records.set(id, {
+        deleted: this.deletedRecords.has(id),
         // Compiled coverage is immutable; mergeInternal copies it before edits.
         mask: mask && (this.sharedCoverage.has(mask) ? mask : cloneMask(mask)),
         record: this.records.get(id),
@@ -724,6 +732,7 @@ export class Store {
       if (target && !target.records.has(id)) {
         const mask = this.coverage.get(id);
         target.records.set(id, {
+          deleted: this.deletedRecords.has(id),
           mask: mask && (this.sharedCoverage.has(mask) ? mask : cloneMask(mask)),
           record: this.records.get(id),
         });
@@ -897,6 +906,7 @@ export class Store {
     const records = mode === 'replace' ? new Map<EntityId, AnyRecord>() : new Map(previousRecords);
 
     for (const [id, incoming] of state.records) {
+      this.deletedRecords.delete(id);
       const previous = records.get(id);
       const next =
         previous && mode === 'preserve-existing' && !options.initialRecords?.has(previous)
@@ -932,6 +942,7 @@ export class Store {
 
     if (mode === 'replace') {
       this.stalePaths.clear();
+      this.deletedRecords.clear();
     }
     for (const [id, paths] of state.stale ?? []) {
       this.restoreRecordStaleness(id, paths, mode === 'replace');
@@ -994,6 +1005,19 @@ export class Store {
     return this.records.get(id);
   }
 
+  /** @internal Distinguish a deleted record from an ordinary cache miss for active readers. */
+  isRecordDeleted(id: EntityId) {
+    return this.deletedRecords.has(id);
+  }
+
+  private restoreRecordDeletion(id: EntityId, deleted: boolean) {
+    if (deleted && this.subscriptions.has(id)) {
+      this.deletedRecords.add(id);
+    } else {
+      this.deletedRecords.delete(id);
+    }
+  }
+
   merge(
     id: EntityId,
     partial: AnyRecord,
@@ -1043,6 +1067,7 @@ export class Store {
     referencesChanged: boolean;
   } | null {
     this.captureRecord(id);
+    this.deletedRecords.delete(id);
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
     const selection = isCoverageSelection(selectedPaths) ? selectedPaths : undefined;
     if (this.recordingLayer) {
@@ -1163,6 +1188,7 @@ export class Store {
       }
       this.records.delete(id);
       this.coverage.delete(id);
+      this.restoreRecordDeletion(id, true);
       if (!this.recordingLayer) {
         this.stalePaths.delete(id);
         this.publishChange({ key: id, kind: 'record', referencesChanged: true });
@@ -1270,6 +1296,7 @@ export class Store {
       set.delete(subscription);
       if (set.size === 0) {
         this.subscriptions.delete(id);
+        this.deletedRecords.delete(id);
       }
     };
   }
@@ -1717,6 +1744,7 @@ export class Store {
     this.captureTransactionRecord(id);
     return this.update(() => {
       this.captureRecord(id);
+      this.restoreRecordDeletion(id, snapshot.deleted);
       const previous = this.records.get(id);
       if (previous) {
         this.removeRecordReferenceIndexes(id, previous);

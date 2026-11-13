@@ -54,8 +54,17 @@ export function useListView<
   const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const snapshot = useMemo(() => ({ reader, state: current }), [reader, current]);
   const deferred = useDeferredValue(snapshot);
-  // Defer updates within a connection. A different reader needs its own items and cursors.
-  const listState = deferred.reader === reader ? deferred.state : current;
+  // A deferred list can retain refs after their records have been removed.
+  // Use the current items and cursors together in that case.
+  const stale = deferred.state !== current && deferred.state;
+  const listState =
+    deferred.reader !== reader ||
+    (stale &&
+      [stale.ids, stale.pendingBeforeIds, stale.pendingAfterIds].some((ids) =>
+        ids?.some((id) => !client.store.read(id)),
+      ))
+      ? current
+      : deferred.state;
   const pagination = listState?.pagination ?? resolvedConnection?.pagination;
   const hasNext = Boolean(pagination?.hasNext);
   const hasPrevious = Boolean(pagination?.hasPrevious);
