@@ -2134,7 +2134,7 @@ export class FateClient<
   async executeMutation(
     key: string,
     input: unknown,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     options: { args?: AnyRecord; identity?: MutationIdentity; plan?: SelectionPlan } = {},
   ): Promise<unknown> {
     if (options.identity) {
@@ -5136,7 +5136,7 @@ export class FateClient<
     const groups = new Map<
       GroupKey,
       {
-        fields: Set<string>;
+        fields: ReadonlySet<string>;
         ids: Array<string | number>;
         plan?: SelectionPlan;
         type: string;
@@ -5551,7 +5551,7 @@ export class FateClient<
   private getScalarRead(
     type: string,
     ids: Array<string | number>,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     plan: SelectionPlan,
   ) {
     const config = this.getTypeConfig(type);
@@ -5650,7 +5650,7 @@ export class FateClient<
   private async fetchMissingFields(
     type: string,
     id: string | number,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     plan: SelectionPlan,
     signal?: AbortSignal,
     revalidate = false,
@@ -5671,7 +5671,7 @@ export class FateClient<
   private async fetchByIdAndNormalize(
     type: string,
     ids: Array<string | number>,
-    select: Set<string>,
+    select: ReadonlySet<string>,
     plan?: SelectionPlan,
     prefix: string | null = null,
     signal?: AbortSignal,

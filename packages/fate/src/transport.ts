@@ -81,7 +81,7 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
   mutate?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],
-    select: Set<string>,
+    select: ReadonlySet<string>,
     selectionArgs?: ResolvedArgsPayload,
   ): Promise<Mutations[K]['output']>;
   /**
@@ -91,7 +91,7 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
   mutateDurably?<K extends Extract<keyof Mutations, string>>(
     proc: K,
     input: Mutations[K]['input'],
-    select: Set<string>,
+    select: ReadonlySet<string>,
     identity: MutationIdentity,
     selectionArgs?: ResolvedArgsPayload,
   ): Promise<Mutations[K]['output']>;
@@ -260,7 +260,7 @@ export function createTRPCTransport<
   transport.mutate = async <K extends Extract<keyof Mutations, string>>(
     procedure: K,
     input: MutationMapFromResolvers<Mutations>[K]['input'],
-    select: Set<string>,
+    select: ReadonlySet<string>,
   ) => {
     const resolver = mutations?.[procedure];
     if (!resolver) {

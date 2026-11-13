@@ -14,6 +14,25 @@ type Post = {
   title: string;
 };
 
+test('shared plan contents are readonly while each args map is mutable', () => {
+  const PostView = view<Post>()({ title: { args: { locale: 'en' } } });
+  const plan = getSelectionPlan(PostView, null);
+  const checkTypes = () => {
+    // @ts-expect-error Cached paths must not be mutated.
+    plan.paths.delete('title');
+    // @ts-expect-error Cached live policies must not be replaced.
+    plan.live.set('', { append: 'visible', prepend: 'edge' });
+    // @ts-expect-error Cached live policies must not be mutated.
+    plan.live.get('')!.append = 'visible';
+    // @ts-expect-error Argument values are shared between the per-call maps.
+    plan.args.get('title')!.value.locale = 'ja';
+  };
+  expect(checkTypes).toBeTypeOf('function');
+
+  plan.args.set('title', { hash: 'object:{"locale":string:"ja"}', value: { locale: 'ja' } });
+  expect(getSelectionPlan(PostView, null).args.get('title')!.value.locale).toBe('en');
+});
+
 test('collects scalar and nested selections', () => {
   const PostView = view<Post>()({
     author: {

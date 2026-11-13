@@ -149,10 +149,14 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
     return transport;
   }
   const mutation = (
-    select: Set<string>,
+    select: ReadonlySet<string>,
     input: unknown,
     selectionArgs: AnyRecord | undefined,
-    execute: (select: Set<string>, input: unknown, selectionArgs?: AnyRecord) => Promise<unknown>,
+    execute: (
+      select: ReadonlySet<string>,
+      input: unknown,
+      selectionArgs?: AnyRecord,
+    ) => Promise<unknown>,
   ) => {
     if (![...select].some((path) => path.includes(':'))) {
       return execute(select, input, selectionArgs);

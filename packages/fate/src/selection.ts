@@ -27,15 +27,16 @@ type WalkContext = 'default' | 'connection';
 /**
  * Representation of a composed selection including hashed args and the
  * flat set of field paths to read or fetch.
+ * Shared plan contents are readonly; each caller owns its args map.
  */
 export type SelectionPlan = {
   readonly args: Map<
     string,
-    Readonly<{ hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }>
+    Readonly<{ hash: string; ignoreKeys?: ReadonlySet<string>; value: Readonly<AnyRecord> }>
   >;
   readonly hasTypeBranches?: true;
-  readonly live: Map<string, ConnectionLivePolicy>;
-  readonly paths: Set<string>;
+  readonly live: ReadonlyMap<string, ConnectionLivePolicy>;
+  readonly paths: ReadonlySet<string>;
 };
 
 const isConnectionSelection = (value: AnyRecord): boolean =>
