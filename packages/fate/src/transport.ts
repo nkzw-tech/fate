@@ -45,6 +45,8 @@ type LiveConnectionEvent =
 type LiveConnectionEventHandlers = Readonly<{
   onError?: (error: unknown) => void;
   onEvent: (event: LiveConnectionEvent) => void;
+  /** Refresh the loaded connection after the transport drops queued events. */
+  onRecover?: (signal: AbortSignal) => Promise<void>;
 }>;
 
 /**

@@ -3036,6 +3036,28 @@ export class FateClient<
       return dispose;
     }
 
+    const getTargets = () => {
+      if (connections.size <= 1) {
+        return connections;
+      }
+      // Page sizes share a cache entry. Compare explicit sizes since the
+      // server determines the size when no limit is provided.
+      const widest = new Map<string, LiveConnectionTarget>();
+      for (const target of connections) {
+        const { key } = target.connection;
+        const current = widest.get(key);
+        if (
+          !current ||
+          (target.pageLimit !== null &&
+            current.pageLimit !== null &&
+            target.pageLimit > current.pageLimit)
+        ) {
+          widest.set(key, target);
+        }
+      }
+      return widest.values();
+    };
+
     let unsubscribe: () => void;
     try {
       unsubscribe = this.transport.subscribeConnection!(
@@ -3054,28 +3076,16 @@ export class FateClient<
             if (this.persistenceDisposal?.signal.aborted) {
               return;
             }
-            // Page sizes share a cache entry. Compare explicit sizes since the
-            // server determines the size when no limit is provided.
-            let targets: Iterable<LiveConnectionTarget> = connections;
-            if (connections.size > 1) {
-              const widest = new Map<string, LiveConnectionTarget>();
-              for (const target of connections) {
-                const { key } = target.connection;
-                const current = widest.get(key);
-                if (
-                  !current ||
-                  (target.pageLimit !== null &&
-                    current.pageLimit !== null &&
-                    target.pageLimit > current.pageLimit)
-                ) {
-                  widest.set(key, target);
-                }
-              }
-              targets = widest.values();
-            }
-            for (const { connection, view } of targets) {
+            for (const { connection, view } of getTargets()) {
               this.applyLiveConnectionEvent(view, connection, plan, event);
             }
+          },
+          onRecover: async (signal) => {
+            await Promise.all(
+              Array.from(getTargets(), ({ connection, view }) =>
+                this.refreshLiveConnection(view, connection, signal),
+              ),
+            );
           },
         },
       );
@@ -3144,15 +3154,37 @@ export class FateClient<
     view: V,
     connection: ConnectionMetadata,
   ) {
+    void this.refreshLiveConnection(view, connection).catch((error) => this.reportLiveError(error));
+  }
+
+  private async refreshLiveConnection<V extends View<any, any>>(
+    view: V,
+    connection: ConnectionMetadata,
+    recoverySignal?: AbortSignal,
+  ) {
+    const args = { ...connection.args };
+    const { direction } = getPaginationArgsInfo(args);
+    const list = recoverySignal && this.store.getListState(connection.key);
+    if (list) {
+      const limit = direction === 'backward' ? 'last' : 'first';
+      const size = Math.max(getListPageSize(list), getConnectionPageLimit(args, direction) ?? 0);
+      if (size > 0) {
+        args[limit] = size;
+      }
+    }
     const token = ++this.liveConnectionInvalidationToken;
     this.liveConnectionInvalidations.set(connection.key, token);
-    this.loadConnectionPage(view, connection, connection.args ?? {}, { invalidation: token })
-      .catch((error) => this.reportLiveError(error))
-      .finally(() => {
-        if (this.liveConnectionInvalidations.get(connection.key) === token) {
-          this.liveConnectionInvalidations.delete(connection.key);
-        }
+    try {
+      await this.loadConnectionPage(view, connection, args, {
+        direction: recoverySignal ? direction : undefined,
+        invalidation: token,
+        recoverySignal,
       });
+    } finally {
+      if (this.liveConnectionInvalidations.get(connection.key) === token) {
+        this.liveConnectionInvalidations.delete(connection.key);
+      }
+    }
   }
 
   private deleteConnectionEdge(connection: ConnectionMetadata, entityId: EntityId) {
@@ -3837,7 +3869,11 @@ export class FateClient<
     view: V,
     connection: ConnectionMetadata,
     args: Record<string, unknown>,
-    options: { direction?: 'forward' | 'backward'; invalidation?: number } = {},
+    options: {
+      direction?: 'forward' | 'backward';
+      invalidation?: number;
+      recoverySignal?: AbortSignal;
+    } = {},
   ) {
     const requestArgs = omitUndefinedValues({ ...connection.args, ...args });
     const selection = resolveSelectionPlan(view, requestArgs);
@@ -3872,13 +3908,32 @@ export class FateClient<
     connection: ConnectionMetadata,
     requestArgs: Record<string, unknown>,
     { argsPayload, plan }: ReturnType<typeof resolveSelectionPlan>,
-    options: { direction?: 'forward' | 'backward'; invalidation?: number } = {},
+    options: {
+      direction?: 'forward' | 'backward';
+      invalidation?: number;
+      recoverySignal?: AbortSignal;
+    } = {},
   ) {
     let receivedPage: List | undefined;
     let generation = ++this.writeGeneration;
     const direction = options.direction ?? 'forward';
-    const { invalidation } = options;
+    const { invalidation, recoverySignal } = options;
+    recoverySignal?.throwIfAborted();
     const replacing = invalidation !== undefined;
+    const withRecoveredWindows = (next: List): List => {
+      const windows = recoverySignal && this.store.getListState(connection.key)?.windows;
+      if (!windows) {
+        return next;
+      }
+      // Cursors in a loaded window describe the old ordering. Project the
+      // refreshed data at each reader's existing depth.
+      return {
+        ...next,
+        windows: Object.fromEntries(
+          Object.entries(windows).map(([key, { size }]) => [key, { size }]),
+        ),
+      };
+    };
     const isPage = !replacing && getPaginationMergeInfo(requestArgs).hasCursorArg;
     const listVersionKey = `list:${connection.key}`;
     const refreshVersionKey = `refresh:${listVersionKey}`;
@@ -3900,13 +3955,17 @@ export class FateClient<
         );
       }
 
-      const context = normalizationReadContext(this.transport);
+      const context = normalizationReadContext(
+        this.transport,
+        recoverySignal ? { signal: recoverySignal } : undefined,
+      );
       const connectionResult = await this.transport.fetchList(
         connection.field,
         this.remoteSelection(connection.type, plan.paths, plan),
         this.clientState.remoteArgs(connection.type, argsPayload, new Set(plan.args.keys()), plan),
         ...(context ? [context] : []),
       );
+      recoverySignal?.throwIfAborted();
       this.assertPersistenceActive();
 
       if (connectionResult === null) {
@@ -3965,7 +4024,7 @@ export class FateClient<
           if (!filterConnectionArgs(connection.args)) {
             this.registerRootList(connection.type, connection.key);
           }
-          this.store.setList(connection.key, nextListState);
+          this.store.setList(connection.key, withRecoveredWindows(nextListState));
         }),
       );
       return { list: this.store.getListState(connection.key), page: receivedPage };
@@ -3988,7 +4047,9 @@ export class FateClient<
       parentSelection,
       generation,
       scopedArgsPayload,
+      recoverySignal,
     );
+    recoverySignal?.throwIfAborted();
     this.assertPersistenceActive();
 
     generation = response?.generation ?? generation;
@@ -4063,7 +4124,7 @@ export class FateClient<
           { ...getPaginationMergeInfo(argsPayload), direction, hasCursorArg: true, replace: true },
         );
 
-        this.store.setList(connection.key, nextListState);
+        this.store.setList(connection.key, withRecoveredWindows(nextListState));
 
         const current = this.store.read(connection.owner);
         const nextField = createNodeRefsForIds(

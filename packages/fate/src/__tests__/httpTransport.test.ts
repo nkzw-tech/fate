@@ -774,6 +774,7 @@ test.each(['delete', 'dispose'] as const)(
         source.message({ ...event, type: 'deleteEdge' });
       } else {
         dispose();
+        expect(fetch.mock.calls[1]?.[1]?.signal?.aborted).toBe(true);
       }
       pending.resolve(
         jsonResponse({ results: [{ data: [{ id: 'post-1' }], id: '1', ok: true }], version: 1 }),
@@ -1009,6 +1010,7 @@ test.each(['delete', 'dispose'] as const)(
         dispose();
       }
 
+      expect(fetch.mock.calls[1]?.[1]?.signal?.aborted).toBe(true);
       pending.resolve(
         jsonResponse({
           results: [{ data: [{ id: '1', title: 'Old' }], id: '1', ok: true }],
@@ -1221,6 +1223,65 @@ test('unsubscribes after an in-flight native registration reaches the server', a
     keep();
   }
 });
+
+test.each(['entity', 'connection'] as const)(
+  'recovers a live %s subscription after its queue fills',
+  async (kind) => {
+    const pending = Promise.withResolvers<Response>();
+    const fetch = liveControlFetch();
+    const onData = vi.fn();
+    const onEvent = vi.fn();
+    const transport = createHTTPTransport({
+      eventSource: resetMockEventSource(),
+      fetch,
+      live: liveConnector(),
+      url: 'http://local/fate',
+    });
+    const entity = kind === 'entity';
+    const dispose = entity
+      ? transport.subscribeById!('Post', '1', ['title'], undefined, { onData })
+      : transport.subscribeConnection!('posts', 'Post', undefined, ['title'], undefined, {
+          onEvent,
+        });
+    const source = await openLiveStream();
+    const event = {
+      subscriptionId: '1',
+      topic: entity ? liveEntityTopic('Post', '1') : liveConnectionTopic('posts'),
+      type: entity ? 'update' : 'appendNode',
+    };
+    const reply = (id: string, title: string) =>
+      jsonResponse({
+        results: [{ data: [{ id: event.subscriptionId, title }], id, ok: true }],
+        version: 1,
+      });
+
+    try {
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      fetch.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(reply('2', 'Current'));
+      source.message({ ...event, data: { id: '1', nodeType: 'Post' } });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+      for (let index = 0; index < 1001; index++) {
+        source.message({
+          ...event,
+          data: { data: { id: '1', title: 'Queued' }, node: { id: '1', title: 'Queued' } },
+        });
+      }
+      if (entity) {
+        await vi.waitFor(() =>
+          expect(onData).toHaveBeenCalledWith({ id: '1', title: 'Current' }, ['title']),
+        );
+        expect(onData).toHaveBeenCalledTimes(1);
+      } else {
+        await vi.waitFor(() => expect(onEvent).toHaveBeenLastCalledWith({ type: 'invalidate' }));
+        expect(onEvent).toHaveBeenCalledTimes(1);
+      }
+      expect(fetch.mock.calls[1]?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      pending.resolve(reply('1', 'First'));
+      dispose();
+    }
+  },
+);
 
 test('reopens the native live stream if a disposed registration never settles', async () => {
   const pending = Promise.withResolvers<Response>();

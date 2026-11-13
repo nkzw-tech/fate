@@ -757,3 +757,26 @@ test.each([false, true])(
     expect(ids(2)).toEqual(cursorPage ? ['1', '2'] : []);
   },
 );
+
+test('connector recovery refreshes the full loaded window', async () => {
+  const { client, fetchList, ids, read, subscribeConnection } = setup();
+  fetchList
+    .mockResolvedValueOnce(page(['1']))
+    .mockResolvedValueOnce(page(['2'], false))
+    .mockImplementation(async (_field, _select, args) =>
+      args.first === 2 ? page(['3', '1']) : page(['3']),
+    );
+  await client.request(request(1));
+  const metadata = windowMetadata(read(1));
+  await client.loadConnection(ItemView, metadata, { after: '1', first: 1 });
+  expect(ids(1)).toEqual(['1', '2']);
+  const dispose = client.subscribeLiveListView(ItemView, metadata);
+  try {
+    const handlers = subscribeConnection.mock.calls[0][5];
+    await handlers.onRecover?.(new AbortController().signal);
+    expect(ids(1)).toEqual(['3', '1']);
+    expect(fetchList.mock.calls[2]?.[2]).toMatchObject({ first: 2 });
+  } finally {
+    dispose();
+  }
+});

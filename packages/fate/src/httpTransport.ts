@@ -96,10 +96,75 @@ type VoidLiveClientEvent<Data = unknown> = {
   type?: string;
 };
 
+const liveMaxPendingEvents = 1000;
 const liveRegistrationCleanupTimeout = 10_000;
 const createLiveConnectionId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+// Keep event order while a follow-up read is pending. A single recovery read
+// (or list invalidation) replaces a backlog the subscriber can't keep up with.
+const createLiveEventQueue = <Event>(
+  deliver: (event: Event, signal: AbortSignal) => Promise<void> | void,
+  recover: (signal: AbortSignal) => Promise<void> | void,
+  onError: (error: unknown) => void,
+) => {
+  let pending: Array<Event> = [];
+  let overflowed = false;
+  let current: AbortController | undefined;
+  const drain = async (controller: AbortController) => {
+    const { signal } = controller;
+    try {
+      while (!signal.aborted && (overflowed || pending.length)) {
+        try {
+          let result;
+          if (overflowed) {
+            overflowed = false;
+            result = recover(signal);
+          } else {
+            result = deliver(pending.shift()!, signal);
+          }
+          if (result) {
+            await result;
+          }
+        } catch (error) {
+          if (!signal.aborted) {
+            onError(error);
+          }
+        }
+      }
+    } finally {
+      if (current === controller) {
+        current = undefined;
+      }
+    }
+  };
+  return {
+    push(event: Event) {
+      if (pending.length === liveMaxPendingEvents) {
+        pending = [];
+        overflowed = true;
+        // Start recovery even if the read that caused the backlog never settles.
+        const previous = current;
+        current = undefined;
+        previous?.abort();
+      } else if (!overflowed) {
+        pending.push(event);
+      }
+      if (!current) {
+        current = new AbortController();
+        void drain(current);
+      }
+    },
+    reset() {
+      pending = [];
+      overflowed = false;
+      const previous = current;
+      current = undefined;
+      previous?.abort();
+    },
+  };
+};
 
 const reportSubscriptionError = (subscription: LiveSubscription, error: unknown) => {
   subscription.handlers.onError?.(error);
@@ -735,13 +800,15 @@ export function createHTTPTransport<
 
     const fetchLiveRecord = async (
       subscription: LiveSubscription,
-      select: ReadonlyArray<string> = subscription.select,
+      select: ReadonlyArray<string>,
+      signal: AbortSignal,
     ) => {
       const [record] = await transport.fetchById(
         subscription.type,
         [subscription.targetId!],
         select,
         subscription.args,
+        { signal },
       );
       return record;
     };
@@ -750,12 +817,14 @@ export function createHTTPTransport<
       subscription: LiveSubscription,
       id: string | number,
       nodeType: string,
+      signal: AbortSignal,
     ) => {
       const [record] = await transport.fetchById(
         nodeType,
         [id],
         subscription.select,
         subscription.selectionArgs,
+        { signal },
       );
       return record;
     };
@@ -788,8 +857,30 @@ export function createHTTPTransport<
         };
       }
 
-      let deletionGeneration = 0;
-      let pendingUpdate: Promise<void> | undefined;
+      const fetchAndDeliver = async (select: ReadonlyArray<string> | null, signal: AbortSignal) => {
+        const record = await fetchLiveRecord(subscription, select ?? subscription.select, signal);
+        if (!signal.aborted) {
+          if (record == null) {
+            handlers.onDelete?.(id);
+          } else {
+            notifyLiveData(handlers, record, select ?? undefined);
+          }
+        }
+      };
+      const updates = createLiveEventQueue(
+        (
+          { data, select }: { data: LiveEntityPayload; select: ReadonlyArray<string> | null },
+          signal,
+        ) => {
+          if (data.data !== undefined && (!select || canUseLivePayloadData(data.data, select))) {
+            notifyLiveData(handlers, data.data, select ?? undefined);
+            return;
+          }
+          return fetchAndDeliver(select, signal);
+        },
+        (signal) => fetchAndDeliver(subscription.select, signal),
+        (error) => reportSubscriptionError(subscription, error),
+      );
       const unsubscribePromise = getLiveClient()
         .subscribe<LiveEntityPayload>({
           id: liveId,
@@ -798,8 +889,7 @@ export function createHTTPTransport<
               return;
             }
             if (event.type === 'delete') {
-              deletionGeneration++;
-              pendingUpdate = undefined;
+              updates.reset();
               handlers.onDelete?.(event.data.id ?? id);
               return;
             }
@@ -811,50 +901,12 @@ export function createHTTPTransport<
               return;
             }
 
-            const generation = deletionGeneration;
-            const isCurrent = () =>
-              generation === deletionGeneration && liveSubscriptions.has(liveId);
-            const deliver = () => {
-              if (!isCurrent()) {
-                return;
-              }
-              if ('data' in event.data && event.data.data !== undefined) {
-                if (!liveSelect || canUseLivePayloadData(event.data.data, liveSelect)) {
-                  notifyLiveData(handlers, event.data.data, liveSelect ?? undefined);
-                  return;
-                }
-              }
-              return fetchLiveRecord(subscription, liveSelect ?? subscription.select).then(
-                (record) => {
-                  if (isCurrent()) {
-                    if (record == null) {
-                      handlers.onDelete?.(id);
-                    } else {
-                      notifyLiveData(handlers, record, liveSelect ?? undefined);
-                    }
-                  }
-                },
-              );
-            };
-            const result = pendingUpdate ? pendingUpdate.then(deliver) : deliver();
-            if (result) {
-              const next = result
-                .catch((error: unknown) => {
-                  if (isCurrent()) {
-                    reportSubscriptionError(subscription, error);
-                  }
-                })
-                .finally(() => {
-                  if (pendingUpdate === next) {
-                    pendingUpdate = undefined;
-                  }
-                });
-              pendingUpdate = next;
-            }
+            updates.push({ data: event.data, select: liveSelect });
           },
           topic: liveEntityTopic(type, id),
         })
         .catch((error) => {
+          updates.reset();
           liveSubscriptions.delete(liveId);
           reportSubscriptionError(subscription, error);
           return null;
@@ -864,6 +916,7 @@ export function createHTTPTransport<
         if (!liveSubscriptions.delete(liveId)) {
           return;
         }
+        updates.reset();
         void unsubscribePromise.then((unsubscribe) => unsubscribe?.());
       };
     };
@@ -880,7 +933,7 @@ export function createHTTPTransport<
         type,
       };
       const isActive = () => liveSubscriptions.has(liveId);
-      const deliverEvent = (event: VoidLiveClientEvent) => {
+      const deliverEvent = (event: VoidLiveClientEvent, signal: AbortSignal) => {
         if (!isActive()) {
           return;
         }
@@ -943,32 +996,23 @@ export function createHTTPTransport<
           return;
         }
 
-        return resolveConnectionNode(subscription, id, nodeType).then((node) => {
-          if (isActive()) {
+        return resolveConnectionNode(subscription, id, nodeType, signal).then((node) => {
+          if (!signal.aborted) {
             sendNode(node);
           }
         });
       };
-      let pendingEvent: Promise<void> | undefined;
+      const events = createLiveEventQueue(
+        deliverEvent,
+        (signal) =>
+          handlers.onRecover
+            ? handlers.onRecover(signal)
+            : handlers.onEvent({ type: 'invalidate' }),
+        (error) => reportSubscriptionError(subscription, error),
+      );
       const handleEvent = (event: VoidLiveClientEvent) => {
-        // A fetch for an insert must settle before a later event can update
-        // the same connection, including events on its global topic.
-        const result = pendingEvent
-          ? pendingEvent.then(() => deliverEvent(event))
-          : deliverEvent(event);
-        if (result) {
-          const next = result
-            .catch((error: unknown) => {
-              if (isActive()) {
-                reportSubscriptionError(subscription, error);
-              }
-            })
-            .finally(() => {
-              if (pendingEvent === next) {
-                pendingEvent = undefined;
-              }
-            });
-          pendingEvent = next;
+        if (isActive()) {
+          events.push(event);
         }
       };
 
@@ -1007,6 +1051,7 @@ export function createHTTPTransport<
           return;
         }
         liveSubscriptions.delete(globalLiveId);
+        events.reset();
         for (const unsubscribe of unsubscribers.splice(0)) {
           void unsubscribeTopic(unsubscribe);
         }
