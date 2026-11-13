@@ -919,37 +919,43 @@ export function createHTTPTransport<
         };
       }
 
-      liveSubscriptions.set(globalLiveId, subscription);
       const client = getLiveClient();
-      const unsubscribeSpecific = client.subscribe({
-        id: liveId,
-        onEvent: handleEvent,
-        topic: liveConnectionTopic(procedure, args),
-      });
-      const unsubscribeGlobal = client.subscribe({
-        id: globalLiveId,
-        onEvent: handleEvent,
-        topic: liveGlobalConnectionTopic(procedure),
-      });
-      const unsubscribePromise = Promise.all([unsubscribeSpecific, unsubscribeGlobal]).catch(
-        (error) => {
-          liveSubscriptions.delete(liveId);
-          liveSubscriptions.delete(globalLiveId);
+      liveSubscriptions.set(globalLiveId, subscription);
+      const unsubscribers: Array<() => Promise<void> | void> = [];
+      const unsubscribeTopic = async (unsubscribe: () => Promise<void> | void) => {
+        try {
+          await unsubscribe();
+        } catch (error) {
           reportSubscriptionError(subscription, error);
-          return [];
-        },
-      );
-
-      return () => {
-        const deleted = liveSubscriptions.delete(liveId) || liveSubscriptions.delete(globalLiveId);
-        if (!deleted) {
+        }
+      };
+      const dispose = () => {
+        if (!liveSubscriptions.delete(liveId)) {
           return;
         }
         liveSubscriptions.delete(globalLiveId);
-        void unsubscribePromise.then((unsubscribers) =>
-          Promise.all(unsubscribers.map((unsubscribe) => unsubscribe())),
-        );
+        for (const unsubscribe of unsubscribers.splice(0)) {
+          void unsubscribeTopic(unsubscribe);
+        }
       };
+      const subscribeTopic = async (id: string, topic: string) => {
+        try {
+          const unsubscribe = await client.subscribe({ id, onEvent: handleEvent, topic });
+          if (isActive()) {
+            unsubscribers.push(unsubscribe);
+          } else {
+            await unsubscribeTopic(unsubscribe);
+          }
+        } catch (error) {
+          if (isActive()) {
+            dispose();
+            reportSubscriptionError(subscription, error);
+          }
+        }
+      };
+      void subscribeTopic(liveId, liveConnectionTopic(procedure, args));
+      void subscribeTopic(globalLiveId, liveGlobalConnectionTopic(procedure));
+      return dispose;
     };
   }
 

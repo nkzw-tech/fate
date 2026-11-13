@@ -1145,3 +1145,32 @@ test('invalidates mixed lists on live connector membership events', async () => 
     dispose();
   }
 });
+
+test.each(['scoped', 'global'])(
+  'cleans up the live topic when %s registration fails',
+  async (failure) => {
+    const pending = Promise.withResolvers<() => void>();
+    const stop = vi.fn();
+    const onError = vi.fn();
+    const error = new Error('Could not register topic');
+    const transport = createHTTPTransport({
+      live: () => ({
+        subscribe: ({ id }) =>
+          id.endsWith(':global') === (failure === 'global')
+            ? Promise.reject(error)
+            : pending.promise,
+      }),
+      url: 'http://local/fate',
+    });
+
+    const dispose = transport.subscribeConnection!('posts', 'Post', {}, ['id'], undefined, {
+      onError,
+      onEvent: vi.fn(),
+    });
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(error));
+    pending.resolve(stop);
+    dispose();
+    await Promise.resolve();
+    expect(stop).toHaveBeenCalledOnce();
+  },
+);
