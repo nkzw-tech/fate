@@ -105,7 +105,7 @@ export function paginationFixture(
   });
   const run = async ({
     args = { children: { first: 2 } },
-    batching = true,
+    batching,
     concurrency = 10,
     direction = 'asc',
     fields = ['children.id', 'children.rank'],

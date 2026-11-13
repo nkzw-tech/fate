@@ -38,6 +38,7 @@ for (const dialect of ['postgres', 'mysql'] as const) {
     });
     const adapter = createDrizzleSourceAdapter({
       db: dialect === 'postgres' ? postgres(execute) : mysql(execute),
+      nestedPaginationBatching: true,
       views: [
         {
           relations: { children: { foreignKey: 'parentId', localKey: 'id' } },

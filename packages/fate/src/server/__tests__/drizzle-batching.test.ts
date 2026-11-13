@@ -33,7 +33,7 @@ for (const direction of ['asc', 'desc'] as const) {
           ],
         };
         const before = await fixture.run({ ...options, batching: false });
-        const after = await fixture.run(options);
+        const after = await fixture.run({ ...options, batching: true });
         expect(after.result).toEqual(before.result);
         expect(after.queries.some((query) => query.includes('row_number()'))).toBe(true);
         expect(after.queries.length).toBeLessThan(before.queries.length);
@@ -71,11 +71,21 @@ test('nested pagination preserves results for date-valued relation keys', async 
   }
 });
 
+test('nested pagination uses per-parent queries by default', async () => {
+  const fixture = paginationFixture(3);
+  try {
+    const result = await fixture.run();
+    expect(result.queries.some((query) => query.includes('row_number()'))).toBe(false);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('grouped pagination bounds the rows fetched and chunks large parent sets', async () => {
   const fixture = paginationFixture(260);
   try {
     const before = await fixture.run({ batching: false });
-    const after = await fixture.run();
+    const after = await fixture.run({ batching: true });
     expect(after.result).toEqual(before.result);
     expect(after.queries).toHaveLength(4); // Parent query plus three windows.
     expect(after.rowsRead).toBe(260 + 259 * 3);
@@ -125,7 +135,7 @@ test('recursive hydration keeps the same results and shares its siblings query b
       fields: ['children.id', 'children.tag.id', 'tags.id'],
     };
     const before = await fixture.run({ ...options, batching: false });
-    const after = await fixture.run(options);
+    const after = await fixture.run({ ...options, batching: true });
     expect(after.result).toEqual(before.result);
     expect(before.peak).toBeLessThanOrEqual(2);
     expect(after.peak).toBeLessThanOrEqual(2);

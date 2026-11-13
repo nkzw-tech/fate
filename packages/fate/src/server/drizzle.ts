@@ -111,7 +111,7 @@ type DrizzleViewsInput = Array<DataView<AnyRecord> | DrizzleViewConfig<AnyRecord
 
 type DrizzleSourceAdapterOptions<Context> = {
   db: DrizzleDatabaseInput<Context>;
-  /** Disable grouped window queries for databases without window-function support. */
+  /** Enable grouped pagination on databases that support window functions. */
   nestedPaginationBatching?: boolean;
   nestedPaginationConcurrency?: number;
   schema?: Record<string, unknown>;
@@ -832,7 +832,7 @@ const resolveManyToManyConfig = ({
 
 export function createDrizzleSourceAdapter<Context>({
   db,
-  nestedPaginationBatching = true,
+  nestedPaginationBatching = false,
   nestedPaginationConcurrency,
   schema,
   views,

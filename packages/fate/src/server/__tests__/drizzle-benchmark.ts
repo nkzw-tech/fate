@@ -33,7 +33,7 @@ try {
     const peaks: Array<number> = [];
     for (let i = 0; i < Number(samples) + 3; i++) {
       const start = performance.now();
-      const result = await fixture.run(options);
+      const result = await fixture.run({ ...options, batching: true });
       const duration = performance.now() - start;
       assert.deepEqual(result.result, expected.result);
       if (i >= 3) {
