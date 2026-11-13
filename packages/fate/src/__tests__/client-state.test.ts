@@ -2226,3 +2226,72 @@ test.each([false, true])(
     expect(client.store.read('Post:next')).toMatchObject({ draft: null, expanded: false });
   },
 );
+
+test('projected mutation reads and snapshot-free patches share the staged overlay', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('UI', {
+      resolve: ({ store }) => {
+        expect(store.patch('UI', 'main', { count: 1 })).toBeUndefined();
+        const value = store.get('UI', 'main', ['count']);
+        expectTypeOf(value).toEqualTypeOf<
+          Readonly<Partial<Pick<EntityOf<typeof client, 'UI'>, 'count'>>> | undefined
+        >();
+        expect(value).toEqual({ count: 1 });
+        expect(store.get('Todo', 'missing', ['title'])).toBeUndefined();
+        const selected = store.get('UI', 'main', ['todos'])!;
+        store.patch('Todo', 'a', { title: 'Changed' });
+        expect(selected.todos![0].title).toBe('Before');
+        expect(store.get('UI', 'main', ['todos'])!.todos![0].title).toBe('Changed');
+        expect(() => store.patch('Todo', 'missing', { title: 'Missing' })).toThrow('missing');
+        expect(() => store.patch('UI', 'main', { summary: 'Computed' } as any)).toThrow(
+          'not a stored client field',
+        );
+        return value;
+      },
+    }),
+  }));
+  client.write(
+    'UI',
+    { id: 'main', todos: [{ id: 'a', title: 'Before' }] },
+    new Set(['todos', 'todos.id', 'todos.title']),
+  );
+  expect((await client.mutations.edit()).result).toEqual({ count: 1 });
+  expect(client.store.read('Todo:a')?.title).toBe('Changed');
+});
+
+test('snapshot-free patches roll back and do not inspect unselected relationships', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('UI', {
+      resolve: ({ store }) => {
+        store.patch('UI', 'main', { count: store.get('UI', 'main', ['count'])!.count! + 1 });
+        throw new Error('Discard patch');
+      },
+    }),
+  }));
+  client.write(
+    'UI',
+    { count: 0, id: 'main', todos: [{ id: 'a', title: 'A' }] },
+    new Set(['count', 'todos.id', 'todos.title']),
+  );
+  const read = vi.spyOn(client.store, 'confirmedRecord');
+  await expect(client.mutations.edit()).rejects.toThrow('Discard patch');
+  expect(read.mock.calls.some(([id]) => id === 'Todo:a')).toBe(false);
+  expect(client.store.read('UI:main')?.count).toBe(0);
+});
+
+test('an equal staged patch still overwrites a concurrent write before commit', async () => {
+  const pending = Promise.withResolvers<void>();
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    edit: mutation('UI', {
+      resolve: async ({ store }) => {
+        store.patch('UI', 'main', { count: 0 });
+        await pending.promise;
+      },
+    }),
+  }));
+  const edit = client.mutations.edit();
+  client.write('UI', { count: 1, id: 'main' }, new Set(['count']));
+  pending.resolve();
+  await edit;
+  expect(client.store.read('UI:main')?.count).toBe(0);
+});

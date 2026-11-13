@@ -302,3 +302,34 @@ Recycling compares only selected containers, keeps scalar objects opaque, and
 holds invalidated results weakly so unmounted readers do not keep stale graphs
 alive. Inline graph reads still traverse their selections; this change targets
 reference stability and downstream rendering rather than eliminating that walk.
+
+## Selective client mutations
+
+The client-state browser fixture includes `parent scalar without snapshot` and
+`projected read + patch`. These call `store.patch` and the field-selection overload
+of `store.get`. When benchmarking an older runtime, the fixture performs the same
+write with `update` and discards its result; older `get` implementations ignore
+the third argument and materialize the whole graph. The existing full-snapshot
+cases remain as controls. This measures an opt-in API improvement, not a change
+to the return semantics of existing calls.
+
+```sh
+FATE_BENCH_BASELINE=6b7a056 node scripts/benchmark-client-state.mjs chromium 10000 15 /tmp/mutations-before.json
+node scripts/benchmark-client-state.mjs chromium 10000 15 /tmp/mutations-after.json
+```
+
+Chromium 158.0.8127.18 medians on 2026-11-13, milliseconds per operation:
+
+| Operation                                                | Before |  After |
+| -------------------------------------------------------- | -----: | -----: |
+| Parent scalar write, ignoring its snapshot               |   1.22 | 0.0055 |
+| Projected counter read followed by patch                 |   2.36 | 0.0057 |
+| Unchanged relationship replacement, full return snapshot |   20.2 |   10.0 |
+| Changed relationship replacement, full return snapshot   |   24.6 |   25.6 |
+
+The unchanged replacement improves without API changes. Scalar leaves are checked
+against current records at commit, not when the resolver stages them, so async
+mutations still overwrite intervening changes correctly. Coverage, invalidation,
+and competing response generations remain part of the fast-path checks.
+Changed replacements still process every changed child and are not materially
+faster. Full-snapshot parent reads/writes retain their graph-proportional cost.

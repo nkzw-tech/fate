@@ -104,6 +104,12 @@ async function benchmark() {
     5,
   );
   await measure('mutation: parent read-modify-write', () => client.mutations.increment(), 5);
+  await measure(
+    'mutation: parent scalar without snapshot',
+    () => client.mutations.parentPatch({ input: { count: ++version } }),
+    10,
+  );
+  await measure('mutation: projected read + patch', () => client.mutations.incrementPatch(), 10);
   await measure('mutation: replace relationship', () => client.mutations.replace());
   await measure('mutation: replace changed relationship', () =>
     client.mutations.replaceChanged({ input: { count: ++version } }),

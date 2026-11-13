@@ -744,7 +744,7 @@ export default class ClientState {
       const staged = patches.get(entityId);
       return staged ? staged.data !== null : Boolean(this.client.store.confirmedRecord(entityId));
     };
-    const get = (type: string, id: string | number) => {
+    const get = (type: string, id: string | number, fields?: ReadonlyArray<string>) => {
       assertActive();
       const entityId = toEntityId(type, id);
       const staged = patches.get(entityId);
@@ -752,11 +752,28 @@ export default class ClientState {
         return undefined;
       }
       const existing = this.client.store.confirmedRecord(entityId);
-      return existing || staged
-        ? materialize({ id, ...existing, ...staged?.data, __typename: type })
-        : undefined;
+      if (!existing && !staged) {
+        return undefined;
+      }
+      const record: AnyRecord = { id, ...existing, ...staged?.data, __typename: type };
+      if (!fields) {
+        return materialize(record);
+      }
+      const selected: AnyRecord = {};
+      for (const field of fields) {
+        if (Object.hasOwn(record, field)) {
+          setRecordValue(selected, field, record[field]);
+        }
+      }
+      return materialize(selected);
     };
-    const update = (type: string, id: string | number, data: AnyRecord, create = false) => {
+    const update = (
+      type: string,
+      id: string | number,
+      data: AnyRecord,
+      create = false,
+      snapshot = true,
+    ) => {
       assertActive();
       if (!create && !has(type, id)) {
         throw new Error(`fate: Cannot update missing client record '${type}:${id}'.`);
@@ -773,7 +790,7 @@ export default class ClientState {
         }
       }
       stage(type, id, data);
-      return get(type, id);
+      return snapshot ? get(type, id) : undefined;
     };
     const changeList = (
       operation: 'append' | 'remove',
@@ -875,6 +892,9 @@ export default class ClientState {
           },
           get,
           has,
+          patch: (type, id, data) => {
+            update(type, id, data, false, false);
+          },
           remove: (type, id, field, ...ids) => changeList('remove', type, id, field, ...ids),
           update,
         },

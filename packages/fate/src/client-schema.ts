@@ -266,7 +266,19 @@ export type ClientStore<Entities, S extends ClientSchema> = {
     type: N,
     id: string | number,
   ): Readonly<Partial<Entities[N]>> | undefined;
+  /** Read only these stored fields, without materializing unrelated relationships. */
+  get<N extends keyof Entities & string, K extends keyof Entities[NoInfer<N>] & string>(
+    type: N,
+    id: string | number,
+    fields: ReadonlyArray<K>,
+  ): Readonly<Partial<Pick<Entities[N], K>>> | undefined;
   has<N extends keyof Entities & string>(type: N, id: string | number): boolean;
+  /** Stage a patch without constructing a detached return snapshot. */
+  patch<N extends keyof Entities & string>(
+    type: N,
+    id: string | number,
+    patch: ClientPatch<Entities, S, N>,
+  ): void;
   /** Remove list membership by ID without deleting the entities. Missing members are ignored. */
   remove<
     N extends keyof Entities & string,

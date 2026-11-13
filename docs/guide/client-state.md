@@ -328,6 +328,22 @@ Later reads inside the mutation see the removal, and it commits together with th
 
 Use `store.has(type, id)` to check whether an object exists, or `store.get(type, id)` to read a copy of its stored fields. `store.get` includes changes made earlier in the mutation. It can return partial data or `undefined` for a missing object. It doesn't fetch missing fields or calculate computed values. Use views to read computed fields and remote mutations to change server fields.
 
+For frequent updates to entities with large relationships, use
+`store.get(type, id, fields)` to copy only the stored fields you need, and
+`store.patch(type, id, patch)` to stage a write without constructing a return
+snapshot. Both use the same mutation overlay and atomic commit as `get` and
+`update`:
+
+```ts
+const board = store.get('Board', 'main', ['count']);
+store.patch('Board', 'main', { count: (board?.count ?? 0) + 1 });
+```
+
+A projection returns only the requested fields. Selected relationships are still
+detached copies; unselected relationships are not traversed. `patch` returns
+`void` and validates stored client fields just like `update`. Existing `get` and
+`update` calls continue to return detached snapshots of the complete stored graph.
+
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
 
 The resolver's return value becomes the action result. fate applies the changes made through the store and `mutateRemote`. Returning a copy of an object from earlier in the mutation won't overwrite later edits to that object.

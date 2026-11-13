@@ -2286,6 +2286,34 @@ export class FateClient<
         this.deleteRecord(type, id);
         continue;
       }
+      // Repeated relationship replacements often include unchanged scalar leaves.
+      // Compare at commit time: a resolver may have awaited while other writes landed.
+      if (
+        !remote &&
+        this.isClientOwnedType(type) &&
+        !this.store.isRecordingOptimistic &&
+        !this.store.hasStaleRecord(entityId)
+      ) {
+        const existing = this.store.read(entityId);
+        const keys = Object.keys(data);
+        const fields = this.getTypeConfig(type).fields;
+        if (
+          existing &&
+          keys.every(
+            (key) =>
+              (key === 'id' || key === '__typename' || fields?.[key] === 'scalar') &&
+              Object.hasOwn(existing, key) &&
+              Object.is(existing[key], data[key]) &&
+              this.store.hasCoverage(entityId, key),
+          )
+        ) {
+          const generation = this.applyingGeneration ?? ++this.writeGeneration;
+          for (const key of keys) {
+            this.acceptFieldWrite(entityId, key, generation);
+          }
+          continue;
+        }
+      }
       let select = recordPaths(data);
       let normalization: NormalizationContext | undefined;
       if (batches) {

@@ -77,6 +77,17 @@ export function createClientStateFixture(recordCount: number) {
         resolve: ({ store }) =>
           store.update('State', 'main', { count: store.get('State', 'main')!.count! + 1 }),
       }),
+      incrementPatch: mutation('State', {
+        resolve: ({ store }) => {
+          // Old runtimes ignore the projection argument; both read the same count.
+          const count = store.get('State', 'main', ['count'])!.count! + 1;
+          if (typeof store.patch === 'function') {
+            store.patch('State', 'main', { count });
+          } else {
+            store.update('State', 'main', { count });
+          }
+        },
+      }),
       leaf: mutation('Item', {
         input,
         resolve: ({ input, store }) => store.update('Item', '0', { title: `Edit ${input.count}` }),
@@ -84,6 +95,17 @@ export function createClientStateFixture(recordCount: number) {
       parent: mutation('State', {
         input,
         resolve: ({ input, store }) => store.update('State', 'main', { count: input.count }),
+      }),
+      parentPatch: mutation('State', {
+        input,
+        resolve: ({ input, store }) => {
+          // Older runtimes provide the same write but construct an ignored snapshot.
+          if (typeof store.patch === 'function') {
+            store.patch('State', 'main', { count: input.count });
+          } else {
+            store.update('State', 'main', { count: input.count });
+          }
+        },
       }),
       remove: mutation('Item', {
         resolve: ({ store }) => store.delete('Item', 'temporary'),
