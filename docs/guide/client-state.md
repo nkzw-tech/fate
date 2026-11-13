@@ -343,6 +343,9 @@ A projection returns only the requested fields. Selected relationships are still
 detached copies; unselected relationships are not traversed. `patch` returns
 `void` and validates stored client fields just like `update`. Existing `get` and
 `update` calls continue to return detached snapshots of the complete stored graph.
+Resolvers infer these methods automatically. Use `ClientMutationStore` for a
+helper that needs them, or `ClientStore` for a helper that only needs the base
+store methods.
 
 Reads inside a mutation exclude optimistic updates. For example, an increment reads the confirmed count so it does not apply its own optimistic increment twice.
 

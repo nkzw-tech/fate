@@ -79,5 +79,6 @@ export {
   type ClientStore,
   type ClientMutationBuilder,
   type ClientMutationContext,
+  type ClientMutationStore,
   type EntityOf,
 } from '@nkzw/fate';

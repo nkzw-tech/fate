@@ -266,19 +266,7 @@ export type ClientStore<Entities, S extends ClientSchema> = {
     type: N,
     id: string | number,
   ): Readonly<Partial<Entities[N]>> | undefined;
-  /** Read only these stored fields, without materializing unrelated relationships. */
-  get<N extends keyof Entities & string, K extends keyof Entities[NoInfer<N>] & string>(
-    type: N,
-    id: string | number,
-    fields: ReadonlyArray<K>,
-  ): Readonly<Partial<Pick<Entities[N], K>>> | undefined;
   has<N extends keyof Entities & string>(type: N, id: string | number): boolean;
-  /** Stage a patch without constructing a detached return snapshot. */
-  patch<N extends keyof Entities & string>(
-    type: N,
-    id: string | number,
-    patch: ClientPatch<Entities, S, N>,
-  ): void;
   /** Remove list membership by ID without deleting the entities. Missing members are ignored. */
   remove<
     N extends keyof Entities & string,
@@ -312,11 +300,43 @@ export type ClientMutationContext<
   store: ClientStore<Entities, S>;
 };
 
+/** The store provided by fate to a client mutation resolver. */
+export type ClientMutationStore<Entities, S extends ClientSchema> = Omit<
+  ClientStore<Entities, S>,
+  'get'
+> & {
+  /** Read only these stored fields, without materializing unrelated relationships. */
+  get<N extends keyof Entities & string, K extends keyof Entities[NoInfer<N>] & string>(
+    type: N,
+    id: string | number,
+    fields: ReadonlyArray<K>,
+  ): Readonly<Partial<Pick<Entities[N], K>>> | undefined;
+  get<N extends keyof Entities & string>(
+    type: N,
+    id: string | number,
+  ): Readonly<Partial<Entities[N]>> | undefined;
+  /** Stage a patch without constructing a detached return snapshot. */
+  patch<N extends keyof Entities & string>(
+    type: N,
+    id: string | number,
+    patch: ClientPatch<Entities, S, N>,
+  ): void;
+};
+
+type ClientMutationResolverContext<
+  Entities,
+  M extends FateMutations,
+  I,
+  S extends ClientSchema,
+> = Omit<ClientMutationContext<Entities, M, I, S>, 'store'> & {
+  store: ClientMutationStore<Entities, S>;
+};
+
 export type ClientMutationDefinition = {
   entity: string;
   input?: { parse(value: unknown): any };
   [MutationKind]: true;
-  resolve: (context: ClientMutationContext<any, any, any, any>) => unknown;
+  resolve: (context: ClientMutationResolverContext<any, any, any, any>) => unknown;
 };
 
 type ClientInputParser = { parse(value: unknown): any };
@@ -336,7 +356,7 @@ export type ClientMutationBuilder<
     definition: {
       input?: never;
       resolve: (
-        context: ClientMutationContext<SchemaEntities<R, S, M>, M, Record<never, never>, S>,
+        context: ClientMutationResolverContext<SchemaEntities<R, S, M>, M, Record<never, never>, S>,
       ) => Result;
     },
   ): MutationDefinition<
@@ -350,7 +370,12 @@ export type ClientMutationBuilder<
     definition: {
       input: P;
       resolve: (
-        context: ClientMutationContext<SchemaEntities<R, S, M>, M, ReturnType<P['parse']>, S>,
+        context: ClientMutationResolverContext<
+          SchemaEntities<R, S, M>,
+          M,
+          ReturnType<P['parse']>,
+          S
+        >,
       ) => Result;
     },
   ): MutationDefinition<

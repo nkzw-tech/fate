@@ -5,6 +5,7 @@ import {
   dataView,
   type ClientMutationBuilder,
   type ClientMutationContext,
+  type ClientMutationStore,
   type ClientOf,
   type ClientStore,
   type ClientDefinitionOf,
@@ -42,6 +43,32 @@ test('public client mutation types support extracted helpers in every framework'
   const { result } = await client.mutations.increment();
   expectTypeOf(result?.value).toEqualTypeOf<number | undefined>();
   expect(result?.value).toBe(1);
+});
+
+test('a store implementing the 2.1.0 contract still satisfies the public types', () => {
+  type ExistingStore = Pick<
+    Store,
+    'append' | 'create' | 'delete' | 'get' | 'has' | 'remove' | 'update'
+  >;
+  expectTypeOf<ExistingStore>().toExtend<Store>();
+  expectTypeOf<Parameters<Store['get']>>().toEqualTypeOf<['Counter', string | number]>();
+});
+
+test('client mutation resolvers receive a compatible store with the new methods', async () => {
+  const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
+    project: mutation('Counter', {
+      resolve: (context) => {
+        expectTypeOf(context).toExtend<Context>();
+        const store: ClientMutationStore<Entities, typeof schema> = context.store;
+        expectTypeOf(store).toExtend<Store>();
+        store.patch('Counter', 'main', { value: 2 });
+        const projected = store.get('Counter', 'main', ['value']);
+        expectTypeOf(projected).toEqualTypeOf<Readonly<{ value?: number }> | undefined>();
+        return projected;
+      },
+    }),
+  }));
+  expect((await client.mutations.project()).result).toEqual({ value: 2 });
 });
 
 type AppClient = ClientOf<typeof schema, ReturnType<typeof defineMutations>>;

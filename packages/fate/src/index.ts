@@ -126,6 +126,7 @@ export {
   type ClientStore,
   type ClientMutationBuilder,
   type ClientMutationContext,
+  type ClientMutationStore,
   type EntityOf,
   type ClientDefinitionOf,
   type ClientRegistration,
