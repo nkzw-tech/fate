@@ -86,7 +86,8 @@ export default defineConfig({
   sitemap: {
     hostname: 'https://fate.technology',
   },
-  srcExclude: ['docs/parts/**.', 'packages/**/README.md', 'packages/**/docs/**', '/README.md'],
+  // Discover pages only under docs/, excluding the fragments used to build the README.
+  srcExclude: ['*.md', '!(docs)/**', 'docs/parts/**'],
   themeConfig: {
     footer: {
       copyright: `Copyright © 2025-present Nakazawa Tech`,
