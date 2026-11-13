@@ -44,6 +44,19 @@ for (const direction of ['asc', 'desc'] as const) {
   }
 }
 
+test('grouped pagination preserves fields mapped to the generated SQL column names', async () => {
+  const fixture = paginationFixture(3, 0, { renameFields: true });
+  try {
+    const fields = ['children.id', 'children.displayName', 'children.sortName'];
+    const before = await fixture.run({ batching: false, fields });
+    const after = await fixture.run({ batching: true, fields });
+    expect(after.result).toEqual(before.result);
+    expect(after.queries).toHaveLength(2);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('grouped pagination bounds the rows fetched and chunks large parent sets', async () => {
   const fixture = paginationFixture(260);
   try {

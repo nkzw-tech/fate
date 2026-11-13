@@ -5,7 +5,11 @@ import { dataView, list } from '../../dataView.ts';
 import { createDrizzleSourceAdapter } from '../../drizzle.ts';
 import { createSourcePlan } from '../../source.ts';
 
-export function paginationFixture(count = 100, latency = 0) {
+export function paginationFixture(
+  count = 100,
+  latency = 0,
+  { renameFields = false } = {},
+) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`
     CREATE TABLE Parent (id INTEGER PRIMARY KEY);
@@ -43,11 +47,11 @@ export function paginationFixture(count = 100, latency = 0) {
   }
   const parentTable = sqliteTable('Parent', { id: integer('id').primaryKey() });
   const childTable = sqliteTable('Child', {
-    __fate_parent: text('__fate_parent'),
-    __fate_rank: text('__fate_rank'),
     id: integer('id').primaryKey(),
     parentId: integer('parentId'),
     rank: integer('rank'),
+    [renameFields ? 'displayName' : '__fate_parent']: text('__fate_parent'),
+    [renameFields ? 'sortName' : '__fate_rank']: text('__fate_rank'),
   });
   const tagTable = sqliteTable('Tag', { id: integer('id').primaryKey(), rank: integer('rank') });
   const linkTable = sqliteTable('ParentTag', {
@@ -58,10 +62,19 @@ export function paginationFixture(count = 100, latency = 0) {
   const child = dataView<{
     __fate_parent: string;
     __fate_rank: string;
+    displayName: string;
     id: number;
     rank: number | null;
+    sortName: string;
     tag: { id: number; rank: number | null } | null;
-  }>('Child')({ __fate_parent: true, __fate_rank: true, id: true, rank: true, tag });
+  }>('Child')({
+    ...(renameFields
+      ? { displayName: true, sortName: true }
+      : { __fate_parent: true, __fate_rank: true }),
+    id: true,
+    rank: true,
+    tag,
+  });
   const parent = dataView<{
     children: Array<{ id: number }>;
     id: number;

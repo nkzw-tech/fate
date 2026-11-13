@@ -1442,16 +1442,24 @@ export function createDrizzleSourceAdapter<Context>({
     const currentDb = getDb(ctx);
     const parentColumn = through?.localColumn ?? getColumn(config.columns, relation.foreignKey);
     const selection = buildSelection(node);
-    // Keep adapter metadata separate from user columns, including adversarial names.
+    // Keep result mapping keys distinct from the metadata keys.
     let parentField = '__fate_parent';
-    while (Object.hasOwn(selection, parentField)) {
+    while (Object.hasOwn(config.columns, parentField)) {
       parentField += '_';
     }
     let rankField = '__fate_rank';
-    while (Object.hasOwn(selection, rankField)) {
+    while (Object.hasOwn(config.columns, rankField)) {
       rankField += '_';
     }
-    const parent = sql`${parentColumn}`.mapWith(parentColumn).as(parentField);
+    // Give every projected SQL column a distinct name. Drizzle's result keys
+    // can differ from physical column names and do not disambiguate a subquery.
+    const rankedFields = Object.fromEntries(
+      Object.entries(selection).map(([field, column], index) => [
+        field,
+        sql`${column}`.mapWith(column).as(`__fate_column_${index}`),
+      ]),
+    );
+    const parent = sql`${parentColumn}`.mapWith(parentColumn).as('__fate_parent');
     const args = paginationArgs(node.args);
     const direction = getConnectionDirection(args);
     const pageSize = getConnectionSize(20, args);
@@ -1467,10 +1475,11 @@ export function createDrizzleSourceAdapter<Context>({
     };
     const rank =
       sql<number>`row_number() over (partition by ${parentColumn} order by ${sql.join(getQueryOrder(direction, node, config.columns), sql`, `)})`.as(
-        rankField,
+        '__fate_rank',
       );
     // Custom query builders that implement the original adapter surface can opt out.
-    if (typeof from({ ...selection, [parentField]: parent, [rankField]: rank }).as !== 'function') {
+    const projection = { ...rankedFields, [parentField]: parent, [rankField]: rank };
+    if (typeof from(projection).as !== 'function') {
       return undefined;
     }
     const result = new Map<unknown, ConnectionResult<AnyRecord>>();
@@ -1509,9 +1518,7 @@ export function createDrizzleSourceAdapter<Context>({
           }),
         )!;
       }
-      const ranked = from({ ...selection, [parentField]: parent, [rankField]: rank })
-        .where(where)
-        .as('__fate_page');
+      const ranked = from(projection).where(where).as('__fate_page');
       const rows = (await runQuery(() =>
         currentDb
           .select()
