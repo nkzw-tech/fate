@@ -166,6 +166,8 @@ export type DeferredMetadata = Readonly<{
   field: string;
   id: string | number;
   owner: EntityId;
+  /** @internal The field's position within its bound view. */
+  retentionKey?: string;
   selection: unknown;
   type: string;
 }>;

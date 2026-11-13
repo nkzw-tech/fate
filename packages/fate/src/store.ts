@@ -1224,6 +1224,15 @@ export class Store {
     return this.records.has(id) && !!mask && isCovered(mask, path);
   }
 
+  hasFieldSubscribers(id: EntityId, field: string) {
+    for (const { mask } of this.subscriptions.get(id) ?? []) {
+      if (!mask || mask.all || mask.children.has(field)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   subscribe(id: EntityId, selection: ReadonlySet<string> | null, fn: () => void): () => void;
 
   subscribe(id: EntityId, fn: () => void): () => void;
@@ -1341,6 +1350,20 @@ export class Store {
 
   getListState(key: string): List | undefined {
     return this.lists.get(key);
+  }
+
+  hasListSubscribers(key: string) {
+    return this.listSubscriptions.has(key);
+  }
+
+  /** Includes covered fields that were omitted from a response. */
+  *recordFields(id: EntityId, record: AnyRecord): Iterable<string> {
+    yield* Object.keys(record);
+    for (const field of this.coverage.get(id)?.children.keys() ?? []) {
+      if (!Object.hasOwn(record, field)) {
+        yield field;
+      }
+    }
   }
 
   getListsForField(ownerId: EntityId, field: string): Array<readonly [string, List]> {
@@ -1488,6 +1511,34 @@ export class Store {
 
   restoreList(key: string, list?: List) {
     return this.update(() => this.writeList(key, list));
+  }
+
+  /** Eviction is a cache miss, so it must not be persisted as a server write. */
+  collectRecordFields(id: EntityId, fields: ReadonlySet<string>) {
+    const previous = this.records.get(id)!;
+    const record = { ...previous };
+    const mask = this.coverage.get(id);
+    const coverage = mask && cloneMask(mask);
+    for (const field of fields) {
+      delete record[field];
+      if (coverage) {
+        removePath(coverage, field);
+      }
+    }
+    if (coverage) {
+      this.coverage.set(id, coverage);
+    }
+    const stale = this.stalePaths.get(id);
+    if (stale) {
+      const remaining = stale.filter((path) => !fields.has(path.split('.', 1)[0]));
+      if (remaining.length) {
+        this.stalePaths.set(id, remaining);
+      } else {
+        this.stalePaths.delete(id);
+      }
+    }
+    this.records.set(id, record);
+    this.updateRecordReferenceIndexes(id, previous, record, fields);
   }
 
   collectGarbage(
@@ -1712,7 +1763,8 @@ export class Store {
     }
   }
 
-  private getListReferencedEntityIds(list: List): Iterable<EntityId> {
+  /** @internal */
+  getListReferencedEntityIds(list: List): Iterable<EntityId> {
     if (
       !list.liveAfterIds?.length &&
       !list.liveBeforeIds?.length &&

@@ -6,7 +6,7 @@ import {
   typeBranchField,
 } from './alias.ts';
 import { cloneArgs, getConnectionWindowIgnoreKeys, hashArgs, hashConnectionArgs } from './args.ts';
-import { isDeferredSelection } from './defer.ts';
+import { getDeferredSelection, isDeferredSelection } from './defer.ts';
 import { isRecord } from './record.ts';
 import {
   AnyRecord,
@@ -18,11 +18,21 @@ import {
   type Selection,
   type View,
 } from './types.ts';
-import { getViewPayloads } from './view.ts';
+import { getViewPayloadEntries, resolveView } from './view.ts';
 import { isTypeBranch } from './viewFor.ts';
 import { resolveConditionalSelection } from './when.ts';
 
 type WalkContext = 'default' | 'connection';
+
+export type DeferredRetention = Readonly<
+  { ownerPath: string } & (
+    | { field: string; key?: string; selection: unknown }
+    | { plan: SelectionPlan }
+  )
+>;
+
+export const deferredRetentionKey = (viewTag: string, path: string, field: string) =>
+  JSON.stringify([viewTag, path, field]);
 
 /**
  * Representation of a composed selection including hashed args and the
@@ -34,6 +44,7 @@ export type SelectionPlan = {
     string,
     Readonly<{ hash: string; ignoreKeys?: ReadonlySet<string>; value: Readonly<AnyRecord> }>
   >;
+  readonly deferred?: ReadonlyArray<DeferredRetention>;
   readonly hasTypeBranches?: true;
   readonly live: ReadonlyMap<string, ConnectionLivePolicy>;
   readonly paths: ReadonlySet<string>;
@@ -102,6 +113,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
     { hash: string; ignoreKeys?: ReadonlySet<string>; value: AnyRecord }
   >();
   const live = new Map<string, ConnectionLivePolicy>();
+  const deferred: Array<DeferredRetention> = [];
   const paths = new Set<string>();
   const responsePaths = new Map<string, string>();
   let hasTypeBranches: true | undefined;
@@ -121,6 +133,8 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
     context: WalkContext = 'default',
     namespace: ReadonlyArray<string> = [],
     type?: string,
+    viewTag?: string,
+    viewPath = '',
   ) => {
     if (prefix === null && context !== 'connection' && isConnectionSelection(selection)) {
       if (selection.live && isRecord(selection.live)) {
@@ -139,7 +153,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
       }
 
       const { args: _args, live: _live, ...withoutArgs } = selection;
-      walk(withoutArgs, prefix, 'connection', namespace, type);
+      walk(withoutArgs, prefix, 'connection', namespace, type, viewTag, viewPath);
       return;
     }
 
@@ -152,13 +166,13 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
         hasTypeBranches = true;
         // Identity is enough when the concrete view has only deferred fields.
         paths.add(prefix ? `${prefix}.__typename` : '__typename');
-        walk(rawValue.view, prefix, context, namespace, rawValue.type);
+        walk(rawValue.view, prefix, context, namespace, rawValue.type, viewTag, viewPath);
         continue;
       }
       if (isAliasedView(rawValue)) {
         aliasedField(key, key);
-        for (const payload of getViewPayloads(rawValue.view, null)) {
-          walk(payload.select, prefix, context, [...namespace, key], type);
+        for (const [tag, payload] of getViewPayloadEntries(rawValue.view)) {
+          walk(payload.select, prefix, context, [...namespace, key], type, tag);
         }
         continue;
       }
@@ -179,6 +193,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
         throw new Error('fate: Bind the view parameters before using a view in a selection.');
       }
       const path = prefix ? `${prefix}.${field}` : field;
+      const localPath = viewPath ? `${viewPath}.${key}` : key;
 
       if (context === 'connection') {
         if (key === 'args' || key === 'live' || key === 'pagination') {
@@ -187,7 +202,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
 
         if (key === 'items' && isRecord(value)) {
           if (isRecord(value.node)) {
-            walk(value.node, prefix);
+            walk(value.node, prefix, 'default', [], undefined, viewTag, viewPath);
           }
           continue;
         }
@@ -210,12 +225,20 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
       }
 
       if (isDeferredSelection(value)) {
+        // A deferred read starts a new plan at this entity. Its arguments
+        // participate in retention but must stay out of the eager request.
+        deferred.push({
+          field: sourceField,
+          key: viewTag ? deferredRetentionKey(viewTag, localPath, sourceField) : undefined,
+          ownerPath: prefix ?? '',
+          selection: getDeferredSelection(value),
+        });
         continue;
       }
 
       if (isViewTag(key)) {
         if (type || options?.includeNestedViews || hasView(key)) {
-          walk((value as { select: AnyRecord }).select, prefix, context, namespace, type);
+          walk((value as { select: AnyRecord }).select, prefix, context, namespace, type, key);
         }
         continue;
       }
@@ -240,7 +263,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
           }
 
           const { args: _ignored, live: _live, ...withoutArgs } = selectionObject;
-          walk(withoutArgs, path, 'connection');
+          walk(withoutArgs, path, 'connection', [], undefined, viewTag, localPath);
           continue;
         }
 
@@ -259,7 +282,7 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
 
         const hasEntries = Object.keys(selectionWithoutArgs).length > 0;
         if (hasEntries) {
-          walk(selectionWithoutArgs, path);
+          walk(selectionWithoutArgs, path, 'default', [], undefined, viewTag, localPath);
         } else if (hasArgs) {
           paths.add(path);
         }
@@ -267,21 +290,24 @@ const createSelectionPlan = <T extends Entity, S extends Selection<T>, V extends
     }
   };
 
-  const payloads =
-    typeof viewComposition === 'object'
-      ? Object.entries(viewComposition)
-          .filter(([key]) => isViewTag(key) && hasView(key))
-          .map(([, payload]) => payload)
-      : getViewPayloads(viewComposition, ref);
+  const payloads = getViewPayloadEntries(resolveView(viewComposition, ref)).filter(([tag]) =>
+    hasView(tag),
+  );
   if (payloads.length === 0 && isRecord(viewComposition)) {
     walk(viewComposition, null);
   } else {
-    for (const payload of payloads) {
-      walk(payload.select, null);
+    for (const [tag, payload] of payloads) {
+      walk(payload.select, null, 'default', [], undefined, tag);
     }
   }
 
-  return { args, ...(hasTypeBranches ? { hasTypeBranches } : null), live, paths };
+  return {
+    args,
+    ...(deferred.length ? { deferred } : null),
+    ...(hasTypeBranches ? { hasTypeBranches } : null),
+    live,
+    paths,
+  };
 };
 
 export const getDeferredSelectionPlan = (field: string, selection: unknown): SelectionPlan => {

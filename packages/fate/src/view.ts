@@ -63,6 +63,15 @@ export const resolveView = <V extends View<any, any>>(view: V, ref: ViewRef<stri
   return boundViews.get(matches[0]) as V;
 };
 
+export const getViewPayloadEntries = (view: View<any, any>) => {
+  let payloads = viewPayloads.get(view);
+  if (!payloads) {
+    payloads = Object.entries(view).filter(([key]) => isViewTag(key));
+    viewPayloads.set(view, payloads);
+  }
+  return payloads;
+};
+
 /**
  * Collects all view payloads that apply to the given ref.
  */
@@ -70,15 +79,9 @@ export const getViewPayloads = <T extends Entity, S extends Selection<T>, V exte
   view: V,
   ref: ViewRef<T['__typename']> | null,
 ): ReadonlyArray<ViewPayload<T, S>> => {
-  view = resolveView(view, ref);
-  let payloads = viewPayloads.get(view);
-  if (!payloads) {
-    payloads = Object.entries(view).filter(([key]) => isViewTag(key));
-    viewPayloads.set(view, payloads);
-  }
   const names = ref?.[ViewsTag];
   const result: Array<ViewPayload<T, S>> = [];
-  for (const [key, value] of payloads) {
+  for (const [key, value] of getViewPayloadEntries(resolveView(view, ref))) {
     if (!ref || names?.has(key)) {
       result.push(value);
     }

@@ -10,8 +10,13 @@ import {
 } from './types.ts';
 
 type CachedSnapshot = FateThenable<ViewSnapshot<any, any>>;
+type FieldRevision = { revision: number };
 type CacheEntry = {
-  dependencies: ReadonlyArray<{ cache: EntityCache; fields: ReadonlySet<string> | null }>;
+  dependencies: ReadonlyArray<{
+    cache: EntityCache;
+    fields: ReadonlySet<string> | null;
+    variants?: ReadonlyArray<FieldRevision>;
+  }>;
   previous?: WeakRef<object>;
   revision: number;
   thenable?: CachedSnapshot;
@@ -20,6 +25,7 @@ type EntityCache = {
   fields?: Map<string, number>;
   invalidated: number;
   revision: number;
+  variants?: Map<string, FieldRevision>;
   views?: WeakMap<View<any, any>, WeakMap<ViewRef<string>, CacheEntry>>;
 };
 
@@ -59,7 +65,7 @@ export default class ViewDataCache {
       return null;
     }
     if (entry.revision !== this.revision) {
-      for (const { cache, fields } of entry.dependencies) {
+      for (const { cache, fields, variants } of entry.dependencies) {
         if (cache.invalidated > entry.revision) {
           return this.expire(entry);
         }
@@ -71,6 +77,11 @@ export default class ViewDataCache {
         }
         for (const field of fields) {
           if ((cache.fields?.get(field) ?? 0) > entry.revision) {
+            return this.expire(entry);
+          }
+        }
+        for (const field of variants ?? []) {
+          if (field.revision > entry.revision) {
             return this.expire(entry);
           }
         }
@@ -118,7 +129,23 @@ export default class ViewDataCache {
     let coversEntity = false;
     for (const [id, fields] of thenable.value?.coverage ?? []) {
       coversEntity ||= id === entityId;
-      dependencies.push({ cache: this.entityCache(id), fields });
+      const cache = this.entityCache(id);
+      let variants: Array<FieldRevision> | undefined;
+      // Only argument variants can be collected individually. Ordinary fields
+      // can reuse the snapshot's coverage without allocating revision cells.
+      for (const field of fields) {
+        if (!field.includes('(')) {
+          continue;
+        }
+        const revisions = (cache.variants ??= new Map());
+        let revision = revisions.get(field);
+        if (!revision) {
+          revision = { revision: 0 };
+          revisions.set(field, revision);
+        }
+        (variants ??= []).push(revision);
+      }
+      dependencies.push({ cache, fields, variants });
     }
     if (!coversEntity) {
       dependencies.push({ cache: this.entityCache(entityId), fields: null });
@@ -129,6 +156,15 @@ export default class ViewDataCache {
   invalidateField(entityId: EntityId, field: string, hash?: string) {
     if (this.cache.has(entityId)) {
       this.invalidate(entityId, [argumentFieldKey(field, hash)]);
+    }
+  }
+
+  collectFields(entityId: EntityId, fields: ReadonlySet<string>) {
+    this.invalidate(entityId, fields);
+    const revisions = this.cache.get(entityId)?.variants;
+    for (const field of fields) {
+      // Old snapshots still see the invalidated revision through their cell.
+      revisions?.delete(field);
     }
   }
 
@@ -144,7 +180,15 @@ export default class ViewDataCache {
     if (paths) {
       for (const path of paths) {
         revision ||= ++this.revision;
-        (cache.fields ??= new Map()).set(path.split('.')[0], revision);
+        const field = path.split('.')[0];
+        if (field.includes('(')) {
+          const variant = cache.variants?.get(field);
+          if (variant) {
+            variant.revision = revision;
+          }
+        } else {
+          (cache.fields ??= new Map()).set(field, revision);
+        }
       }
     }
     if (revision) {
@@ -154,6 +198,7 @@ export default class ViewDataCache {
       // Unread parents can retain this revision metadata after the entity is
       // removed. Drop its view storage without allocating a replacement map.
       cache.fields = undefined;
+      cache.variants = undefined;
       cache.views = undefined;
       this.cache.delete(entityId);
     }

@@ -113,7 +113,13 @@ import {
 } from './request-observer.ts';
 import FateRequestPromise from './request-promise.ts';
 import { clientRoot } from './root.ts';
-import { getDeferredSelectionPlan, getSelectionPlan, type SelectionPlan } from './selection.ts';
+import {
+  deferredRetentionKey,
+  getDeferredSelectionPlan,
+  getSelectionPlan,
+  type DeferredRetention,
+  type SelectionPlan,
+} from './selection.ts';
 import {
   compileListKey,
   getListKey,
@@ -159,7 +165,7 @@ import {
   addViewName,
   viewNamesForType,
   getViewNames,
-  getViewPayloads,
+  getViewPayloadEntries,
   resolveView,
 } from './view.ts';
 import { isTypeBranch } from './viewFor.ts';
@@ -863,6 +869,11 @@ export class FateClient<
   private readonly rootLists = new Map<string, Set<string>>();
   private listTargets = new WeakMap<object, ConnectionMetadata>();
   private deferredTargets = new WeakMap<object, string>();
+  private readonly evaluatedDeferredPlans = new Map<
+    EntityId,
+    WeakMap<object, Map<string, SelectionPlan>>
+  >();
+  private readonly boundDeferredPlans = new Map<EntityId, Map<string, SelectionPlan>>();
   private readonly mutationLists = new Map<string, number>();
   private readonly mutationRecords = new Map<EntityId, number>();
   private readonly pendingViews = new Map<
@@ -893,7 +904,20 @@ export class FateClient<
     }
   >();
   private readonly liveConnectionInvalidations = new Map<string, number>();
-  private readonly stableRefs = new Map<EntityId, Map<string, ViewRef<string>>>();
+  private readonly stableRefs = new Map<EntityId, Map<string, WeakRef<ViewRef<string>>>>();
+  private readonly collectedRefs = new FinalizationRegistry<{
+    entityId: EntityId;
+    key: string;
+    reference: WeakRef<ViewRef<string>>;
+  }>(({ entityId, key, reference }) => {
+    const refs = this.stableRefs.get(entityId);
+    if (refs?.get(key) === reference) {
+      refs.delete(key);
+      if (!refs.size) {
+        this.stableRefs.delete(entityId);
+      }
+    }
+  });
   private readonly requests = new Map<
     string,
     Map<RequestMode, FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>>
@@ -1314,6 +1338,8 @@ export class FateClient<
     });
 
     if (mode === 'replace') {
+      this.boundDeferredPlans.clear();
+      this.evaluatedDeferredPlans.clear();
       this.rootLists.clear();
       this.rootRequests.clear();
       this.rootValues.clear();
@@ -1902,7 +1928,12 @@ export class FateClient<
         metadata = this.nestedListMetadata(
           owner,
           reference.field,
-          getDeferredSelectionPlan(reference.field, reference.selection),
+          this.evaluateDeferredPlan(
+            owner,
+            reference.field,
+            reference.selection,
+            reference.retentionKey,
+          ),
           reference.field,
         );
       }
@@ -2401,6 +2432,8 @@ export class FateClient<
       const entityId = toEntityId(type, id);
 
       if (!this.store.isPreviewing) {
+        this.boundDeferredPlans.delete(entityId);
+        this.evaluatedDeferredPlans.delete(entityId);
         this.viewDataCache.invalidate(entityId);
         this.stableRefs.delete(entityId);
         this.clientState.collect(entityId);
@@ -2411,14 +2444,8 @@ export class FateClient<
   }
 
   private ownerRef(entityId: EntityId): ViewRef<string> {
-    const existing = this.stableRefs.get(entityId)?.get('');
-    if (existing) {
-      return existing;
-    }
     const { id, type } = parseEntityId(entityId);
-    const ref = this.stableRefWithViewNames(type, id, emptySet);
-    this.stableRefs.get(entityId)!.set('', ref);
-    return ref;
+    return this.stableRefWithViewNames(type, id, emptySet);
   }
 
   private stableRefWithViewNames<TName extends string>(
@@ -2435,7 +2462,7 @@ export class FateClient<
       this.stableRefs.set(entityId, refs);
     }
 
-    const existing = refs.get(key);
+    const existing = refs.get(key)?.deref();
     if (existing) {
       return existing as ViewRef<TName>;
     }
@@ -2445,7 +2472,9 @@ export class FateClient<
     if (resolution) {
       this.optimisticRefResolutions.set(ref, resolution);
     }
-    refs.set(key, ref);
+    const reference = new WeakRef(ref);
+    refs.set(key, reference);
+    this.collectedRefs.register(ref, { entityId, key, reference });
     return ref;
   }
 
@@ -2745,6 +2774,40 @@ export class FateClient<
     return this.readDeferredInternal(deferred, undefined);
   }
 
+  private evaluateDeferredPlan(
+    owner: EntityId,
+    field: string,
+    selection: unknown,
+    retentionKey?: string,
+  ) {
+    const plan = getDeferredSelectionPlan(field, selection);
+    if (!(plan.args.size || plan.deferred?.length)) {
+      return plan;
+    }
+    if (retentionKey !== undefined) {
+      let evaluated = this.boundDeferredPlans.get(owner);
+      if (!evaluated) {
+        evaluated = new Map();
+        this.boundDeferredPlans.set(owner, evaluated);
+      }
+      evaluated.set(retentionKey, plan);
+    }
+    if (isRecord(selection)) {
+      let evaluated = this.evaluatedDeferredPlans.get(owner);
+      if (!evaluated) {
+        evaluated = new WeakMap();
+        this.evaluatedDeferredPlans.set(owner, evaluated);
+      }
+      let fields = evaluated.get(selection);
+      if (!fields) {
+        fields = new Map();
+        evaluated.set(selection, fields);
+      }
+      fields.set(field, plan);
+    }
+    return plan;
+  }
+
   /** @internal Keeps deferred failures stable across discarded React renders. */
   readDeferredForRender<T>(
     deferred: Deferred<T>,
@@ -2766,7 +2829,12 @@ export class FateClient<
         ? ownerRecord.id
         : parsedOwner.id;
     const ownerType = parsedOwner.type || metadata.type;
-    const plan = getDeferredSelectionPlan(metadata.field, metadata.selection);
+    const plan = this.evaluateDeferredPlan(
+      resolvedOwner,
+      metadata.field,
+      metadata.selection,
+      metadata.retentionKey,
+    );
     const selectedPaths = plan.paths;
     const missing = this.missingForSelection(resolvedOwner, selectedPaths, plan);
     const hasMissingList = () =>
@@ -3785,8 +3853,11 @@ export class FateClient<
     }
     resolution.next = target;
     if (!this.store.isPreviewing) {
-      for (const ref of this.stableRefs.get(optimisticEntityId)?.values() ?? []) {
-        this.optimisticRefResolutions.set(ref, resolution);
+      for (const reference of this.stableRefs.get(optimisticEntityId)?.values() ?? []) {
+        const ref = reference.deref();
+        if (ref) {
+          this.optimisticRefResolutions.set(ref, resolution);
+        }
       }
     }
     this.store.replaceListEntityId(optimisticEntityId, resolvedEntityId);
@@ -4646,8 +4717,8 @@ export class FateClient<
   }
 
   /**
-   * Removes records and lists that are not reachable from retained requests or
-   * the release buffer.
+   * Removes unreachable records, lists, and cached field variants. Retained
+   * requests and the release buffer keep their argument variants available.
    *
    * Garbage collection is scheduled automatically when retained requests are
    * released. Calling this method manually is mainly useful in tests and custom
@@ -4682,6 +4753,9 @@ export class FateClient<
     const markedRecords = new Set<EntityId>();
     const markedQueries = new Set<string>();
     const queue: Array<EntityId> = [];
+    const selectedFields = new Map<EntityId, Set<string>>();
+    const retainedDeferredKeys = new Map<EntityId, Set<string>>();
+    const pinnedRecords = new Set<EntityId>();
 
     const markRecord = (entityId: EntityId | null | undefined) => {
       if (!entityId || markedRecords.has(entityId)) {
@@ -4692,23 +4766,153 @@ export class FateClient<
       queue.push(entityId);
     };
 
+    const pinRecord = (id: EntityId) => {
+      pinnedRecords.add(id);
+      markRecord(id);
+    };
+
     const markList = (key: string) => {
+      if (markedLists.has(key)) {
+        return;
+      }
       markedLists.add(key);
       const listState = this.store.getListState(key);
       if (!listState) {
         return;
       }
 
-      for (const id of listState.pendingBeforeIds ?? []) {
+      for (const id of this.store.getListReferencedEntityIds(listState)) {
         markRecord(id);
       }
+    };
 
-      for (const id of listState.ids) {
-        markRecord(id);
+    const markSelection = (ids: Iterable<EntityId>, type: string, plan: SelectionPlan) => {
+      // Expanding client computations can add argument-bearing dependencies.
+      if (this.clientState.definitions.size) {
+        plan = { ...plan, args: new Map(plan.args) };
+        this.clientState.expand(type, plan.paths, false, plan);
       }
-
-      for (const id of listState.pendingAfterIds ?? []) {
-        markRecord(id);
+      const argumentPaths = new Set([...plan.args.keys()].filter(Boolean));
+      const deferred = new Map<string, Array<DeferredRetention>>();
+      for (const selection of plan.deferred ?? []) {
+        const path = selection.ownerPath;
+        const atPath = deferred.get(path) ?? [];
+        atPath.push(selection);
+        deferred.set(path, atPath);
+        if (path) {
+          argumentPaths.add(path);
+        }
+      }
+      if (!argumentPaths.size && !deferred.size) {
+        return;
+      }
+      const tree = compileEmbeddedSelection(argumentPaths);
+      const visited = new Map<EmbeddedSelection, Set<EntityId>>();
+      const walk = (
+        value: unknown,
+        fields: EmbeddedSelection,
+        prefix: string,
+        owner?: EntityId,
+      ) => {
+        if (isNodeRef(value)) {
+          visit(getNodeRefId(value), fields, prefix);
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (const entry of value) {
+            walk(entry, fields, prefix);
+          }
+          return;
+        }
+        if (!isRecord(value)) {
+          return;
+        }
+        const config = owner ? this.types.get(parseEntityId(owner).type) : undefined;
+        for (const [field, children] of fields) {
+          if (config && !fieldAppliesTo(field, config.type)) {
+            continue;
+          }
+          const path = prefix ? `${prefix}.${field}` : field;
+          const storageKey = getFieldKey(path, plan);
+          const args = plan.args.get(path);
+          if (owner && args) {
+            let selected = selectedFields.get(owner);
+            if (!selected) {
+              selected = new Set();
+              selectedFields.set(owner, selected);
+            }
+            selected.add(storageKey);
+          }
+          const name = schemaField(field);
+          const relation = config?.fields?.[name];
+          if (
+            owner &&
+            (children.size || deferred.has(path)) &&
+            relation &&
+            relation !== 'scalar' &&
+            'listOf' in relation
+          ) {
+            const key = getListKey(owner, name, args?.hash);
+            const list = this.store.getListState(key);
+            if (list) {
+              for (const id of this.store.getListReferencedEntityIds(list)) {
+                visit(id, children, path);
+              }
+              continue;
+            }
+          }
+          walk(value[storageKey], children, path);
+        }
+      };
+      const visit = (id: EntityId, fields: EmbeddedSelection, prefix: string) => {
+        if (!fields.size && !deferred.has(prefix)) {
+          return;
+        }
+        let seen = visited.get(fields);
+        if (!seen) {
+          seen = new Set();
+          visited.set(fields, seen);
+        }
+        if (seen.has(id)) {
+          return;
+        }
+        seen.add(id);
+        const record = this.store.read(id);
+        if (record) {
+          for (const selection of deferred.get(prefix) ?? []) {
+            // A deferred read supplies the plan. Collection must never run
+            // argument getters for a field that has not been opened.
+            const key = 'key' in selection ? selection.key : undefined;
+            let evaluated =
+              key === undefined ? undefined : this.boundDeferredPlans.get(id)?.get(key);
+            if (evaluated && key !== undefined) {
+              let keys = retainedDeferredKeys.get(id);
+              if (!keys) {
+                keys = new Set();
+                retainedDeferredKeys.set(id, keys);
+              }
+              keys.add(key);
+            }
+            evaluated ??=
+              'plan' in selection
+                ? selection.plan
+                : isRecord(selection.selection)
+                  ? this.evaluatedDeferredPlans
+                      .get(id)
+                      ?.get(selection.selection)
+                      ?.get(selection.field)
+                  : undefined;
+            if (evaluated) {
+              markSelection([id], parseEntityId(id).type, evaluated);
+            }
+          }
+          if (fields.size) {
+            walk(record, fields, prefix, id);
+          }
+        }
+      };
+      for (const id of ids) {
+        visit(id, tree, '');
       }
     };
 
@@ -4735,14 +4939,14 @@ export class FateClient<
     }
     const optimisticRoots = this.store.getOptimisticRoots();
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
-    optimisticRoots.records.forEach(markRecord);
+    optimisticRoots.records.forEach(pinRecord);
     optimisticRoots.lists.forEach(markList);
-    this.mutationRecords.forEach((_count, id) => markRecord(this.resolveEntityId(id)));
+    this.mutationRecords.forEach((_count, id) => pinRecord(this.resolveEntityId(id)));
     for (const key of this.mutationLists.keys()) {
       markList(key);
       const owner = parseListKey(key)?.ownerId;
-      if (owner !== '__root__') {
-        markRecord(owner);
+      if (owner && owner !== '__root__') {
+        pinRecord(owner);
       }
     }
 
@@ -4750,16 +4954,20 @@ export class FateClient<
     for (const descriptor of retainedRequests.values()) {
       for (const item of descriptor.items) {
         if (item.kind === 'node' || item.kind === 'nodes') {
-          for (const raw of item.ids) {
-            markRecord(toEntityId(item.type, raw));
-          }
+          const ids = item.ids.map((id) => toEntityId(item.type, id));
+          ids.forEach(markRecord);
+          markSelection(ids, item.type, item.plan);
           continue;
         }
 
         if (item.kind === 'query') {
           const key = this.queryResultKey(item);
           markedQueries.add(key);
-          markRecord(this.rootRequests.get(key));
+          const id = this.getPersistenceClientRoot(item) ?? this.rootRequests.get(key);
+          markRecord(id);
+          if (id) {
+            markSelection([id], item.type, item.plan);
+          }
           continue;
         }
 
@@ -4770,6 +4978,10 @@ export class FateClient<
 
         if (item.kind === 'list') {
           markList(item.listKey);
+          const list = this.store.getListState(item.listKey);
+          if (list) {
+            markSelection(this.store.getListReferencedEntityIds(list), item.type, item.plan);
+          }
           retainedValueKeys.add(`list:${item.listKey}`);
         }
       }
@@ -4786,23 +4998,48 @@ export class FateClient<
         continue;
       }
 
-      this.markRecordReferences(record, markRecord);
-
       const { type } = parseEntityId(entityId);
       const config = this.types.get(type);
-      if (!config?.fields) {
-        continue;
-      }
+      const selected = selectedFields.get(entityId);
+      const keepField = (field: string) =>
+        pinnedRecords.has(entityId) ||
+        selected?.has(field) ||
+        this.clientState.isLocalField(type, field.split('(', 1)[0]) ||
+        this.store.hasFieldSubscribers(entityId, field);
+      const listFields = new Set<string>();
 
-      for (const [field, descriptor] of Object.entries(config.fields)) {
+      for (const [field, descriptor] of Object.entries(config?.fields ?? {})) {
         if (!descriptor || descriptor === 'scalar' || !('listOf' in descriptor)) {
           continue;
         }
 
         for (const [listKey] of this.store.getListsForField(entityId, field)) {
-          markList(listKey);
+          const hash = parseListKey(listKey)?.hash;
+          const storageKey = argumentFieldKey(field, hash);
+          if (
+            storageKey === field ||
+            markedLists.has(listKey) ||
+            keepField(storageKey) ||
+            this.store.hasListSubscribers(listKey)
+          ) {
+            markList(listKey);
+            listFields.add(storageKey);
+          }
         }
       }
+      const released = new Set<string>();
+      for (const field of this.store.recordFields(entityId, record)) {
+        if (field.includes('(') && !listFields.has(field) && !keepField(field)) {
+          released.add(field);
+        }
+      }
+      if (released.size) {
+        this.store.collectRecordFields(entityId, released);
+        this.clientState.collect(entityId);
+        this.viewDataCache.collectFields(entityId, released);
+        this.clearStalledRequestsForEntity(entityId);
+      }
+      this.markRecordReferences(this.store.read(entityId)!, markRecord);
     }
 
     const swept = this.store.collectGarbage(markedRecords, markedLists, {
@@ -4811,6 +5048,7 @@ export class FateClient<
         this.clientState.collect(id);
         this.viewDataCache.invalidate(id);
         this.stableRefs.delete(id);
+        this.evaluatedDeferredPlans.delete(id);
         this.clearStalledRequestsForEntity(id);
       },
     });
@@ -4819,6 +5057,22 @@ export class FateClient<
     for (const id of this.stableRefs.keys()) {
       if (!markedRecords.has(id)) {
         this.stableRefs.delete(id);
+      }
+    }
+    for (const id of this.evaluatedDeferredPlans.keys()) {
+      if (!markedRecords.has(id)) {
+        this.evaluatedDeferredPlans.delete(id);
+      }
+    }
+    for (const [id, plans] of this.boundDeferredPlans) {
+      const retained = retainedDeferredKeys.get(id);
+      for (const key of plans.keys()) {
+        if (!retained?.has(key)) {
+          plans.delete(key);
+        }
+      }
+      if (!plans.size) {
+        this.boundDeferredPlans.delete(id);
       }
     }
     for (const [id, resolution] of this.optimisticEntityResolutions) {
@@ -6905,6 +7159,8 @@ export class FateClient<
       parentId: EntityId,
       prefix: string | null,
       before?: AnyRecord,
+      viewTag?: string,
+      viewPath = '',
     ) => {
       let entries = selectionEntries.get(viewPayload);
       if (!entries) {
@@ -6972,11 +7228,13 @@ export class FateClient<
         const storageKey = getFieldKey(fieldPath, plan);
         if (isDeferredSelection(selectionKind)) {
           const { id, type } = parseEntityId(parentId);
+          const localPath = viewPath ? `${viewPath}.${key}` : key;
           cover(storageKey);
           const deferred = createDeferred({
             field,
             id,
             owner: parentId,
+            retentionKey: viewTag ? deferredRetentionKey(viewTag, localPath, field) : undefined,
             selection: getDeferredSelection(selectionKind),
             type,
           });
@@ -7030,6 +7288,7 @@ export class FateClient<
             continue;
           }
 
+          const localPath = viewPath ? `${viewPath}.${key}` : key;
           if (!Object.hasOwn(target, key)) {
             setRecordValue(target, key, {});
           }
@@ -7086,6 +7345,8 @@ export class FateClient<
                     (previousValue?.items as Array<AnyRecord> | undefined)?.[index]?.node as
                       | AnyRecord
                       | undefined,
+                    viewTag,
+                    localPath,
                   );
                 }
 
@@ -7175,6 +7436,8 @@ export class FateClient<
                     entityId,
                     fieldPath,
                     previousValue?.[index] as AnyRecord | undefined,
+                    viewTag,
+                    localPath,
                   );
                   return finishNode(node, previousValue?.[index]);
                 }
@@ -7214,6 +7477,8 @@ export class FateClient<
                 entityId,
                 fieldPath,
                 previousValue,
+                viewTag,
+                localPath,
               );
               setRecordValue(target, key, finishNode(targetRecord as ViewResult, previousValue));
             }
@@ -7225,6 +7490,8 @@ export class FateClient<
               entityId,
               fieldPath,
               previousValue,
+              viewTag,
+              localPath,
             );
             setRecordValue(target, key, recycleViewResult(target[key], previousValue));
           }
@@ -7236,13 +7503,15 @@ export class FateClient<
       __typename: parseEntityId(entityId).type,
     };
 
-    const payloads = getViewPayloads(viewComposition, ref);
-    if (payloads.length === 0 && isRecord(viewComposition)) {
-      walk(viewComposition, record, data, entityId, pathPrefix, previous);
-    } else {
-      for (const viewPayload of payloads) {
-        walk(viewPayload.select, record, data, entityId, pathPrefix, previous);
+    let matched = false;
+    for (const [tag, payload] of getViewPayloadEntries(resolveView(viewComposition, ref))) {
+      if (ref[ViewsTag]?.has(tag)) {
+        matched = true;
+        walk(payload.select, record, data, entityId, pathPrefix, previous, tag);
       }
+    }
+    if (!matched && isRecord(viewComposition)) {
+      walk(viewComposition, record, data, entityId, pathPrefix, previous);
     }
 
     return {

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vite-plus/test';
 import ViewDataCache from '../cache.ts';
+import { argumentFieldKey } from '../field-key.ts';
 import { createRefWithViewNames } from '../ref.ts';
 import {
   ViewsTag,
@@ -147,6 +148,32 @@ test('full invalidation still evicts snapshots after unrelated field changes', (
   expect(cache.get('User:1', selected, ref)).toBe(snapshot);
   cache.invalidate('User:1');
   expect(cache.get('User:1', selected, ref)).toBeNull();
+});
+
+test('collecting an argument variant invalidates old snapshots even if the field is cached again', () => {
+  const cache = new ViewDataCache();
+  const entityId = 'User:1';
+  const field = argumentFieldKey('name', 'locale:ja');
+  const ref = createViewRef('User', '1');
+  const view = createView();
+  const otherView = createView();
+  const snapshot = (selected: string) =>
+    createThenable<ViewSnapshot<any, any>>({
+      coverage: [[entityId, new Set([selected])]],
+      data: { [ViewsTag]: new Set() },
+    });
+  const id = snapshot('id');
+  cache.set(entityId, view, ref, snapshot(field));
+  cache.set(entityId, otherView, ref, id);
+  cache.collectFields(entityId, new Set([field]));
+  const newView = createView();
+  const restored = snapshot(field);
+  cache.set(entityId, newView, ref, restored);
+  expect(cache.get(entityId, view, ref)).toBeNull();
+  expect(cache.get(entityId, otherView, ref)).toBe(id);
+  expect(cache.get(entityId, newView, ref)).toBe(restored);
+  cache.invalidate(entityId, [field]);
+  expect(cache.get(entityId, newView, ref)).toBeNull();
 });
 
 test('replacing one snapshot drops obsolete dependencies without affecting other views', () => {

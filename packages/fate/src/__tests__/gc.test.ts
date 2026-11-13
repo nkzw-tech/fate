@@ -1,8 +1,10 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
+import { getFieldKey } from '../field-key.ts';
 import { FateMutations, mutation } from '../mutation.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
+import { getSelectionPlan } from '../selection.ts';
 import { AnyRecord, ConnectionMetadata, ConnectionTag, FateRoots, Request } from '../types.ts';
 import { view } from '../view.ts';
 
@@ -16,6 +18,80 @@ const createGCClient = (
 ) => createClient(options as Parameters<typeof createClient>[0]) as GCClient;
 
 const flushGarbageCollection = () => Promise.resolve();
+
+test('gc collects released argument variants on a retained entity', async () => {
+  type Post = { __typename: 'Post'; id: string; title: string };
+  type User = {
+    __typename: 'User';
+    id: string;
+    label: string;
+    missing?: string;
+    posts: Array<Post>;
+  };
+  const PostView = view<Post>()({ id: true, title: true });
+  const UserView = view<User>()(({ search }: { search: string }) => ({
+    id: true,
+    label: { args: { search } },
+    missing: { args: { search } },
+    posts: { args: { search }, items: { node: PostView } },
+  }));
+  const client = createClient({
+    gcReleaseBufferSize: 0,
+    roots: { user: clientRoot<User, 'User'>('User') },
+    types: [
+      { fields: { label: 'scalar', posts: { listOf: 'Post' } }, type: 'User' },
+      { fields: { title: 'scalar' }, type: 'Post' },
+    ],
+  });
+  const write = (search: string) => {
+    const selection = UserView({ search });
+    const plan = getSelectionPlan(selection, null);
+    const request = { user: { id: '1', view: selection } };
+    const retain = client.retain(request);
+    client.write(
+      'User',
+      { id: '1', label: search, posts: [{ id: search, title: search }] },
+      plan.paths,
+      plan,
+    );
+    return { plan, request, retain };
+  };
+  const kept = write('kept');
+  const { user } = await client.request(kept.request);
+  const snapshot = await client.readView(UserView, user);
+  for (let index = 0; index < 12; index++) {
+    const released = write(String(index));
+    released.retain.dispose();
+    await flushGarbageCollection();
+    expect(client.store.hasCoverage('User:1', getFieldKey('missing', released.plan))).toBe(false);
+  }
+
+  expect(client.store.getListsForField('User:1', 'posts').map(([, list]) => list.ids)).toEqual([
+    ['Post:kept'],
+  ]);
+  expect([...client.store.recordIds()].sort()).toEqual(['Post:kept', 'User:1']);
+  expect(
+    Object.keys(client.store.read('User:1')!).filter((key) => key.startsWith('label(')),
+  ).toHaveLength(1);
+  expect(await client.readView(UserView, user)).toBe(snapshot);
+  expect(snapshot.data).toMatchObject({
+    label: 'kept',
+    posts: { items: [{ node: { id: 'kept' } }] },
+  });
+
+  const observed = write('observed');
+  const field = getFieldKey('posts', observed.plan);
+  const unsubscribe = client.store.subscribe('User:1', new Set([field]), vi.fn());
+  observed.retain.dispose();
+  await flushGarbageCollection();
+  expect(client.store.read('Post:observed')).toBeDefined();
+  expect(client.store.hasCoverage('User:1', `${field}.id`)).toBe(true);
+  unsubscribe();
+  client.gc();
+  expect(client.store.read('Post:observed')).toBeUndefined();
+  expect(client.store.hasCoverage('User:1', `${field}.id`)).toBe(false);
+  kept.retain.dispose();
+});
 
 test(`'gc' collects unretained root list records and list state`, async () => {
   type Post = { __typename: 'Post'; id: string; title: string };
@@ -599,6 +675,20 @@ test('released request handles do not retain collected list state', () => {
       '--import',
       '@oxc-node/core/register',
       fileURLToPath(new URL('./fixtures/request-retention.ts', import.meta.url)),
+    ],
+    { timeout: 10_000 },
+  );
+});
+
+test('retained entities do not keep unused parameterized refs alive', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--expose-gc',
+      '--no-warnings',
+      '--import',
+      '@oxc-node/core/register',
+      fileURLToPath(new URL('./fixtures/view-ref-retention.ts', import.meta.url)),
     ],
     { timeout: 10_000 },
   );

@@ -16,6 +16,7 @@ import { restoreViewNames } from './view.ts';
 type Encoded = ReturnType<typeof encodeHydrationValue>;
 type SerializedSelectionPlan = {
   args: Array<readonly [string, { hash: string; ignoreKeys?: Array<string>; value: AnyRecord }]>;
+  deferred?: Array<readonly [string, SerializedSelectionPlan]>;
   live: Array<readonly [string, ConnectionLivePolicy]>;
   paths: Array<string>;
 };
@@ -73,7 +74,16 @@ const isSerializedPlan = (value: unknown): value is SerializedSelectionPlan =>
       typeof entry[0] === 'string' &&
       isLivePolicy(entry[1]),
   ) &&
-  isStringArray(value.paths);
+  isStringArray(value.paths) &&
+  (value.deferred === undefined ||
+    (Array.isArray(value.deferred) &&
+      value.deferred.every(
+        (entry) =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === 'string' &&
+          isSerializedPlan(entry[1]),
+      )));
 
 const isSerializedRequest = (value: unknown): value is SerializedRequest =>
   isRecord(value) &&
@@ -100,6 +110,11 @@ export const serializePlan = (plan: SelectionPlan): SerializedSelectionPlan => (
         { ...value, ignoreKeys: value.ignoreKeys ? [...value.ignoreKeys] : undefined },
       ] as const,
   ),
+  ...(plan.deferred && {
+    deferred: plan.deferred.flatMap((entry) =>
+      'plan' in entry ? [[entry.ownerPath, serializePlan(entry.plan)] as const] : [],
+    ),
+  }),
   live: [...plan.live],
   paths: [...plan.paths],
 });
@@ -111,6 +126,12 @@ export const deserializePlan = (value: SerializedSelectionPlan): SelectionPlan =
       { ...entry, ignoreKeys: entry.ignoreKeys ? new Set(entry.ignoreKeys) : undefined },
     ]),
   ),
+  ...(value.deferred && {
+    deferred: value.deferred.map(([ownerPath, selection]) => ({
+      ownerPath,
+      plan: deserializePlan(selection),
+    })),
+  }),
   live: new Map(value.live),
   ...(value.paths.some(pathHasTypeCondition) ? { hasTypeBranches: true as const } : null),
   paths: new Set(value.paths),
