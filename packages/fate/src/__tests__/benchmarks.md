@@ -279,13 +279,15 @@ This production browser fixture mounts a React `useView` reader over an inline
 list of records. Every sample changes every row's `done` field, measures the
 synchronous write (including subscriber reads), and verifies the rendered count
 after React commits. It excludes initial mount and payload construction, warms
-up for three updates, and reports individual-operation p50/p95 and snapshot read
-counts. It does not measure network latency or full application paint time.
+up for at least ten updates and 100 ms of timed work, and reports
+individual-operation p50/p95 and snapshot read counts. It does not measure
+network latency or full application paint time.
 The baseline option substitutes core and React runtime sources from a commit,
 while keeping the current fixture and dependencies.
 
-On 2026-11-13, Chromium 158.0.8127.18 with 1,000 records and ten measured updates
-reported 766 ms median before notification batching and 2.3 ms after. Synchronous
+On 2026-11-13, Chromium 158.0.8127.18 with 1,000 records and 15 measured updates
+compared `6705d4a` with all four optimizations. Bulk writes improved from 748.6 ms
+median to 1.9 ms, with p95 improving from 778.1 to 2.7 ms. Synchronous
 snapshot reads dropped from 2,000 to two per write. The store now publishes cache
 invalidations immediately and coalesces subscriber callbacks at synchronous
 response/update boundaries. It does not hold notifications across network awaits
@@ -293,10 +295,10 @@ or deferred response chunks, and failed partial writes still notify readers.
 
 The mounted benchmark also updates a parent counter above memoized rows that
 read masked child views. It measures through the parent layout-effect commit,
-counts row renders, and checks the DOM. With 1,000 rows and ten samples, Chromium
-reported 4.8 ms median at `0344f8d` and 2.3 ms after stable child refs and selection
-result recycling. Row renders dropped from 1,000 to zero per counter update.
-Bulk-write time remained approximately 2.6 ms. These rows deliberately do little
+counts row renders, and checks the DOM. In the same final comparison, parent
+updates improved from 3.5 to 2.1 ms median, with p95 improving from 5.5 to 2.8 ms.
+Row renders dropped from 1,000 to zero per counter update through stable child
+refs and selection result recycling. These rows deliberately do little
 rendering work; applications with more expensive rows can benefit differently.
 Recycling compares only selected containers, keeps scalar objects opaque, and
 holds invalidated results weakly so unmounted readers do not keep stale graphs
@@ -333,3 +335,42 @@ mutations still overwrite intervening changes correctly. Coverage, invalidation,
 and competing response generations remain part of the fast-path checks.
 Changed replacements still process every changed child and are not materially
 faster. Full-snapshot parent reads/writes retain their graph-proportional cost.
+
+## Drizzle nested pagination
+
+```sh
+node scripts/benchmark-drizzle.mjs 100 15 0 /tmp/drizzle-local.json
+node scripts/benchmark-drizzle.mjs 100 15 2 /tmp/drizzle-latency.json
+FATE_BENCH_BASELINE=18bf0e2 node scripts/benchmark-drizzle.mjs 100 15 2 /tmp/drizzle-before.json
+```
+
+Arguments are parent count, measured samples, simulated latency per query in
+milliseconds, and an optional JSON report. This bundles the actual Drizzle
+adapter and runs queries against in-memory SQLite through Drizzle's proxy driver.
+The fixture has eight children per populated parent, one empty parent, nullable
+ordering fields, and shared many-to-many children. It verifies each result against
+the individual-parent query path, warms each scenario three times, and excludes
+seeding and result verification from timing. Adapter/plan construction is timed.
+A git baseline substitutes runtime sources while retaining the same fixture.
+
+Node 26.13.1 medians on 2026-11-13, 100 parents and 15 samples:
+
+| Scenario                  | Queries before → after | Local ms before → after | With 2 ms/query before → after |
+| ------------------------- | ---------------------- | ----------------------- | ------------------------------ |
+| First child pages         | 101 → 2                | 2.24 → 0.87             | 30.66 → 6.00                   |
+| Cursor child pages        | 201 → 5                | 4.36 → 1.63             | 56.60 → 15.27                  |
+| Two sibling relationships | 201 → 3                | 5.98 → 1.66             | 61.05 → 7.08                   |
+
+The 2 ms delay models transport latency; it is not a measurement from a remote
+production database. Cursor pages use smaller parent batches to bound SQL bind
+parameters. Queries use the existing ordering and cursor comparisons inside a
+partitioned `row_number()` window and fetch at most page size plus one row per
+parent. This bounds returned rows, not the database's internal ranking work;
+very large collections with excellent indexes can favor the individual-query
+path. `nestedPaginationBatching: false` keeps that fallback available.
+
+Tests execute forward/backward/cursor and many-to-many queries against SQLite,
+compare complete pages and metadata to the fallback, check large-batch splitting
+and recursive query limits, and exercise SQL generation and row decoding through
+PostgreSQL and MySQL proxy drivers. Those driver tests do not run PostgreSQL or
+MySQL database servers.

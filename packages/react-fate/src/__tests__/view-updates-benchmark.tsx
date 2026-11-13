@@ -61,8 +61,10 @@ async function benchmark() {
   await ready.promise;
   const elapsed: Array<number> = [];
   const snapshotReads: Array<number> = [];
+  let warmupIterations = 0;
+  let warmupMs = 0;
   try {
-    for (let i = 0; i < sampleCount + 3; i++) {
+    for (let i = 0; elapsed.length < sampleCount; i++) {
       await frame();
       const done = i % 2 === 0;
       const data = { id: 'main', items: rows.map((row) => ({ ...row, done })) };
@@ -76,13 +78,16 @@ async function benchmark() {
       if (Number(container.textContent) !== (done ? recordCount : 0)) {
         throw new Error('Incorrect rendered result');
       }
-      if (i >= 3) {
+      if (warmupIterations < 10 || warmupMs < 100) {
+        warmupIterations++;
+        warmupMs += duration;
+      } else {
         elapsed.push(duration);
         snapshotReads.push(count);
       }
     }
     return {
-      bulkWrite: { elapsedMs: summarize(elapsed), snapshotReads },
+      bulkWrite: { elapsedMs: summarize(elapsed), snapshotReads, warmupIterations },
       recordCount,
       sampleCount,
     };
@@ -126,8 +131,10 @@ async function benchmarkParent() {
   await ready.promise;
   const elapsed: Array<number> = [];
   const renders: Array<number> = [];
+  let warmupIterations = 0;
+  let warmupMs = 0;
   try {
-    for (let i = 1; i <= sampleCount + 3; i++) {
+    for (let i = 1; elapsed.length < sampleCount; i++) {
       await frame();
       const commit = Promise.withResolvers<void>();
       committed = () => commit.resolve();
@@ -142,12 +149,15 @@ async function benchmarkParent() {
       ) {
         throw new Error('Incorrect parent or row output');
       }
-      if (i > 3) {
+      if (warmupIterations < 10 || warmupMs < 100) {
+        warmupIterations++;
+        warmupMs += duration;
+      } else {
         elapsed.push(duration);
         renders.push(rowRenders);
       }
     }
-    return { elapsedToCommitMs: summarize(elapsed), rowRenders: renders };
+    return { elapsedToCommitMs: summarize(elapsed), rowRenders: renders, warmupIterations };
   } finally {
     root.unmount();
   }
