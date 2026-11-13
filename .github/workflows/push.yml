@@ -17,7 +17,6 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      deployments: write
 
     steps:
       - uses: actions/checkout@v5
@@ -35,6 +34,3 @@ jobs:
 
       - name: Run tests
         run: vp test
-
-      - name: Publish
-        run: vpx pkg-pr-new publish './packages/*' --compact
