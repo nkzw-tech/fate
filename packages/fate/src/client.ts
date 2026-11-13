@@ -7147,6 +7147,25 @@ export class FateClient<
       }
       return recycleViewResult(node, before);
     };
+    const childObjects = new WeakMap<
+      ViewResult,
+      Map<string, { before: unknown; entity: boolean; node: ViewResult }>
+    >();
+    // Multiple payloads can add fields and tags to the same child. Reuse its
+    // result only after all selections writing to the parent have finished.
+    const finishChildren = (target: ViewResult) => {
+      const children = childObjects.get(target);
+      if (!children) {
+        return;
+      }
+      for (const [key, { before, entity, node }] of children) {
+        if (target[key] === node) {
+          finishChildren(node);
+          const result = entity ? finishNode(node, before) : recycleViewResult(node, before);
+          setRecordValue(target, key, result);
+        }
+      }
+    };
     const coverageById = new Map<EntityId, Set<string>>();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
@@ -7355,6 +7374,7 @@ export class FateClient<
                     viewTag,
                     localPath,
                   );
+                  finishChildren(node);
                 }
 
                 const itemResult: AnyRecord = {
@@ -7446,6 +7466,7 @@ export class FateClient<
                     viewTag,
                     localPath,
                   );
+                  finishChildren(node);
                   return finishNode(node, previousValue?.[index]);
                 }
 
@@ -7467,40 +7488,34 @@ export class FateClient<
                 ),
               );
             }
-          } else if (isNodeRef(value)) {
-            const entityId = getNodeRefId(value);
-            const relatedRecord = this.store.read(entityId);
-            const { id, type } = parseEntityId(entityId);
-            const targetRecord = target[key] as AnyRecord;
-
-            targetRecord.id = id;
-            targetRecord.__typename = type;
-
-            if (relatedRecord) {
-              walk(
-                nextSelection,
-                relatedRecord,
-                targetRecord as ViewResult,
-                entityId,
-                fieldPath,
-                previousValue,
-                viewTag,
-                localPath,
-              );
-              setRecordValue(target, key, finishNode(targetRecord as ViewResult, previousValue));
-            }
           } else {
+            const node = target[key] as ViewResult;
+            const childId = isNodeRef(value) ? getNodeRefId(value) : undefined;
+            const childRecord = childId ? this.store.read(childId) : (value as AnyRecord);
+            if (childId) {
+              const { id, type } = parseEntityId(childId);
+              node.id = id;
+              node.__typename = type;
+            }
+            if (!childRecord) {
+              continue;
+            }
             walk(
               nextSelection,
-              value as AnyRecord,
-              target[key] as ViewResult,
-              entityId,
+              childRecord,
+              node,
+              childId ?? parentId,
               fieldPath,
               previousValue,
               viewTag,
               localPath,
             );
-            setRecordValue(target, key, recycleViewResult(target[key], previousValue));
+            let children = childObjects.get(target);
+            if (!children) {
+              children = new Map();
+              childObjects.set(target, children);
+            }
+            children.set(key, { before: previousValue, entity: childId !== undefined, node });
           }
         }
       }
@@ -7520,6 +7535,7 @@ export class FateClient<
     if (!matched && isRecord(viewComposition)) {
       walk(viewComposition, record, data, entityId, pathPrefix, previous);
     }
+    finishChildren(data);
 
     return {
       coverage: [...coverageById.entries()],

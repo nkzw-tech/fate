@@ -243,3 +243,27 @@ test('recycling selected containers does not inspect scalar objects', async () =
   expect((await client.readView(selected, ref)).data.tags).toBe(scalar);
   expect(read).not.toHaveBeenCalled();
 });
+
+test('composed views can contribute to the same child ref', async () => {
+  type Child = { __typename: 'Child'; email: string; id: string; name: string };
+  type Parent = { __typename: 'Parent'; child: Child; count: number; id: string };
+  const Name = view<Child>()({ name: true });
+  const Email = view<Child>()({ email: true });
+  const First = view<Parent>()({ child: Name, count: true });
+  const Second = view<Parent>()({ child: Email });
+  const Combined = { ...First, ...Second };
+  const client = createClient({
+    types: [{ fields: { child: { type: 'Child' } }, type: 'Parent' }, { type: 'Child' }],
+  });
+  client.write(
+    'Parent',
+    { child: { email: 'sam@example.com', id: 'c', name: 'Sam' }, count: 0, id: 'p' },
+    new Set(['child.email', 'child.name', 'count']),
+  );
+  const ref = client.ref<Parent>('Parent', 'p', Combined);
+  const { data } = await client.readView(Combined, ref);
+  expect((await client.readView(Name, data.child)).data.name).toBe('Sam');
+  expect((await client.readView(Email, data.child)).data.email).toBe('sam@example.com');
+  client.write('Parent', { count: 1, id: 'p' }, new Set(['count']));
+  expect((await client.readView(Combined, ref)).data.child).toBe(data.child);
+});
