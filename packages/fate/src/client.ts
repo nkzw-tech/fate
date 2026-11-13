@@ -244,6 +244,10 @@ type LiveConnectionTarget = {
   view: View<any, any>;
 };
 
+const rejectHydrationFetch = (): never => {
+  throw new Error('fate: Cannot fetch from the server hydration snapshot.');
+};
+
 type FateClientOptions<
   Roots extends FateRoots,
   Mutations extends FateMutations,
@@ -842,7 +846,7 @@ export class FateClient<
     RequestDescriptor,
     { complete: boolean; revalidate: boolean; revision: number }
   >();
-  private readonly cacheOnlyRefs = new WeakSet<object>();
+  private cacheOnlyRefs = new WeakSet<object>();
   private readonly cacheOnlyCopies = new WeakMap<object, object>();
   private readonly requestResults = new WeakMap<RequestDescriptor, AnyRecord>();
   private readonly requestItemResults = new WeakMap<
@@ -856,8 +860,8 @@ export class FateClient<
     Array<{ field: string; parentType: string; via?: string }>
   >();
   private readonly rootLists = new Map<string, Set<string>>();
-  private readonly listTargets = new WeakMap<object, ConnectionMetadata>();
-  private readonly deferredTargets = new WeakMap<object, string>();
+  private listTargets = new WeakMap<object, ConnectionMetadata>();
+  private deferredTargets = new WeakMap<object, string>();
   private readonly mutationLists = new Map<string, number>();
   private readonly mutationRecords = new Map<EntityId, number>();
   private readonly pendingViews = new Map<
@@ -966,6 +970,7 @@ export class FateClient<
   private readonly operationLifetime: OperationLifetime;
   private readonly hydrationLimits: HydrationLimits;
   private hydrationScope: HydrationScope;
+  private isHydrationReader = false;
   private readonly persistenceScope: string;
   private readonly types: Map<string, TypeConfig>;
   private readonly clientState = new ClientState(this);
@@ -1341,6 +1346,27 @@ export class FateClient<
     this.viewDataCache.clear();
     this.requestRevision++;
     notify();
+  }
+
+  /** @internal Creates an isolated read source for React's initial hydration renders. */
+  createHydrationReader(state: FateDehydratedState<HydrationScope>): FateClient<Roots, Mutations> {
+    const reader = new FateClient<Roots, Mutations, HydrationScope>({
+      hydrationLimits: this.hydrationLimits,
+      hydrationScope: this.hydrationScope,
+      roots: this.roots,
+      transport: { fetchById: rejectHydrationFetch, fetchQuery: rejectHydrationFetch },
+      types: [...this.types.values()],
+    });
+    reader.clientState.copyReadDefinitionsFrom(this.clientState);
+    reader.hydrate(state, { merge: 'replace' });
+    reader.isHydrationReader = true;
+
+    // References can cross from hydrated parents to pending children. Preserve
+    // their metadata in either reader without sharing records or subscriptions.
+    reader.cacheOnlyRefs = this.cacheOnlyRefs;
+    reader.deferredTargets = this.deferredTargets;
+    reader.listTargets = this.listTargets;
+    return reader;
   }
 
   /** @internal */
@@ -2605,6 +2631,9 @@ export class FateClient<
     }
 
     if (missing.size > 0) {
+      if (this.isHydrationReader) {
+        throw new Error(`fate: The server hydration snapshot is missing data for '${entityId}'.`);
+      }
       if (this.cacheOnlyRefs.has(ref)) {
         throw new Error('fate: Cache-only view is missing selected fields.');
       }
@@ -2750,6 +2779,11 @@ export class FateClient<
     if (missing.size === 0 && !listMissing) {
       this.clearStalledRequestsForEntity(resolvedOwner);
       return resolveSnapshot();
+    }
+    if (this.isHydrationReader) {
+      throw new Error(
+        `fate: The server hydration snapshot is missing '${resolvedOwner}.${metadata.field}'.`,
+      );
     }
     if (cacheOnly) {
       throw new Error('fate: Cache-only view is missing selected fields.');
@@ -4311,7 +4345,12 @@ export class FateClient<
   observeRequestResult<R extends Request>(request: R) {
     const descriptor = this.createRequestDescriptor(request);
     return {
-      getSnapshot: () => this.getRequestResultFromDescriptor(descriptor) as RequestResult<Roots, R>,
+      getSnapshot: () => {
+        if (this.isHydrationReader && !this.hasRequestData(descriptor)) {
+          throw new Error('fate: The server hydration snapshot is missing data for this request.');
+        }
+        return this.getRequestResultFromDescriptor(descriptor) as RequestResult<Roots, R>;
+      },
       subscribe: (listener: () => void) => this.subscribeRequestDescriptor(descriptor, listener),
     };
   }

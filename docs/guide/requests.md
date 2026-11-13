@@ -230,6 +230,29 @@ fate.hydrate(loaderData.fate, { merge: 'replace' });
 
 Snapshots from different hydration scopes cannot be combined. Keep each user's server client and snapshot separate.
 
+### Selective Hydration in React
+
+If your server-rendered app uses Suspense boundaries that can hydrate at different times, pass the original snapshot to the React provider as well:
+
+```tsx
+const state = loaderData.fate;
+const fate = createFateClient();
+fate.hydrate(state);
+
+hydrateRoot(
+  document,
+  <FateClient client={fate} hydrationState={state}>
+    <App />
+  </FateClient>,
+);
+```
+
+If the live cache changes before a boundary hydrates, that boundary first reads the original snapshot to match its server HTML. Once it hydrates, it reads the live cache and applies any changes. Request policies that fetch from the network resume after the component hydrates.
+
+Keep the same snapshot on the provider for the lifetime of the hydrated tree. The provider retains a separate copy of the server cache so delayed boundaries can still read it. This works with preloaded SSR data that covers the rendered content.
+
+The snapshot applies to the React request and view hooks. If you pass an explicit client to a view hook, an enclosing provider for that client supplies its snapshot. Direct reads from the client or its store still read the live cache.
+
 ## Observing Request State
 
 Outside React or Vue components, `fate.observeRequest(request, options)` provides request state through `getSnapshot()` and `subscribe(listener)`:

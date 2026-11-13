@@ -146,6 +146,18 @@ export default class ClientState {
 
   constructor(private readonly client: FateClient<any, any, any>) {}
 
+  copyReadDefinitionsFrom(source: ClientState) {
+    for (const [name, definition] of source.definitions) {
+      this.definitions.set(name, definition);
+    }
+    for (const name of source.localTypes) {
+      this.localTypes.add(name);
+    }
+    for (const [name, root] of source.roots) {
+      this.roots.set(name, root);
+    }
+  }
+
   install(schema: ClientSchema, types: Map<string, TypeConfig>) {
     for (const [name, definition] of Object.entries({
       ...schema.types,

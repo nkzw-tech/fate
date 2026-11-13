@@ -1,7 +1,7 @@
 import { type Deferred } from '@nkzw/fate';
 import { createConnectionReader, getListEntries, getListWindowKey } from '@nkzw/fate/list';
 import { useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
-import { useFateClient } from './context.tsx';
+import { useFateClient, useHydrationReader } from './context.tsx';
 import {
   useListViewInfo,
   type ConnectionItems,
@@ -23,6 +23,7 @@ export function useListView<
   connection: C,
 ): [ConnectionItems<ResolvedConnection<C>>, LoadMoreFn | null, LoadMoreFn | null] {
   const client = useFateClient();
+  const hydrationReader = useHydrationReader(client);
   const resolvedConnection = useDeferredValueSnapshot<ConnectionValue | null | undefined>(
     connection,
   );
@@ -41,8 +42,16 @@ export function useListView<
     [reader],
   );
   const getSnapshot = useCallback(() => reader?.getSnapshot(), [reader]);
+  const getServerSnapshot = useMemo(
+    () =>
+      hydrationReader && metadata
+        ? createConnectionReader(hydrationReader, metadata).getSnapshot
+        : getSnapshot,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [getSnapshot, hydrationReader, identity],
+  );
 
-  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const snapshot = useMemo(() => ({ reader, state: current }), [reader, current]);
   const deferred = useDeferredValue(snapshot);
   // Defer updates within a connection. A different reader needs its own items and cursors.

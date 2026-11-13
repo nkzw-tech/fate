@@ -9,7 +9,7 @@ import {
   type ViewRef,
 } from '@nkzw/fate';
 import { use, useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useFateClient, useViewClient } from './context.tsx';
+import { useFateClient, useHydrationReader, useViewClient } from './context.tsx';
 import { fulfilledThenable, isFulfilledThenable } from './thenable.ts';
 
 export type ViewInput<V extends View<any, any>> =
@@ -326,6 +326,7 @@ const createDeferredReader = <T>(
 
 export function useDeferredValueSnapshot<T>(input: T | Deferred<T>): T {
   const client = useFateClient();
+  const hydrationReader = useHydrationReader(client);
   const scope = useReadScope();
   const getSnapshot = useMemo(() => {
     if (!isDeferred(input)) {
@@ -334,7 +335,14 @@ export function useDeferredValueSnapshot<T>(input: T | Deferred<T>): T {
     }
     return createDeferredReader(client, input, scope);
   }, [client, input, scope]);
-  return useSnapshot(client, getSnapshot, true) as T;
+  const getServerSnapshot = useMemo(
+    () =>
+      hydrationReader && isDeferred(input)
+        ? createDeferredReader(hydrationReader, input, scope)
+        : getSnapshot,
+    [getSnapshot, hydrationReader, input, scope],
+  );
+  return useSnapshot(client, getSnapshot, getServerSnapshot, true) as T;
 }
 
 export function useViewSnapshots<V extends View<any, any>>(
@@ -342,6 +350,7 @@ export function useViewSnapshots<V extends View<any, any>>(
   refs: ReadonlyArray<ViewInput<V>>,
 ): ReadonlyArray<unknown> {
   const client = useFateClient();
+  const hydrationReader = useHydrationReader(client);
   const scope = useReadScope();
   const [previousRefs, setPreviousRefs] = useState(refs);
   // Callers can construct arrays inline without rebuilding readers and subscriptions.
@@ -355,7 +364,12 @@ export function useViewSnapshots<V extends View<any, any>>(
     () => createArrayReader(client, view, stableRefs, scope),
     [client, view, stableRefs, scope],
   );
-  return useSnapshot(client, getSnapshot, true) as ReadonlyArray<unknown>;
+  const getServerSnapshot = useMemo(
+    () =>
+      hydrationReader ? createArrayReader(hydrationReader, view, stableRefs, scope) : getSnapshot,
+    [getSnapshot, hydrationReader, view, stableRefs, scope],
+  );
+  return useSnapshot(client, getSnapshot, getServerSnapshot, true) as ReadonlyArray<unknown>;
 }
 
 export function useViewSnapshot<V extends View<any, any>>(
@@ -364,24 +378,33 @@ export function useViewSnapshot<V extends View<any, any>>(
   explicitClient?: FateClient<any, any> | null,
 ): unknown {
   const client = useViewClient(explicitClient);
+  const hydrationReader = useHydrationReader(client);
   const scope = useReadScope();
   const getSnapshot = useMemo(
     () => cacheReadError(createReader(client, view, ref, scope)),
     [client, view, ref, scope],
   );
-  return useSnapshot(client, getSnapshot, false);
+  const getServerSnapshot = useMemo(
+    () =>
+      hydrationReader
+        ? cacheReadError(createReader(hydrationReader, view, ref, scope))
+        : getSnapshot,
+    [getSnapshot, hydrationReader, view, ref, scope],
+  );
+  return useSnapshot(client, getSnapshot, getServerSnapshot, false);
 }
 
 function useSnapshot(
   client: FateClient<any, any>,
   getSnapshot: ReadSnapshot,
+  getServerSnapshot: ReadSnapshot,
   batch: boolean,
 ): unknown {
   const subscribe = useMemo(
     () => createSubscribe(client, getSnapshot, batch),
     [client, getSnapshot, batch],
   );
-  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const input = useMemo(() => ({ reader: getSnapshot, snapshot: current }), [getSnapshot, current]);
   const deferred = useDeferredValue(input);
   const snapshot = use(deferred.reader === getSnapshot ? deferred.snapshot : current);

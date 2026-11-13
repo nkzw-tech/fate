@@ -1,7 +1,5 @@
 import {
   Deferred,
-  DeferredSnapshot,
-  isDeferred,
   resolveView,
   View,
   ViewData,
@@ -10,7 +8,7 @@ import {
   ViewRef,
   ViewSelection,
 } from '@nkzw/fate';
-import { use, useEffect, useEffectEvent } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 import { useFateClient } from './context.tsx';
 import { useView } from './useView.tsx';
 
@@ -18,7 +16,7 @@ type ViewEntityWithTypename<V extends View<any, any>> = ViewEntity<V> & {
   __typename: ViewEntityName<V>;
 };
 
-import { useReadScope } from './useViewSnapshots.ts';
+import { useDeferredValueSnapshot } from './useViewSnapshots.ts';
 
 /**
  * Resolves a reference against a view and subscribes to live server updates for
@@ -46,14 +44,7 @@ export function useLiveView<V extends View<any, any>>(
   ref: Deferred<ViewRef<ViewEntityName<V>>> | ViewRef<ViewEntityName<V>> | null | undefined,
 ): ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null | undefined {
   const client = useFateClient();
-  const scope = useReadScope();
-  const resolvedRef = isDeferred(ref)
-    ? (
-        use(
-          client.readDeferredForRender(ref as Deferred<ViewRef<ViewEntityName<V>>>, scope.current),
-        ) as DeferredSnapshot<ViewRef<ViewEntityName<V>> | null | undefined>
-      ).data
-    : (ref as ViewRef<ViewEntityName<V>> | null | undefined);
+  const resolvedRef = useDeferredValueSnapshot<ViewRef<ViewEntityName<V>> | null | undefined>(ref);
   const liveRef = resolvedRef
     ? client.ref<ViewEntity<V>>(
         resolvedRef.__typename,
@@ -72,8 +63,5 @@ export function useLiveView<V extends View<any, any>>(
 
   useEffect(() => subscribeLiveView(), [client, view, liveRef]);
 
-  return useView(
-    view,
-    ref as Deferred<ViewRef<ViewEntityName<V>>> | ViewRef<ViewEntityName<V>> | null | undefined,
-  );
+  return useView(view, resolvedRef);
 }

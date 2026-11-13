@@ -7,7 +7,7 @@ import {
   type RequestOptions,
 } from '@nkzw/fate';
 import { use, useDeferredValue, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { useFateClient } from './context.tsx';
+import { useFateClient, useHydrationReader } from './context.tsx';
 import { fulfilledThenable, isFulfilledThenable } from './thenable.ts';
 
 type GeneratedFateClient = RegisteredClient<
@@ -23,6 +23,9 @@ export type UseRequestOptions = Omit<RequestOptions, 'mode'> & {
   mode?: RequestOptions['mode'] | 'cache-only';
 };
 const cacheOnlyGate = fulfilledThenable(undefined);
+const noopSubscribe = () => () => {};
+const getClientRender = () => false;
+const getHydrationRender = () => true;
 
 /**
  * Declares the data a screen needs and kicks off fetching, suspending while the
@@ -44,6 +47,13 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   options?: UseRequestOptions,
 ): RequestResult<O, R> | undefined {
   const client = useFateClient();
+  const hydrationReader = useHydrationReader(client);
+  // React switches this consumer to the live request path after it hydrates.
+  const hydrating = useSyncExternalStore(
+    noopSubscribe,
+    getClientRender,
+    hydrationReader ? getHydrationRender : getClientRender,
+  );
   const mode = options?.mode ?? 'cache-first';
   const cacheOnly = mode === 'cache-only';
   const key = client.getRequestKey(request);
@@ -52,25 +62,30 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   const maxAge = options?.persist?.maxAge;
   const { promise, requestKey } = useMemo(
     () =>
-      cacheOnly
+      cacheOnly || hydrating
         ? { promise: cacheOnlyGate, requestKey: key }
         : client.prepareRequestForRender(request, options as RequestOptions),
     // A mounted consumer keeps its preparation even if another consumer releases it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cacheOnly, client, key, mode, timeout, signal, maxAge],
+    [cacheOnly, client, hydrating, key, mode, timeout, signal, maxAge],
   );
 
   const observed = useMemo(
     () => {
-      const observer = cacheOnly ? client.observeRequest(request, { mode: 'cache-only' }) : null;
+      const observe = (source: typeof client) => {
+        if (!cacheOnly) {
+          return source.observeRequestResult(request);
+        }
+        const observer = source.observeRequest(request, { mode: 'cache-only' });
+        return { getSnapshot: () => observer.getSnapshot().data, subscribe: observer.subscribe };
+      };
+      const live = observe(client);
       return {
-        ...(observer
-          ? {
-              getSnapshot: () => observer.getSnapshot().data,
-              subscribe: observer.subscribe,
-            }
-          : client.observeRequestResult(request)),
+        ...live,
         client,
+        getServerSnapshot: hydrationReader
+          ? observe(hydrationReader).getSnapshot
+          : live.getSnapshot,
         mode,
         requestPromise: promise,
         retain: () => client.retain(request),
@@ -83,11 +98,15 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
     },
     // Equivalent inline selections share the same request identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cacheOnly, client, mode, promise, requestKey],
+    [cacheOnly, client, hydrationReader, mode, promise, requestKey],
   );
   const deferred = useDeferredValue(observed);
   const active = cacheOnly ? observed : deferred;
-  const result = useSyncExternalStore(active.subscribe, active.getSnapshot, active.getSnapshot);
+  const result = useSyncExternalStore(
+    active.subscribe,
+    active.getSnapshot,
+    active.getServerSnapshot,
+  );
 
   useEffect(() => {
     if (active.mode === 'cache-only') {
@@ -97,7 +116,10 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
 
     // Render retries share the preparation until commit. After that this
     // reader keeps its own gate, and a new mount can start a fresh request.
-    if (active.mode === 'network-only' || active.mode === 'stale-while-revalidate') {
+    if (
+      active.requestPromise !== cacheOnlyGate &&
+      (active.mode === 'network-only' || active.mode === 'stale-while-revalidate')
+    ) {
       active.client.releaseRequestKey(active.requestKey, active.mode, active.requestPromise);
     }
     return retained.dispose;

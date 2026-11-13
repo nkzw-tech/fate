@@ -29,7 +29,8 @@
     "generate-readme": "node --conditions=development --no-warnings --import @oxc-node/core/register scripts/generate-readme.ts",
     "prepare": "vp config",
     "prisma": "vp run --filter '@nkzw/fate-server' prisma",
-    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public"
+    "ship": "vp run build:all && vp run build:api-docs && vp run copy-package-docs && vp check && vp test && vp pm publish -r --access public",
+    "test:selective-hydration": "node node_modules/@playwright/test/cli.js test --config example/client/__tests__/selective-hydration/playwright.config.ts"
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
