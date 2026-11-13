@@ -97,17 +97,18 @@ export default class ViewDataCache {
       viewMap = new WeakMap();
       entityMap.set(view, viewMap);
     }
-    const coverage = new Map<EntityId, ReadonlySet<string> | null>(thenable.value?.coverage);
-    if (!coverage.has(entityId)) {
-      coverage.set(entityId, null);
-    }
     // Coverage already includes every nested entity. Keep dependencies only on
     // this weakly held snapshot instead of accumulating a reverse entity graph.
-    viewMap.set(ref, {
-      dependencies: [...coverage].map(([id, fields]) => ({ cache: this.entityCache(id), fields })),
-      revision: this.revision,
-      thenable,
-    });
+    const dependencies: Array<CacheEntry['dependencies'][number]> = [];
+    let coversEntity = false;
+    for (const [id, fields] of thenable.value?.coverage ?? []) {
+      coversEntity ||= id === entityId;
+      dependencies.push({ cache: this.entityCache(id), fields });
+    }
+    if (!coversEntity) {
+      dependencies.push({ cache: this.entityCache(entityId), fields: null });
+    }
+    viewMap.set(ref, { dependencies, revision: this.revision, thenable });
   }
 
   invalidateField(entityId: EntityId, field: string, hash?: string) {

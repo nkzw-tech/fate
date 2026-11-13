@@ -1165,7 +1165,7 @@ export function createGraphQLTransport<
   const mutate = <K extends Extract<keyof Mutations, string>>(
     name: K,
     input: Mutations[K]['input'],
-    select: Set<string>,
+    select: ReadonlySet<string>,
     selectionArgs?: ResolvedArgsPayload,
     identity?: MutationIdentity,
   ) => {

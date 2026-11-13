@@ -29,7 +29,21 @@ const isNonFiniteId = (id: string | number) => typeof id === 'number' && !Number
 const serializeIds = (ids: ReadonlyArray<string | number>) =>
   ids.some(isNonFiniteId) ? ids.map((id) => (isNonFiniteId(id) ? [String(id)] : id)) : ids;
 
+const viewSignatures = new WeakMap<object, string>();
+
 export const getViewSignature = (view: unknown): string => {
+  if (!view || typeof view !== 'object') {
+    return createViewSignature(view);
+  }
+  let signature = viewSignatures.get(view);
+  if (signature === undefined) {
+    signature = createViewSignature(view);
+    viewSignatures.set(view, signature);
+  }
+  return signature;
+};
+
+const createViewSignature = (view: unknown): string => {
   const viewNames = new Set<string>();
   const seen = new Set<object>();
 
