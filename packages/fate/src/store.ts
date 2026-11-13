@@ -313,6 +313,7 @@ export class Store {
   private transactionChanges: Array<() => void> | undefined;
   private transactionSubscribers: Set<() => void> | undefined;
   private previewing = false;
+  private batchSubscribers: Set<() => void> | undefined;
 
   get isPreviewing() {
     return this.previewing;
@@ -445,6 +446,10 @@ export class Store {
       change();
     }
     for (const subscriber of subscribers) {
+      if (this.batchSubscribers) {
+        this.batchSubscribers.add(subscriber);
+        continue;
+      }
       try {
         subscriber();
       } catch {
@@ -452,6 +457,31 @@ export class Store {
       }
     }
     return result;
+  }
+
+  /** @internal Notify each reader once after a synchronous update, including failed partial writes. */
+  batch<T>(apply: () => T): T {
+    if (
+      this.batchSubscribers ||
+      this.transactionSubscribers ||
+      (!this.subscriptions.size && !this.listSubscriptions.size)
+    ) {
+      return apply();
+    }
+    const subscribers = new Set<() => void>();
+    this.batchSubscribers = subscribers;
+    try {
+      return apply();
+    } finally {
+      this.batchSubscribers = undefined;
+      for (const subscriber of subscribers) {
+        try {
+          subscriber();
+        } catch {
+          /* Subscribers cannot undo an update. */
+        }
+      }
+    }
   }
 
   private publishChange(change: StoreChange, owner?: ListKeyParts | null) {
@@ -477,6 +507,10 @@ export class Store {
 
   /** Apply a synchronous cache update beneath the pending optimistic layers. */
   update<T>(apply: () => T): T {
+    return this.batch(() => this.updateOptimistic(apply));
+  }
+
+  private updateOptimistic<T>(apply: () => T): T {
     if (this.rebase || this.optimisticLayers.size === 0) {
       return apply();
     }
@@ -1257,8 +1291,9 @@ export class Store {
         continue;
       }
 
-      if (this.transactionSubscribers) {
-        this.transactionSubscribers.add(fn);
+      const subscribers = this.transactionSubscribers ?? this.batchSubscribers;
+      if (subscribers) {
+        subscribers.add(fn);
         continue;
       }
       try {
@@ -1287,8 +1322,9 @@ export class Store {
     }
 
     for (const fn of set) {
-      if (this.transactionSubscribers) {
-        this.transactionSubscribers.add(fn);
+      const subscribers = this.transactionSubscribers ?? this.batchSubscribers;
+      if (subscribers) {
+        subscribers.add(fn);
         continue;
       }
       try {

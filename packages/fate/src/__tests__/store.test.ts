@@ -413,3 +413,52 @@ test('transactions roll back records, coverage, invalidation and optimistic sett
   settle();
   expect(store.read('Post:1')?.title).toBe('Base');
 });
+
+test('batches nested record and list notifications after publishing cache changes', () => {
+  const changed = vi.fn();
+  const store = new Store(undefined, changed);
+  const snapshots: Array<unknown> = [];
+  const notify = () => snapshots.push([store.read('Item:1'), store.getList('items')]);
+  store.subscribe('Item:1', notify);
+  store.subscribeList('items', notify);
+  store.update(() => {
+    store.merge('Item:1', { title: 'First' }, ['title']);
+    store.transaction(() => store.merge('Item:1', { title: 'Last' }, ['title']));
+    store.setList('items', { ids: ['Item:1'] });
+    expect(changed).toHaveBeenCalled();
+    expect(snapshots).toEqual([]);
+  });
+  expect(snapshots).toEqual([[{ title: 'Last' }, ['Item:1']]]);
+});
+
+test('failed batches publish partial writes and release notification state', () => {
+  const store = new Store();
+  const notify = vi.fn(() => store.read('Item:1')?.title);
+  store.subscribe('Item:1', notify);
+  expect(() =>
+    store.update(() => {
+      store.merge('Item:1', { title: 'Committed' }, ['title']);
+      throw new Error('Failed');
+    }),
+  ).toThrow('Failed');
+  expect(notify).toHaveReturnedWith('Committed');
+  store.update(() => store.merge('Item:1', { title: 'Next' }, ['title']));
+  expect(notify).toHaveBeenCalledTimes(2);
+  expect(notify).toHaveLastReturnedWith('Next');
+});
+
+test('a rolled-back transaction inside a batch does not publish its notifications', () => {
+  const store = new Store();
+  const notify = vi.fn();
+  store.subscribe('Item:1', notify);
+  store.update(() => {
+    expect(() =>
+      store.transaction(() => {
+        store.merge('Item:1', { title: 'Rolled back' }, ['title']);
+        throw new Error('Rollback');
+      }),
+    ).toThrow('Rollback');
+  });
+  expect(notify).not.toHaveBeenCalled();
+  expect(store.read('Item:1')).toBeUndefined();
+});

@@ -267,3 +267,26 @@ store.
 
 Use the native and custom-identity cases as controls when changing the direct
 path. These benchmarks remain separate from the normal test run.
+
+## Mounted view updates
+
+```sh
+node scripts/benchmark-view-updates.mjs chromium 1000 15 /tmp/view-updates.json
+FATE_BENCH_BASELINE=6705d4a node scripts/benchmark-view-updates.mjs chromium 1000 15 /tmp/view-updates-before.json
+```
+
+This production browser fixture mounts a React `useView` reader over an inline
+list of records. Every sample changes every row's `done` field, measures the
+synchronous write (including subscriber reads), and verifies the rendered count
+after React commits. It excludes initial mount and payload construction, warms
+up for three updates, and reports individual-operation p50/p95 and snapshot read
+counts. It does not measure network latency or full application paint time.
+The baseline option substitutes core and React runtime sources from a commit,
+while keeping the current fixture and dependencies.
+
+On 2026-11-13, Chromium 158.0.8127.18 with 1,000 records and ten measured updates
+reported 766 ms median before notification batching and 2.3 ms after. Synchronous
+snapshot reads dropped from 2,000 to two per write. The store now publishes cache
+invalidations immediately and coalesces subscriber callbacks at synchronous
+response/update boundaries. It does not hold notifications across network awaits
+or deferred response chunks, and failed partial writes still notify readers.

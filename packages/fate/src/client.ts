@@ -795,7 +795,7 @@ export class FateClient<
       this.uncontendedWriteGeneration = generation;
     }
     try {
-      return this.withWriteGeneration(generation, apply);
+      return this.store.batch(() => this.withWriteGeneration(generation, apply));
     } finally {
       this.remoteWriteDepth--;
       this.uncontendedWriteGeneration = previous;
@@ -2226,7 +2226,7 @@ export class FateClient<
     plan?: SelectionPlan,
     insert?: InsertPosition,
   ) {
-    return this.writeEntity(type, data, select, plan, null, insert);
+    return this.store.batch(() => this.writeEntity(type, data, select, plan, null, insert));
   }
 
   /** @internal Commit staged patches, sharing only selection metadata within this commit. */
@@ -5753,16 +5753,18 @@ export class FateClient<
         sharedSignal?.throwIfAborted();
         this.assertPersistenceActive();
         const normalization = batch?.normalization ?? createNormalizationContext();
-        const entityIds = records.map(({ generation, record }) =>
-          this.withResponseWrite(generation, () =>
-            this.writeEntity(
-              type,
-              record as AnyRecord,
-              select,
-              plan,
-              prefix,
-              undefined,
-              normalization,
+        const entityIds = this.store.batch(() =>
+          records.map(({ generation, record }) =>
+            this.withResponseWrite(generation, () =>
+              this.writeEntity(
+                type,
+                record as AnyRecord,
+                select,
+                plan,
+                prefix,
+                undefined,
+                normalization,
+              ),
             ),
           ),
         );
