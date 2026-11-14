@@ -112,6 +112,22 @@ export function createIndexedDBStorage({
         releaseDatabase();
       }
     },
+    async readMany(keys) {
+      if (!keys.length) {
+        return [];
+      }
+      const db = await acquireDatabase();
+      try {
+        const transaction = db.transaction('fate');
+        const [values] = await Promise.all([
+          Promise.all(keys.map((key) => transaction.store.get(key))),
+          transaction.done,
+        ]);
+        return values;
+      } finally {
+        releaseDatabase();
+      }
+    },
     async scan(prefix, after, limit = 64) {
       const lowerOpen = after !== undefined && after >= prefix;
       const lower = lowerOpen ? after : prefix;

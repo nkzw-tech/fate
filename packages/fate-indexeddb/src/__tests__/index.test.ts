@@ -4,6 +4,19 @@ import { createIndexedDBStorage } from '../index.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 
+test('batch reads preserve order, duplicates and absent values and detach stored objects', async () => {
+  const storage = createIndexedDBStorage({ name: crypto.randomUUID() });
+  await storage.writeBatch([
+    ['a', { value: 1 }],
+    ['b', { value: 2 }],
+  ]);
+  expect(await storage.readMany!([])).toEqual([]);
+  const values = await storage.readMany!(['b', 'missing', 'a', 'b']);
+  expect(values).toEqual([{ value: 2 }, undefined, { value: 1 }, { value: 2 }]);
+  (values[0] as { value: number }).value = 3;
+  expect(await storage.read('b')).toEqual({ value: 2 });
+});
+
 test('committed data survives opening another adapter and isolates account keys', async () => {
   const name = crypto.randomUUID();
   const first = createIndexedDBStorage({ name });

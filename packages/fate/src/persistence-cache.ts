@@ -16,6 +16,7 @@ import { decodeRequests, encodeRequests } from './persistence-codec.ts';
 import {
   persistenceEntrySize,
   persistencePageSize,
+  readPersistenceBatch,
   yieldPersistenceTask,
 } from './persistence-utils.ts';
 import type { PersistenceStorage } from './persistence.ts';
@@ -779,8 +780,11 @@ export class PersistenceCache {
     });
   }
 
-  private async node(key: string): Promise<Node | undefined> {
-    const node = await this.read<Node>(this.nodeKey(key));
+  private async node(key: string, prefetched?: Map<string, unknown>): Promise<Node | undefined> {
+    const node = prefetched?.has(key)
+      ? decodeStoredValue<Node>(prefetched.get(key))?.value
+      : await this.read<Node>(this.nodeKey(key));
+    prefetched?.delete(key);
     if (!node) {
       return;
     }
@@ -807,6 +811,7 @@ export class PersistenceCache {
     const visited = new Map<SelectionPlan, Map<string, Set<string>>>();
     let complete = true;
     let fetchedAt = Infinity;
+    const prefetched = new Map<string, unknown>();
     const queue: Array<{ id: string; paths: Array<string>; plan: SelectionPlan; prefix: string }> =
       [];
     const readNode = async (key: string): Promise<unknown> => {
@@ -860,7 +865,7 @@ export class PersistenceCache {
           }
         }
       }
-      const stored = await this.node(key);
+      const stored = await this.node(key, prefetched);
       if (stored) {
         for (const claim of Object.values(stored.claims)) {
           fetchedAt = Math.min(fetchedAt, claim.fetchedAt);
@@ -1001,6 +1006,24 @@ export class PersistenceCache {
         continue;
       }
       contexts.set(context, new Set([...(traversed ?? []), ...paths]));
+      if (!readsMemory && !local && !prefetched.has(key)) {
+        // Queue entries at this point are siblings whose IDs are already known.
+        // Await the entire bounded batch so failures cannot leave detached reads
+        // running after the storage lock is released.
+        prefetched.clear();
+        const keys = [
+          ...new Set(
+            queue
+              .slice(index, index + 32)
+              .filter(({ id }) => !this.client.isClientOwnedType(parseEntityId(id).type))
+              .map(({ id }) => recordKey(id)),
+          ),
+        ];
+        const diskKeys = keys.map((key) => this.nodeKey(key));
+        const values = await readPersistenceBatch(this.storage, diskKeys);
+        this.assertActive();
+        keys.forEach((key, index) => prefetched.set(key, values[index]));
+      }
       const record = local ? undefined : ((await readNode(key)) as RecordValue | undefined);
       if (!local) {
         const storagePaths = [...this.client.getRemotePersistenceSelection(type, paths)].map(

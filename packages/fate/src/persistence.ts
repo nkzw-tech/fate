@@ -87,6 +87,8 @@ export type PersistenceStorageWrite = readonly [key: string, value: unknown];
 export interface PersistenceStorage {
   exclusive<T>(key: string, run: () => Promise<T>): Promise<T>;
   read(key: string): Promise<unknown>;
+  /** Read a bounded batch in input order, including undefined for absent keys. */
+  readMany?(keys: ReadonlyArray<string>): Promise<Array<unknown>>;
   /** Ordered, bounded scan. Return keys strictly after `after`, under `prefix`. */
   scan(prefix: string, after?: string, limit?: number): Promise<Array<PersistenceStorageEntry>>;
   subscribe?(key: string, listener: () => void): () => void;
