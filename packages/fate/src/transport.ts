@@ -55,6 +55,8 @@ type LiveConnectionEventHandlers = Readonly<{
  * mutations with the provided selections.
  */
 export interface Transport<Mutations extends TransportMutations = EmptyTransportMutations> {
+  /** Close the live stream and discard its subscriptions without individual unsubscribe requests. */
+  closeLiveSubscriptions?(): void;
   durableMutations?: ReadonlyArray<string>;
   fetchById(
     type: string,

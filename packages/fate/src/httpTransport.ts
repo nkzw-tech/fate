@@ -52,6 +52,7 @@ type LiveConnectorOptions = {
 };
 
 type LiveConnectorClient = {
+  close?(): void;
   subscribe<Data = unknown>(options: {
     id: string;
     lastEventId?: string;
@@ -75,6 +76,7 @@ type LiveSubscription = {
     | Parameters<NonNullable<Transport['subscribeById']>>[4]
     | Parameters<NonNullable<Transport['subscribeConnection']>>[5];
   procedure?: string;
+  reset?: () => void;
   select: Array<string>;
   selectionArgs?: Record<string, unknown> | undefined;
   targetId?: string | number;
@@ -519,7 +521,7 @@ export function createHTTPTransport<
         reportSubscriptionError(subscription, error);
       }
     };
-    let liveClient: LiveConnectorClient | undefined;
+    let liveClient: { client: LiveConnectorClient; controller: AbortController } | undefined;
     let nativeLiveClient:
       | {
           add(operation: FateLiveConnectionSubscribeOperation | FateLiveSubscribeOperation): void;
@@ -527,23 +529,70 @@ export function createHTTPTransport<
         }
       | undefined;
     let liveNextId = 0;
+    if (liveConnector) {
+      transport.closeLiveSubscriptions = () => {
+        const previous = liveClient;
+        if (!previous?.client.close) {
+          return;
+        }
+        liveClient = undefined;
+        previous.controller.abort();
+        const subscriptions = new Set(liveSubscriptions.values());
+        liveSubscriptions.clear();
+        for (const subscription of subscriptions) {
+          subscription.reset?.();
+        }
+        previous.client.close();
+      };
+    }
     const getLiveClient = () => {
       if (!liveConnector) {
         throw new Error('fate(http): A live connector is required for topic subscriptions.');
       }
+      if (liveClient) {
+        return liveClient;
+      }
 
-      return (liveClient ??= liveConnector(liveEndpointUrl, {
+      const controller = new AbortController();
+      const { signal } = controller;
+      const client = liveConnector(liveEndpointUrl, {
         eventSource,
-        fetch: fetchImpl as typeof fetch,
+        async fetch(input, init) {
+          signal.throwIfAborted();
+          const requestSignal =
+            init?.signal ?? (typeof input === 'object' && 'signal' in input ? input.signal : null);
+          return fetchImpl(input, {
+            ...init,
+            signal: requestSignal ? AbortSignal.any([signal, requestSignal]) : signal,
+          });
+        },
         headers,
         onError(error) {
-          for (const subscription of new Set(liveSubscriptions.values())) {
-            subscription.handlers.onError?.(error);
+          if (!signal.aborted) {
+            reportError(error);
           }
         },
         retryDelay: liveRetryMs,
         withCredentials: true,
-      }));
+      });
+      return (liveClient = { client, controller });
+    };
+
+    const unsubscribeTopic = async (
+      subscription: LiveSubscription,
+      signal: AbortSignal,
+      unsubscribe: (() => Promise<void> | void) | null,
+    ) => {
+      if (signal.aborted) {
+        return;
+      }
+      try {
+        await unsubscribe?.();
+      } catch (error) {
+        if (!signal.aborted) {
+          reportSubscriptionError(subscription, error);
+        }
+      }
     };
 
     const getNativeLiveClient = () => {
@@ -881,7 +930,9 @@ export function createHTTPTransport<
         (signal) => fetchAndDeliver(subscription.select, signal),
         (error) => reportSubscriptionError(subscription, error),
       );
-      const unsubscribePromise = getLiveClient()
+      const { client, controller } = getLiveClient();
+      subscription.reset = updates.reset;
+      const unsubscribePromise = client
         .subscribe<LiveEntityPayload>({
           id: liveId,
           onEvent(event) {
@@ -908,7 +959,9 @@ export function createHTTPTransport<
         .catch((error) => {
           updates.reset();
           liveSubscriptions.delete(liveId);
-          reportSubscriptionError(subscription, error);
+          if (!controller.signal.aborted) {
+            reportSubscriptionError(subscription, error);
+          }
           return null;
         });
 
@@ -917,7 +970,9 @@ export function createHTTPTransport<
           return;
         }
         updates.reset();
-        void unsubscribePromise.then((unsubscribe) => unsubscribe?.());
+        void unsubscribePromise.then((unsubscribe) =>
+          unsubscribeTopic(subscription, controller.signal, unsubscribe),
+        );
       };
     };
 
@@ -1036,16 +1091,10 @@ export function createHTTPTransport<
         };
       }
 
-      const client = getLiveClient();
+      const { client, controller } = getLiveClient();
+      subscription.reset = events.reset;
       liveSubscriptions.set(globalLiveId, subscription);
       const unsubscribers: Array<() => Promise<void> | void> = [];
-      const unsubscribeTopic = async (unsubscribe: () => Promise<void> | void) => {
-        try {
-          await unsubscribe();
-        } catch (error) {
-          reportSubscriptionError(subscription, error);
-        }
-      };
       const dispose = () => {
         if (!liveSubscriptions.delete(liveId)) {
           return;
@@ -1053,7 +1102,7 @@ export function createHTTPTransport<
         liveSubscriptions.delete(globalLiveId);
         events.reset();
         for (const unsubscribe of unsubscribers.splice(0)) {
-          void unsubscribeTopic(unsubscribe);
+          void unsubscribeTopic(subscription, controller.signal, unsubscribe);
         }
       };
       const subscribeTopic = async (id: string, topic: string) => {
@@ -1062,7 +1111,7 @@ export function createHTTPTransport<
           if (isActive()) {
             unsubscribers.push(unsubscribe);
           } else {
-            await unsubscribeTopic(unsubscribe);
+            await unsubscribeTopic(subscription, controller.signal, unsubscribe);
           }
         } catch (error) {
           if (isActive()) {

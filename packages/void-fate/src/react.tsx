@@ -1,5 +1,5 @@
 import type { FateClient as FateClientType } from '@nkzw/fate';
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useLayoutEffect, useMemo } from 'react';
 import { FateClient } from 'react-fate';
 import { createFateClient as createGeneratedFateClient } from 'react-fate/client';
 
@@ -52,6 +52,9 @@ export function VoidFateClient({
       }),
     [fetch, headers, livePath, liveRetryMs, liveUrl, onLiveError, origin, rpcPath, url, userId],
   );
+
+  // Close the old stream before its views release subscriptions using the new session cookie.
+  useLayoutEffect(() => () => fate.closeLiveSubscriptions(), [fate]);
 
   return (
     <FateClient client={fate} key={userId ?? undefined}>

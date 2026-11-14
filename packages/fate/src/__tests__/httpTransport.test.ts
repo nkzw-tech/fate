@@ -1177,6 +1177,56 @@ test.each(['scoped', 'global'])(
   },
 );
 
+test('reports a rejected entity unsubscribe through the live error handler', async () => {
+  const error = new Error('Could not unsubscribe');
+  const unsubscribe = vi.fn(async () => {
+    throw error;
+  });
+  const onError = vi.fn();
+  const transport = createHTTPTransport({
+    live: () => ({ subscribe: async () => unsubscribe }),
+    url: 'http://local/fate',
+  });
+
+  transport.subscribeById!('Post', '1', ['id'], undefined, { onData: vi.fn(), onError })();
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledExactlyOnceWith(error));
+});
+
+test('closes the old connector without using its pending subscription cleanup', async () => {
+  const first = Promise.withResolvers<() => void>();
+  const unsubscribe = vi.fn();
+  const onError = vi.fn();
+  const close = vi.fn();
+  const fetch = vi.fn(
+    async (_input: string | URL | Request, _init?: RequestInit) => new Response(),
+  );
+  const connect = vi.fn<TestLiveConnector>();
+  connect
+    .mockImplementationOnce(() => ({ close, subscribe: () => first.promise }))
+    .mockImplementationOnce(() => ({ subscribe: async () => unsubscribe }));
+  const transport = createHTTPTransport({ fetch, live: connect, url: 'http://local/fate' });
+  const subscribe = () =>
+    transport.subscribeById!('Post', '1', ['id'], undefined, { onData: vi.fn(), onError });
+
+  const dispose = subscribe();
+  const options = connect.mock.calls[0]![1]!;
+  await options.fetch!('http://local/fate/live');
+  transport.closeLiveSubscriptions!();
+  dispose();
+  first.resolve(unsubscribe);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(close).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  await expect(options.fetch!('http://local/fate/live')).rejects.toThrow();
+  expect(unsubscribe).not.toHaveBeenCalled();
+  expect(onError).not.toHaveBeenCalled();
+  subscribe()();
+  expect(connect).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+});
+
 test('unsubscribes after an in-flight native registration reaches the server', async () => {
   const registration = Promise.withResolvers<void>();
   const active = new Set<string>();

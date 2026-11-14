@@ -2180,6 +2180,25 @@ export class FateClient<
     this.liveSubscriptions.clear();
   }
 
+  /** Release the client's live subscriptions when its session ends. */
+  closeLiveSubscriptions(): void {
+    try {
+      this.transport.closeLiveSubscriptions?.();
+    } catch (error) {
+      this.reportLiveError(error);
+    }
+    const subscriptions = [...this.liveSubscriptions.values()];
+    this.liveSubscriptions.clear();
+    for (const { connections, unsubscribe } of subscriptions) {
+      connections?.clear();
+      try {
+        unsubscribe();
+      } catch (error) {
+        this.reportLiveError(error);
+      }
+    }
+  }
+
   private requireDurableMutationTransport(key?: string): void {
     if (!this.supportsDurableMutations(key)) {
       throw new FateRequestError(
@@ -3016,7 +3035,9 @@ export class FateClient<
       existing.count += 1;
       existing.releaseScheduled = false;
       return () => {
-        this.releaseLiveSubscription(key);
+        if (this.liveSubscriptions.get(key) === existing) {
+          this.releaseLiveSubscription(key);
+        }
       };
     }
 
@@ -3062,10 +3083,13 @@ export class FateClient<
       unsubscribe();
       return emptyDispose;
     }
-    this.liveSubscriptions.set(key, { count: 1, unsubscribe });
+    const subscription = { count: 1, unsubscribe };
+    this.liveSubscriptions.set(key, subscription);
 
     return () => {
-      this.releaseLiveSubscription(key);
+      if (this.liveSubscriptions.get(key) === subscription) {
+        this.releaseLiveSubscription(key);
+      }
     };
   }
 
@@ -7673,7 +7697,7 @@ export class FateClient<
     subscription.releaseScheduled = true;
     queueMicrotask(() => {
       const current = this.liveSubscriptions.get(key);
-      if (!current || !current.releaseScheduled || current.count > 0) {
+      if (current !== subscription || !current.releaseScheduled || current.count > 0) {
         return;
       }
 

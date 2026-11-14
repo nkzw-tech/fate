@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
+import { URL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { chromium, expect } from '@playwright/test';
 
@@ -91,6 +92,24 @@ try {
   await expect(page.getByText('Latest posts', { exact: true })).toBeVisible({ timeout: 30_000 });
 
   if (framework === 'react') {
+    const documentRequests = [];
+    const liveControlErrors = [];
+    if (!hasBackend) {
+      page.on('request', (request) => {
+        if (request.resourceType() === 'document') {
+          documentRequests.push(request.url());
+        }
+      });
+      page.on('response', (response) => {
+        if (
+          new URL(response.url()).pathname === '/fate-live' &&
+          response.request().method() === 'POST' &&
+          !response.ok()
+        ) {
+          liveControlErrors.push(response.status());
+        }
+      });
+    }
     await page.getByRole('link', { exact: true, name: 'Login' }).first().click();
     await page.locator('input[name=email]').fill('alex@example.com');
     await page.locator('input[name=password]').fill('password-alex');
@@ -122,6 +141,14 @@ try {
       await expect(page.getByText(comment, { exact: true })).toBeVisible({ timeout: 30_000 });
     }
     await expect(observer.getByText(comment, { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    if (!hasBackend) {
+      await page.getByText('Logout', { exact: true }).click();
+      await expect(page.getByRole('link', { exact: true, name: 'Login' }).first()).toBeVisible();
+      await expect(page.getByText('Latest posts', { exact: true })).toBeVisible();
+      expect(documentRequests).toEqual([]);
+      expect(liveControlErrors).toEqual([]);
+    }
   } else {
     const posts = page.locator('article');
     await expect(posts).toHaveCount(10);
