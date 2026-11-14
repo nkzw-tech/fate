@@ -45,7 +45,7 @@
     "react": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "void": "^1.7.0"
+    "void": "^1.9.0"
   },
   "peerDependencies": {
     "@nkzw/fate": "^2.0.0",
