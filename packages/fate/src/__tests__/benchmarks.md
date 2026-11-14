@@ -444,3 +444,97 @@ graphs for flat rows so sparse-update caching does not require that allocation
 on every bulk change. Scalar writes without graph reads remained about 0.001 ms
 in the Node control. These desktop measurements do not predict mobile frame
 times, network performance, or an application's complete paint time.
+
+## Follow-up review: isolated commits and retained memory
+
+The follow-up review measures each optimization against its immediate parent,
+so the commit titles attribute the gain to that commit. The first response
+benchmark uses 25 measured Node samples, the final selection benchmark uses 100,
+and the storage benchmarks use nine Chromium samples, all after the warmup
+specified above. These are separate runs from the combined baseline comparison.
+
+| Commit    | Isolated operation                             | Before → after, ms | Speedup |
+| --------- | ---------------------------------------------- | -----------------: | ------: |
+| `234ad95` | 1,000 records with 50 optimistic layers        |     67.185 → 1.065 |   63.1x |
+| `c4cbfd6` | Restore 1,000-row persisted graph              |       113.5 → 25.5 |   4.45x |
+| `6efffed` | Restore 1,000-ID persisted request             |        35.4 → 27.5 |   1.29x |
+| `87147e5` | Sparse edit and 10,000-row graph read          |       12.67 → 7.37 |   1.72x |
+| `aa4e156` | Cross-tab setting update among 1,000 documents |         19.4 → 0.4 |   48.5x |
+
+The review found and fixed a memory regression in the original fourth commit.
+A global `WeakSet` tracking shared coverage sets retained approximately 64 MiB
+of backing-table capacity after bursts of computed reads, even after the clients
+were collected. Coverage ownership now belongs to each walk; completed coverage
+is copied before modification. The fix and regression tests are folded into
+that commit. The memory guard was also run against the unpatched implementation
+and rejected its retained growth.
+
+Dependency tracking has a bounded cost. The review reduced allocation by reusing
+unchanged field sets and revision metadata, and stops constructing a separate
+revision index after repeated computed-cache misses. Stable reads re-enable it.
+Earlier paired runs measured about 11–15% overhead for a 10,000-row computation
+whose inputs change on every read. After the final hot-path adjustment, the
+100-sample paired control measured 4.73 → 4.70 ms median, but 5.37 → 5.76 ms p95
+(about 7% worse). Treat this path as comparable at the median with some tail
+cost and run variance, not as a universal speedup. Unchanged-input reads measure
+4.63 → 2.88 ms. Mounted React bulk changes remain
+comparable at 4.4 → 4.2 ms median and 7.3 → 7.3 ms p95; parent-only changes measure
+2.1 → 1.6 ms, with no child rerenders. Scalar-write controls remain about 0.001 ms.
+
+Run the retained-memory checks separately from timing benchmarks:
+
+```sh
+FATE_BENCH_BASELINE=550572c node scripts/benchmark-memory.mjs node /tmp/memory-before.json
+node scripts/benchmark-memory.mjs node /tmp/memory-after.json
+FATE_BENCH_BASELINE=550572c node scripts/benchmark-memory.mjs chromium /tmp/browser-memory-before.json
+node scripts/benchmark-memory.mjs chromium /tmp/browser-memory-after.json
+```
+
+Node runs use `--expose-gc`; Chromium uses the DevTools garbage collector and
+`Runtime.getHeapUsage`. Each workload records six post-GC checkpoints after
+warmup. Ordinary Node operations yield between reads so `WeakRef` probes do not
+keep an entire batch alive in one JavaScript job. A separate computed-burst case
+intentionally runs 200 operations per task, covering the original regression.
+The checks include 1,100 flat graph updates, 1,100 computed reads, 6,000 nested-row
+updates, 270 responses with optimistic edits, 120 released clients, 110 browser
+restore/dispose cycles, and 1,040 cross-tab mutations.
+
+Final checkpoint heap values, in MiB, compared with `550572c`:
+
+| Node workload                                   | Before | After |
+| ----------------------------------------------- | -----: | ----: |
+| Live 10,000-row flat graph                      |  17.24 | 17.10 |
+| Live 10,000-row changing computation            |  16.44 | 16.54 |
+| Live 1,000 nested rows                          |   7.73 |  8.62 |
+| Optimistic-response workload                    |   6.98 |  6.59 |
+| All clients released, including after the burst |   6.35 |  5.92 |
+
+Nested subtree caching adds about 0.89 MiB in this fixture. Old snapshots and
+replaced subtrees were collectible; only the current snapshot and 1,000 current
+subtrees remained. All 120 released Node clients were collected. The harness
+fails if released heap exceeds its initial value by 16 MiB; this is a generous
+regression guard, not a general application memory limit. Small checkpoint
+increases include JIT warmup and the benchmark's own growing array of weak probes.
+
+Node RSS is recorded as well. The maximum sampled RSS during ordinary workloads
+was 271 → 260 MiB; during the deliberate single-task burst it was 634 → 631 MiB.
+RSS includes allocator reserves and does not return to initial process size just
+because the live JavaScript objects have been collected. These are checkpoint
+samples, not a continuous peak-RSS trace. Browser measurements cover the page's
+JavaScript heap, not the entire browser process or IndexedDB disk usage.
+
+Chromium's final checkpoints were 19.51 → 11.47 MiB for the two live cross-tab
+clients, and 3.69 → 4.70 MiB after repeated remote-cache restores and disposal.
+The latter is approximately 1 MiB of additional warmed page heap; it plateaued
+rather than increasing with every restored client. All 110 disposed clients were
+collectible. The cross-tab history stayed at 16 batches, 16 entry references, and
+1,531 serialized bytes after 1,040 mutations. These results demonstrate bounded
+behavior for the exercised workloads, not a guarantee for every application.
+
+The source review covered grouped normalization under optimistic layers,
+bounded batch reads and failure settlement, legacy-key migration and eviction,
+selection/computed invalidation, and atomic cross-tab restoration and fallback.
+No correctness regressions were found in the reviewed paths. `vp check --fix`
+and `vp run test:all` passed, including 1,586 tests in 144 files; additional WebKit
+persistence checks also passed. The known costs above are retained explicitly
+rather than claiming that every workload becomes faster or uses less memory.
