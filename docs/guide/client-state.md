@@ -399,6 +399,8 @@ const fate = createClient({
 
 Use a stable `key` for each app or account. When we open the app again, fate restores the counter before its views render. The same setup also saves client fields on server objects, such as our post bookmarks.
 
+Before a saved mutation runs, fate reconciles changes made by other tabs under the same storage lock. Recent changes use a bounded revision history to load only affected entries. A new client, an older revision, or a schema migration uses a full restore. This also works when a suspended tab misses change notifications. Memory-only edits to unrelated fields remain local.
+
 Saved client state survives remote cache expiration and `clearCache()`. Adding fields with defaults preserves existing values. For other changes to saved data, we can define a [migration](#migrations). Server fields still follow the ordinary [read cache lifetime](/guide/persistence#cache-lifetime).
 
 When a mutation changes client data, fate saves the changed objects and lists in a single transaction, including deletions. Views receive the confirmed state after the save succeeds. If saving fails, the mutation reports the error and keeps the previous confirmed state. We can still use optimistic updates to show a change while it is being saved.

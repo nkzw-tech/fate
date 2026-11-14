@@ -325,6 +325,7 @@ To use storage other than IndexedDB, implement `PersistenceStorage`:
 ```ts
 interface PersistenceStorage {
   read(key: string): Promise<unknown>;
+  readMany?(keys: ReadonlyArray<string>): Promise<Array<unknown>>;
   scan(
     prefix: string,
     after?: string,
@@ -337,6 +338,8 @@ interface PersistenceStorage {
 ```
 
 Values can be stored as JSON. `scan` returns keys in ascending order after the optional cursor, up to the limit (64 by default). `writeBatch` must commit all entries atomically; `undefined` deletes a key.
+
+`readMany` is optional. Return one value per input key in the same order, including `undefined` for missing keys. Fate requests bounded batches; adapters without this method use bounded concurrent `read` calls. The IndexedDB adapter reads each batch in one transaction.
 
 `exclusive` coordinates tabs or processes sharing storage. Different lock names must be independent and allow nesting. `subscribe` notifies other clients after a write commits; without it, clients check during delivery and explicit retries.
 

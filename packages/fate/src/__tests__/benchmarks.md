@@ -374,3 +374,73 @@ compare complete pages and metadata to the fallback, check large-batch splitting
 and recursive query limits, and exercise SQL generation and row decoding through
 PostgreSQL and MySQL proxy drivers. Those driver tests do not run PostgreSQL or
 MySQL database servers.
+
+## Incremental updates and persistence, November 2026
+
+Run the response/selection benchmark in Node and the storage benchmark in an
+installed Playwright browser:
+
+```sh
+FATE_BENCH_BASELINE=550572c node scripts/benchmark-incremental.mjs 25 /tmp/incremental-before.json
+node scripts/benchmark-incremental.mjs 25 /tmp/incremental-after.json
+FATE_BENCH_BASELINE=550572c node scripts/benchmark-cache-performance.mjs chromium 9 /tmp/cache-before.json
+node scripts/benchmark-cache-performance.mjs chromium 9 /tmp/cache-after.json
+node scripts/benchmark-cache-performance.mjs webkit 5 /tmp/cache-webkit.json
+```
+
+The baseline substitutes runtime sources from the specified commit while retaining
+the current fixture and dependencies. Run comparisons sequentially without builds
+or tests running concurrently. Both runners verify resulting data and fail on
+incorrect output. They run separately from the test suite.
+
+On 2026-11-14, Node 26.13.1 and Chromium 158.0.8127.18 compared `550572c` with the
+five subsequent optimizations. Times below are median elapsed milliseconds:
+
+| Operation                                                                        | Before | After |
+| -------------------------------------------------------------------------------- | -----: | ----: |
+| Fetch 1,000 IDs with 50 pending optimistic edits, Node                           |  69.01 |  1.05 |
+| Edit one row and read a 10,000-row inline graph, Node                            |  12.37 |  7.41 |
+| Edit a parent counter and read an unchanged 10,000-row computed dependency, Node |   4.75 |  2.90 |
+| Restore a cached 1,000-row nested graph, Chromium/IndexedDB                      | 114.90 | 25.30 |
+| Restore a cached 1,000-ID request, Chromium/IndexedDB                            | 125.10 | 25.40 |
+| Update a setting after another client's edit, with 1,000 saved documents         |  18.40 |  0.40 |
+
+The Node fixture warms each case for at least ten iterations and 100 ms, then
+records 25 individual operations. Transport returns prepared in-memory records;
+there is no simulated network delay. Response normalization replays pending
+optimistic edits 50 times instead of 50,000 times. Sparse graph reads perform
+30,007 store reads instead of 40,006; unchanged computed dependencies require
+10,004 instead of 20,005. Completeness checks and array assembly still scale with
+the selected graph. These changes do not make arbitrary graph reads constant-time.
+
+The browser storage fixture uses real IndexedDB, one unmeasured warmup, and nine
+measured samples. Each remote sample starts with a fresh client after its
+persistence session is ready; seeding, initial session setup, and subsequent
+flushes are excluded. It verifies that restoration does not access the network.
+For the nested graph, storage read calls fell from 1,009 to 41, with batches of at
+most 32 keys. Legacy adapters without `readMany` use bounded concurrent reads.
+Browser task yielding remains enabled, without nested-timer delays.
+
+The ID-request fixture read 8,412,577 serialized bytes before and 460,302 after.
+Long request keys previously repeated the complete ID array in every record's
+claim. Stable SHA-256 identifiers now keep those claims small, with the request
+descriptor stored once per root. Existing keys remain readable and migrate on
+save. These byte counts measure JSON-encoded values returned by the storage
+adapter, not physical IndexedDB disk usage.
+
+The cross-client fixture disables change notifications to simulate a suspended
+tab, alternates two clients sharing storage, and checks the resulting counter.
+Each document has a 4 KiB string. Reconciliation read approximately 4.30 MB before
+and 1.85 kB after the revision history filled. Same-client setting updates stayed
+below 1 ms. History is bounded to 16 revisions, 256 changed-entry references, and
+16 KiB, and can shrink further to respect the storage budget. Cold starts,
+history gaps, legacy writers, and schema migrations retain the full-restore path.
+
+The mounted React control benchmark used 1,000 rows and 40 measured updates.
+Bulk updates remained comparable: 4.9 to 4.6 ms median and 7.0 to 7.3 ms p95.
+Parent-only updates improved from 2.1 to 1.6 ms, retaining zero child rerenders.
+Bulk timings varied between runs; the implementation avoids per-row dependency
+graphs for flat rows so sparse-update caching does not require that allocation
+on every bulk change. Scalar writes without graph reads remained about 0.001 ms
+in the Node control. These desktop measurements do not predict mobile frame
+times, network performance, or an application's complete paint time.

@@ -4,6 +4,7 @@ import { decodeHydrationValue, encodeHydrationValue } from './hydration.ts';
 import {
   persistenceEntrySize,
   persistencePageSize,
+  readPersistenceBatch,
   yieldPersistenceTask,
 } from './persistence-utils.ts';
 import type { PersistenceStorage, PersistenceStorageWrite } from './persistence.ts';
@@ -135,7 +136,9 @@ const isReference = (value: unknown): value is ClientStateReference =>
 
 const collections = ['lists', 'records', 'references'] as const;
 type Collection = (typeof collections)[number];
-type Header = { format: 2; revision: string; version: number };
+type ChangedEntry = readonly [Collection, string];
+type History = { base: string; batches: Array<{ entries: Array<ChangedEntry>; revision: string }> };
+type Header = { format: 2; history?: History; revision: string; version: number };
 type Encoded = ReturnType<typeof encodeHydrationValue>;
 
 const invalidState = () => new Error('fate: Invalid persisted client state.');
@@ -147,6 +150,67 @@ const isHeader = (value: unknown): value is Header =>
   typeof value.version === 'number' &&
   Number.isSafeInteger(value.version) &&
   value.version > 0;
+
+// History is an optional acceleration hint. Older writers omit it, and readers
+// fall back to a full scan if its chain is absent, truncated, or malformed.
+const readHistory = (header: Header): History | undefined => {
+  const history = header.history;
+  if (
+    !isRecord(history) ||
+    typeof history.base !== 'string' ||
+    !Array.isArray(history.batches) ||
+    !history.batches.length ||
+    history.batches.length > 16
+  ) {
+    return;
+  }
+  const revisions = new Set([history.base]);
+  let entries = 0;
+  for (const batch of history.batches) {
+    if (
+      !isRecord(batch) ||
+      typeof batch.revision !== 'string' ||
+      revisions.has(batch.revision) ||
+      !Array.isArray(batch.entries) ||
+      !batch.entries.every(
+        (entry: unknown) =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          collections.includes(entry[0]) &&
+          typeof entry[1] === 'string',
+      )
+    ) {
+      return;
+    }
+    revisions.add(batch.revision);
+    entries += batch.entries.length;
+  }
+  return entries <= 256 && history.batches.at(-1)?.revision === header.revision
+    ? history
+    : undefined;
+};
+
+const decodeEntry = (
+  kind: Collection,
+  value: unknown,
+  limits: Parameters<typeof decodeHydrationValue>[1],
+) => {
+  if (!isRecord(value) || !Number.isSafeInteger(value.bytes) || (value.bytes as number) <= 0) {
+    throw invalidState();
+  }
+  const entry = decodeHydrationValue(value.data as Encoded, limits);
+  if (
+    entry !== null &&
+    !(kind === 'lists'
+      ? isList(entry)
+      : kind === 'references'
+        ? isReference(entry)
+        : isRecord(entry))
+  ) {
+    throw invalidState();
+  }
+  return { bytes: value.bytes as number, entry };
+};
 
 /** The confirmed client graph has its own lifetime, independent of the read cache. */
 export class ClientPersistence {
@@ -241,6 +305,13 @@ export class ClientPersistence {
     if (this.header?.revision === header.revision) {
       return;
     }
+    if (
+      this.header?.version === header.version &&
+      header.version === this.options.version &&
+      (await this.loadChanges(header))
+    ) {
+      return;
+    }
     const next = emptySnapshot();
     const sizes = new Map<string, number>();
     let bytes = 0;
@@ -313,12 +384,115 @@ export class ClientPersistence {
     this.saved = next;
   }
 
+  private async loadChanges(header: Header): Promise<boolean> {
+    const history = readHistory(header);
+    if (!history || !this.header) {
+      return false;
+    }
+    const index =
+      history.base === this.header.revision
+        ? 0
+        : history.batches.findIndex(({ revision }) => revision === this.header!.revision) + 1;
+    if (index === 0 && history.base !== this.header.revision) {
+      return false;
+    }
+    const entries = new Map<string, ChangedEntry>();
+    for (const batch of history.batches.slice(index)) {
+      for (const entry of batch.entries) {
+        entries.set(this.entryKey(...entry), entry);
+      }
+    }
+    const keys = [...entries.keys()];
+    const patch: ClientStatePatch = { lists: new Map(), records: new Map(), references: new Map() };
+    const previous: ClientStatePatch = {
+      lists: new Map(),
+      records: new Map(),
+      references: new Map(),
+    };
+    const before = emptySnapshot();
+    const after = emptySnapshot();
+    const sizes = new Map<string, number>();
+    let bytes = this.bytes;
+    for (let start = 0; start < keys.length; start += 32) {
+      const batch = keys.slice(start, start + 32);
+      const values = await readPersistenceBatch(this.storage, batch);
+      this.client.assertPersistenceActive();
+      batch.forEach((key, index) => {
+        const [kind, id] = entries.get(key)!;
+        const value = values[index];
+        const decoded =
+          value === undefined ? undefined : decodeEntry(kind, value, this.options.limits);
+        const size = decoded?.bytes ?? 0;
+        bytes += size - (this.sizes.get(key) ?? 0);
+        sizes.set(key, size);
+        // Validation above narrows each collection's value; the maps share the
+        // same update algorithm while retaining their specific public types.
+        const saved = this.saved[kind].get(id);
+        (previous[kind] as Map<string, unknown>).set(id, saved);
+        (patch[kind] as Map<string, unknown>).set(id, decoded?.entry);
+        if (saved !== undefined) {
+          (before[kind] as Map<string, unknown>).set(id, saved);
+        }
+        if (decoded) {
+          (after[kind] as Map<string, unknown>).set(id, decoded.entry);
+        }
+      });
+    }
+    const changes = getChanges(before, after);
+    const referenceDeltas = new Map<EntityId, number>();
+    for (const [records, delta] of [
+      [before.records, -1],
+      [after.records, 1],
+    ] as const) {
+      for (const record of records.values()) {
+        if (record) {
+          for (const id of this.client.clientReferenceIds(record)) {
+            referenceDeltas.set(id, (referenceDeltas.get(id) ?? 0) + delta);
+          }
+        }
+      }
+    }
+    const apply = (changes: ClientStatePatch) => {
+      applyEntries(this.saved.lists, changes.lists);
+      applyEntries(this.saved.records, changes.records);
+      applyEntries(this.saved.references, changes.references);
+    };
+    apply(patch);
+    try {
+      this.client.restoreClientState(this.saved, changes);
+    } catch (error) {
+      apply(previous);
+      this.client.restoreClientState(this.saved, emptySnapshot());
+      throw error;
+    }
+    for (const [id, delta] of referenceDeltas) {
+      const count = (this.referenceCounts.get(id) ?? 0) + delta;
+      if (count) {
+        this.referenceCounts.set(id, count);
+      } else {
+        this.referenceCounts.delete(id);
+      }
+    }
+    for (const [key, size] of sizes) {
+      if (size) {
+        this.sizes.set(key, size);
+      } else {
+        this.sizes.delete(key);
+      }
+    }
+    this.bytes = bytes;
+    this.header = header;
+    return true;
+  }
+
   private async write(changes: ClientStatePatch) {
     const writes: Array<PersistenceStorageWrite> = [];
+    const changed: Array<ChangedEntry> = [];
     const sizes = new Map<string, number>();
     let bytes = this.bytes;
     for (const kind of collections) {
       for (const [id, value] of changes[kind]) {
+        changed.push([kind, id]);
         const key = this.entryKey(kind, id);
         const data =
           value === undefined ? undefined : encodeHydrationValue(value, this.options.limits);
@@ -329,11 +503,31 @@ export class ClientPersistence {
         writes.push([key, data === undefined ? undefined : { bytes: size, data }]);
       }
     }
-    const header = {
+    const header: Header = {
       format: 2 as const,
       revision: crypto.randomUUID(),
       version: this.options.version,
     };
+    if (this.header && this.header.version === header.version) {
+      const previous = readHistory(this.header);
+      const batches = [
+        ...(previous?.batches ?? []),
+        { entries: changed, revision: header.revision },
+      ];
+      header.history = { base: previous?.base ?? this.header.revision, batches };
+      while (
+        batches.length &&
+        (batches.length > 16 ||
+          batches.reduce((size, batch) => size + batch.entries.length, 0) > 256 ||
+          persistenceEntrySize(this.storageKey, header.history) > 16_384 ||
+          bytes + persistenceEntrySize(this.storageKey, header) > this.options.maxBytes)
+      ) {
+        header.history.base = batches.shift()!.revision;
+      }
+      if (!batches.length) {
+        delete header.history;
+      }
+    }
     if (bytes + persistenceEntrySize(this.storageKey, header) > this.options.maxBytes) {
       throw new Error('fate: Persisted client state exceeds the storage size limit.');
     }
