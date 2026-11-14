@@ -38,11 +38,6 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
-  '@cloudflare/workers-types': 5.20261103.1
-  better-auth: 1.7.15
-  drizzle-orm: 0.45.4
-  kysely: 0.28.17
-  pg: 8.23.1
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
 
