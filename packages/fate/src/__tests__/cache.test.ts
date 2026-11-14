@@ -176,6 +176,14 @@ test('collecting an argument variant invalidates old snapshots even if the field
   expect(cache.get(entityId, newView, ref)).toBeNull();
 });
 
+test('clearing caches invalidates detached dependency trackers', () => {
+  const cache = new ViewDataCache();
+  const tracked = cache.capture([['User:1', new Set(['name'])]]);
+  expect(cache.isCurrent(tracked)).toBe(true);
+  cache.clear();
+  expect(cache.isCurrent(tracked)).toBe(false);
+});
+
 test('replacing one snapshot drops obsolete dependencies without affecting other views', () => {
   const cache = new ViewDataCache();
   const parentId = 'Parent:1';
@@ -219,3 +227,29 @@ test.each(['selected-field', 'unknown-fields', 'deleted-dependency', 'invalidate
     );
   },
 );
+
+test('recaptured dependencies follow field changes, collection, and recreated entities', () => {
+  const cache = new ViewDataCache();
+  const fields = new Set(['title']);
+  let tracked = cache.capture([['Item:1', fields]])!;
+  cache.invalidate('Item:1', ['title']);
+  expect(cache.isCurrent(tracked)).toBe(false);
+  tracked = cache.capture([['Item:1', fields]], tracked)!;
+  expect(cache.isCurrent(tracked)).toBe(true);
+  cache.invalidate('Item:1', ['title']);
+  expect(cache.isCurrent(tracked)).toBe(false);
+  cache.invalidate('Item:1');
+  tracked = cache.capture([['Item:1', fields]], tracked)!;
+  expect(cache.isCurrent(tracked)).toBe(true);
+  cache.invalidate('Item:1', ['title']);
+  expect(cache.isCurrent(tracked)).toBe(false);
+
+  const key = argumentFieldKey('title', 'language');
+  const coverage: Array<[EntityId, Set<string>]> = [['Item:1', new Set([key])]];
+  tracked = cache.capture(coverage)!;
+  cache.collectFields('Item:1', new Set([key]));
+  tracked = cache.capture(coverage, tracked)!;
+  expect(cache.isCurrent(tracked)).toBe(true);
+  cache.invalidateField('Item:1', 'title', 'language');
+  expect(cache.isCurrent(tracked)).toBe(false);
+});

@@ -13,7 +13,8 @@ const summarize = (values: Array<number>) => {
   };
 };
 async function measure(run: () => unknown, count = Number(process.argv[2] ?? 15)) {
-  for (let i = 0; i < 5; i++) {
+  const warmup = performance.now();
+  for (let i = 0; i < 10 || performance.now() - warmup < 100; i++) {
     await run();
   }
   const values = [];
@@ -70,6 +71,7 @@ async function graph() {
       throw Error('Incorrect graph');
     }
     resultsForSize.storeReadsPerGraphRead = reads;
+    await client.readView(mixed, mixedRef);
     client.write('State', { count: ++version, id: 'main' }, new Set(['id', 'count']));
     reads = 0;
     await client.readView(mixed, mixedRef);

@@ -1,5 +1,7 @@
 import { responseField, schemaField, typeBranchField, typeCondition } from './alias.ts';
 import { cloneArgs, combineArgsPayload, hashArgs, resolvedArgsFromPlan } from './args.ts';
+import type ViewDataCache from './cache.ts';
+import type { ViewDependencies } from './cache.ts';
 import type { ClientStateReference } from './client-persistence.ts';
 import type {
   ClientMutationDefinition,
@@ -17,6 +19,12 @@ import { isDate, isRecord, setRecordValue } from './record.ts';
 import { parseEntityId, toEntityId } from './ref.ts';
 import type { SelectionPlan } from './selection.ts';
 import type { AnyRecord, EntityId, RelationDescriptor, TypeConfig } from './types.ts';
+import {
+  addViewCoverage,
+  mergeViewCoverage,
+  ViewCoverageBuilder,
+  type ViewCoverage,
+} from './view-coverage.ts';
 
 export type ClientStateWrite = { id: EntityId } & (
   | { append: { field: string; members: ReadonlySet<EntityId> } }
@@ -129,7 +137,14 @@ const dependencyPath = (
     .join('.');
 };
 
-type ComputedValue = { key: string; result: unknown; values: Array<unknown> };
+type ComputedValue = {
+  changes: number;
+  coverage?: ViewCoverage;
+  dependencies?: ViewDependencies;
+  key: string;
+  result: unknown;
+  values: Array<unknown>;
+};
 
 export default class ClientState {
   readonly initialRecords = new WeakSet<AnyRecord>();
@@ -144,7 +159,10 @@ export default class ClientState {
   // another field or argument variant is actually read. Collection is O(1).
   private readonly computedCache = new Map<EntityId, ComputedValue | Map<string, ComputedValue>>();
 
-  constructor(private readonly client: FateClient<any, any, any>) {}
+  constructor(
+    private readonly client: FateClient<any, any, any>,
+    private readonly viewCache: ViewDataCache,
+  ) {}
 
   copyReadDefinitionsFrom(source: ClientState) {
     for (const [name, definition] of source.definitions) {
@@ -459,12 +477,12 @@ export default class ClientState {
     field: string,
     plan: SelectionPlan,
     path: string,
-    coverage: Map<EntityId, Set<string>>,
+    coverage: ViewCoverageBuilder,
     stack = new Set<string>(),
   ): unknown {
     const { type } = parseEntityId(id);
     const key = getFieldKey(path, plan);
-    coverage.set(id, (coverage.get(id) ?? new Set()).add(key));
+    addViewCoverage(coverage, id, key);
     const definition = this.definitions.get(type)?.view.fields[field];
     if (!isComputed(definition)) {
       return this.client.store.read(id)?.[key];
@@ -473,6 +491,17 @@ export default class ClientState {
     if (stack.has(cacheKey)) {
       throw new Error(`fate: Cyclic client computation at '${type}.${field}'.`);
     }
+    const cached = this.computedCache.get(id);
+    const previous =
+      cached && !('key' in cached) ? cached.get(key) : cached?.key === key ? cached : undefined;
+    if (previous && this.viewCache.isCurrent(previous.dependencies)) {
+      mergeViewCoverage(coverage, previous.coverage!);
+      return previous.result;
+    }
+    const track = !previous || previous.changes < 2;
+    const computedCoverage = track
+      ? new ViewCoverageBuilder([[id, new Set([key])]], previous?.coverage)
+      : coverage;
     stack = new Set(stack).add(cacheKey);
     const values: Array<unknown> = [];
     const args = plan.args.get(path)?.value;
@@ -484,7 +513,7 @@ export default class ClientState {
         name,
         dependencies,
         segments.slice(0, index + 1).join('.'),
-        coverage,
+        computedCoverage,
         stack,
       );
       return readValue(value, segments, index + 1);
@@ -520,14 +549,19 @@ export default class ClientState {
         values.push(deps[name]);
       }
     }
-    const cached = this.computedCache.get(id);
-    const previous =
-      cached && !('key' in cached) ? cached.get(key) : cached?.key === key ? cached : undefined;
+    if (track) {
+      mergeViewCoverage(coverage, computedCoverage);
+    }
     if (
       previous &&
       previous.values.length === values.length &&
       values.every((value, index) => Object.is(value, previous.values[index]))
     ) {
+      previous.changes = 0;
+      previous.coverage = track ? computedCoverage : undefined;
+      previous.dependencies = track
+        ? this.viewCache.capture(computedCoverage, previous.dependencies)
+        : undefined;
       return previous.result;
     }
     const result = definition.resolve(
@@ -539,7 +573,20 @@ export default class ClientState {
     if (result && typeof result === 'object' && 'then' in result) {
       throw new Error(`fate: Client memo field '${type}.${field}' must be synchronous.`);
     }
-    const next = { key, result, values };
+    // A computation whose inputs change on every read cannot benefit from a
+    // revision shortcut. Stop rebuilding that index after repeated misses;
+    // stable reads above enable it again. The hot fallback writes dependency
+    // coverage straight into its caller, as an uncached computation would.
+    const changes = previous ? Math.min(2, previous.changes + 1) : 0;
+    const next = {
+      changes,
+      coverage: track ? computedCoverage : undefined,
+      dependencies:
+        changes < 2 ? this.viewCache.capture(computedCoverage, previous?.dependencies) : undefined,
+      key,
+      result,
+      values,
+    };
     if (cached && !('key' in cached)) {
       cached.set(key, next);
     } else {

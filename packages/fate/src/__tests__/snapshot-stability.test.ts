@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { clientRoot } from '../root.ts';
 import { view } from '../view.ts';
+import { createClientStateFixture } from './fixtures/client-state.ts';
 
 type User = {
   __typename: 'User';
@@ -11,6 +12,76 @@ type User = {
   tags: Array<string>;
 };
 const UserView = view<User>()({ character: { color: true }, name: true, tags: true });
+
+test('reused nested list results retain transitive coverage through optimistic rollback', async () => {
+  type Child = { __typename: 'Child'; friend: User; id: string; name: string };
+  type Parent = { __typename: 'Parent'; children: Array<Child>; count: number; id: string };
+  const selected = view<Parent>()({
+    children: { friend: { name: true }, name: true },
+    count: true,
+  });
+  const client = createClient({
+    types: [
+      { fields: { children: { array: true, listOf: 'Child' } }, type: 'Parent' },
+      { fields: { friend: { type: 'User' } }, type: 'Child' },
+      { type: 'User' },
+    ],
+  });
+  client.write(
+    'Parent',
+    {
+      children: [
+        { friend: { id: 'a', name: 'Friend A' }, id: 'a', name: 'A' },
+        { friend: { id: 'b', name: 'Friend B' }, id: 'b', name: 'B' },
+      ],
+      count: 0,
+      id: 'p',
+    },
+    new Set(['count', 'children.name', 'children.friend.name']),
+  );
+  const ref = client.ref('Parent', 'p', selected);
+  const first = await client.readView(selected, ref);
+  client.write('Parent', { count: 1, id: 'p' }, new Set(['count']));
+  const next = await client.readView(selected, ref);
+  expect(next.data.children).toBe(first.data.children);
+  expect(next.coverage).toEqual(first.coverage);
+  const rollback = client.store.optimisticUpdate(() =>
+    client.write('User', { id: 'a', name: 'Pending' }, new Set(['name'])),
+  );
+  const optimistic = await client.readView(selected, ref);
+  expect(optimistic.data.children[0].friend.name).toBe('Pending');
+  expect(optimistic.data.children[1]).toBe(first.data.children[1]);
+  client.write('User', { id: 'a', name: 'Confirmed' }, new Set(['name']));
+  rollback();
+  expect((await client.readView(selected, ref)).data.children[0].friend.name).toBe('Confirmed');
+  client.deleteRecord('User', 'b');
+  expect((await client.readView(selected, ref)).data.children[1].friend).toBeNull();
+});
+
+test.each([0, 5])(
+  'memo reuse retains dependencies after %i changing reads and an unrelated field change',
+  async (changingReads) => {
+    const { make, seed } = createClientStateFixture(10);
+    const client = make();
+    seed(client);
+    const selected = view<{ __typename: 'State'; count: number; id: string; titles: string }>()({
+      count: true,
+      titles: true,
+    });
+    const ref = client.ref('State', 'main', selected);
+    for (let index = 0; index < changingReads; index++) {
+      client.write('Item', { id: '0', title: `Edit ${index}` }, new Set(['title']));
+      await client.readView(selected, ref);
+    }
+    const first = await client.readView(selected, ref);
+    client.write('State', { count: 1, id: 'main' }, new Set(['count']));
+    const next = await client.readView(selected, ref);
+    expect(next.data.titles).toBe(first.data.titles);
+    expect(next.coverage).toEqual(first.coverage);
+    client.write('Item', { id: '0', title: 'Changed' }, new Set(['title']));
+    expect((await client.readView(selected, ref)).data.titles.startsWith('Changed,')).toBe(true);
+  },
+);
 const setup = () => {
   const fetchQuery = vi.fn(async () => ({
     character: { color: 1 },

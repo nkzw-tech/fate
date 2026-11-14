@@ -13,7 +13,7 @@ import {
   resolvedArgsFromPlan,
   scopeArgsPayload,
 } from './args.ts';
-import ViewDataCache from './cache.ts';
+import ViewDataCache, { type ViewDependencies } from './cache.ts';
 import type { ClientStateReference, ClientStateSnapshot } from './client-persistence.ts';
 import {
   clientMutationBuilder,
@@ -161,6 +161,7 @@ import {
   MutationDefinition,
   RootDefinition,
 } from './types.ts';
+import { mergeViewCoverage, ViewCoverageBuilder, type ViewCoverage } from './view-coverage.ts';
 import {
   addViewName,
   viewNamesForType,
@@ -998,11 +999,25 @@ export class FateClient<
   private isHydrationReader = false;
   private readonly persistenceScope: string;
   private readonly types: Map<string, TypeConfig>;
-  private readonly clientState = new ClientState(this);
+  private readonly viewDataCache = new ViewDataCache(() => !this.store.isRebasing);
+  private readonly clientState = new ClientState(this, this.viewDataCache);
   private remoteWriteDepth = 0;
   private readonly transport: Transport<MutationMapFromDefinitions<Mutations>>;
-  // Intermediate rollback/replay states must not evict or populate view snapshots.
-  private readonly viewDataCache = new ViewDataCache(() => !this.store.isRebasing);
+  // Weak keys ensure cached selections do not keep unmounted results alive.
+  private readonly subtreeResults = new WeakMap<
+    object,
+    {
+      argsKey: string;
+      cacheOnly: boolean;
+      coverage: ViewCoverage;
+      dependencies: ViewDependencies;
+      id: EntityId;
+      paths: ReadonlySet<string>;
+      prefix: string;
+      selection: object;
+      tag?: string;
+    }
+  >();
   private liveConnectionInvalidationToken = 0;
 
   readonly persistence?: PersistenceSession;
@@ -7192,7 +7207,7 @@ export class FateClient<
         }
       }
     };
-    const coverageById = new Map<EntityId, Set<string>>();
+    let coverageById = new ViewCoverageBuilder();
     const getWindowScope = () => (windowScope ??= getViewSignature(viewComposition));
 
     const getViewTags = (target: ViewResult, parentId: EntityId) => {
@@ -7202,6 +7217,122 @@ export class FateClient<
         this.optimisticRefOwners.set(target, this.optimisticRefOwners.get(ownerRef) ?? ownerRef);
       }
       return target[ViewsTag]!;
+    };
+
+    const argsKey = JSON.stringify([...plan.args].map(([path, args]) => [path, args.hash]));
+    const previousState = this.viewDataCache.previousState(entityId, viewComposition, ref);
+    const previousCoverage = previousState && new Map(previousState.coverage);
+    const flatSelections = new WeakMap<object, Map<string, boolean>>();
+    const isFlat = (selection: object, type: string) => {
+      let types = flatSelections.get(selection);
+      let flat = types?.get(type);
+      if (flat === undefined) {
+        flat = Object.entries(selection).every(([key, value]) => {
+          if (isViewTag(key)) {
+            return true;
+          }
+          const raw = resolveConditionalSelection(value);
+          const field = isAliasedSelection(raw) ? raw.field : key;
+          const selected = isAliasedSelection(raw) ? raw.selection : raw;
+          return (
+            selected === undefined ||
+            (typeof selected === 'boolean' && !this.clientState.isComputed(type, field))
+          );
+        });
+        if (!types) {
+          types = new Map();
+          flatSelections.set(selection, types);
+        }
+        types.set(type, flat);
+      }
+      return flat;
+    };
+    const readChild = (
+      id: EntityId,
+      selection: object,
+      prefix: string,
+      before: AnyRecord | undefined,
+      tag: string | undefined,
+      localPath: string,
+    ): ViewResult | null => {
+      const parsed = parseEntityId(id);
+      if (isFlat(selection, parsed.type)) {
+        // Flat rows only depend on their own entity. Use the enclosing snapshot's
+        // revision instead of allocating a dependency graph for every changed row.
+        const fields = previousCoverage?.get(id);
+        if (
+          before &&
+          before.id === parsed.id &&
+          before.__typename === parsed.type &&
+          fields &&
+          previousState &&
+          this.viewDataCache.unchangedEntity(id, previousState)
+        ) {
+          coverageById.merge(id, fields);
+          return before;
+        }
+        const record = this.store.read(id);
+        if (!coverageById.has(id)) {
+          coverageById.set(id, new Set());
+        }
+        if (!record) {
+          return null;
+        }
+        const node = { __typename: parsed.type, id: parsed.id };
+        walk(selection, record, node, id, prefix, before, tag, localPath);
+        return finishNode(node, before);
+      }
+      const cached = before && this.subtreeResults.get(before);
+      const cacheOnly = this.cacheOnlyRefs.has(ref);
+      if (
+        cached &&
+        cached.id === id &&
+        cached.selection === selection &&
+        cached.paths === plan.paths &&
+        cached.argsKey === argsKey &&
+        cached.prefix === prefix &&
+        cached.tag === tag &&
+        cached.cacheOnly === cacheOnly &&
+        this.viewDataCache.isCurrent(cached.dependencies)
+      ) {
+        mergeViewCoverage(coverageById, cached.coverage);
+        return before!;
+      }
+      const record = this.store.read(id);
+      if (!record) {
+        if (!coverageById.has(id)) {
+          coverageById.set(id, new Set());
+        }
+        return null;
+      }
+      const parentCoverage = coverageById;
+      coverageById = new ViewCoverageBuilder();
+      // Even a masked reference depends on its entity continuing to exist.
+      coverageById.set(id, new Set());
+      try {
+        const node = { __typename: parsed.type, id: parsed.id };
+        walk(selection, record, node, id, prefix, before, tag, localPath);
+        finishChildren(node);
+        const result = finishNode(node, before);
+        const dependencies = this.viewDataCache.capture(coverageById);
+        if (dependencies) {
+          this.subtreeResults.set(result, {
+            argsKey,
+            cacheOnly,
+            coverage: coverageById,
+            dependencies,
+            id,
+            paths: plan.paths,
+            prefix,
+            selection,
+            tag,
+          });
+        }
+        mergeViewCoverage(parentCoverage, coverageById);
+        return result;
+      } finally {
+        coverageById = parentCoverage;
+      }
     };
 
     const walk = (
@@ -7221,16 +7352,8 @@ export class FateClient<
       }
       const parentType = parseEntityId(parentId).type;
       let parentCoverage: Set<string> | undefined;
-      const cover = (storageKey: string) => {
-        if (!parentCoverage) {
-          parentCoverage = coverageById.get(parentId);
-          if (!parentCoverage) {
-            parentCoverage = new Set();
-            coverageById.set(parentId, parentCoverage);
-          }
-        }
-        parentCoverage.add(storageKey);
-      };
+      const cover = (storageKey: string) =>
+        (parentCoverage ??= coverageById.own(parentId)).add(storageKey);
       for (const [key, conditionalSelection] of entries) {
         const previousValue = before?.[key] as AnyRecord | undefined;
         const rawSelection = resolveConditionalSelection(conditionalSelection);
@@ -7383,33 +7506,17 @@ export class FateClient<
                   return itemResult;
                 }
 
-                const record = this.store.read(entityId);
-                const { id, type } = parseEntityId(entityId);
-                const node = { __typename: type, id };
-
-                if (record) {
-                  walk(
-                    selection.node as AnyRecord,
-                    record,
-                    node,
+                const itemResult: AnyRecord = {
+                  node: readChild(
                     entityId,
+                    selection.node as object,
                     fieldPath,
                     (previousValue?.items as Array<AnyRecord> | undefined)?.[index]?.node as
                       | AnyRecord
                       | undefined,
                     viewTag,
                     localPath,
-                  );
-                  finishChildren(node);
-                }
-
-                const itemResult: AnyRecord = {
-                  node: record
-                    ? finishNode(
-                        node,
-                        (previousValue?.items as Array<AnyRecord> | undefined)?.[index]?.node,
-                      )
-                    : null,
+                  ),
                 };
 
                 if (selection.cursor === true) {
@@ -7477,26 +7584,14 @@ export class FateClient<
                   return item;
                 }
 
-                const record = this.store.read(entityId);
-                const { id, type } = parseEntityId(entityId);
-
-                if (record) {
-                  const node = { __typename: type, id };
-                  walk(
-                    nextSelection,
-                    record,
-                    node,
-                    entityId,
-                    fieldPath,
-                    previousValue?.[index] as AnyRecord | undefined,
-                    viewTag,
-                    localPath,
-                  );
-                  finishChildren(node);
-                  return finishNode(node, previousValue?.[index]);
-                }
-
-                return null;
+                return readChild(
+                  entityId,
+                  nextSelection,
+                  fieldPath,
+                  previousValue?.[index] as AnyRecord | undefined,
+                  viewTag,
+                  localPath,
+                );
               });
               const metadata = this.nestedListMetadata(
                 parentId,

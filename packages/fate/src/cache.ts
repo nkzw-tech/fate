@@ -11,17 +11,22 @@ import {
 
 type CachedSnapshot = FateThenable<ViewSnapshot<any, any>>;
 type FieldRevision = { revision: number };
-type CacheEntry = {
+export type ViewDependencies = {
   dependencies: ReadonlyArray<{
     cache: EntityCache;
     fields: ReadonlySet<string> | null;
     variants?: ReadonlyArray<FieldRevision>;
   }>;
-  previous?: WeakRef<object>;
+  epoch: object;
   revision: number;
+};
+type CacheEntry = ViewDependencies & {
+  previous?: WeakRef<object>;
+  previousSnapshot?: WeakRef<ViewSnapshot<any, any>>;
   thenable?: CachedSnapshot;
 };
 type EntityCache = {
+  created: number;
   fields?: Map<string, number>;
   invalidated: number;
   revision: number;
@@ -34,11 +39,12 @@ export default class ViewDataCache {
 
   private cache = new Map<EntityId, EntityCache>();
   private revision = 0;
+  private epoch = {};
 
   private entityCache(entityId: EntityId): EntityCache {
     let cache = this.cache.get(entityId);
     if (!cache) {
-      cache = { invalidated: 0, revision: 0 };
+      cache = { created: this.revision, invalidated: 0, revision: 0 };
       this.cache.set(entityId, cache);
     }
     return cache;
@@ -46,6 +52,7 @@ export default class ViewDataCache {
 
   clear() {
     this.cache.clear();
+    this.epoch = {};
   }
 
   get<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
@@ -64,34 +71,46 @@ export default class ViewDataCache {
     if (!entry?.thenable) {
       return null;
     }
+    if (!this.isCurrent(entry)) {
+      return this.expire(entry);
+    }
+    return entry.thenable;
+  }
+
+  isCurrent(entry: ViewDependencies | undefined): boolean {
+    if (!entry || !this.isEnabled() || entry.epoch !== this.epoch) {
+      return false;
+    }
     if (entry.revision !== this.revision) {
       for (const { cache, fields, variants } of entry.dependencies) {
         if (cache.invalidated > entry.revision) {
-          return this.expire(entry);
+          return false;
         }
         if (cache.revision <= entry.revision) {
           continue;
         }
         if (!fields) {
-          return this.expire(entry);
+          return false;
         }
         for (const field of fields) {
           if ((cache.fields?.get(field) ?? 0) > entry.revision) {
-            return this.expire(entry);
+            return false;
           }
         }
         for (const field of variants ?? []) {
           if (field.revision > entry.revision) {
-            return this.expire(entry);
+            return false;
           }
         }
       }
       entry.revision = this.revision;
     }
-    return entry.thenable;
+    return true;
   }
 
   private expire(entry: CacheEntry): null {
+    const snapshot = entry.thenable?.value;
+    entry.previousSnapshot = snapshot ? new WeakRef(snapshot) : undefined;
     const data = entry.thenable?.value?.data;
     entry.previous = data && typeof data === 'object' ? new WeakRef(data) : undefined;
     entry.thenable = undefined;
@@ -106,6 +125,26 @@ export default class ViewDataCache {
     }
     const entry = this.cache.get(entityId)?.views?.get(view)?.get(ref);
     return entry?.thenable?.value?.data ?? entry?.previous?.deref();
+  }
+
+  previousState(entityId: EntityId, view: View<any, any>, ref: ViewRef<string>) {
+    const entry = this.cache.get(entityId)?.views?.get(view)?.get(ref);
+    const snapshot = entry?.thenable?.value ?? entry?.previousSnapshot?.deref();
+    return entry && snapshot
+      ? { coverage: snapshot.coverage, epoch: entry.epoch, revision: entry.revision }
+      : undefined;
+  }
+
+  unchangedEntity(entityId: EntityId, previous: { epoch: object; revision: number }) {
+    const cache = this.cache.get(entityId);
+    return (
+      this.isEnabled() &&
+      previous.epoch === this.epoch &&
+      cache !== undefined &&
+      cache.created <= previous.revision &&
+      cache.invalidated <= previous.revision &&
+      cache.revision <= previous.revision
+    );
   }
 
   set<T extends Entity, S extends Selection<T>, V extends View<T, S>>(
@@ -123,13 +162,41 @@ export default class ViewDataCache {
       viewMap = new WeakMap();
       entityMap.set(view, viewMap);
     }
-    // Coverage already includes every nested entity. Keep dependencies only on
-    // this weakly held snapshot instead of accumulating a reverse entity graph.
-    const dependencies: Array<CacheEntry['dependencies'][number]> = [];
-    let coversEntity = false;
-    for (const [id, fields] of thenable.value?.coverage ?? []) {
-      coversEntity ||= id === entityId;
+    const tracked = this.capture(thenable.value?.coverage ?? [])!;
+    if (!thenable.value?.coverage.some(([id]) => id === entityId)) {
+      (tracked.dependencies as Array<ViewDependencies['dependencies'][number]>).push({
+        cache: this.entityCache(entityId),
+        fields: null,
+      });
+    }
+    viewMap.set(ref, { ...tracked, thenable });
+  }
+
+  /** Track field revisions without retaining records or result objects. */
+  capture(
+    coverage: Iterable<readonly [EntityId, ReadonlySet<string>]>,
+    previous?: ViewDependencies,
+  ): ViewDependencies | undefined {
+    if (!this.isEnabled()) {
+      return;
+    }
+    const dependencies: Array<ViewDependencies['dependencies'][number]> = [];
+    const reusable = previous?.epoch === this.epoch ? previous.dependencies : undefined;
+    let index = 0;
+    for (const [id, fields] of coverage) {
       const cache = this.entityCache(id);
+      const before = reusable?.[index++];
+      if (
+        before?.cache === cache &&
+        !before.variants &&
+        before.fields &&
+        (before.fields === fields ||
+          (before.fields.size === fields.size &&
+            [...fields].every((field) => before.fields!.has(field))))
+      ) {
+        dependencies.push(before);
+        continue;
+      }
       let variants: Array<FieldRevision> | undefined;
       // Only argument variants can be collected individually. Ordinary fields
       // can reuse the snapshot's coverage without allocating revision cells.
@@ -147,10 +214,7 @@ export default class ViewDataCache {
       }
       dependencies.push({ cache, fields, variants });
     }
-    if (!coversEntity) {
-      dependencies.push({ cache: this.entityCache(entityId), fields: null });
-    }
-    viewMap.set(ref, { dependencies, revision: this.revision, thenable });
+    return { dependencies, epoch: this.epoch, revision: this.revision };
   }
 
   invalidateField(entityId: EntityId, field: string, hash?: string) {
