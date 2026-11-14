@@ -365,6 +365,25 @@ export class PersistenceCache {
   private work = 0;
   private journalBytes = 0;
   private policies = new WeakMap<RequestDescriptor, number>();
+  private compactRequests = new WeakMap<RequestDescriptor, Promise<RequestDescriptor>>();
+
+  private compactRequest(request: RequestDescriptor): Promise<RequestDescriptor> {
+    if (request.key.length <= 256 || !globalThis.crypto?.subtle) {
+      return Promise.resolve(request);
+    }
+    let pending = this.compactRequests.get(request);
+    if (!pending) {
+      pending = crypto.subtle
+        .digest('SHA-256', new TextEncoder().encode(request.key))
+        .then((digest) => ({
+          ...request,
+          key: `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+        }));
+      this.compactRequests.set(request, pending);
+      void pending.catch(() => this.compactRequests.delete(request));
+    }
+    return pending;
+  }
 
   constructor(
     private readonly client: FateClient<any, any, any>,
@@ -1100,6 +1119,8 @@ export class PersistenceCache {
   }
 
   async restore(request: RequestDescriptor) {
+    const legacyKey = request.key;
+    request = await this.compactRequest(request);
     await this.storage.exclusive(`${this.key}:write`, async () => {
       if (!(await this.active())) {
         return;
@@ -1150,14 +1171,19 @@ export class PersistenceCache {
           await this.step();
         }
       }
-      const root = await this.read<Root>(this.rootKey(request.key));
+      let rootId = request.key;
+      let root = await this.read<Root>(this.rootKey(rootId));
+      if (!root && legacyKey !== rootId) {
+        rootId = legacyKey;
+        root = await this.read<Root>(this.rootKey(rootId));
+      }
       if (root && root.fetchedAt + root.maxAge > Date.now()) {
-        const old = `${this.prefix}lru:${stamp(root.usedAt)}:${request.key}`;
+        const old = `${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`;
         root.usedAt = Date.now();
         await this.put([
           [old, undefined],
-          [this.rootKey(request.key), root],
-          [`${this.prefix}lru:${stamp(root.usedAt)}:${request.key}`, request.key],
+          [this.rootKey(rootId), root],
+          [`${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`, rootId],
         ]);
       }
     });
@@ -1210,13 +1236,21 @@ export class PersistenceCache {
     usedAt = Date.now(),
     fromNetwork = false,
   ) {
-    if (!maxAge || fetchedAt + maxAge <= Date.now()) {
+    const legacyKey = request.key;
+    request = await this.compactRequest(request);
+    const remove = async () => {
       await this.remove(request.key);
+      if (legacyKey !== request.key) {
+        await this.remove(legacyKey);
+      }
+    };
+    if (!maxAge || fetchedAt + maxAge <= Date.now()) {
+      await remove();
       return;
     }
     const { nodes } = await this.collect(request, fromNetwork ? 'network' : 'memory');
     if (!nodes.size) {
-      await this.remove(request.key);
+      await remove();
       return;
     }
     const root: Root = {
@@ -1246,7 +1280,7 @@ export class PersistenceCache {
       await this.step();
     }
     if (minimum + this.journalBytes + this.overhead > this.maxBytes) {
-      await this.remove(request.key);
+      await remove();
       return;
     }
     const prepare = async () => {
@@ -1334,7 +1368,7 @@ export class PersistenceCache {
         (entry) => decodeStoredValue<string>(entry.value)?.value !== request.key,
       );
       if (!candidate) {
-        await this.remove(request.key);
+        await remove();
         return;
       }
       const id = decodeStoredValue<string>(candidate.value)!.value;
@@ -1351,6 +1385,11 @@ export class PersistenceCache {
       await yieldPersistenceTask();
     }
     await this.put([[this.rootKey(request.key), root]]);
+    // Migrate only after the new root and its claims have committed. Readers
+    // continue to accept either format if a write is interrupted partway through.
+    if (legacyKey !== request.key) {
+      await this.remove(legacyKey);
+    }
   }
 
   /** Called under the shared write lock. Expiry/LRU indexes avoid whole-cache scans. */
@@ -1451,6 +1490,10 @@ export class PersistenceCache {
       values: new Map([...updates].map(([key, update]) => [key, update.value])),
     };
     try {
+      const pendingIds = new Set(pending.keys());
+      for (const { request } of pending.values()) {
+        pendingIds.add((await this.compactRequest(request)).key);
+      }
       const affected = new Map<string, Root>();
       for (const key of this.flushingNodes.values.keys()) {
         const node = await this.node(key);
@@ -1492,7 +1535,7 @@ export class PersistenceCache {
           continue;
         }
         for (const rootId of Object.keys(node?.claims ?? {})) {
-          if (pending.has(rootId) || affected.has(rootId)) {
+          if (pendingIds.has(rootId) || affected.has(rootId)) {
             continue;
           }
           const root = await this.read<Root>(this.rootKey(rootId));
@@ -1510,20 +1553,28 @@ export class PersistenceCache {
           await this.save(request, fetchedAt, maxAge, Date.now(), true);
         }
       }
-      for (const { fetchedAt, maxAge, request } of pending.values()) {
+      for (const { fetchedAt, maxAge, request: original } of pending.values()) {
         if (fetchedAt !== undefined) {
           continue;
         }
+        const request = await this.compactRequest(original);
         if (!maxAge) {
           await this.remove(request.key);
+          if (request.key !== original.key) {
+            await this.remove(original.key);
+          }
           continue;
         }
         const cached = await this.collect(request, 'disk');
         if (cached.complete && Number.isFinite(cached.fetchedAt)) {
-          const root = await this.read<Root>(this.rootKey(request.key));
+          const root =
+            (await this.read<Root>(this.rootKey(request.key))) ??
+            (request.key !== original.key
+              ? await this.read<Root>(this.rootKey(original.key))
+              : undefined);
           // An overlapping selection may have older claims on the same nodes.
           // Reusing this request must preserve its own successful fetch time.
-          await this.save(request, root?.fetchedAt ?? cached.fetchedAt, maxAge);
+          await this.save(original, root?.fetchedAt ?? cached.fetchedAt, maxAge);
         }
       }
       this.flushingNodes.values.clear();
@@ -1600,6 +1651,7 @@ export class PersistenceCache {
   }
 
   private reset() {
+    this.compactRequests = new WeakMap();
     this.recoveryUpdates.clear();
     this.policies = new WeakMap();
     for (const entry of this.pendingRequests.values()) {
