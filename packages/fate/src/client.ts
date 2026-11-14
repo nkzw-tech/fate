@@ -6128,7 +6128,9 @@ export class FateClient<
         sharedSignal?.throwIfAborted();
         this.assertPersistenceActive();
         const normalization = batch?.normalization ?? createNormalizationContext();
-        const entityIds = this.store.batch(() =>
+        // Expose the confirmed base once for the entire response. Rebasing each
+        // root separately replays every pending mutation for every returned ID.
+        const entityIds = this.store.update(() =>
           records.map(({ generation, record }) =>
             this.withResponseWrite(generation, () =>
               this.writeEntity(

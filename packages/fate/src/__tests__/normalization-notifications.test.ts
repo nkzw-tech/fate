@@ -39,3 +39,38 @@ test.each(['write', 'fetch'] as const)(
     expect(observed).toEqual([['After', 'After']]);
   },
 );
+
+test('a multi-ID response rebases once and retains overlapping optimistic writes until rollback', async () => {
+  const itemView = view<Item>()({ id: true, title: true });
+  const selected = new Set(['id', 'title']);
+  const client = createClient({
+    roots: { items: clientRoot<Item, 'Item'>('Item') },
+    transport: {
+      fetchById: async () => ['a', 'b', 'c'].map((id) => ({ id, title: `Server ${id}` })),
+    },
+    types: [{ type: 'Item' }],
+  });
+  for (const id of ['a', 'b', 'c']) {
+    client.write('Item', { id, title: 'Initial' }, selected);
+  }
+  let applications = 0;
+  const rollback = client.store.optimisticUpdate(() => {
+    applications++;
+    client.write('Item', { id: 'a', title: 'Optimistic' }, selected);
+  });
+  const observed: Array<unknown> = [];
+  const notify = () =>
+    observed.push(['a', 'b', 'c'].map((id) => client.store.read(`Item:${id}`)?.title));
+  for (const id of ['a', 'b', 'c']) {
+    client.store.subscribe(`Item:${id}`, notify);
+  }
+  applications = 0;
+  await client.request(
+    { items: { ids: ['a', 'b', 'c'], view: itemView } },
+    { mode: 'network-only' },
+  );
+  expect(applications).toBe(1);
+  expect(observed).toEqual([['Optimistic', 'Server b', 'Server c']]);
+  rollback();
+  expect(client.store.read('Item:a')?.title).toBe('Server a');
+});
