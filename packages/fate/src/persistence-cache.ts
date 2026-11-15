@@ -1367,12 +1367,17 @@ export class PersistenceCache {
       if (used + added + this.journalBytes + this.overhead <= this.maxBytes) {
         break;
       }
-      const candidates = await this.storage.scan(`${this.prefix}lru:`, undefined, 2);
-      const candidate = candidates.find(
-        (entry) => decodeStoredValue<string>(entry.value)?.value !== request.key,
-      );
+      // Keep both identities until migration commits. Three entries suffice to
+      // find an eviction candidate beyond the compact and legacy roots.
+      const candidates = await this.storage.scan(`${this.prefix}lru:`, undefined, 3);
+      const candidate = candidates.find((entry) => {
+        const id = decodeStoredValue<string>(entry.value)?.value;
+        return id !== request.key && id !== legacyKey;
+      });
       if (!candidate) {
-        await remove();
+        // Defer migration if its temporary growth cannot fit. The legacy root
+        // must remain readable if this attempt is interrupted or abandoned.
+        await this.remove(request.key);
         return;
       }
       const id = decodeStoredValue<string>(candidate.value)!.value;
