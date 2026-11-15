@@ -7,13 +7,20 @@ const name = `fate-audit-${crypto.randomUUID()}`;
 const params = new URLSearchParams(location.search);
 const sampleCount = Number(params.get('samples') ?? 7);
 const disk = createIndexedDBStorage({ name });
-let readCalls = 0,
+let writeCalls = 0,
+  nodeWrites = 0,
+  readCalls = 0,
   scans = 0,
   active = 0,
   peak = 0,
   readEntries: Array<any> = [];
 const storage = {
   ...disk,
+  async writeBatch(entries: Parameters<typeof disk.writeBatch>[0]) {
+    writeCalls++;
+    nodeWrites += entries.filter(([key]) => key.includes(':node:')).length;
+    return disk.writeBatch(entries);
+  },
   // Simulate a suspended tab that missed BroadcastChannel messages; reconciliation must still work.
   async read(key: string) {
     readCalls++;
@@ -46,6 +53,8 @@ if (!disk.readMany) {
   delete (storage as { readMany?: unknown }).readMany;
 }
 const reset = () => {
+  writeCalls = 0;
+  nodeWrites = 0;
   readCalls = 0;
   scans = 0;
   peak = 0;
@@ -58,10 +67,12 @@ const stats = () => ({
       Object.keys(entry?.[1]?.value?.claims ?? {}).reduce((size, key) => size + key.length, 0),
     0,
   ),
+  nodeWrites,
   peak,
   readBytes: new TextEncoder().encode(JSON.stringify(readEntries)).length,
   readCalls,
   scans,
+  writeCalls,
 });
 
 async function remote(n: number, mode: 'ids' | 'graph' = 'ids') {
@@ -114,8 +125,11 @@ async function remote(n: number, mode: 'ids' | 'graph' = 'ids') {
     if (network || next.store.read(`Item:${n - 1}`)?.title !== `Task ${n - 1}`) {
       throw Error('Remote cache restore failed');
     }
-    const result = { elapsed, ...stats() };
+    const restore = { elapsed, ...stats() };
+    reset();
+    const flushStart = performance.now();
     await next.persistence!.flush();
+    const result = { ...restore, flush: { elapsed: performance.now() - flushStart, ...stats() } };
     next.persistence!.dispose();
     if (i) {
       samples.push(result);

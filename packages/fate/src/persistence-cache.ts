@@ -1178,15 +1178,19 @@ export class PersistenceCache {
         root = await this.read<Root>(this.rootKey(rootId));
       }
       if (root && root.fetchedAt + root.maxAge > Date.now()) {
-        const old = `${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`;
-        root.usedAt = Date.now();
-        await this.put([
-          [old, undefined],
-          [this.rootKey(rootId), root],
-          [`${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`, rootId],
-        ]);
+        await this.touch(rootId, root);
       }
     });
+  }
+
+  private async touch(rootId: string, root: Root) {
+    const old = `${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`;
+    root.usedAt = Date.now();
+    await this.put([
+      [old, undefined],
+      [this.rootKey(rootId), root],
+      [`${this.prefix}lru:${stamp(root.usedAt)}:${rootId}`, rootId],
+    ]);
   }
 
   private async remove(rootId: string) {
@@ -1565,10 +1569,22 @@ export class PersistenceCache {
           }
           continue;
         }
+        const existing = await this.read<Root>(this.rootKey(request.key));
+        // With no node updates, an exact, fresh claim with the same policy
+        // needs only an LRU touch, including when served directly from memory.
+        // Missing/legacy roots and changed policies still collect and save.
+        if (
+          updates.size === 0 &&
+          existing?.maxAge === maxAge &&
+          existing.fetchedAt + maxAge > Date.now()
+        ) {
+          await this.touch(request.key, existing);
+          continue;
+        }
         const cached = await this.collect(request, 'disk');
         if (cached.complete && Number.isFinite(cached.fetchedAt)) {
           const root =
-            (await this.read<Root>(this.rootKey(request.key))) ??
+            existing ??
             (request.key !== original.key
               ? await this.read<Root>(this.rootKey(original.key))
               : undefined);

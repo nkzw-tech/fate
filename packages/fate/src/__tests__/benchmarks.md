@@ -571,3 +571,16 @@ took 969.11 → 2.82 ms (343.38x faster). Consecutive staged deletions
 and persisted remote deletion batches share reference cleanup. An intervening
 write flushes the batch to preserve delete/recreate ordering. Individual
 low-level `deleteRecord` calls retain their synchronous semantics.
+
+## Fresh cache-hit flushes
+
+The browser cache runner now reports restore and subsequent flush separately,
+including node writes. Run `node scripts/benchmark-cache-performance.mjs chromium 7 /tmp/cache.json`
+with and without `FATE_BENCH_BASELINE=8b26975`. For 1,000 IDs, seven measured
+restores after a warmup: subsequent flush 297.50 → 2.30 ms median
+(129.35x faster), node writes 1,000 → 0. These are asynchronous elapsed
+times on real IndexedDB, not continuous main-thread blocking. The fast path
+requires the exact fresh root, the same TTL, and no pending/recovery node updates.
+It refreshes LRU metadata even when the request was served directly from memory.
+Policy changes, legacy migration, overlapping new requests and cache misses
+retain the existing collection/save path.
