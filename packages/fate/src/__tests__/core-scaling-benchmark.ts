@@ -76,4 +76,39 @@ async function completeness() {
   return results;
 }
 
-console.log(JSON.stringify({ completeness: await completeness(), samples }));
+async function observers() {
+  const results = [];
+  for (const rows of [1000, 10_000]) {
+    for (const mode of ['cache-only', 'result'] as const) {
+      const { client, ref, selected } = setup(rows, 3);
+      await client.readView(selected, ref);
+      const releases = Array.from({ length: 10 }, () => {
+        const request = { parent: { id: 'main', view: selected } };
+        const observer =
+          mode === 'result'
+            ? client.observeRequestResult(request)
+            : client.observeRequest(request, { mode });
+        observer.getSnapshot();
+        return observer.subscribe(() => {
+          observer.getSnapshot();
+        });
+      });
+      let version = 0;
+      const selectedEdit = await measure(async () => {
+        client.write('Item', { f0: ++version, id: '0' }, new Set(['f0']));
+        await Promise.resolve();
+      });
+      const unselectedEdit = await measure(async () => {
+        client.write('Item', { id: '0', unselected: ++version }, new Set(['unselected']));
+        await Promise.resolve();
+      });
+      releases.forEach((release) => release());
+      results.push({ mode, rows, selectedEdit, unselectedEdit });
+    }
+  }
+  return results;
+}
+
+console.log(
+  JSON.stringify({ completeness: await completeness(), observers: await observers(), samples }),
+);

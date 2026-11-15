@@ -2295,3 +2295,39 @@ test('an equal staged patch still overwrites a concurrent write before commit', 
   await edit;
   expect(client.store.read('UI:main')?.count).toBe(0);
 });
+
+test('query observers follow scalar-dependent result IDs when sharing dependencies', async () => {
+  const Count = view<{ __typename: 'UI'; count: number }>()({ count: true });
+  const Title = view<{ __typename: 'Todo'; title: string }>()({ title: true });
+  const client = createClient().registerClientSchema(
+    clientSchema({
+      ...schema,
+      roots: {
+        ...schema.roots,
+        active: clientQuery('Todo', {
+          resolve: ({ read }) => (read(Count, 'UI', 'main')?.count ? 'b' : 'a'),
+        }),
+      },
+    }),
+  );
+  client.write('Todo', { id: 'a', title: 'A' }, new Set(['title']));
+  client.write('Todo', { id: 'b', title: 'B' }, new Set(['title']));
+  const first = client.observeRequestResult({ active: { view: Title } });
+  const second = client.observeRequestResult({ active: { view: Title } });
+  const changed = vi.fn();
+  const stopFirst = first.subscribe(changed);
+  const stopSecond = second.subscribe(changed);
+  expect(first.getSnapshot().active?.id).toBe('a');
+  client.write('UI', { count: 1, id: 'main' }, new Set(['count']));
+  await Promise.resolve();
+  expect(first.getSnapshot().active?.id).toBe('b');
+  changed.mockClear();
+  client.write('Todo', { id: 'a', title: 'Detached' }, new Set(['title']));
+  await Promise.resolve();
+  expect(changed).not.toHaveBeenCalled();
+  client.write('Todo', { id: 'b', title: 'Selected' }, new Set(['title']));
+  await Promise.resolve();
+  expect(changed).toHaveBeenCalledTimes(2);
+  stopFirst();
+  stopSecond();
+});

@@ -548,3 +548,15 @@ minified build, ten warmup iterations and 50 samples, run sequentially:
 10,000 rows with ten fields took 20.57 → 13.53 ms median (1.52x faster).
 Scalar coverage checks avoid splitting paths; storage field keys are reused
 only within one traversal, so no cache survives the read or changes its coverage semantics.
+
+## Shared request observers
+
+The core scaling runner also measures ten independent observers over the same
+request (cache-only and the result observer used by React). Against `8bb7034`,
+30 samples on Node v26.13.1: a 10,000-row unselected-field edit with ten
+cache-only observers took 87.79 → 3.17 ms median (27.70x faster).
+The result-observer variant took 55.225 → 0.004 ms.
+Dependency sets and revision-scoped completeness checks are shared only while
+readers are subscribed. Scalar edits preserve dependency topology; list changes,
+reference changes and rebases rebuild it. Snapshot reads are included; React
+rendering is not.

@@ -707,6 +707,14 @@ const createNormalizationContext = (): NormalizationContext => ({
   windows: new Map(),
 });
 
+type RequestListenerGroup = {
+  dependencies: Set<string>;
+  descriptor: RequestDescriptor;
+  dirty: boolean;
+  dynamic: boolean;
+  listeners: Set<() => void>;
+};
+
 /**
  * Core client that normalizes records, manages the view cache, and coordinates
  * data fetching.
@@ -842,11 +850,9 @@ export class FateClient<
     return this.relatedEntityType(type, this.types.get(type)?.possibleTypes, record);
   }
 
-  private readonly requestListeners = new Map<
-    () => void,
-    { dependencies: Set<string>; descriptor: RequestDescriptor }
-  >();
-  private readonly requestListenersByDependency = new Map<string, Set<() => void>>();
+  private readonly requestListeners = new Map<() => void, RequestListenerGroup>();
+  private readonly requestListenerGroups = new Map<string, RequestListenerGroup>();
+  private readonly requestListenersByDependency = new Map<string, Set<RequestListenerGroup>>();
   private readonly pendingRequestListeners = new Set<() => void>();
   private requestNotificationScheduled = false;
   private requestRevision = 0;
@@ -990,6 +996,7 @@ export class FateClient<
               ...this.store.getListKeysForEntity(change.key).map((key) => `list:${key}`),
             ]
           : [`list:${change.key}`],
+        change.kind === 'list' || change.referencesChanged,
       );
     },
   );
@@ -4366,45 +4373,45 @@ export class FateClient<
     return dependencies;
   }
 
-  private updateRequestListenerDependencies(listener: () => void) {
-    const entry = this.requestListeners.get(listener);
-    if (!entry) {
+  private updateRequestListenerDependencies(group: RequestListenerGroup) {
+    if (!group.dirty) {
       return;
     }
-    const next = this.requestDependencies(entry.descriptor, true);
-    for (const dependency of entry.dependencies) {
+    const next = this.requestDependencies(group.descriptor, true);
+    for (const dependency of group.dependencies) {
       if (!next.has(dependency)) {
-        const listeners = this.requestListenersByDependency.get(dependency);
-        listeners?.delete(listener);
-        if (!listeners?.size) {
+        const groups = this.requestListenersByDependency.get(dependency);
+        groups?.delete(group);
+        if (!groups?.size) {
           this.requestListenersByDependency.delete(dependency);
         }
       }
     }
     for (const dependency of next) {
-      if (!entry.dependencies.has(dependency)) {
-        let listeners = this.requestListenersByDependency.get(dependency);
-        if (!listeners) {
-          listeners = new Set();
-          this.requestListenersByDependency.set(dependency, listeners);
+      if (!group.dependencies.has(dependency)) {
+        let groups = this.requestListenersByDependency.get(dependency);
+        if (!groups) {
+          groups = new Set();
+          this.requestListenersByDependency.set(dependency, groups);
         }
-        listeners.add(listener);
+        groups.add(group);
       }
     }
-    entry.dependencies = next;
+    group.dependencies = next;
+    group.dirty = false;
   }
 
-  private notifyRequests(dependencies: Iterable<string>) {
+  private notifyRequests(dependencies: Iterable<string>, referencesChanged = true) {
     this.requestRevision++;
     for (const dependency of dependencies) {
-      for (const listener of this.requestListenersByDependency.get(dependency) ?? []) {
-        this.pendingRequestListeners.add(listener);
+      for (const group of this.requestListenersByDependency.get(dependency) ?? []) {
+        group.dirty ||= referencesChanged || group.dynamic;
+        for (const listener of group.listeners) {
+          this.pendingRequestListeners.add(listener);
+        }
       }
     }
-    if (this.pendingRequestListeners.size === 0) {
-      return;
-    }
-    if (this.requestNotificationScheduled) {
+    if (this.pendingRequestListeners.size === 0 || this.requestNotificationScheduled) {
       return;
     }
     this.requestNotificationScheduled = true;
@@ -4413,11 +4420,11 @@ export class FateClient<
       const listeners = [...this.pendingRequestListeners];
       this.pendingRequestListeners.clear();
       for (const listener of listeners) {
-        this.updateRequestListenerDependencies(listener);
-        if (!this.requestListeners.has(listener)) {
-          continue;
+        const group = this.requestListeners.get(listener);
+        if (group) {
+          this.updateRequestListenerDependencies(group);
+          listener();
         }
-        listener();
       }
     });
   }
@@ -4531,17 +4538,42 @@ export class FateClient<
     });
   }
 
-  private subscribeRequestDescriptor(descriptor: RequestDescriptor, listener: () => void) {
-    this.requestListeners.set(listener, { dependencies: new Set(), descriptor });
-    this.updateRequestListenerDependencies(listener);
+  private subscribeRequestDescriptor(descriptor: RequestDescriptor, callback: () => void) {
+    // Only the dependency graph is shared. Each reader keeps its own snapshot,
+    // request options and lifetime, including repeated subscriptions of one callback.
+    const listener = () => callback();
+    let group = this.requestListenerGroups.get(descriptor.key);
+    if (!group) {
+      group = {
+        dependencies: new Set(),
+        descriptor,
+        dirty: true,
+        // Client query resolvers can choose a different ID after a scalar edit.
+        dynamic: descriptor.items.some((item) => {
+          const root = item.kind === 'query' && this.clientState.roots.get(item.procedure);
+          return root && !('id' in root);
+        }),
+        listeners: new Set(),
+      };
+      this.requestListenerGroups.set(descriptor.key, group);
+    }
+    group.listeners.add(listener);
+    this.requestListeners.set(listener, group);
+    this.updateRequestListenerDependencies(group);
     return () => {
-      const entry = this.requestListeners.get(listener);
-      this.requestListeners.delete(listener);
+      if (!this.requestListeners.delete(listener)) {
+        return;
+      }
       this.pendingRequestListeners.delete(listener);
-      for (const dependency of entry?.dependencies ?? []) {
-        const listeners = this.requestListenersByDependency.get(dependency);
-        listeners?.delete(listener);
-        if (!listeners?.size) {
+      group.listeners.delete(listener);
+      if (group.listeners.size) {
+        return;
+      }
+      this.requestListenerGroups.delete(descriptor.key);
+      for (const dependency of group.dependencies) {
+        const groups = this.requestListenersByDependency.get(dependency);
+        groups?.delete(group);
+        if (!groups?.size) {
           this.requestListenersByDependency.delete(dependency);
         }
       }
@@ -5707,6 +5739,8 @@ export class FateClient<
   }
 
   private hasRequestData(request: RequestDescriptor, revalidate = false): boolean {
+    // Equivalent active readers share coverage only for this store revision.
+    request = this.requestListenerGroups.get(request.key)?.descriptor ?? request;
     const cached = this.requestCoverage.get(request);
     if (
       !this.store.isRebasing &&

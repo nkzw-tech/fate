@@ -5,6 +5,53 @@ import { clientRoot, clientValueRoot } from '../root.ts';
 import type { ViewSelection } from '../types.ts';
 import { view } from '../view.ts';
 
+test('shared request dependencies follow relationship changes and independent subscriptions', async () => {
+  type User = { __typename: 'User'; friend: User | null; id: string; name: string };
+  const selected = view<User>()({ friend: { name: true }, name: true });
+  const client = createClient({
+    roots: { user: clientRoot<User, 'User'>('User') },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  client.write(
+    'User',
+    { friend: { id: '2', name: 'Two' }, id: '1', name: 'One' },
+    new Set(['name', 'friend.name']),
+  );
+  const make = () => client.observeRequestResult({ user: { id: '1', view: selected } });
+  const first = make();
+  const second = make();
+  const listener = vi.fn();
+  const stopFirst = first.subscribe(listener);
+  const stopSecond = second.subscribe(listener);
+  client.write('User', { id: '2', name: 'Updated' }, new Set(['name']));
+  await Promise.resolve();
+  expect(listener).toHaveBeenCalledTimes(2);
+  stopFirst();
+  client.write('User', { friend: { id: '3', name: 'Three' }, id: '1' }, new Set(['friend.name']));
+  // Subscribe before the pending dependency refresh; the new child must be observed.
+  const thirdListener = vi.fn();
+  const stopThird = make().subscribe(thirdListener);
+  await Promise.resolve();
+  listener.mockClear();
+  thirdListener.mockClear();
+  client.write('User', { id: '2', name: 'Detached' }, new Set(['name']));
+  await Promise.resolve();
+  expect(listener).not.toHaveBeenCalled();
+  client.write('User', { id: '3', name: 'Attached' }, new Set(['name']));
+  await Promise.resolve();
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(thirdListener).toHaveBeenCalledTimes(1);
+  stopSecond();
+  stopThird();
+  const finalListener = vi.fn();
+  const stopFinal = make().subscribe(finalListener);
+  stopSecond(); // Disposing an old subscription again must not remove the new group.
+  client.deleteRecord('User', '3');
+  await Promise.resolve();
+  expect(finalListener).toHaveBeenCalledTimes(1);
+  stopFinal();
+});
+
 test('publishes new value-query results by identity without inspecting their properties', async () => {
   const propertyRead = vi.fn(() => 'same');
   const value = () => Object.defineProperty({}, 'content', { enumerable: true, get: propertyRead });
