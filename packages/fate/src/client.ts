@@ -1611,17 +1611,26 @@ export class FateClient<
     }
     this.store.transaction(() =>
       this.store.update(() => {
+        const deleted = new Set<EntityId>();
+        const flushDeleted = () => {
+          if (deleted.size) {
+            this.deleteRecords(deleted);
+            deleted.clear();
+          }
+        };
         for (const [id, record] of changes.records) {
           if (record) {
+            flushDeleted();
             this.store.merge(id, record, recordPaths(record));
             this.initializePersistedClientFields(id, record);
           } else {
-            const { id: value, type } = parseEntityId(id);
+            const { type } = parseEntityId(id);
             if (this.clientState.localTypes.has(type)) {
-              this.deleteRecord(type, value);
+              deleted.add(id);
             }
           }
         }
+        flushDeleted();
         for (const [key, list] of changes.lists) {
           this.store.restoreList(key, list ?? undefined);
         }
@@ -2311,10 +2320,18 @@ export class FateClient<
             { normalization: NormalizationContext; paths: Map<string, Set<string>> }
           >()
         : undefined;
+    const deleted = new Set<EntityId>();
+    const flushDeleted = () => {
+      if (deleted.size) {
+        this.deleteRecords(deleted);
+        deleted.clear();
+      }
+    };
     for (const operation of writes) {
       const { id: entityId } = operation;
       const { id, type } = parseEntityId(entityId);
       if ('append' in operation || 'remove' in operation) {
+        flushDeleted();
         const { field, members } = 'append' in operation ? operation.append : operation.remove;
         const record = this.store.confirmedRecord(entityId);
         if (!record) {
@@ -2355,9 +2372,11 @@ export class FateClient<
       }
       const { data, plan, prefix, remote } = operation;
       if (data === null) {
-        this.deleteRecord(type, id);
+        deleted.add(entityId);
         continue;
       }
+      // Preserve staged ordering: later replacements may recreate a deleted ID.
+      flushDeleted();
       // Repeated relationship replacements often include unchanged scalar leaves.
       // Compare at commit time: a resolver may have awaited while other writes landed.
       if (
@@ -2424,6 +2443,7 @@ export class FateClient<
         write();
       }
     }
+    flushDeleted();
   }
 
   /** @internal Normalize an optimistic patch identified by its mutation input. */
@@ -2469,18 +2489,22 @@ export class FateClient<
   }
 
   deleteRecord(type: string, id: string | number) {
-    return this.store.update(() => {
-      const entityId = toEntityId(type, id);
+    return this.deleteRecords(new Set([toEntityId(type, id)]));
+  }
 
-      if (!this.store.isPreviewing) {
-        this.boundDeferredPlans.delete(entityId);
-        this.evaluatedDeferredPlans.delete(entityId);
-        this.viewDataCache.invalidate(entityId);
-        this.stableRefs.delete(entityId);
-        this.clientState.collect(entityId);
+  private deleteRecords(ids: ReadonlySet<EntityId>) {
+    return this.store.update(() => {
+      for (const entityId of ids) {
+        if (!this.store.isPreviewing) {
+          this.boundDeferredPlans.delete(entityId);
+          this.evaluatedDeferredPlans.delete(entityId);
+          this.viewDataCache.invalidate(entityId);
+          this.stableRefs.delete(entityId);
+          this.clientState.collect(entityId);
+        }
+        this.store.deleteRecord(entityId);
       }
-      this.store.deleteRecord(entityId);
-      this.store.removeReferencesTo(entityId, this.viewDataCache);
+      this.store.removeReferencesToMany(ids, this.viewDataCache);
     });
   }
 

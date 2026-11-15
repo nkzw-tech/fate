@@ -4,6 +4,7 @@ import process from 'node:process';
 import { createClient } from '../client.ts';
 import { clientRoot } from '../root.ts';
 import { view } from '../view.ts';
+import { createClientStateFixture } from './fixtures/client-state.ts';
 
 const samples = Number(process.argv[2] ?? 25);
 
@@ -109,6 +110,34 @@ async function observers() {
   return results;
 }
 
+async function deletions() {
+  const results = [];
+  for (const rows of [1000, 3000]) {
+    const { make, seed } = createClientStateFixture(rows);
+    const times: Array<number> = [];
+    for (let sample = 0; sample < 7; sample++) {
+      const client = make();
+      seed(client);
+      const start = performance.now();
+      await client.mutations.removeAll();
+      const elapsed = performance.now() - start;
+      assert.deepEqual(client.store.read('State:main')?.items, []);
+      assert.equal(client.store.read(`Item:${rows - 1}`), undefined);
+      if (sample >= 2) {
+        times.push(elapsed);
+      }
+    }
+    times.sort((a, b) => a - b);
+    results.push({ medianMs: times[2], rows, samples: 5 });
+  }
+  return results;
+}
+
 console.log(
-  JSON.stringify({ completeness: await completeness(), observers: await observers(), samples }),
+  JSON.stringify({
+    completeness: await completeness(),
+    deletions: await deletions(),
+    observers: await observers(),
+    samples,
+  }),
 );

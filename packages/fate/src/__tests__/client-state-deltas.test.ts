@@ -46,6 +46,13 @@ const setup = () => {
           }),
       }),
       remove: mutation('Document', { resolve: ({ store }) => store.delete('Document', '0') }),
+      removeAll: mutation('Document', {
+        resolve: ({ store }) => {
+          for (let id = 0; id < 100; id++) {
+            store.delete('Document', String(id));
+          }
+        },
+      }),
       seed: mutation('Document', {
         resolve: ({ store }) => {
           for (let id = 0; id < 100; id++) {
@@ -180,6 +187,33 @@ test('a corrupt delta publishes no partial state and can be retried', async () =
     await second.mutations.increment();
     expect(second.store.read('Settings:main')?.count).toBe(11);
     expect(second.store.read('Document:0')?.text).toBe('Changed');
+  } finally {
+    first.persistence!.dispose();
+    second.persistence!.dispose();
+  }
+});
+
+test('bulk deletions survive cross-tab reconciliation and restart', async () => {
+  const { make } = setup();
+  const first = make();
+  await first.persistence!.ready;
+  await first.mutations.seed();
+  const second = make();
+  await second.persistence!.ready;
+  try {
+    await first.mutations.removeAll();
+    await second.mutations.increment();
+    expect(second.store.read('Document:0')).toBeUndefined();
+    expect(second.store.read('Document:99')).toBeUndefined();
+    expect(second.store.read('Settings:main')?.items).toEqual([]);
+    const reopened = make();
+    try {
+      await reopened.persistence!.ready;
+      expect(reopened.store.read('Document:0')).toBeUndefined();
+      expect(reopened.store.read('Settings:main')?.items).toEqual([]);
+    } finally {
+      reopened.persistence!.dispose();
+    }
   } finally {
     first.persistence!.dispose();
     second.persistence!.dispose();

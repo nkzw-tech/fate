@@ -4,6 +4,51 @@ import { CoverageSelection } from '../mask.ts';
 import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { getListKey, Store } from '../store.ts';
 
+test('batch reference removal preserves cursor metadata and rolls back optimistic removals', () => {
+  const store = new Store();
+  const cache = new ViewDataCache();
+  const key = getListKey('Owner:1', 'items');
+  const refs = ['Item:1', 'Item:2', 'Item:3'].map(createNodeRef);
+  store.merge('Owner:1', { favorite: refs[0], items: refs }, ['favorite', 'items']);
+  const initial = {
+    cursors: ['one', 'two', 'three'],
+    ids: ['Item:1', 'Item:2', 'Item:3'],
+    liveAfterIds: ['Item:4'],
+    pagination: { hasNext: true, hasPrevious: false },
+    pendingBeforeIds: ['Item:5', 'Item:6'],
+    windows: { first: { end: 'three', size: 3, start: 'one' } },
+  };
+  store.setList(key, initial);
+  const remove = () =>
+    store.removeReferencesToMany(new Set(['Item:1', 'Item:3', 'Item:4', 'Item:5']), cache);
+  const check = () => {
+    expect(store.read('Owner:1')).toEqual({ favorite: null, items: [refs[1]] });
+    expect(store.getListState(key)).toMatchObject({
+      cursors: ['two'],
+      ids: ['Item:2'],
+      liveAfterIds: [],
+      pagination: initial.pagination,
+      pendingBeforeIds: ['Item:6'],
+      windows: initial.windows,
+    });
+    expect(store.getPersistenceOwners('Item:1')).toEqual({ lists: [], records: [] });
+  };
+  const settle = store.optimisticUpdate(remove);
+  check();
+  settle();
+  expect(store.getListState(key)).toEqual(initial);
+  expect(store.read('Owner:1')?.items).toEqual(refs);
+  expect(() =>
+    store.transaction(() => {
+      remove();
+      throw Error('rollback');
+    }),
+  ).toThrow('rollback');
+  expect(store.getListState(key)).toEqual(initial);
+  remove();
+  check();
+});
+
 test('notifies field subscribers when their record is deleted', async () => {
   const store = new Store();
   store.merge('Post:1', { title: 'Current' }, ['title']);

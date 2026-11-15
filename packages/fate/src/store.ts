@@ -1633,8 +1633,29 @@ export class Store {
   }
 
   removeReferencesTo(targetId: EntityId, viewDataCache: ViewDataCache) {
+    return this.removeReferencesToMany(new Set([targetId]), viewDataCache);
+  }
+
+  /** Remove a batch of targets with one rewrite per affected list and owner. */
+  removeReferencesToMany(targetIds: ReadonlySet<EntityId>, viewDataCache: ViewDataCache) {
     return this.update(() => {
-      const listKeys = copyIndexValues(this.listKeysByReferencedEntity.get(targetId));
+      const listKeys = new Set<string>();
+      const recordEntries = new Map<EntityId, Set<string>>();
+      for (const targetId of targetIds) {
+        for (const key of indexValues(this.listKeysByReferencedEntity.get(targetId))) {
+          listKeys.add(key);
+        }
+        for (const [id, fields] of this.recordReferencesByTarget.get(targetId) ?? []) {
+          let selected = recordEntries.get(id);
+          if (!selected) {
+            selected = new Set();
+            recordEntries.set(id, selected);
+          }
+          for (const field of indexValues(fields)) {
+            selected.add(field);
+          }
+        }
+      }
       for (const key of listKeys) {
         const list = this.lists.get(key);
         if (!list) {
@@ -1642,26 +1663,12 @@ export class Store {
         }
 
         const { ids } = list;
-        const hasLiveAfter = Boolean(list.liveAfterIds?.includes(targetId));
-        const hasLiveBefore = Boolean(list.liveBeforeIds?.includes(targetId));
-        const hasPendingAfter = Boolean(list.pendingAfterIds?.includes(targetId));
-        const hasPendingBefore = Boolean(list.pendingBeforeIds?.includes(targetId));
-        if (
-          !ids.includes(targetId) &&
-          !hasLiveAfter &&
-          !hasLiveBefore &&
-          !hasPendingAfter &&
-          !hasPendingBefore
-        ) {
-          continue;
-        }
-
         const entityIds: Array<EntityId> = [];
         const cursors = list.cursors ? ([] as Array<string | undefined>) : undefined;
 
         for (let index = 0; index < ids.length; index++) {
           const id = ids[index];
-          if (id === targetId) {
+          if (targetIds.has(id)) {
             continue;
           }
 
@@ -1672,20 +1679,20 @@ export class Store {
         }
 
         this.setList(key, {
-          acknowledgedInsertions: list.acknowledgedInsertions?.filter((id) => id !== targetId),
+          acknowledgedInsertions: list.acknowledgedInsertions?.filter((id) => !targetIds.has(id)),
           afterCursor: list.afterCursor,
           backwardPageLimit: list.backwardPageLimit,
           beforeCursor: list.beforeCursor,
           cursors,
           forwardPageLimit: list.forwardPageLimit,
           ids: entityIds,
-          insertedAfterIds: list.insertedAfterIds?.filter((id) => id !== targetId),
-          insertedBeforeIds: list.insertedBeforeIds?.filter((id) => id !== targetId),
-          liveAfterIds: list.liveAfterIds?.filter((id) => id !== targetId),
-          liveBeforeIds: list.liveBeforeIds?.filter((id) => id !== targetId),
+          insertedAfterIds: list.insertedAfterIds?.filter((id) => !targetIds.has(id)),
+          insertedBeforeIds: list.insertedBeforeIds?.filter((id) => !targetIds.has(id)),
+          liveAfterIds: list.liveAfterIds?.filter((id) => !targetIds.has(id)),
+          liveBeforeIds: list.liveBeforeIds?.filter((id) => !targetIds.has(id)),
           pagination: list.pagination,
-          pendingAfterIds: list.pendingAfterIds?.filter((id) => id !== targetId),
-          pendingBeforeIds: list.pendingBeforeIds?.filter((id) => id !== targetId),
+          pendingAfterIds: list.pendingAfterIds?.filter((id) => !targetIds.has(id)),
+          pendingBeforeIds: list.pendingBeforeIds?.filter((id) => !targetIds.has(id)),
           stale: list.stale,
           unloaded: list.unloaded,
           windows: list.windows,
@@ -1693,8 +1700,6 @@ export class Store {
       }
 
       const ids = new Map<EntityId, Set<string>>();
-
-      const recordEntries = [...(this.recordReferencesByTarget.get(targetId)?.entries() ?? [])];
 
       for (const [id, fields] of recordEntries) {
         const record = this.records.get(id);
@@ -1706,11 +1711,11 @@ export class Store {
         const next: AnyRecord = Object.create(null);
         const paths = new Set<string>();
 
-        for (const key of indexValues(fields)) {
+        for (const key of fields) {
           const value = record[key];
           if (Array.isArray(value)) {
             const filtered = value.filter(
-              (item) => !(isNodeRef(item) && getNodeRefId(item) === targetId),
+              (item) => !(isNodeRef(item) && targetIds.has(getNodeRefId(item))),
             );
 
             if (filtered.length !== value.length) {
@@ -1718,7 +1723,7 @@ export class Store {
               paths.add(key);
               next[key] = filtered;
             }
-          } else if (isNodeRef(value) && getNodeRefId(value) === targetId) {
+          } else if (isNodeRef(value) && targetIds.has(getNodeRefId(value))) {
             updated = true;
             paths.add(key);
             next[key] = null;

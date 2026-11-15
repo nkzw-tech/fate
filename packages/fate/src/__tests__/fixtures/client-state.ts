@@ -110,6 +110,13 @@ export function createClientStateFixture(recordCount: number) {
       remove: mutation('Item', {
         resolve: ({ store }) => store.delete('Item', 'temporary'),
       }),
+      removeAll: mutation('Item', {
+        resolve: ({ store }) => {
+          for (const item of items) {
+            store.delete('Item', item.id);
+          }
+        },
+      }),
       replace: mutation('State', {
         resolve: ({ store }) => store.update('State', 'main', { items }),
       }),

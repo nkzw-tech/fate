@@ -560,3 +560,14 @@ Dependency sets and revision-scoped completeness checks are shared only while
 readers are subscribed. Scalar edits preserve dependency topology; list changes,
 reference changes and rebases rebuild it. Snapshot reads are included; React
 rendering is not.
+
+## Batched client-record deletion
+
+The core scaling runner measures a real client mutation deleting all records
+from a related list. Seeding is excluded; staging, committing, cleanup and
+completion are included. Seven fresh clients per size, discard the first two,
+report the median of five. Against `1048f21` on Node v26.13.1, 3,000 deletes
+took 969.11 → 2.82 ms (343.38x faster). Consecutive staged deletions
+and persisted remote deletion batches share reference cleanup. An intervening
+write flushes the batch to preserve delete/recreate ordering. Individual
+low-level `deleteRecord` calls retain their synchronous semantics.
