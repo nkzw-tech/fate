@@ -4,6 +4,7 @@ import { clientQuery, clientSchema, type EntityOf } from '../client-schema.ts';
 import { createClient } from '../client.ts';
 import { dataView, list } from '../data-view.ts';
 import { createPersistence } from '../persistence.ts';
+import { clientRoot } from '../root.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 
@@ -914,5 +915,93 @@ test('in-memory relationship edits do not discard saved server identities', asyn
     });
   } finally {
     reopened.persistence!.dispose();
+  }
+});
+
+test('a cache hit renews claims after a persisted client relationship changes', async () => {
+  type Person = { __typename: 'Person'; id: string; name: string };
+  const person = dataView<Person>('Person')({ id: true, name: true });
+  const storage = memoryStorage();
+  let now = 1_800_000_000_000;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const fetchById = vi.fn(async (_type: string, ids: Array<string | number>) =>
+    ids.map((id) => ({ id, name: id })),
+  );
+  const make = () =>
+    createClient({
+      gcReleaseBufferSize: 0,
+      persistence: createPersistence({
+        key: 'relationship-claims',
+        maxAge: 60_000,
+        online: () => false,
+        storage,
+      }),
+      roots: { person: clientRoot<Person, 'Person'>('Person') },
+      transport: { fetchById },
+      types: [{ type: 'Person' }],
+    }).registerClientSchema(
+      clientSchema({
+        roots: { selection: { id: 'main', type: 'Selection' } },
+        types: {
+          Selection: {
+            defaults: (id) => ({ id, person: null }),
+            view: dataView<{ id: string; person: Person | null }>('Selection')({
+              id: true,
+              person,
+            }),
+          },
+        },
+      }),
+      ({ mutation }) => ({
+        chooseA: mutation('Selection', {
+          resolve: ({ store }) => store.update('Selection', 'main', { person: { id: 'a' } }),
+        }),
+        chooseB: mutation('Selection', {
+          resolve: ({ store }) => store.update('Selection', 'main', { person: { id: 'b' } }),
+        }),
+      }),
+    );
+  const Selection = view<EntityOf<ReturnType<typeof make>, 'Selection'>>()({
+    person: { id: true, name: true },
+  });
+  const PersonView = view<Person>()({ id: true, name: true });
+  const request = { selection: { view: Selection } };
+  const first = make();
+  const sessions = [first.persistence!];
+  try {
+    await first.mutations.chooseA();
+    await first.request(request);
+    await first.persistence!.flush();
+    const direct = { person: { id: 'b', view: PersonView } };
+    const keep = first.retain(direct);
+    await first.request(direct, { persist: { maxAge: 1000 } });
+    await first.persistence!.flush();
+    await first.mutations.chooseB();
+    await first.persistence!.flush();
+    keep.dispose();
+    first.persistence!.dispose();
+
+    // Reopen with no remote writes: the saved local relationship now points to B.
+    const second = make();
+    sessions.push(second.persistence!);
+    const result = await second.request(request);
+    expect((await second.readView(Selection, result.selection)).data.person?.name).toBe('b');
+    expect(fetchById).toHaveBeenCalledTimes(2);
+    await second.persistence!.flush();
+    second.persistence!.dispose();
+
+    // B's direct request has expired, but Selection's 60-second claim is still fresh.
+    now += 2000;
+    fetchById.mockRejectedValue(new TypeError('Offline'));
+    const third = make();
+    sessions.push(third.persistence!);
+    const restored = await third.request(request);
+    expect((await third.readView(Selection, restored.selection)).data.person?.name).toBe('b');
+    expect(fetchById).toHaveBeenCalledTimes(2);
+  } finally {
+    for (const session of sessions) {
+      session.dispose();
+    }
+    clock.mockRestore();
   }
 });

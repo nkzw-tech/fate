@@ -1570,10 +1570,12 @@ export class PersistenceCache {
           continue;
         }
         const existing = await this.read<Root>(this.rootKey(request.key));
-        // With no node updates, an exact, fresh claim with the same policy
-        // needs only an LRU touch, including when served directly from memory.
-        // Missing/legacy roots and changed policies still collect and save.
+        // Without client state or node updates, an exact, fresh claim with the
+        // same policy needs only an LRU touch. Client relationships and query
+        // roots can change the graph without producing remote node updates,
+        // including across restarts, so their claims must be collected again.
         if (
+          !this.client.hasClientState() &&
           updates.size === 0 &&
           existing?.maxAge === maxAge &&
           existing.fetchedAt + maxAge > Date.now()
