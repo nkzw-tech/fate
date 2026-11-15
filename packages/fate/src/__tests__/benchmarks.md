@@ -538,3 +538,13 @@ No correctness regressions were found in the reviewed paths. `vp check --fix`
 and `vp run test:all` passed, including 1,586 tests in 144 files; additional WebKit
 persistence checks also passed. The known costs above are retained explicitly
 rather than claiming that every workload becomes faster or uses less memory.
+
+## Completeness traversal scaling
+
+`node scripts/benchmark-core-scaling.mjs 50 /tmp/core.json` measures a sparse
+row edit followed by a complete graph read. Set `FATE_BENCH_BASELINE=969a0b6`
+to build the same fixture against the pre-change runtime. Node v26.13.1,
+minified build, ten warmup iterations and 50 samples, run sequentially:
+10,000 rows with ten fields took 20.57 → 13.53 ms median (1.52x faster).
+Scalar coverage checks avoid splitting paths; storage field keys are reused
+only within one traversal, so no cache survives the read or changes its coverage semantics.

@@ -127,6 +127,11 @@ export function isCovered(mask: FieldMask, path: string): boolean {
     return true;
   }
 
+  if (!path.includes('.')) {
+    const child = mask.children.get(path);
+    return !!child && (child.all || child.children.size === 0);
+  }
+
   const parts = path.split('.');
   let current: FieldMask | undefined = mask;
   for (let i = 0; i < parts.length; i++) {

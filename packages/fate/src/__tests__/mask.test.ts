@@ -58,3 +58,13 @@ test('removing the last nested path does not mark its empty ancestors as covered
   expect(isCovered(mask, 'name')).toBe(true);
   expect(toPaths(mask)).toEqual(['name']);
 });
+
+test('distinguishes a partially covered object from a covered scalar', () => {
+  const mask = fromPaths(['profile.name', 'title']);
+  expect(isCovered(mask, 'profile')).toBe(false);
+  expect(isCovered(mask, 'title')).toBe(true);
+  expect(isCovered(mask, 'missing')).toBe(false);
+  addPath(mask, 'profile');
+  expect(isCovered(mask, 'profile')).toBe(true);
+  expect(isCovered(mask, 'profile.other')).toBe(true);
+});

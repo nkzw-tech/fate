@@ -5385,6 +5385,8 @@ export class FateClient<
       return missing;
     }
     const missing = new Set<string>();
+    // The same selected path is checked for every row of a relationship.
+    const storageKeys = new Map<string, string>();
     const covered = (
       id: EntityId,
       parts: ReadonlyArray<string>,
@@ -5403,7 +5405,11 @@ export class FateClient<
         return true;
       }
       const path = prefix ? `${prefix}.${field}` : field;
-      const storageKey = getFieldKey(path, plan);
+      let storageKey = storageKeys.get(path);
+      if (storageKey === undefined) {
+        storageKey = getFieldKey(path, plan);
+        storageKeys.set(path, storageKey);
+      }
       if (
         revalidate &&
         this.store.hasStaleRecord(id) &&
