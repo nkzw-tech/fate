@@ -18,6 +18,7 @@ export type LiveSourceEvent = Readonly<{
   data?: unknown;
   eventId?: string;
   id: string | number;
+  revision?: number;
   type: LiveEventType;
 }>;
 
@@ -71,7 +72,11 @@ type LiveConnectionHandle = Readonly<{
 
 export type LiveEventBus = Readonly<{
   connection: (procedure: string, args?: Record<string, unknown>) => LiveConnectionHandle;
-  delete: (type: string, id: string | number, options?: { eventId?: string }) => void;
+  delete: (
+    type: string,
+    id: string | number,
+    options?: { eventId?: string; revision?: number },
+  ) => void;
   emit: (
     type: string,
     id: string | number,
@@ -79,6 +84,7 @@ export type LiveEventBus = Readonly<{
       changed?: ReadonlyArray<string>;
       data?: unknown;
       eventId?: string;
+      revision?: number;
       type?: LiveEventType;
     },
   ) => void;
@@ -204,6 +210,7 @@ export function createLiveEventBus(): LiveEventBus {
       data: options.data,
       eventId: options.eventId,
       id,
+      ...(options.revision !== undefined && { revision: options.revision }),
       type: options.type ?? 'update',
     } satisfies LiveSourceEvent);
   };

@@ -1,4 +1,5 @@
 import type { MemoField, MemoSelection, DataField, DataView, ResolverField } from '../data-view.ts';
+import { optimisticSnapshotKey } from '../optimistic-snapshot.ts';
 import { isRecord } from '../record.ts';
 import { AnyRecord } from '../types.ts';
 import { isConnectionResult, toConnectionResult, type ConnectionResult } from './connection.ts';
@@ -119,6 +120,9 @@ const filterToViewFields = (
   }
 
   const filtered: AnyRecord = {};
+  if (Object.hasOwn(item, optimisticSnapshotKey)) {
+    filtered[optimisticSnapshotKey] = item[optimisticSnapshotKey];
+  }
 
   for (const [field, config] of Object.entries(view.fields)) {
     const path = prefix ? `${prefix}.${field}` : field;

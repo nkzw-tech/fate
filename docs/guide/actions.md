@@ -54,16 +54,21 @@ const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
 
 ## Optimistic Updates
 
-To update the like count before the server responds, pass an `optimistic` object:
+Use an optimistic function to increment the cached like count while the mutation is pending.
 
 ```tsx
 like({
   input: { id: post.id },
-  optimistic: { likes: post.likes + 1 },
+  optimistic: (current) => (current.likes === undefined ? undefined : { likes: current.likes + 1 }),
+  persist: false,
 });
 ```
 
 Views that select `likes` update immediately. Views that only select other fields, such as `title`, do not re-render. If the mutation fails, fate rolls back the optimistic update.
+
+Fate reruns pending functions in submission order when confirmed data changes. Each function receives the cached record after earlier pending updates. Keep the function synchronous and pure. Cached fields can be missing. Return `undefined` to skip the update, or return one patch containing all the fields to update. The function can also read the mutation input as its second argument. Use a view or selection to request any result fields a conditional patch might update.
+
+An object with fixed values, such as `optimistic: { archived: true }`, reapplies those values on every replay. Use a [registered updater](/guide/persistence#actions-mutations) for offline replay. If live updates can include this mutation before its response arrives, use [versioned snapshots](/integrations/server#optimistic-reconciliation) to prevent double counting.
 
 ## Inserting New Objects
 

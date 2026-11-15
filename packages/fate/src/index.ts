@@ -27,6 +27,7 @@ export type {
   MutationIdentifier,
   MutationInput,
   MutationResult,
+  OptimisticUpdater,
   NodesItem,
   Pagination,
   Request,
@@ -54,7 +55,8 @@ export type {
   MutationInsertion,
   MutationRemoval,
 } from './mutation.ts';
-export type { ReadContext, Transport } from './transport.ts';
+export type { MutationContext, ReadContext, Transport } from './transport.ts';
+export { withOptimisticSnapshot, type OptimisticSnapshot } from './optimistic-snapshot.ts';
 export type {
   GraphQLMutationDefinition,
   GraphQLMutationInput,

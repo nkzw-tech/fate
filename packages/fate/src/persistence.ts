@@ -126,6 +126,7 @@ const decodeCommand = (value: Encoded): MutationCommand => {
     !command ||
     typeof command.key !== 'string' ||
     typeof command.entity !== 'string' ||
+    (command.optimisticUpdater !== undefined && command.optimisticUpdater !== true) ||
     !isResolvedMutationInsertion(command.insert) ||
     (command.remove !== undefined && !isResolvedMutationRemoval(command.remove)) ||
     (command.invalidate !== undefined &&
@@ -380,7 +381,7 @@ class Session implements PersistenceRuntime {
     for (const entry of data.mutations) {
       if (isPendingMutation(entry)) {
         if (entry.base && this.client.isPersistenceScopeCompatible(entry.base.scope)) {
-          this.cache.restoreBase(decodeClientHydrationState(entry.base.data));
+          this.cache.restoreBase(decodeClientHydrationState(entry.base.data, undefined, true));
         }
       }
     }
@@ -452,11 +453,14 @@ class Session implements PersistenceRuntime {
         this.client.isPersistenceScopeCompatible(entry.scope)
       ) {
         if (entry.base) {
-          this.cache.restoreBase(decodeClientHydrationState(entry.base.data));
+          this.cache.restoreBase(decodeClientHydrationState(entry.base.data, undefined, true));
         }
         const command = this.command(entry);
-        if (this.client.hasMutation(command.key, command.entity)) {
-          this.operations.set(entry.id, this.prepareOperation(command));
+        if (
+          this.client.hasMutation(command.key, command.entity) &&
+          (!command.optimisticUpdater || this.client.getOptimisticUpdater(command.key))
+        ) {
+          this.operations.set(entry.id, this.prepareOperation(command, entry.id));
         }
       }
     }
@@ -469,12 +473,12 @@ class Session implements PersistenceRuntime {
     this.publish(data);
   }
 
-  private prepareOperation(command: MutationCommand) {
+  private prepareOperation(command: MutationCommand, id: string) {
     const operation = prepareMutation(
       this.client,
       command,
       command.entity === '__value__' ? undefined : this.client.getTypeConfig(command.entity),
-      true,
+      { durable: true, id },
     );
     const { promise, resolve } = Promise.withResolvers<void>();
     let cacheUpdates: Encoded | undefined;
@@ -574,11 +578,11 @@ class Session implements PersistenceRuntime {
     this.mutationAdmission = admission.catch(() => {});
     const base = await admission;
     this.assertActive();
-    this.cache.restoreBase(decodeClientHydrationState(base.data));
+    this.cache.restoreBase(decodeClientHydrationState(base.data, undefined, true));
     const result = new Promise((resolve, reject) => this.waiters.set(id, { reject, resolve }));
     try {
       if (!this.operations.has(id)) {
-        this.operations.set(id, this.prepareOperation(decodeCommand(encoded)));
+        this.operations.set(id, this.prepareOperation(decodeCommand(encoded), id));
       }
     } catch (error) {
       await this.fail(id, error);
@@ -1000,7 +1004,8 @@ class Session implements PersistenceRuntime {
           const command = this.command(entry);
           if (
             !this.client.isPersistenceScopeCompatible(entry.scope) ||
-            !this.client.hasMutation(command.key, command.entity)
+            !this.client.hasMutation(command.key, command.entity) ||
+            (command.optimisticUpdater && !this.client.getOptimisticUpdater(command.key))
           ) {
             await this.fail(
               entry.id,

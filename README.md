@@ -1309,16 +1309,21 @@ const LikeButton = ({ post }: { post: { id: string; likes: number } }) => {
 
 ### Optimistic Updates
 
-To update the like count before the server responds, pass an `optimistic` object:
+Use an optimistic function to increment the cached like count while the mutation is pending.
 
 ```tsx
 like({
   input: { id: post.id },
-  optimistic: { likes: post.likes + 1 },
+  optimistic: (current) => (current.likes === undefined ? undefined : { likes: current.likes + 1 }),
+  persist: false,
 });
 ```
 
 Views that select `likes` update immediately. Views that only select other fields, such as `title`, do not re-render. If the mutation fails, fate rolls back the optimistic update.
+
+Fate reruns pending functions in submission order when confirmed data changes. Each function receives the cached record after earlier pending updates. Keep the function synchronous and pure. Cached fields can be missing. Return `undefined` to skip the update, or return one patch containing all the fields to update. The function can also read the mutation input as its second argument. Use a view or selection to request any result fields a conditional patch might update.
+
+An object with fixed values, such as `optimistic: { archived: true }`, reapplies those values on every replay. Use a [registered updater](/docs/guide/persistence.md#actions-mutations) for offline replay. If live updates can include this mutation before its response arrives, use [versioned snapshots](/docs/integrations/server.md#optimistic-reconciliation) to prevent double counting.
 
 ### Inserting New Objects
 
@@ -1635,18 +1640,27 @@ Pending mutations are never evicted to make room for cached data. If a new mutat
 
 ### Actions & Mutations
 
-Let's say a user wants to like a post while offline. With persistence and a [durable mutation transport](#server-deduplication) configured, fate saves the mutation before applying its optimistic update or sending it to the server. We can use the same API as for regular [Actions](/docs/guide/actions.md):
+To increment a like count while offline, define the optimistic function alongside the mutation. Fate stores the mutation name and input and looks up the function again after restart.
+
+```ts
+const like = mutation<Post, { id: string }, Post>('Post', {
+  optimistic: (current) => (current.likes === undefined ? undefined : { likes: current.likes + 1 }),
+});
+```
+
+With persistence and a [durable mutation transport](#server-deduplication) configured, select the registered updater with `optimistic: true`. Pass a view or selection that includes the fields the server should return. The saved selection stays the same across retries, even when the optimistic patch depends on changing cache data.
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
 
 like({
   input: { id: post.id },
-  optimistic: { likes: post.likes + 1 },
+  optimistic: true,
+  view: PostView,
 });
 ```
 
-If the user likes a post while offline, the count updates immediately. Reloading restores the pending action and its optimistic update. When the connection returns and the app is running, fate sends it to the server.
+Fate saves the mutation before applying the optimistic update or sending it to the server. Reloading reapplies the updater over the saved confirmed data. When the connection returns and the app is running, fate sends the mutation with the original ID.
 
 Mutations are delivered in the order they were saved, one at a time per persistence key. Tabs sharing a key coordinate delivery. Temporary failures are retried. Authentication failures wait for the user to sign in again. A terminal client error rolls back the optimistic update.
 
@@ -1696,7 +1710,7 @@ Use client-generated IDs when creating objects that later offline mutations depe
 
 If the server assigns IDs, wait for the creation result before sending a dependent mutation. fate does not rewrite IDs inside mutation inputs or cancel later mutations when a creation fails.
 
-Inputs and optimistic updates must be serializable. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false`.
+Inputs and fixed optimistic patches must be serializable. Inline callbacks require `persist: false`. For uploads, save the content first and queue a reference to it, or use `persist: false`.
 
 ### Server Deduplication
 
@@ -3097,6 +3111,23 @@ export const fate = createFateServer({
   sources,
 });
 ```
+
+#### Optimistic Reconciliation
+
+Native HTTP mutation resolvers receive a `mutationId` for a [functional optimistic update](/docs/guide/actions.md#optimistic-updates) or a durable mutation. Record the ID with the database write and use `withOptimisticSnapshot` from `@nkzw/fate` to attach metadata to the entity record returned by a mutation, a read, or a live source.
+
+```ts
+return withOptimisticSnapshot(post, {
+  appliedMutationIds,
+  revision: postRevision,
+});
+```
+
+Use an increasing revision for each entity. Read the entity and its applied mutation IDs from the same committed state. Include the IDs of any operations the viewer might still have pending whose effects are already reflected in the snapshot. Scope those IDs to the authorized viewer. Fate uses the revision to reject older values and the IDs to avoid replaying an operation already reflected in the cache.
+
+An acknowledgement applies to the fields carried by the snapshot. Send dependent fields together when a multi-field updater needs them at the same revision. Custom transports can return the same versioned records and read immediate mutation IDs from the `MutationContext` argument to `mutate`. Durable delivery reuses the ID from `MutationIdentity`.
+
+For deletes, publish the deletion's revision with `live.delete('Post', id, { revision })`. Custom transports pass it as the second argument to `onDelete`. Fate retains the deletion revision for pending mutations, including across offline restart. A recreated record needs a higher revision.
 
 #### Live Views
 

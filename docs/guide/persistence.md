@@ -92,18 +92,27 @@ Pending mutations are never evicted to make room for cached data. If a new mutat
 
 ## Actions & Mutations
 
-Let's say a user wants to like a post while offline. With persistence and a [durable mutation transport](#server-deduplication) configured, fate saves the mutation before applying its optimistic update or sending it to the server. We can use the same API as for regular [Actions](/guide/actions):
+To increment a like count while offline, define the optimistic function alongside the mutation. Fate stores the mutation name and input and looks up the function again after restart.
+
+```ts
+const like = mutation<Post, { id: string }, Post>('Post', {
+  optimistic: (current) => (current.likes === undefined ? undefined : { likes: current.likes + 1 }),
+});
+```
+
+With persistence and a [durable mutation transport](#server-deduplication) configured, select the registered updater with `optimistic: true`. Pass a view or selection that includes the fields the server should return. The saved selection stays the same across retries, even when the optimistic patch depends on changing cache data.
 
 ```tsx
 const [result, like] = useActionState(fate.actions.post.like, null);
 
 like({
   input: { id: post.id },
-  optimistic: { likes: post.likes + 1 },
+  optimistic: true,
+  view: PostView,
 });
 ```
 
-If the user likes a post while offline, the count updates immediately. Reloading restores the pending action and its optimistic update. When the connection returns and the app is running, fate sends it to the server.
+Fate saves the mutation before applying the optimistic update or sending it to the server. Reloading reapplies the updater over the saved confirmed data. When the connection returns and the app is running, fate sends the mutation with the original ID.
 
 Mutations are delivered in the order they were saved, one at a time per persistence key. Tabs sharing a key coordinate delivery. Temporary failures are retried. Authentication failures wait for the user to sign in again. A terminal client error rolls back the optimistic update.
 
@@ -153,7 +162,7 @@ Use client-generated IDs when creating objects that later offline mutations depe
 
 If the server assigns IDs, wait for the creation result before sending a dependent mutation. fate does not rewrite IDs inside mutation inputs or cancel later mutations when a creation fails.
 
-Inputs and optimistic updates must be serializable. Functions, streams, and `File` objects cannot be queued. For uploads, save the content first and queue a reference to it, or use `persist: false`.
+Inputs and fixed optimistic patches must be serializable. Inline callbacks require `persist: false`. For uploads, save the content first and queue a reference to it, or use `persist: false`.
 
 ## Server Deduplication
 

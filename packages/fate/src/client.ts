@@ -53,6 +53,7 @@ import {
 import { CoverageSelection } from './mask.ts';
 import {
   FateMutations,
+  getRegisteredOptimisticUpdater,
   InsertPosition,
   MutationActionsFor,
   MutationFunction,
@@ -74,6 +75,20 @@ import {
   type NormalizationInput,
 } from './normalization-input.ts';
 import OperationLifetime, { type RetainHandle } from './operation-lifetime.ts';
+import {
+  hasNewerOptimisticDescendant,
+  isOptimisticFieldKey,
+  isSnapshotRevision,
+  latestOptimisticRevision,
+  optimisticDeletionRevision,
+  optimisticFieldKey,
+  optimisticIncarnationFloor,
+  optimisticSnapshotKey,
+  preserveNewerOptimisticFields,
+  readOptimisticField,
+  readOptimisticSnapshot,
+  reconcileOptimisticDeletion,
+} from './optimistic-snapshot.ts';
 import type {
   MutationIdentity,
   Persistence,
@@ -691,6 +706,7 @@ type NormalizationSelection = {
 };
 type NormalizationSelections = Map<ReadonlySet<string>, Map<string, NormalizationSelection>>;
 type NormalizationContext = {
+  optimisticMutationId?: string;
   selections: NormalizationSelections;
   windows: Map<
     string,
@@ -702,7 +718,8 @@ type NormalizationContext = {
     }
   >;
 };
-const createNormalizationContext = (): NormalizationContext => ({
+const createNormalizationContext = (optimisticMutationId?: string): NormalizationContext => ({
+  optimisticMutationId,
   selections: new Map(),
   windows: new Map(),
 });
@@ -868,6 +885,10 @@ export class FateClient<
     { source: unknown; value: unknown }
   >();
   private readonly mutationEntities?: ReadonlyMap<string, string>;
+  private optimisticUpdaters?: Map<
+    string,
+    NonNullable<ReturnType<typeof getRegisteredOptimisticUpdater>>
+  >;
   private readonly mutationMap: Record<string, MutationFunction<any>>;
   private readonly parentLists = new Map<
     string,
@@ -1032,6 +1053,8 @@ export class FateClient<
   readonly persistence?: PersistenceSession;
   readonly actions: MutationActionsFor<Mutations>;
   readonly mutations: MutationFunctionsFor<Mutations>;
+  /** @internal */
+  hasOptimisticSnapshots = false;
   readonly roots: Roots;
 
   constructor(options: FateClientOptions<Roots, Mutations, HydrationScope>) {
@@ -1082,6 +1105,10 @@ export class FateClient<
 
     if (options.mutations) {
       for (const [key, definition] of Object.entries(options.mutations)) {
+        const updater = getRegisteredOptimisticUpdater(definition);
+        if (updater) {
+          (this.optimisticUpdaters ??= new Map()).set(key, updater);
+        }
         const mutation = wrapMutation(this, { ...definition, key });
         this.mutationMap[key] = mutation;
 
@@ -1325,6 +1352,7 @@ export class FateClient<
           store: this.store.dehydrate(),
         },
         this.hydrationLimits,
+        this.hasOptimisticSnapshots,
       ),
       scope: this.hydrationScope,
       version: 1,
@@ -1355,7 +1383,10 @@ export class FateClient<
     if (mode !== 'preserve-existing' && mode !== 'replace') {
       throw new Error(`fate: Unsupported hydration merge mode.`);
     }
-    const decoded = decodeClientHydrationState(state.data, this.hydrationLimits);
+    const decoded = decodeClientHydrationState(state.data, this.hydrationLimits, true);
+    this.hasOptimisticSnapshots ||= decoded.store.records.some(
+      ([, record]) => latestOptimisticRevision(record) !== undefined,
+    );
 
     const notify = this.store.hydrate(decoded.store, mode, {
       deferNotifications: true,
@@ -1432,6 +1463,7 @@ export class FateClient<
           store: this.store.dehydrateConfirmed(),
         },
         this.hydrationLimits,
+        this.hasOptimisticSnapshots,
       ),
       scope: this.hydrationScope,
       version: 1,
@@ -1503,7 +1535,7 @@ export class FateClient<
 
   /** @internal */
   readRemotePersistenceRecord(id: EntityId) {
-    const value = this.store.readConfirmed(id);
+    const value = this.store.readConfirmed(id, true);
     const { type } = parseEntityId(id);
     if (!value || this.isClientOwnedType(type)) {
       return;
@@ -1661,11 +1693,24 @@ export class FateClient<
   restorePersistenceData(state: ClientHydrationState) {
     this.store.update(() => {
       const coverage = new Map(state.store.coverage);
+      this.hasOptimisticSnapshots ||= state.store.records.some(
+        ([, record]) => latestOptimisticRevision(record) !== undefined,
+      );
+      const reconcile = this.hasOptimisticSnapshots;
       const stale = new Map(state.store.stale);
       const local = this.persistenceRuntime?.mutateClient && this.hasClientState();
       for (const [id, saved] of state.store.records) {
         const { type } = parseEntityId(id);
         if (local && this.clientState.localTypes.has(type)) {
+          continue;
+        }
+        const savedDeletion = reconcile ? optimisticDeletionRevision(saved) : undefined;
+        if (savedDeletion !== undefined) {
+          this.deleteRecords(new Set([id]), savedDeletion);
+          continue;
+        }
+        const deleted = this.store.deletionRevision(id);
+        if (deleted !== undefined && (latestOptimisticRevision(saved) ?? -1) <= deleted) {
           continue;
         }
         const isRemote = (path: string) => !this.isPersistedClientField(id, path.split('.', 1)[0]);
@@ -1677,10 +1722,20 @@ export class FateClient<
           local ? stale.get(id)?.filter(isRemote) : stale.get(id),
         );
         const existing = this.store.read(id);
+        const incarnation =
+          reconcile && existing ? reconcileOptimisticDeletion(existing, record) : undefined;
+        if (incarnation && incarnation === existing) {
+          continue;
+        }
+        if (incarnation) {
+          this.deleteRecords(new Set([id]), optimisticIncarnationFloor(incarnation));
+        }
         const paths = coverage.get(id) ?? [];
+        const merged = existing ? mergePreservingExisting(record, existing) : record;
         this.store.merge(
           id,
-          existing ? (mergePreservingExisting(record, existing) as AnyRecord) : record,
+          incarnation ??
+            (reconcile && existing ? preserveNewerOptimisticFields(record, merged) : merged),
           local ? paths.filter(isRemote) : paths,
         );
         if (local) {
@@ -1695,6 +1750,7 @@ export class FateClient<
           this.store.setList(key, list);
         }
       }
+      this.store.removeRestoredReferencesToDeletions(state.store, this.viewDataCache);
       for (const [key, id] of state.rootRequests) {
         if (!this.rootRequests.has(key)) {
           this.rootRequests.set(key, id);
@@ -1722,6 +1778,11 @@ export class FateClient<
   /** @internal */
   restoreRetainedRequests(requests: ReadonlyArray<RequestDescriptor>) {
     this.operationLifetime.restore(requests);
+  }
+
+  /** @internal */
+  getOptimisticUpdater(key: string) {
+    return this.optimisticUpdaters?.get(key);
   }
 
   /** @internal */
@@ -2115,6 +2176,9 @@ export class FateClient<
 
   /** @internal Apply explicit membership changes in the caller's optimistic transaction. */
   insertMutationTargets(entityId: EntityId, targets: ReadonlyArray<ResolvedInsertion>) {
+    if (this.store.deletionRevision(entityId) !== undefined) {
+      return;
+    }
     for (const { list, position } of targets) {
       if (
         !list.root &&
@@ -2247,7 +2311,12 @@ export class FateClient<
     key: string,
     input: unknown,
     select: ReadonlySet<string>,
-    options: { args?: AnyRecord; identity?: MutationIdentity; plan?: SelectionPlan } = {},
+    options: {
+      args?: AnyRecord;
+      identity?: MutationIdentity;
+      mutationId?: string;
+      plan?: SelectionPlan;
+    } = {},
   ): Promise<unknown> {
     if (options.identity) {
       this.requireDurableMutationTransport(key);
@@ -2298,9 +2367,13 @@ export class FateClient<
               argsPayload,
             )
           : this.transport.mutateDurably!(key as any, requestInput as any, select, options.identity)
-        : separateSelectionArgs
-          ? this.transport.mutate!(key as any, requestInput as any, select, argsPayload)
-          : this.transport.mutate!(key as any, requestInput as any, select),
+        : options.mutationId
+          ? this.transport.mutate!(key as any, requestInput as any, select, argsPayload, {
+              mutationId: options.mutationId,
+            })
+          : separateSelectionArgs
+            ? this.transport.mutate!(key as any, requestInput as any, select, argsPayload)
+            : this.transport.mutate!(key as any, requestInput as any, select),
     );
     return entity ? this.clientState.sanitize(entity, result) : result;
   }
@@ -2458,8 +2531,19 @@ export class FateClient<
     select: ReadonlySet<string>,
     plan: SelectionPlan | undefined,
     insert: InsertPosition,
+    mutationId?: string,
   ) {
-    return this.writeEntity(type, data, select, plan, null, insert, undefined, undefined, id);
+    return this.writeEntity(
+      type,
+      data,
+      select,
+      plan,
+      null,
+      insert,
+      createNormalizationContext(mutationId),
+      undefined,
+      id,
+    );
   }
 
   /** @internal Normalize mutation snapshots while retaining unrelated loaded pages. */
@@ -2492,13 +2576,53 @@ export class FateClient<
     }
   }
 
-  deleteRecord(type: string, id: string | number) {
-    return this.deleteRecords(new Set([toEntityId(type, id)]));
+  deleteRecord(type: string, id: string | number, revision?: number) {
+    this.deleteRecords(new Set([toEntityId(type, id)]), revision);
   }
 
-  private deleteRecords(ids: ReadonlySet<EntityId>) {
+  /** @internal Tell a mutation settlement whether a versioned deletion was accepted. */
+  commitVersionedMutationDeletion(type: string, id: string | number, revision: number) {
+    const entityId = toEntityId(type, id);
+    return (
+      this.store.deletionRevision(entityId) === revision ||
+      this.deleteRecords(new Set([entityId]), revision).has(entityId)
+    );
+  }
+
+  /** @internal Check the incarnation of an entity referenced by a received snapshot. */
+  canReferenceEntity(id: EntityId, record: AnyRecord) {
+    if (!this.hasOptimisticSnapshots) {
+      return true;
+    }
+    if (this.store.deletionRevision(id) !== undefined) {
+      return false;
+    }
+    const floor = this.store.incarnationFloor(id);
+    if (floor === undefined || this.store.isRecordingOptimistic) {
+      return true;
+    }
+    const snapshot = readOptimisticSnapshot(record);
+    return snapshot === undefined || snapshot.revision > floor;
+  }
+
+  private deleteRecords(ids: ReadonlySet<EntityId>, revision?: number) {
+    const versionedDeletion = isSnapshotRevision(revision) ? revision : undefined;
+    this.hasOptimisticSnapshots ||= versionedDeletion !== undefined;
     return this.store.update(() => {
+      const deleted = new Set<EntityId>();
       for (const entityId of ids) {
+        const previousDeletion = this.store.deletionRevision(entityId);
+        const current =
+          !this.hasOptimisticSnapshots || this.store.isRecordingOptimistic
+            ? undefined
+            : latestOptimisticRevision(this.store.read(entityId));
+        const next = versionedDeletion ?? current;
+        if (
+          (previousDeletion !== undefined && (next === undefined || next <= previousDeletion)) ||
+          (current !== undefined && next !== undefined && next < current)
+        ) {
+          continue;
+        }
         if (!this.store.isPreviewing) {
           this.boundDeferredPlans.delete(entityId);
           this.evaluatedDeferredPlans.delete(entityId);
@@ -2506,9 +2630,11 @@ export class FateClient<
           this.stableRefs.delete(entityId);
           this.clientState.collect(entityId);
         }
-        this.store.deleteRecord(entityId);
+        this.store.deleteRecord(entityId, next);
+        deleted.add(entityId);
       }
-      this.store.removeReferencesToMany(ids, this.viewDataCache);
+      this.store.removeReferencesToMany(deleted, this.viewDataCache);
+      return deleted;
     });
   }
 
@@ -3113,11 +3239,11 @@ export class FateClient<
               this.write(type, record as AnyRecord, select, plan, 'none'),
             );
           },
-          onDelete: (deletedId) => {
+          onDelete: (deletedId, revision) => {
             if (this.persistenceDisposal?.signal.aborted) {
               return;
             }
-            this.deleteRecord(type, deletedId ?? id);
+            this.deleteRecord(type, deletedId ?? id, revision);
           },
           onError: (error) => {
             if (!this.persistenceDisposal?.signal.aborted) {
@@ -3289,6 +3415,9 @@ export class FateClient<
       const entityId = this.withResponseWrite(++this.writeGeneration, () =>
         this.write(nodeType, nodeRecord, plan.paths, plan, 'none'),
       );
+      if (!this.canReferenceEntity(entityId, nodeRecord)) {
+        return;
+      }
       this.insertConnectionEdge(
         connection.key,
         entityId,
@@ -3913,7 +4042,10 @@ export class FateClient<
   }
 
   resolveOptimisticEntity(optimisticEntityId: EntityId, resolvedEntityId: EntityId) {
-    if (optimisticEntityId === resolvedEntityId) {
+    if (
+      optimisticEntityId === resolvedEntityId ||
+      this.store.deletionRevision(resolvedEntityId) !== undefined
+    ) {
       return;
     }
     const resolution = this.entityResolution(optimisticEntityId);
@@ -4152,7 +4284,7 @@ export class FateClient<
               undefined,
               input,
             );
-            if (!this.store.read(id)) {
+            if (!this.store.read(id) || !this.canReferenceEntity(id, entry.node as AnyRecord)) {
               continue;
             }
             incomingIds.push(id);
@@ -4251,7 +4383,7 @@ export class FateClient<
             undefined,
             listInput,
           );
-          if (!this.store.read(id)) {
+          if (!this.store.read(id) || !this.canReferenceEntity(id, node)) {
             continue;
           }
           incomingIds.push(id);
@@ -5074,6 +5206,11 @@ export class FateClient<
     optimisticRoots.baseRecords.forEach((record) => this.markRecordReferences(record, markRecord));
     optimisticRoots.records.forEach(pinRecord);
     optimisticRoots.lists.forEach(markList);
+    for (const id of this.pendingOptimisticMutations.keys()) {
+      if (this.store.deletionRevision(id) !== undefined) {
+        pinRecord(id);
+      }
+    }
     this.mutationRecords.forEach((_count, id) => pinRecord(this.resolveEntityId(id)));
     for (const key of this.mutationLists.keys()) {
       markList(key);
@@ -6518,6 +6655,9 @@ export class FateClient<
               normalization,
               input,
             );
+            if (!this.canReferenceEntity(id, entry.node as AnyRecord)) {
+              continue;
+            }
             ids.push(id);
             cursors.push(entry.cursor);
           }
@@ -6553,6 +6693,7 @@ export class FateClient<
     replacedPaths: Set<string>,
     preserveSiblings = true,
     input?: NormalizationInput,
+    acceptPath?: (path: string, replace: boolean, stamp?: boolean) => boolean,
   ): unknown {
     if (input && input.connection(value) !== value) {
       return this.normalizeEmbedded(
@@ -6564,15 +6705,23 @@ export class FateClient<
         storagePrefix,
         replacedPaths,
         preserveSiblings,
+        undefined,
+        acceptPath,
       );
     }
     if (selection.size === 0) {
+      if (acceptPath && !acceptPath(storagePrefix, true)) {
+        return previous;
+      }
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
       }
       return reuseNormalizedField(input ? input.materialize(value) : value, previous);
     }
     if (Array.isArray(value)) {
+      if (acceptPath && !acceptPath(storagePrefix, true)) {
+        return previous;
+      }
       replacedPaths.add(storagePrefix);
       const existing = Array.isArray(previous) ? previous : undefined;
       // An array position is not an identity: replace each element's returned shape.
@@ -6592,10 +6741,16 @@ export class FateClient<
       return reuseNormalizedField(items, existing);
     }
     if (!isRecord(value)) {
+      if (acceptPath && !acceptPath(storagePrefix, true)) {
+        return previous;
+      }
       if (isRecord(previous) || Array.isArray(previous)) {
         replacedPaths.add(storagePrefix);
       }
       return reuseNormalizedField(input ? input.materialize(value) : value, previous);
+    }
+    if (acceptPath && !acceptPath(storagePrefix, false, false)) {
+      return previous;
     }
     const existing = isRecord(previous) ? previous : undefined;
     if (!existing) {
@@ -6629,6 +6784,7 @@ export class FateClient<
         replacedPaths,
         preserveSiblings,
         input?.child(value, key),
+        acceptPath,
       );
       setRecordValue(result, storageKey, normalized);
     }
@@ -6651,7 +6807,7 @@ export class FateClient<
     knownId?: string | number,
     initializing = false,
   ): EntityId {
-    const { selections, windows } = normalization;
+    const { optimisticMutationId, selections, windows } = normalization;
     if (this.store.hasOptimisticUpdates && !this.store.isRebasing) {
       return this.store.update(() =>
         this.writeEntity(
@@ -6718,8 +6874,51 @@ export class FateClient<
     }
 
     const entityId = toEntityId(type, id);
+    const snapshot = this.store.isRecordingOptimistic ? undefined : readOptimisticSnapshot(record);
+    const reconciliation = (this.hasOptimisticSnapshots ||= snapshot !== undefined);
+    const deletion = reconciliation ? this.store.deletionRevision(entityId) : undefined;
+    const floor = deletion ?? (snapshot ? this.store.incarnationFloor(entityId) : undefined);
+    if (
+      (deletion !== undefined && !snapshot) ||
+      (snapshot && floor !== undefined && snapshot.revision <= floor)
+    ) {
+      return entityId;
+    }
+    const beforeSnapshot = snapshot && this.store.read(entityId);
+    const confirmed = optimisticMutationId && this.store.confirmedRecord(entityId);
+    const isAcknowledged =
+      optimisticMutationId && confirmed
+        ? (path: string) =>
+            readOptimisticField(confirmed, path)?.appliedMutationIds?.includes(optimisticMutationId)
+        : undefined;
+    const snapshotPaths = snapshot && new Set<string>();
+    const embeddedFields = snapshot && new Set<string>();
+    let writtenEmbeddedPaths = 0;
+    const embeddedSnapshotPath =
+      Boolean(snapshot || optimisticMutationId) &&
+      ((path: string, replace: boolean, stamp = true) => {
+        if (isAcknowledged?.(path)) {
+          return false;
+        }
+        const previous = readOptimisticField(beforeSnapshot, path);
+        if (
+          snapshot &&
+          ((previous && previous.revision > snapshot.revision) ||
+            (replace &&
+              beforeSnapshot &&
+              hasNewerOptimisticDescendant(beforeSnapshot, path, snapshot.revision)))
+        ) {
+          return false;
+        }
+        if (stamp) {
+          writtenEmbeddedPaths++;
+          snapshotPaths?.add(path);
+        }
+        return true;
+      });
     const generation = this.applyingGeneration ?? ++this.writeGeneration;
     if (
+      deletion === undefined &&
       !this.store.isRecordingOptimistic &&
       this.writeVersions.size > 0 &&
       (this.writeVersions.get(`record:${entityId}`) ?? 0) > generation
@@ -6774,7 +6973,31 @@ export class FateClient<
     // A nested initializer only supplies fields the related record does not have yet.
     const existing = initializing ? this.store.read(entityId) : undefined;
     const recordKeys = input ? input.keys(record) : Object.keys(record);
-    const keys = existing ? recordKeys.filter((key) => !Object.hasOwn(existing, key)) : recordKeys;
+    const keys =
+      reconciliation || existing
+        ? recordKeys.filter(
+            (key) =>
+              (!existing || !Object.hasOwn(existing, key)) &&
+              (!reconciliation || (key !== optimisticSnapshotKey && !isOptimisticFieldKey(key))),
+          )
+        : recordKeys;
+    const acceptReconciled =
+      snapshot || isAcknowledged
+        ? (storageKey: string) => {
+            if (isAcknowledged?.(storageKey)) {
+              return false;
+            }
+            if (!snapshot) {
+              return this.acceptFieldWrite(entityId, storageKey, generation);
+            }
+            const previous = readOptimisticField(beforeSnapshot, storageKey);
+            if (previous && previous.revision > snapshot.revision) {
+              return false;
+            }
+            this.acceptFieldWrite(entityId, storageKey, generation);
+            return true;
+          }
+        : undefined;
     for (const key of keys) {
       const field = normalizationField(fields, key, pathPrefix, config, plan);
       const {
@@ -6790,7 +7013,9 @@ export class FateClient<
       const childInput =
         input && value && typeof value === 'object' ? input.child(record, key) : undefined;
       const initializeChild = initializing || Boolean(defaults && Object.hasOwn(defaults, key));
-      const acceptField = this.acceptFieldWrite(entityId, storageKey, generation);
+      const acceptField = acceptReconciled
+        ? acceptReconciled(storageKey)
+        : this.acceptFieldWrite(entityId, storageKey, generation);
       if (relationDescriptor === 'scalar') {
         if (!acceptField) {
           continue;
@@ -6817,11 +7042,12 @@ export class FateClient<
         }
         if (isNodeRef(value)) {
           if (acceptField) {
-            setRecordValue(
-              result,
-              storageKey,
-              reuseNormalizedField(value, this.store.read(entityId)?.[storageKey]),
-            );
+            const previous = this.store.read(entityId)?.[storageKey];
+            const related =
+              this.store.deletionRevision(getNodeRefId(value)) === undefined
+                ? value
+                : (previous ?? null);
+            setRecordValue(result, storageKey, reuseNormalizedField(related, previous));
           }
           continue;
         }
@@ -6839,19 +7065,7 @@ export class FateClient<
           const childRecord = (
             childInput && !childReader ? childInput.materialize(value) : value
           ) as AnyRecord;
-          const childId = toEntityId(
-            childType,
-            normalizationId(childConfig, childRecord, childReader),
-          );
-          if (acceptField) {
-            setRecordValue(
-              result,
-              storageKey,
-              reuseNormalizedField(createNodeRef(childId), this.store.read(entityId)?.[storageKey]),
-            );
-          }
-
-          this.writeEntity(
+          const childId = this.writeEntity(
             childType,
             childRecord,
             childPaths,
@@ -6863,6 +7077,13 @@ export class FateClient<
             undefined,
             initializeChild,
           );
+          if (acceptField) {
+            const previous = this.store.read(entityId)?.[storageKey];
+            const related = this.canReferenceEntity(childId, childRecord)
+              ? createNodeRef(childId)
+              : (previous ?? null);
+            setRecordValue(result, storageKey, reuseNormalizedField(related, previous));
+          }
         }
       } else if (
         relationDescriptor &&
@@ -6952,9 +7173,12 @@ export class FateClient<
                 : undefined;
             const node = item ? item.node : entry;
             const cursor = item?.cursor as string | undefined;
-            cursors.push(cursor);
             if (isNodeRef(node)) {
-              ids.push(getNodeRefId(node));
+              const childId = getNodeRefId(node);
+              if (this.store.deletionRevision(childId) === undefined) {
+                ids.push(childId);
+                cursors.push(cursor);
+              }
               continue;
             }
 
@@ -6983,7 +7207,10 @@ export class FateClient<
                 initializeChild,
               );
 
-              ids.push(childId);
+              if (this.canReferenceEntity(childId, node as AnyRecord)) {
+                ids.push(childId);
+                cursors.push(cursor);
+              }
               continue;
             }
 
@@ -7080,21 +7307,23 @@ export class FateClient<
             embedded = compileEmbeddedSelection(selectionTree.get(key) ?? emptySet);
             normalized.embedded.set(key, embedded);
           }
-          setRecordValue(
-            result,
+          const previousSize = writtenEmbeddedPaths;
+          const embeddedValue = this.normalizeEmbedded(
+            value,
+            this.store.read(entityId)?.[storageKey],
+            embedded,
+            plan,
+            fieldPath,
             storageKey,
-            this.normalizeEmbedded(
-              value,
-              this.store.read(entityId)?.[storageKey],
-              embedded,
-              plan,
-              fieldPath,
-              storageKey,
-              (replacedPaths ??= new Set()),
-              true,
-              childInput,
-            ),
+            (replacedPaths ??= new Set()),
+            true,
+            childInput,
+            embeddedSnapshotPath || undefined,
           );
+          if (!embeddedSnapshotPath || writtenEmbeddedPaths !== previousSize) {
+            embeddedFields?.add(storageKey);
+            setRecordValue(result, storageKey, embeddedValue);
+          }
         }
       }
     }
@@ -7104,7 +7333,11 @@ export class FateClient<
       if (descriptor) {
         continue;
       }
-      if (this.acceptFieldWrite(entityId, storageKey, generation)) {
+      if (
+        acceptReconciled
+          ? acceptReconciled(storageKey)
+          : this.acceptFieldWrite(entityId, storageKey, generation)
+      ) {
         const value = input ? input.get(record, key) : record[key];
         setRecordValue(
           result,
@@ -7147,15 +7380,46 @@ export class FateClient<
       } else if (
         !initializing &&
         !(input ? input.has(record, recordKey) : Object.hasOwn(record, recordKey)) &&
-        this.acceptFieldWrite(entityId, storageKey, generation)
+        (acceptReconciled
+          ? acceptReconciled(storageKey)
+          : this.acceptFieldWrite(entityId, storageKey, generation)) &&
+        (!embeddedSnapshotPath || embeddedSnapshotPath(storageKey, true))
       ) {
         // JSON omits selected undefined fields. Clear any previous value.
         const previous = this.store.read(entityId);
-        if (previous && Object.hasOwn(previous, storageKey) && previous[storageKey] !== undefined) {
+        if (
+          snapshot ||
+          (previous && Object.hasOwn(previous, storageKey) && previous[storageKey] !== undefined)
+        ) {
           setRecordValue(result, storageKey, undefined);
           (replacedPaths ??= new Set()).add(storageKey);
         }
         selectedPaths.push(storagePath);
+      }
+    }
+
+    if (snapshot && snapshotPaths) {
+      for (const field of Object.keys(result)) {
+        if (!embeddedFields?.has(field)) {
+          snapshotPaths.add(field);
+        }
+      }
+      for (const path of snapshotPaths) {
+        const key = optimisticFieldKey(path);
+        const previous = beforeSnapshot?.[key] as typeof snapshot | undefined;
+        const next =
+          previous?.revision === snapshot.revision && previous.appliedMutationIds?.length
+            ? {
+                ...snapshot,
+                appliedMutationIds: [
+                  ...new Set([
+                    ...previous.appliedMutationIds,
+                    ...(snapshot.appliedMutationIds ?? []),
+                  ]),
+                ],
+              }
+            : snapshot;
+        setRecordValue(result, key, reuseNormalizedField(next, previous));
       }
     }
 

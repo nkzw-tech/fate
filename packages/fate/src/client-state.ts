@@ -15,6 +15,7 @@ import { getFieldKey } from './field-key.ts';
 import type { MutationOptions } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
 import { normalizationInput } from './normalization-input.ts';
+import { isOptimisticFieldKey, optimisticSnapshotKey } from './optimistic-snapshot.ts';
 import { isDate, isRecord, setRecordValue } from './record.ts';
 import { parseEntityId, toEntityId } from './ref.ts';
 import type { SelectionPlan } from './selection.ts';
@@ -38,6 +39,9 @@ export const recordPaths = (
   paths = new Set<string>(),
 ): Set<string> => {
   for (const key of Object.keys(record)) {
+    if (key === optimisticSnapshotKey || isOptimisticFieldKey(key)) {
+      continue;
+    }
     const value = record[key];
     const path = `${prefix}${key}`;
     paths.add(path);
@@ -450,6 +454,10 @@ export default class ClientState {
     }
     const result: AnyRecord = {};
     for (const [key, entry] of Object.entries(record)) {
+      if (key === optimisticSnapshotKey) {
+        result[key] = entry;
+        continue;
+      }
       const name = schemaField(key);
       if (this.isLocalField(type, name) && name !== 'id' && name !== '__typename') {
         continue;

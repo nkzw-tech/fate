@@ -1,4 +1,11 @@
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
+import {
+  isOptimisticFieldKey,
+  isOptimisticSnapshot,
+  optimisticFieldKey,
+  optimisticFieldPath,
+  type OptimisticSnapshot,
+} from './optimistic-snapshot.ts';
 import type { List, StoreHydrationState } from './store.ts';
 import type { AnyRecord } from './types.ts';
 
@@ -52,6 +59,7 @@ export type ClientHydrationState = Readonly<{
 type EncodedValue = ReadonlyArray<FateSerializedValue>;
 
 const maxDepth = 64;
+const packedOptimisticFields = '\0fate:optimistic-fields';
 const defaultHydrationLimits: HydrationLimits = {
   maxCollectionLength: 100_000,
   maxNodes: 250_000,
@@ -92,9 +100,43 @@ const isDate = (value: object): value is Date =>
   typeof (value as Date).getTime === 'function' &&
   typeof (value as Date).toISOString === 'function';
 
+const packOptimisticFields = (entries: Array<[string, unknown]>) => {
+  let groups: Map<OptimisticSnapshot, Array<string>> | undefined;
+  for (const [key, value] of entries) {
+    if (key === packedOptimisticFields) {
+      return entries;
+    }
+    if (isOptimisticFieldKey(key) && isOptimisticSnapshot(value)) {
+      groups ??= new Map();
+      let fields = groups.get(value);
+      if (!fields) {
+        fields = [];
+        groups.set(value, fields);
+      }
+      fields.push(key);
+    }
+  }
+  if (!groups) {
+    return entries;
+  }
+  const shared = [...groups].filter(([, fields]) => fields.length > 1);
+  if (shared.length === 0) {
+    return entries;
+  }
+  const packedKeys = new Set(shared.flatMap(([, fields]) => fields));
+  return [
+    ...entries.filter(([key]) => !packedKeys.has(key)),
+    [
+      packedOptimisticFields,
+      shared.map(([stamp, fields]) => [stamp, fields.map(optimisticFieldPath)]),
+    ],
+  ] satisfies Array<[string, unknown]>;
+};
+
 export const encodeHydrationValue = (
   value: unknown,
   limits?: Partial<HydrationLimits>,
+  compactOptimisticFields = false,
 ): FateSerializedValue => {
   const resolvedLimits = resolveHydrationLimits(limits);
   const seen = new Set<object>();
@@ -220,7 +262,7 @@ export const encodeHydrationValue = (
       }
       return [
         'object',
-        entries.map(([key, item]) => {
+        (compactOptimisticFields ? packOptimisticFields(entries) : entries).map(([key, item]) => {
           if (key.length > resolvedLimits.maxStringLength) {
             throw error(
               path,
@@ -257,6 +299,7 @@ const tagLengths: Readonly<Record<string, number>> = {
 export const decodeHydrationValue = (
   value: FateSerializedValue,
   limits?: Partial<HydrationLimits>,
+  compactOptimisticFields = false,
 ): unknown => {
   const resolvedLimits = resolveHydrationLimits(limits);
   let nodes = 0;
@@ -367,6 +410,35 @@ export const decodeHydrationValue = (
             throw invalidPayload(path);
           }
           result[item[0]] = decode(item[1], `${path}.${item[0]}`, depth + 1);
+        }
+        if (compactOptimisticFields && Object.hasOwn(result, packedOptimisticFields)) {
+          const packed = result[packedOptimisticFields];
+          if (!Array.isArray(packed)) {
+            throw invalidPayload(path);
+          }
+          delete result[packedOptimisticFields];
+          let size = payload.length - 1;
+          for (const group of packed) {
+            if (
+              !Array.isArray(group) ||
+              group.length !== 2 ||
+              !isOptimisticSnapshot(group[0]) ||
+              !isStringArray(group[1])
+            ) {
+              throw invalidPayload(path);
+            }
+            for (const field of group[1]) {
+              const key = optimisticFieldKey(field);
+              if (
+                key.length > resolvedLimits.maxStringLength ||
+                Object.hasOwn(result, key) ||
+                ++size > resolvedLimits.maxCollectionLength
+              ) {
+                throw invalidPayload(path);
+              }
+              result[key] = group[0];
+            }
+          }
         }
         return result;
       }
@@ -494,8 +566,9 @@ const hasDuplicateEntries = (entries: ReadonlyArray<unknown>): boolean =>
 export const decodeClientHydrationState = (
   value: FateSerializedValue,
   limits?: Partial<HydrationLimits>,
+  compactOptimisticFields = false,
 ): ClientHydrationState => {
-  const decoded = decodeHydrationValue(value, limits);
+  const decoded = decodeHydrationValue(value, limits, compactOptimisticFields);
   if (
     !isRecord(decoded) ||
     !hasOnlyKeys(decoded, clientStateKeys) ||

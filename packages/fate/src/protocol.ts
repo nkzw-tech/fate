@@ -13,6 +13,7 @@ export type FateOperation = Readonly<{
   input?: unknown;
   kind: FateOperationKind;
   mutation?: MutationIdentity;
+  mutationId?: string;
   name?: string;
   select: Array<string>;
   type?: string;
@@ -50,6 +51,7 @@ export type FateLiveDataEvent = Readonly<{
 export type FateLiveDeleteEvent = Readonly<{
   delete: true;
   id?: string | number;
+  revision?: number;
   type?: 'delete';
 }>;
 

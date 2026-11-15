@@ -10,6 +10,9 @@ export type ResolvedArgsPayload = AnyRecord;
 
 export type ReadContext = Readonly<{ refetch?: string; signal?: AbortSignal }>;
 
+/** The ID a server can associate with the effects of an immediate mutation. */
+export type MutationContext = Readonly<{ mutationId: string }>;
+
 type TransportMutations = Record<string, MutationShape>;
 type EmptyTransportMutations = Record<never, MutationShape>;
 type Bivariant<Fn extends (...args: Array<any>) => any> = {
@@ -22,7 +25,7 @@ type TRPCListResult = {
 
 type LiveEventHandlers = Readonly<{
   onData: (record: unknown, select?: ReadonlyArray<string>) => void;
-  onDelete?: (id?: string | number) => void;
+  onDelete?: (id?: string | number, revision?: number) => void;
   onError?: (error: unknown) => void;
 }>;
 
@@ -87,6 +90,7 @@ export interface Transport<Mutations extends TransportMutations = EmptyTransport
     input: Mutations[K]['input'],
     select: ReadonlySet<string>,
     selectionArgs?: ResolvedArgsPayload,
+    context?: MutationContext,
   ): Promise<Mutations[K]['output']>;
   /**
    * Deliver through an endpoint that durably deduplicates this identity. Required

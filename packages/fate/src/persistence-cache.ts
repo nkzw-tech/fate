@@ -12,6 +12,16 @@ import {
 import { getListEntries } from './list.ts';
 import type { MutationCommand } from './mutation.ts';
 import { createNodeRef, getNodeRefId, isNodeRef } from './node-ref.ts';
+import {
+  hasNewerOptimisticDescendant,
+  isOptimisticFieldKey,
+  optimisticDeletionRevision,
+  optimisticFieldPath,
+  optimisticSnapshotKey,
+  preserveNewerOptimisticFields,
+  readOptimisticField,
+  reconcileOptimisticDeletion,
+} from './optimistic-snapshot.ts';
 import { decodeRequests, encodeRequests } from './persistence-codec.ts';
 import {
   persistenceEntrySize,
@@ -121,6 +131,9 @@ const valueKey = (id: string) => `v:${id}`;
 const pathsOverlap = (path: string, selected: string) =>
   path === selected || path.startsWith(`${selected}.`) || selected.startsWith(`${path}.`);
 const projectRecord = (value: RecordValue, paths: Array<string>): RecordValue => {
+  if (optimisticDeletionRevision(value.record) !== undefined) {
+    return value;
+  }
   const fields = new Set(['id', '__typename', ...paths.map((path) => path.split('.')[0])]);
   const stale = value.stale?.filter((path) =>
     paths.some((selected) => pathsOverlap(path, selected)),
@@ -128,14 +141,49 @@ const projectRecord = (value: RecordValue, paths: Array<string>): RecordValue =>
   return {
     ...(stale?.length && { stale }),
     paths: value.paths.filter((path) => paths.some((selected) => pathsOverlap(path, selected))),
-    record: Object.fromEntries(Object.entries(value.record).filter(([field]) => fields.has(field))),
+    record: Object.fromEntries(
+      Object.entries(value.record).filter(
+        ([field]) =>
+          field === optimisticSnapshotKey ||
+          fields.has(
+            isOptimisticFieldKey(field) ? optimisticFieldPath(field).split('.', 1)[0] : field,
+          ),
+      ),
+    ),
   };
 };
 
 const isWithinPath = (path: string, field: string) =>
   path === field || path.startsWith(`${field}.`);
 
-const patchRecord = (before: AnyRecord, after: AnyRecord, fields: Set<string>): AnyRecord => {
+const patchRecord = (
+  before: AnyRecord,
+  after: AnyRecord,
+  fields: Set<string>,
+  reconcile = true,
+): AnyRecord => {
+  if (reconcile) {
+    // A changed revision carries its value even when it was unchanged in this tab.
+    const paths = new Set(fields);
+    for (const field of fields) {
+      if (isOptimisticFieldKey(field)) {
+        paths.add(optimisticFieldPath(field));
+      }
+    }
+    // Compare the two snapshots before merging: inherited metadata can otherwise
+    // hide an older parent replacing a child, or an older child replacing a parent.
+    fields = new Set(
+      [...paths].filter((path) => {
+        const field = isOptimisticFieldKey(path) ? optimisticFieldPath(path) : path;
+        const incoming = readOptimisticField(after, field);
+        return (
+          !incoming ||
+          ((readOptimisticField(before, field)?.revision ?? -1) <= incoming.revision &&
+            !hasNewerOptimisticDescendant(before, field, incoming.revision))
+        );
+      }),
+    );
+  }
   const record = { ...before };
   const nested = new Map<string, Set<string>>();
   for (const path of fields) {
@@ -162,7 +210,7 @@ const patchRecord = (before: AnyRecord, after: AnyRecord, fields: Set<string>): 
         record,
         field,
         isRecord(oldValue) && isRecord(value) && !isNodeRef(oldValue) && !isNodeRef(value)
-          ? patchRecord(oldValue, value, paths)
+          ? patchRecord(oldValue, value, paths, false)
           : value,
       );
     }
@@ -175,6 +223,10 @@ const applyRecordUpdate = (
   after: RecordValue,
   fields?: Set<string>,
 ): RecordValue => {
+  const incarnation = reconcileOptimisticDeletion(before.record, after.record);
+  if (incarnation) {
+    return incarnation === before.record ? before : { ...after, record: incarnation };
+  }
   if (after.invalidate) {
     const diskOnly = before.paths.filter(
       (path) => !after.paths.some((cached) => isWithinPath(path, cached)),
@@ -201,7 +253,7 @@ const applyRecordUpdate = (
   if (!fields) {
     return {
       paths: after.paths,
-      record: { ...before.record, ...after.record },
+      record: preserveNewerOptimisticFields(before.record, { ...before.record, ...after.record }),
       ...(after.stale && { stale: after.stale }),
     };
   }
@@ -219,7 +271,10 @@ const applyRecordUpdate = (
         ...changed.filter((field) => after.paths.some((path) => isWithinPath(field, path))),
       ]),
     ],
-    record: patchRecord(before.record, after.record, fields),
+    record: preserveNewerOptimisticFields(
+      before.record,
+      patchRecord(before.record, after.record, fields),
+    ),
   };
 };
 
@@ -351,6 +406,14 @@ const applyListUpdate = (latest: List, before: List, after: List): List => {
 
 /** Independently addressable normalized disk data. No in-memory retention roots. */
 export class PersistenceCache {
+  private encodeCacheValue(value: unknown) {
+    return encodeHydrationValue(value, undefined, this.client.hasOptimisticSnapshots);
+  }
+
+  private decodeCacheValue(value: Encoded) {
+    return decodeHydrationValue(value, undefined, true);
+  }
+
   private readonly prefix: string;
   private pendingNodes = createNodeChanges();
   private flushingNodes = createNodeChanges();
@@ -440,7 +503,9 @@ export class PersistenceCache {
     command: MutationCommand,
     base?: FateDehydratedState,
   ): Promise<FateDehydratedState> {
-    const previous = base ? decodeClientHydrationState(base.data).store : undefined;
+    const previous = base
+      ? decodeClientHydrationState(base.data, undefined, true).store
+      : undefined;
     const previousRecords = new Map(previous?.records);
     const previousCoverage = new Map(previous?.coverage);
     const previousLists = new Map(previous?.lists);
@@ -549,7 +614,7 @@ export class PersistenceCache {
             : incoming)
         : (before ??
           memory ??
-          (disk ? (decodeHydrationValue(disk.value) as RecordValue) : undefined));
+          (disk ? (this.decodeCacheValue(disk.value) as RecordValue) : undefined));
       if (value) {
         records.push([id, value.record]);
         coverage.push([id, value.paths]);
@@ -583,7 +648,7 @@ export class PersistenceCache {
       await this.step();
     }
     return {
-      data: encodeHydrationValue({
+      data: this.encodeCacheValue({
         rootLists: [
           [
             command.entity,
@@ -754,13 +819,13 @@ export class PersistenceCache {
       this.pendingNodes.referenceChanges.delete(key);
       this.pendingNodes.listBases.delete(key);
     }
-    return encodeHydrationValue([...changes]);
+    return this.encodeCacheValue([...changes]);
   }
 
   replayChanges(updates: ReadonlyArray<Encoded>) {
     this.recoveryUpdates.clear();
     for (const encoded of updates) {
-      for (const [key, update] of decodeHydrationValue(encoded) as Array<[string, CacheUpdate]>) {
+      for (const [key, update] of this.decodeCacheValue(encoded) as Array<[string, CacheUpdate]>) {
         // Older receipts predate explicit reference metadata. Rebuilding their
         // record roots is conservative and keeps upgrade recovery correct.
         const compatible =
@@ -815,8 +880,8 @@ export class PersistenceCache {
     }
     if (key.startsWith('r:')) {
       const paths = Object.values(node.claims).flatMap((claim) => claim.paths);
-      node.value = encodeHydrationValue(
-        projectRecord(decodeHydrationValue(node.value) as RecordValue, paths),
+      node.value = this.encodeCacheValue(
+        projectRecord(this.decodeCacheValue(node.value) as RecordValue, paths),
       );
     }
     return node;
@@ -846,7 +911,7 @@ export class PersistenceCache {
             const stored = await this.node(key);
             if (stored) {
               return applyListUpdate(
-                decodeHydrationValue(stored.value) as List,
+                this.decodeCacheValue(stored.value) as List,
                 base,
                 incoming as List,
               );
@@ -861,7 +926,7 @@ export class PersistenceCache {
             const stored = await this.node(key);
             if (stored) {
               return applyRecordUpdate(
-                decodeHydrationValue(stored.value) as RecordValue,
+                this.decodeCacheValue(stored.value) as RecordValue,
                 incoming as RecordValue,
                 fields,
               );
@@ -897,7 +962,7 @@ export class PersistenceCache {
           ? this.client.readRemotePersistenceRecord(key.slice(2))
           : undefined;
       }
-      const value = decodeHydrationValue(stored.value);
+      const value = this.decodeCacheValue(stored.value);
       if (!readsMemory) {
         return value;
       }
@@ -1208,9 +1273,9 @@ export class PersistenceCache {
         delete node.claims[rootId];
         const live = Object.values(node.claims).filter((claim) => claim.expiresAt > Date.now());
         if (key.startsWith('r:') && live.length) {
-          node.value = encodeHydrationValue(
+          node.value = this.encodeCacheValue(
             projectRecord(
-              decodeHydrationValue(node.value) as RecordValue,
+              this.decodeCacheValue(node.value) as RecordValue,
               live.flatMap((claim) => claim.paths),
             ),
           );
@@ -1279,7 +1344,7 @@ export class PersistenceCache {
         claims: {
           [request.key]: { expiresAt: fetchedAt + maxAge, fetchedAt, paths: [...node.paths] },
         },
-        value: encodeHydrationValue(node.value),
+        value: this.encodeCacheValue(node.value),
       }).bytes;
       await this.step();
     }
@@ -1319,12 +1384,13 @@ export class PersistenceCache {
         }
         let value = next?.value;
         if (previous && key.startsWith('r:')) {
-          const stored = decodeHydrationValue(previous.value) as RecordValue;
+          const stored = this.decodeCacheValue(previous.value) as RecordValue;
           const incoming = this.flushingNodes.values.get(key) as RecordValue | undefined;
           const before = incoming
             ? applyRecordUpdate(stored, incoming, this.flushingNodes.recordFields.get(key))
             : stored;
           const after = next?.value as RecordValue | undefined;
+          const incarnation = after && reconcileOptimisticDeletion(before.record, after.record);
           const stale = new Set([
             ...(before.stale ?? []).filter(
               (path) =>
@@ -1332,19 +1398,30 @@ export class PersistenceCache {
             ),
             ...(after?.stale ?? []),
           ]);
+          const combined = incarnation
+            ? incarnation === before.record
+              ? before
+              : { ...after!, record: incarnation }
+            : {
+                paths: [...new Set([...before.paths, ...(after?.paths ?? [])])],
+                record: preserveNewerOptimisticFields(before.record, {
+                  ...before.record,
+                  ...after?.record,
+                }),
+                ...(stale.size && { stale: [...stale] }),
+              };
           value = projectRecord(
-            {
-              paths: [...new Set([...before.paths, ...(after?.paths ?? [])])],
-              record: { ...before.record, ...after?.record },
-              ...(stale.size && { stale: [...stale] }),
-            },
+            combined,
             Object.values(claims).flatMap((claim) => claim.paths),
           );
         }
         writes.set(
           this.nodeKey(key),
           Object.keys(claims).length
-            ? { claims, value: value !== undefined ? encodeHydrationValue(value) : previous!.value }
+            ? {
+                claims,
+                value: value !== undefined ? this.encodeCacheValue(value) : previous!.value,
+              }
             : undefined,
         );
         await this.step();
@@ -1513,13 +1590,13 @@ export class PersistenceCache {
           key.startsWith('r:') &&
           !this.flushingNodes.referenceChanges.has(key)
         ) {
-          const before = decodeHydrationValue(node.value) as RecordValue;
+          const before = this.decodeCacheValue(node.value) as RecordValue;
           const after = applyRecordUpdate(
             before,
             incoming as RecordValue,
             this.flushingNodes.recordFields.get(key),
           );
-          const value = encodeHydrationValue(
+          const value = this.encodeCacheValue(
             projectRecord(
               after,
               Object.values(node.claims).flatMap((claim) => claim.paths),
@@ -1532,9 +1609,9 @@ export class PersistenceCache {
           const retained = await this.node(key);
           if (retained) {
             next.claims = retained.claims;
-            next.value = encodeHydrationValue(
+            next.value = this.encodeCacheValue(
               projectRecord(
-                decodeHydrationValue(value) as RecordValue,
+                this.decodeCacheValue(value) as RecordValue,
                 Object.values(retained.claims).flatMap((claim) => claim.paths),
               ),
             );

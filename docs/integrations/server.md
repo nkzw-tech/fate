@@ -307,6 +307,23 @@ export const fate = createFateServer({
 });
 ```
 
+### Optimistic Reconciliation
+
+Native HTTP mutation resolvers receive a `mutationId` for a [functional optimistic update](/guide/actions#optimistic-updates) or a durable mutation. Record the ID with the database write and use `withOptimisticSnapshot` from `@nkzw/fate` to attach metadata to the entity record returned by a mutation, a read, or a live source.
+
+```ts
+return withOptimisticSnapshot(post, {
+  appliedMutationIds,
+  revision: postRevision,
+});
+```
+
+Use an increasing revision for each entity. Read the entity and its applied mutation IDs from the same committed state. Include the IDs of any operations the viewer might still have pending whose effects are already reflected in the snapshot. Scope those IDs to the authorized viewer. Fate uses the revision to reject older values and the IDs to avoid replaying an operation already reflected in the cache.
+
+An acknowledgement applies to the fields carried by the snapshot. Send dependent fields together when a multi-field updater needs them at the same revision. Custom transports can return the same versioned records and read immediate mutation IDs from the `MutationContext` argument to `mutate`. Durable delivery reuses the ID from `MutationIdentity`.
+
+For deletes, publish the deletion's revision with `live.delete('Post', id, { revision })`. Custom transports pass it as the second argument to `onDelete`. Fate retains the deletion revision for pending mutations, including across offline restart. A recreated record needs a higher revision.
+
 ### Live Views
 
 Follow the [Live Views server setup](/guide/live-views#server-setup) to add an event bus. After a mutation changes a post, emit an update:

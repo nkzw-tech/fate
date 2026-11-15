@@ -7,9 +7,16 @@ import type {
   GraphQLMutationCallResult,
   GraphQLSelectionBrand,
 } from './graphql-types.ts';
+import { getNodeRefId, isNodeRef } from './node-ref.ts';
+import {
+  isOptimisticFieldKey,
+  optimisticSnapshotKey,
+  readOptimisticSnapshot,
+  withoutOptimisticSnapshot,
+} from './optimistic-snapshot.ts';
 import type { MutationIdentity } from './persistence-types.ts';
 import { FateRequestError } from './protocol.ts';
-import { isRecord } from './record.ts';
+import { isDate, isRecord, setRecordValue } from './record.ts';
 import { toEntityId } from './ref.ts';
 import type { MergeSelectedResults, SelectedResult } from './selection-result.ts';
 import { getSelectionPlan, type SelectionPlan } from './selection.ts';
@@ -25,6 +32,7 @@ import type {
   MutationInput,
   MutationResult,
   OptimisticUpdate,
+  OptimisticUpdater,
   Selection,
   SelectionOf,
   TypeConfig,
@@ -42,17 +50,28 @@ type MutationDefinitionFor<T extends Entity, I, R> = [R] extends [
   ? MutationDefinition<T, I, Result> & { readonly [GraphQLSelectionBrand]: Result }
   : MutationDefinition<T, I, R>;
 
+const registeredOptimisticUpdaters = new WeakMap<object, OptimisticUpdater<any, any>>();
+
+/** @internal Read updater metadata without changing the structural mutation definition type. */
+export const getRegisteredOptimisticUpdater = (definition: object) =>
+  registeredOptimisticUpdaters.get(definition);
+
 /**
  * Defines a mutation for a given entity type, preserving the input and output
  * types for transports.
  */
 export function mutation<T extends Entity, I, R>(
   entity: T['__typename'],
+  options?: { optimistic?: OptimisticUpdater<T, I> },
 ): MutationDefinitionFor<T, I, R> {
-  return Object.freeze({
+  const definition = Object.freeze({
     entity,
     [MutationKind]: true,
   }) as MutationDefinitionFor<T, I, R>;
+  if (options?.optimistic) {
+    registeredOptimisticUpdaters.set(definition, options.optimistic);
+  }
+  return definition;
 }
 
 export function valueMutation<I, R>(): MutationDefinitionFor<{ __typename: '__value__' }, I, R> {
@@ -174,6 +193,11 @@ type HasNoMutationInput<T> = 0 extends 1 & T
 type MutationArguments<I extends MutationIdentifier<any, any, any>, Options> =
   HasNoMutationInput<MutationInput<I>> extends true ? [options?: Options] : [options: Options];
 
+type OptimisticOptions<I extends MutationIdentifier<any, any, any>> =
+  | true
+  | OptimisticUpdater<MutationEntity<I>, MutationInput<I>>
+  | OptimisticUpdate<MutationResult<I>>;
+
 /**
  * Options accepted by a mutation invocation, including optimistic updates and
  * optional selection for the returned payload.
@@ -186,8 +210,8 @@ type MutationBaseOptions<Identifier extends MutationIdentifier<any, any, any>> =
   insert?: MutationInsertion<MutationEntity<Identifier>['__typename']>;
   /** Mark these lists or records stale after the server confirms the mutation. */
   invalidate?: ReadonlyArray<InvalidationTarget>;
-  /** Optional optimistic update to apply immediately. */
-  optimistic?: OptimisticUpdate<MutationResult<Identifier>>;
+  /** Supply a patch, compute one on replay, or use the updater registered for this mutation. */
+  optimistic?: OptimisticOptions<Identifier>;
   /** Skip durable delivery for this call, even when persistence is configured. */
   persist?: boolean;
   /** Remove nodes from the specified lists as part of the optimistic update. */
@@ -414,6 +438,9 @@ const collectImplicitSelectedPaths = (value: AnyRecord): Set<string> => {
     }
 
     for (const [key, child] of Object.entries(current as AnyRecord)) {
+      if (key === optimisticSnapshotKey) {
+        continue;
+      }
       const next = prefix ? `${prefix}.${key}` : key;
       paths.add(next);
       walk(child, next);
@@ -434,6 +461,39 @@ const maybeGetId = (getId: TypeConfig['getId'], input: AnyRecord) => {
 
 const emptySet: ReadonlySet<string> = new Set();
 
+type RecordUpdater = OptimisticUpdater<AnyRecord, AnyRecord>;
+
+const cachedOptimisticRecord = (client: FateClient<any, any>, id: EntityId) => {
+  const copies = new Map<AnyRecord, AnyRecord>();
+  const copy = (value: unknown): unknown => {
+    if (isNodeRef(value)) {
+      return copy(client.store.read(getNodeRefId(value)));
+    }
+    if (Array.isArray(value)) {
+      return Object.freeze(value.map(copy));
+    }
+    if (isDate(value)) {
+      return new Date(value.getTime());
+    }
+    if (!isRecord(value)) {
+      return value;
+    }
+    const previous = copies.get(value);
+    if (previous) {
+      return previous;
+    }
+    const result: AnyRecord = {};
+    copies.set(value, result);
+    for (const [key, child] of Object.entries(value)) {
+      if (key !== optimisticSnapshotKey && !isOptimisticFieldKey(key)) {
+        Object.defineProperty(result, key, { enumerable: true, get: () => copy(child) });
+      }
+    }
+    return Object.freeze(result);
+  };
+  return copy(client.store.read(id)) as Readonly<AnyRecord> | undefined;
+};
+
 /** @internal Serializable input to a live or restored mutation. */
 export type MutationCommand = {
   args?: AnyRecord;
@@ -445,12 +505,13 @@ export type MutationCommand = {
   invalidateRecords?: ReadonlyArray<EntityId>;
   key: string;
   optimistic?: AnyRecord;
+  optimisticUpdater?: true;
   plan?: SelectionPlan;
   remove?: ReadonlyArray<ResolvedRemoval>;
 };
 
 const validateMutationCommand = (command: MutationCommand, config: TypeConfig | undefined) => {
-  if (!config && (command.delete || command.optimistic)) {
+  if (!config && (command.delete || command.optimistic || command.optimisticUpdater)) {
     throw new Error(`fate: Value mutation '${command.key}' does not support entity updates.`);
   }
   if (config && command.delete && maybeGetId(config.getId, command.input) == null) {
@@ -463,7 +524,7 @@ export function prepareMutation(
   client: FateClient<any, any>,
   command: MutationCommand,
   config: TypeConfig | undefined,
-  durable = false,
+  options: { durable?: boolean; id?: string; updater?: RecordUpdater } = {},
 ) {
   const {
     args,
@@ -476,8 +537,16 @@ export function prepareMutation(
     plan,
     remove,
   } = command;
+  const { durable, id: mutationId } = options;
   const position = typeof insert === 'string' ? insert : 'none';
   validateMutationCommand(command, config);
+  const updater = command.optimisticUpdater ? client.getOptimisticUpdater(key) : options.updater;
+  if (command.optimisticUpdater && !updater) {
+    throw new Error(`fate: Mutation '${key}' has no registered optimistic updater.`);
+  }
+  if (updater && !config) {
+    throw new Error(`fate: Value mutation '${key}' does not support entity updates.`);
+  }
   if (!config) {
     const release = client.retainMutationTargets(command);
     let settle: ReturnType<typeof client.store.optimisticUpdate> | undefined;
@@ -513,6 +582,11 @@ export function prepareMutation(
     };
   }
   const id = maybeGetId(config.getId, input);
+  if (updater && (id == null || deleteRecord || insert !== 'none' || remove?.length)) {
+    throw new Error(
+      `fate: Optimistic updater for '${key}' requires an existing entity ID and cannot insert, remove, or delete records.`,
+    );
+  }
   const optimisticWithId = optimistic
     ? id != null
       ? { id, ...optimistic }
@@ -530,35 +604,97 @@ export function prepareMutation(
   const optimisticSelection = optimisticRecord
     ? collectImplicitSelectedPaths(optimisticRecord)
     : undefined;
-  const selection = new Set([...(plan?.paths ?? []), ...(optimisticSelection ?? [])]);
+  const calculatePatch = () => {
+    if (!updater || !optimisticEntityId || id == null) {
+      return;
+    }
+    const current = cachedOptimisticRecord(client, optimisticEntityId);
+    if (!current) {
+      return;
+    }
+    const updated = updater(current, input);
+    if (updated === undefined) {
+      return;
+    }
+    if (!isRecord(updated)) {
+      throw new Error(`fate: Optimistic updater for '${key}' must return a patch or undefined.`);
+    }
+    const patch: AnyRecord = {};
+    for (const [field, value] of Object.entries(updated)) {
+      if (field !== 'id' && field !== '__typename' && value !== undefined) {
+        setRecordValue(patch, field, value);
+      }
+    }
+    return Object.keys(patch).length ? patch : undefined;
+  };
+  const replayPatch = () => {
+    try {
+      return calculatePatch();
+    } catch {
+      // A replay with missing or incompatible data must leave the confirmed write intact.
+      return undefined;
+    }
+  };
+  let initialPatch = updater ? (durable ? replayPatch() : calculatePatch()) : undefined;
+  const selection = new Set([
+    ...(plan?.paths ?? []),
+    ...(optimisticSelection ?? []),
+    ...(!durable && initialPatch ? collectImplicitSelectedPaths(initialPatch) : []),
+  ]);
   const local = client.prepareClientMutation(key, input, selection, plan, args);
   const release = client.retainMutationTargets(command);
   let settle: ReturnType<typeof client.store.optimisticUpdate>;
+  let firstApply = true;
   try {
-    settle = client.store.optimisticUpdate(() => {
-      if (optimisticRecord && optimisticEntityId && optimisticRecordId != null) {
-        const paths = optimisticSelection ?? emptySet;
-        if (optimisticId == null) {
-          client.writeOptimistic(
-            entity,
-            optimisticRecordId,
-            optimisticRecord,
-            paths,
-            plan,
-            position,
-          );
-        } else {
-          client.write(entity, optimisticRecord, paths, plan, position);
+    settle = client.store.optimisticUpdate(
+      () => {
+        if (updater && id != null) {
+          const ignoreFailure = Boolean(durable) || !firstApply;
+          const patch = firstApply ? initialPatch : replayPatch();
+          initialPatch = undefined;
+          firstApply = false;
+          if (patch) {
+            client.store.applyOptimisticPatch(
+              () =>
+                client.writeOptimistic(
+                  entity,
+                  id,
+                  patch,
+                  collectImplicitSelectedPaths(patch),
+                  plan,
+                  'none',
+                  mutationId,
+                ),
+              ignoreFailure,
+            );
+          }
         }
-        if (!deleteRecord && typeof insert !== 'string') {
-          client.insertMutationTargets(optimisticEntityId, insert);
+        if (optimisticRecord && optimisticEntityId && optimisticRecordId != null) {
+          const paths = optimisticSelection ?? emptySet;
+          if (optimisticId == null) {
+            client.writeOptimistic(
+              entity,
+              optimisticRecordId,
+              optimisticRecord,
+              paths,
+              plan,
+              position,
+            );
+          } else {
+            client.write(entity, optimisticRecord, paths, plan, position);
+          }
+          if (!deleteRecord && typeof insert !== 'string') {
+            client.insertMutationTargets(optimisticEntityId, insert);
+          }
         }
-      }
-      if (deleteRecord && id != null) {
-        client.deleteRecord(entity, id);
-      }
-      client.removeMutationTargets(remove);
-    }, durable);
+        if (deleteRecord && id != null) {
+          client.deleteRecord(entity, id);
+        }
+        client.removeMutationTargets(remove);
+      },
+      durable,
+      Boolean(updater),
+    );
   } catch (error) {
     release();
     throw error;
@@ -570,9 +706,21 @@ export function prepareMutation(
           ? (apply: () => void) => client.store.transaction(apply)
           : (apply: () => void) => apply())(() =>
           settle(() => {
-            const snapshot =
-              result && typeof result === 'object' && (!deleteRecord || plan)
-                ? (result as AnyRecord)
+            const receipt =
+              result && typeof result === 'object' ? (result as AnyRecord) : undefined;
+            const snapshot = !deleteRecord || plan ? receipt : undefined;
+            const receiptRevision =
+              deleteRecord && !local && receipt
+                ? readOptimisticSnapshot(receipt)?.revision
+                : undefined;
+            const resultId =
+              receipt && (snapshot || receiptRevision !== undefined)
+                ? maybeGetId(config.getId, receipt)
+                : null;
+            const resultEntityId = resultId != null ? toEntityId(entity, resultId) : undefined;
+            const deletionRevision =
+              resultEntityId === undefined || resultEntityId === optimisticEntityId
+                ? receiptRevision
                 : undefined;
             if (snapshot && !local) {
               client.writeMutationResult(
@@ -586,23 +734,28 @@ export function prepareMutation(
             // Client results are action payloads; only explicit staged writes change the graph.
             // A returned snapshot can predate edits made while an async resolver was waiting.
             local?.commit();
-            if (snapshot) {
-              const resultId = maybeGetId(config.getId, snapshot);
-              if (!deleteRecord && resultId != null && typeof insert !== 'string') {
-                client.insertMutationTargets(toEntityId(entity, resultId), insert);
+            if (
+              id != null &&
+              deletionRevision !== undefined &&
+              !client.commitVersionedMutationDeletion(entity, id, deletionRevision)
+            ) {
+              return;
+            }
+            if (snapshot && resultEntityId !== undefined) {
+              if (!deleteRecord && !local && !client.canReferenceEntity(resultEntityId, snapshot)) {
+                return;
               }
-              if (optimisticEntityId && resultId != null) {
-                client.resolveOptimisticEntity(optimisticEntityId, toEntityId(entity, resultId));
+              if (!deleteRecord && typeof insert !== 'string') {
+                client.insertMutationTargets(resultEntityId, insert);
               }
-              if (
-                optimisticRecordId != null &&
-                resultId != null &&
-                optimisticRecordId !== resultId
-              ) {
+              if (optimisticEntityId) {
+                client.resolveOptimisticEntity(optimisticEntityId, resultEntityId);
+              }
+              if (optimisticRecordId != null && optimisticRecordId !== resultId) {
                 client.deleteRecord(entity, optimisticRecordId);
               }
             }
-            if (deleteRecord && id != null) {
+            if (deleteRecord && id != null && deletionRevision === undefined) {
               client.deleteRecord(entity, id);
             }
             client.removeMutationTargets(remove, true);
@@ -619,7 +772,7 @@ export function prepareMutation(
     execute: (identity?: MutationIdentity) =>
       local
         ? local.execute()
-        : client.executeMutation(key, input, selection, { args, identity, plan }),
+        : client.executeMutation(key, input, selection, { args, identity, mutationId, plan }),
     rollback: () => {
       try {
         local?.rollback();
@@ -654,6 +807,8 @@ export function wrapMutation<
     }: MutationOptions<I> = {} as MutationOptions<I>,
   ) =>
     createMutationResponse<MutationResult<I>>(async (persistence) => {
+      const updater = typeof optimistic === 'function' ? (optimistic as RecordUpdater) : undefined;
+      const entityResult = identifier.entity !== '__value__';
       const command: MutationCommand = {
         args,
         delete: deleteRecord,
@@ -662,7 +817,9 @@ export function wrapMutation<
         insert: client.resolveMutationInsertion(identifier.entity, insert),
         ...(invalidate && client.resolveMutationInvalidation(invalidate)),
         key: identifier.key,
-        optimistic: optimistic as AnyRecord | undefined,
+        optimistic:
+          updater || optimistic === true ? undefined : (optimistic as AnyRecord | undefined),
+        ...(optimistic === true && { optimisticUpdater: true }),
         plan: view
           ? getSelectionPlan(view, null)
           : select
@@ -671,6 +828,9 @@ export function wrapMutation<
         ...(remove && { remove: client.resolveMutationRemoval(remove) }),
       };
       validateMutationCommand(command, config);
+      if (command.optimisticUpdater && !client.getOptimisticUpdater(command.key)) {
+        throw new Error(`fate: Mutation '${command.key}' has no registered optimistic updater.`);
+      }
       // Durable admission can await restoration and disk writes before preparation
       // acquires its own pins. Keep the caller's targets alive throughout that gap.
       const release = client.persistence ? client.retainMutationTargets(command) : undefined;
@@ -681,11 +841,25 @@ export function wrapMutation<
           (persist ??
             (client.persistence !== undefined && client.supportsDurableMutations(identifier.key)))
         ) {
+          if (updater) {
+            throw new Error(
+              'fate: Inline optimistic updaters require persist: false or a registered mutation updater.',
+            );
+          }
+          if (command.optimisticUpdater && !command.plan) {
+            throw new Error('fate: A persistent optimistic updater requires a view or select.');
+          }
           try {
             const result = (await client.withPersistenceLifecycle(() =>
               client.persistMutation(command, persistence.resolve),
             )) as MutationResult<I>;
-            return { error: undefined, result };
+            return {
+              error: undefined,
+              result:
+                entityResult && client.hasOptimisticSnapshots
+                  ? withoutOptimisticSnapshot(result)
+                  : result,
+            };
           } catch (error) {
             return handleMutationError(identifier.key, error);
           }
@@ -700,7 +874,13 @@ export function wrapMutation<
         const run = async (commit: (apply: () => void) => void | Promise<void>) => {
           client.assertPersistenceActive();
           // Preparation failures reject directly, as they did before persistence.
-          const operation = prepareMutation(client, command, config);
+          const operation = prepareMutation(client, command, config, {
+            id:
+              !local && (updater || command.optimisticUpdater)
+                ? globalThis.crypto?.randomUUID?.()
+                : undefined,
+            updater,
+          });
           const performMutation = async () => {
             try {
               const execution = operation.execute();
@@ -714,7 +894,13 @@ export function wrapMutation<
               if (saved) {
                 await saved;
               }
-              return { error: undefined, result };
+              return {
+                error: undefined,
+                result:
+                  entityResult && client.hasOptimisticSnapshots && !local
+                    ? withoutOptimisticSnapshot(result)
+                    : result,
+              };
             } catch (error) {
               operation.rollback();
               return handleMutationError(identifier.key, error);

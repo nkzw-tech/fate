@@ -62,7 +62,7 @@ type ListResolver<Context, Args = Record<string, unknown> | undefined, Output = 
 ) => MaybePromise<ConnectionResult<Output>>;
 
 type MutationResolver<Context, Input = unknown, Output = unknown> = (
-  options: ResolverContext<Context, Input>,
+  options: ResolverContext<Context, Input> & { mutationId?: string },
 ) => MaybePromise<Output>;
 
 type QueryDefinition<Context, Args = Record<string, unknown> | undefined, Output = unknown> = {
@@ -421,6 +421,17 @@ const assertProtocolRequest = (value: unknown): FateProtocolRequest => {
     }
 
     if (
+      operation.mutationId !== undefined &&
+      (operation.kind !== 'mutation' ||
+        operation.mutation !== undefined ||
+        typeof operation.mutationId !== 'string' ||
+        operation.mutationId.length === 0 ||
+        operation.mutationId.length > 256)
+    ) {
+      throw new FateRequestError('BAD_REQUEST', 'Invalid mutation ID.');
+    }
+
+    if (
       operation.mutation !== undefined &&
       ((value.version !== 2 && value.version !== 3) ||
         operation.kind !== 'mutation' ||
@@ -535,7 +546,12 @@ const livePayload = (
   select?: ReadonlyArray<string>,
 ): FateLiveEvent =>
   event.type === 'delete' || data == null
-    ? { delete: true, id: event.id }
+    ? {
+        delete: true,
+        id: event.id,
+        ...(event.type === 'delete' &&
+          event.revision !== undefined && { revision: event.revision }),
+      }
     : {
         data,
         ...(select ? { select: [...select] } : undefined),
@@ -832,10 +848,12 @@ export function createFateServer<
         throw new FateRequestError('NOT_FOUND', `No mutation registered for '${operation.name}'.`);
       }
 
+      const mutationId = operation.mutation?.id ?? operation.mutationId;
       const resolve = async (context: Context) =>
         mutation.resolve({
           ctx: context,
           input: await parseInput(mutation.input, operation.input),
+          ...(mutationId && { mutationId }),
           select: operation.select,
         });
       if (operation.mutation && !idempotency) {

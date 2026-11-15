@@ -667,6 +667,12 @@ export type OptimisticUpdate<T> = {
   [K in keyof T]?: OptimisticUpdateValue<T[K]>;
 };
 
+/** Compute a patch from the cached fields of an existing entity. */
+export type OptimisticUpdater<T, I = never> = (
+  record: Readonly<Partial<T>>,
+  input: Readonly<I>,
+) => OptimisticUpdate<T> | undefined;
+
 /** Promise-like value returned by cache reads that already have a resolved payload for React `use`. */
 export interface FateThenable<T> extends PromiseLike<T> {
   status: 'fulfilled';

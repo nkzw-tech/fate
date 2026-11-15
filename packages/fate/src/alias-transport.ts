@@ -209,11 +209,19 @@ export const withAliasSupport = <M extends Record<string, MutationShape>>(
           )
       : undefined,
     mutate: transport.mutate
-      ? (name, input, select, selectionArgs) =>
+      ? (name, input, select, selectionArgs, context) =>
           mutation(select, input, selectionArgs, (fields, nextInput, nextSelectionArgs) =>
-            transport.separateMutationSelectionArgs
-              ? transport.mutate!(name, nextInput as never, fields, nextSelectionArgs)
-              : transport.mutate!(name, nextInput as never, fields),
+            context
+              ? transport.mutate!(
+                  name,
+                  nextInput as never,
+                  fields,
+                  transport.separateMutationSelectionArgs ? nextSelectionArgs : undefined,
+                  context,
+                )
+              : transport.separateMutationSelectionArgs
+                ? transport.mutate!(name, nextInput as never, fields, nextSelectionArgs)
+                : transport.mutate!(name, nextInput as never, fields),
           ) as never
       : undefined,
     mutateDurably: transport.mutateDurably

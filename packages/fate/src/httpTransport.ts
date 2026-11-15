@@ -87,6 +87,7 @@ type LiveEntityPayload = {
   changed?: ReadonlyArray<string>;
   data?: unknown;
   id?: string | number;
+  revision?: number;
   select?: ReadonlyArray<string>;
 };
 
@@ -495,10 +496,11 @@ export function createHTTPTransport<
       );
     },
     mixedLists,
-    mutate(name, input, select) {
+    mutate(name, input, select, _args, context) {
       return enqueue({
         input,
         kind: 'mutation',
+        ...(context && { mutationId: context.mutationId }),
         name,
         select: [...select],
       }) as Promise<Mutations[Extract<keyof Mutations, string>]['output']>;
@@ -768,7 +770,12 @@ export function createHTTPTransport<
 
         if ('delete' in message.event && message.event.delete) {
           if ('onDelete' in subscription.handlers) {
-            subscription.handlers.onDelete?.(message.event.id ?? subscription.targetId!);
+            const id = message.event.id ?? subscription.targetId!;
+            if (message.event.revision === undefined) {
+              subscription.handlers.onDelete?.(id);
+            } else {
+              subscription.handlers.onDelete?.(id, message.event.revision);
+            }
           }
           return;
         }
@@ -941,7 +948,11 @@ export function createHTTPTransport<
             }
             if (event.type === 'delete') {
               updates.reset();
-              handlers.onDelete?.(event.data.id ?? id);
+              if (event.data.revision === undefined) {
+                handlers.onDelete?.(event.data.id ?? id);
+              } else {
+                handlers.onDelete?.(event.data.id ?? id, event.data.revision);
+              }
               return;
             }
 

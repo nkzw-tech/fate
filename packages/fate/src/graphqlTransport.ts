@@ -1380,7 +1380,7 @@ export function createGraphQLTransport<
         variables,
       });
     },
-    mutate,
+    mutate: (name, input, select, args) => mutate(name, input, select, args),
     mutateDurably:
       mutateDurably ??
       (durableMutations?.length

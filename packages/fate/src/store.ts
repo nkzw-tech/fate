@@ -16,6 +16,16 @@ import {
   union,
 } from './mask.ts';
 import { getNodeRefId, isNodeRef } from './node-ref.ts';
+import {
+  isOptimisticFieldKey,
+  optimisticDeletionRevision,
+  optimisticFieldPath,
+  optimisticIncarnationFloor,
+  optimisticTombstone,
+  readOptimisticField,
+  reconcileOptimisticDeletion,
+  rememberOptimisticDeletion,
+} from './optimistic-snapshot.ts';
 import { isDate } from './record.ts';
 import {
   addIndexValue,
@@ -55,6 +65,7 @@ type OptimisticWrite = { partial: AnyRecord; paths: Set<string>; replacedPaths?:
 type OptimisticLayer = {
   apply: () => void;
   durable?: boolean;
+  recompute?: boolean;
   settled?: boolean;
   writes: Map<EntityId, OptimisticWrite>;
 };
@@ -62,6 +73,11 @@ type OptimisticLayer = {
 type Snapshots = {
   lists: Map<string, List | undefined>;
   records: Map<EntityId, Snapshot>;
+};
+
+type OptimisticSavepoint = Snapshots & {
+  newBaseLists: Set<string>;
+  newBaseRecords: Set<EntityId>;
 };
 
 export type StorePreview = {
@@ -198,20 +214,75 @@ const collectRecordPatchPaths = (
   }
 };
 
-export const mergePreservingExisting = (incoming: unknown, existing: unknown): unknown => {
-  if (!isPlainRecord(incoming) || !isPlainRecord(existing)) {
-    return existing;
+const retainsExistingPath = (record: AnyRecord, path: string) => {
+  let value: unknown = record;
+  for (const field of path.split('.')) {
+    if (!isPlainRecord(value)) {
+      // An existing scalar, array, or reference replaces the entire incoming subtree.
+      return true;
+    }
+    if (!Object.hasOwn(value, field)) {
+      return false;
+    }
+    value = value[field];
   }
+  return true;
+};
 
+const omitRestoredPath = (record: AnyRecord, path: string) => {
+  const dot = path.indexOf('.');
+  if (dot === -1) {
+    delete record[path];
+    return;
+  }
+  const field = path.slice(0, dot);
+  const value = record[field];
+  if (Object.hasOwn(record, field) && isPlainRecord(value)) {
+    const next = { ...value };
+    omitRestoredPath(next, path.slice(dot + 1));
+    record[field] = next;
+  }
+};
+
+const mergeHydrationRecords = (
+  incoming: AnyRecord,
+  existing: AnyRecord,
+  hasFieldMetadata = false,
+): AnyRecord => {
   const result: AnyRecord = Object.create(null);
   for (const [key, value] of Object.entries(incoming)) {
+    if (hasFieldMetadata && isOptimisticFieldKey(key)) {
+      const path = optimisticFieldPath(key);
+      if (readOptimisticField(existing, path) || retainsExistingPath(existing, path)) {
+        continue;
+      }
+    }
     result[key] = value;
   }
   for (const [key, value] of Object.entries(existing)) {
-    result[key] = Object.hasOwn(result, key) ? mergePreservingExisting(result[key], value) : value;
+    if (hasFieldMetadata && isOptimisticFieldKey(key)) {
+      const path = optimisticFieldPath(key);
+      if (!retainsExistingPath(existing, path)) {
+        // Older snapshots may have a revision for an omitted field without an own value.
+        omitRestoredPath(result, path);
+      }
+      result[key] = value;
+      continue;
+    }
+    const previous = result[key];
+    result[key] =
+      isPlainRecord(previous) && isPlainRecord(value)
+        ? mergeHydrationRecords(previous, value)
+        : value;
   }
   return result;
 };
+
+/** Keep each field's snapshot metadata with the value selected by the merge. */
+export const mergePreservingExisting = (incoming: AnyRecord, existing: AnyRecord): AnyRecord =>
+  isPlainRecord(incoming) && isPlainRecord(existing)
+    ? mergeHydrationRecords(incoming, existing, true)
+    : existing;
 
 export const areHydrationValuesEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) {
@@ -307,6 +378,7 @@ export class Store {
   private recordReferenceFields = new Map<EntityId, ReferenceIndex>();
   private recordReferencesByTarget = new Map<EntityId, ReferenceIndex>();
   private records = new Map<EntityId, AnyRecord>();
+  private hasVersionedDeletions = false;
   private subscriptions: Subscriptions = new Map();
   // Only retain deletion state while there are readers who may still hold a snapshot.
   private readonly deletedRecords = new Set<EntityId>();
@@ -316,6 +388,7 @@ export class Store {
   private readonly optimisticBase: Snapshots = { lists: new Map(), records: new Map() };
   private recordingLayer: OptimisticLayer | undefined;
   private rebase: Snapshots | undefined;
+  private optimisticSavepoint: OptimisticSavepoint | undefined;
 
   constructor(
     private readonly onRebase?: (ids: ReadonlySet<EntityId>, lists: ReadonlySet<string>) => void,
@@ -633,8 +706,12 @@ export class Store {
   }
 
   /** Returns an idempotent settlement function; omit its update to roll back. */
-  optimisticUpdate(apply: () => void, durable = false): (commit?: () => void) => void {
-    const layer: OptimisticLayer = { apply, durable, writes: new Map() };
+  optimisticUpdate(
+    apply: () => void,
+    durable = false,
+    recompute = false,
+  ): (commit?: () => void) => void {
+    const layer: OptimisticLayer = { apply, durable, recompute, writes: new Map() };
     const settle = (commit?: () => void) => {
       if (!this.optimisticLayers.has(layer) || layer.settled) {
         return;
@@ -643,9 +720,10 @@ export class Store {
         // A newer completed mutation must not reveal an older pending value.
         // Keep only its overlapping optimistic fields visible until those older
         // operations finish; its complete server response still enters the base.
-        const overlays = commit
-          ? this.getPendingOverlap(layer, layer.writes)
-          : new Map<EntityId, OptimisticWrite>();
+        const overlays =
+          commit && !recompute
+            ? this.getPendingOverlap(layer, layer.writes)
+            : new Map<EntityId, OptimisticWrite>();
         if (overlays.size > 0) {
           layer.settled = true;
           layer.apply = () => {
@@ -687,7 +765,7 @@ export class Store {
       if (pending === layer) {
         break;
       }
-      if (!pending.settled) {
+      if (!pending.settled && !pending.recompute) {
         earlier.push(pending);
       }
     }
@@ -721,6 +799,40 @@ export class Store {
     return overlaps;
   }
 
+  /** Apply a computed patch without leaving partial writes if normalization fails. */
+  applyOptimisticPatch(apply: () => void, ignoreFailure: boolean) {
+    const savepoint: OptimisticSavepoint = {
+      lists: new Map(),
+      newBaseLists: new Set(),
+      newBaseRecords: new Set(),
+      records: new Map(),
+    };
+    this.optimisticSavepoint = savepoint;
+    try {
+      apply();
+    } catch (error) {
+      this.optimisticSavepoint = undefined;
+      for (const [id, snapshot] of savepoint.records) {
+        this.restore(id, snapshot);
+      }
+      for (const [key, list] of savepoint.lists) {
+        this.writeList(key, list, undefined, false);
+      }
+      for (const id of savepoint.newBaseRecords) {
+        this.optimisticBase.records.delete(id);
+      }
+      for (const key of savepoint.newBaseLists) {
+        this.optimisticBase.lists.delete(key);
+      }
+      this.recordingLayer?.writes.clear();
+      if (!ignoreFailure) {
+        throw error;
+      }
+    } finally {
+      this.optimisticSavepoint = undefined;
+    }
+  }
+
   private captureTransactionRecord(id: EntityId) {
     if (this.transactionSnapshots && !this.transactionSnapshots.records.has(id)) {
       const mask = this.coverage.get(id);
@@ -741,7 +853,11 @@ export class Store {
     if (!this.rebase) {
       return;
     }
-    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase]) {
+    const savepoint = this.optimisticSavepoint;
+    if (savepoint && !this.optimisticBase.records.has(id)) {
+      savepoint.newBaseRecords.add(id);
+    }
+    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase, savepoint]) {
       if (target && !target.records.has(id)) {
         const mask = this.coverage.get(id);
         target.records.set(id, {
@@ -761,7 +877,11 @@ export class Store {
     if (!this.rebase) {
       return;
     }
-    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase]) {
+    const savepoint = this.optimisticSavepoint;
+    if (savepoint && !this.optimisticBase.lists.has(key)) {
+      savepoint.newBaseLists.add(key);
+    }
+    for (const target of [this.rebase, this.recordingLayer && this.optimisticBase, savepoint]) {
       if (target && !target.lists.has(key)) {
         target.lists.set(key, this.lists.get(key));
       }
@@ -836,12 +956,15 @@ export class Store {
   }
 
   /** @internal Read one confirmed record without copying the cache. */
-  readConfirmed(id: EntityId) {
+  readConfirmed(id: EntityId, includeDeleted = false) {
     const snapshot = this.optimisticBase.records.get(id);
     const record = snapshot ? snapshot.record : this.records.get(id);
     const mask = snapshot ? snapshot.mask : this.coverage.get(id);
     const stale = this.stalePaths.get(id);
-    return record
+    return record &&
+      (includeDeleted ||
+        !this.hasVersionedDeletions ||
+        optimisticDeletionRevision(record) === undefined)
       ? { paths: mask ? toPaths(mask) : [], record, ...(stale && { stale }) }
       : undefined;
   }
@@ -849,7 +972,10 @@ export class Store {
   /** @internal Read confirmed data without allocating coverage paths or a snapshot wrapper. */
   confirmedRecord(id: EntityId) {
     const snapshot = this.optimisticBase.records.get(id);
-    return snapshot ? snapshot.record : this.records.get(id);
+    const record = snapshot ? snapshot.record : this.records.get(id);
+    return this.hasVersionedDeletions && optimisticDeletionRevision(record) !== undefined
+      ? undefined
+      : record;
   }
 
   /** @internal */
@@ -925,12 +1051,20 @@ export class Store {
       const previous = records.get(id);
       const next =
         previous && mode === 'preserve-existing' && !options.initialRecords?.has(previous)
-          ? (mergePreservingExisting(incoming, previous) as AnyRecord)
+          ? (reconcileOptimisticDeletion(previous, incoming) ??
+            mergePreservingExisting(incoming, previous))
           : incoming;
       records.set(id, previous && areHydrationValuesEqual(previous, next) ? previous : next);
+      if (optimisticDeletionRevision(next) !== undefined) {
+        this.enableVersionedDeletions();
+        coverage.delete(id);
+      }
     }
 
     for (const [id, paths] of state.coverage) {
+      if (this.hasVersionedDeletions && optimisticDeletionRevision(records.get(id)) !== undefined) {
+        continue;
+      }
       const incoming = fromPaths(paths);
       const previous = coverage.get(id);
       if (
@@ -966,6 +1100,13 @@ export class Store {
     this.lists = lists;
     this.records = records;
     this.rebuildIndexes();
+    const deleted = new Set<EntityId>();
+    for (const [id, record] of records) {
+      if (optimisticDeletionRevision(record) !== undefined) {
+        deleted.add(id);
+      }
+    }
+    this.removeReferencesToMany(deleted);
 
     const changedRecordIds = new Set<EntityId>();
     const changedRecordReferences = new Set<EntityId>();
@@ -1020,9 +1161,33 @@ export class Store {
     return this.records.get(id);
   }
 
+  private readWithoutVersionedDeletions(id: EntityId) {
+    const record = this.records.get(id);
+    return optimisticDeletionRevision(record) === undefined ? record : undefined;
+  }
+
+  private enableVersionedDeletions() {
+    if (!this.hasVersionedDeletions) {
+      this.hasVersionedDeletions = true;
+      this.read = this.readWithoutVersionedDeletions;
+    }
+  }
+
+  /** @internal The last known revision of a deleted incarnation. */
+  deletionRevision(id: EntityId) {
+    return this.hasVersionedDeletions
+      ? optimisticDeletionRevision(this.records.get(id))
+      : undefined;
+  }
+
+  /** @internal Retain the previous deletion's revision after an ID is recreated. */
+  incarnationFloor(id: EntityId) {
+    return optimisticIncarnationFloor(this.records.get(id));
+  }
+
   /** @internal Distinguish a deleted record from an ordinary cache miss for active readers. */
   isRecordDeleted(id: EntityId) {
-    return this.deletedRecords.has(id);
+    return this.deletedRecords.has(id) || this.deletionRevision(id) !== undefined;
   }
 
   private restoreRecordDeletion(id: EntityId, deleted: boolean) {
@@ -1083,6 +1248,11 @@ export class Store {
   } | null {
     this.captureRecord(id);
     this.deletedRecords.delete(id);
+    const stored = this.records.get(id);
+    const deletion = this.hasVersionedDeletions ? optimisticDeletionRevision(stored) : undefined;
+    if (deletion !== undefined) {
+      partial = rememberOptimisticDeletion(partial, deletion);
+    }
     const selectedPaths = this.recordingLayer ? new Set(paths) : paths;
     const selection = isCoverageSelection(selectedPaths) ? selectedPaths : undefined;
     if (this.recordingLayer) {
@@ -1099,7 +1269,7 @@ export class Store {
       }
       this.recordingLayer.writes.set(id, write);
     }
-    const previous = this.records.get(id);
+    const previous = deletion === undefined ? stored : undefined;
     const changedPaths = new Set<string>();
 
     let mask = this.coverage.get(id);
@@ -1194,14 +1364,19 @@ export class Store {
     }
   }
 
-  deleteRecord(id: EntityId) {
+  deleteRecord(id: EntityId, revision?: number) {
     return this.update(() => {
       this.captureRecord(id);
       const record = this.records.get(id);
       if (record) {
         this.removeRecordReferenceIndexes(id, record);
       }
-      this.records.delete(id);
+      if (revision === undefined) {
+        this.records.delete(id);
+      } else {
+        this.enableVersionedDeletions();
+        this.records.set(id, optimisticTombstone(revision));
+      }
       this.coverage.delete(id);
       this.restoreRecordDeletion(id, true);
       if (!this.recordingLayer) {
@@ -1438,6 +1613,7 @@ export class Store {
     state: List | undefined,
     owner = parseListKey(key),
     confirmed = true,
+    notify = true,
   ) {
     this.captureList(key);
     const previous = this.lists.get(key);
@@ -1460,7 +1636,9 @@ export class Store {
     } else {
       this.lists.delete(key);
     }
-    this.notifyListSubscribers(key, confirmed, previous, owner);
+    if (notify) {
+      this.notifyListSubscribers(key, confirmed, previous, owner);
+    }
   }
 
   replaceListEntityId(previousId: EntityId, nextId: EntityId) {
@@ -1660,8 +1838,43 @@ export class Store {
     return this.removeReferencesToMany(new Set([targetId]), viewDataCache);
   }
 
+  /** Drop references restored from disk to entities already known to be deleted. */
+  removeRestoredReferencesToDeletions(
+    state: Pick<StoreHydrationState, 'lists' | 'records'>,
+    viewDataCache: ViewDataCache,
+  ) {
+    if (!this.hasVersionedDeletions) {
+      return;
+    }
+    const deleted = new Set<EntityId>();
+    const mark = (id: EntityId) => {
+      if (this.deletionRevision(id) !== undefined) {
+        deleted.add(id);
+      }
+    };
+    for (const [id] of state.records) {
+      for (const ids of this.recordReferenceFields.get(id)?.values() ?? []) {
+        for (const target of indexValues(ids)) {
+          mark(target);
+        }
+      }
+    }
+    for (const [key] of state.lists) {
+      const list = this.lists.get(key);
+      if (list) {
+        for (const target of this.getListReferencedEntityIds(list)) {
+          mark(target);
+        }
+      }
+    }
+    this.removeReferencesToMany(deleted, viewDataCache);
+  }
+
   /** Remove a batch of targets with one rewrite per affected list and owner. */
-  removeReferencesToMany(targetIds: ReadonlySet<EntityId>, viewDataCache: ViewDataCache) {
+  removeReferencesToMany(targetIds: ReadonlySet<EntityId>, viewDataCache?: ViewDataCache) {
+    if (targetIds.size === 0) {
+      return;
+    }
     return this.update(() => {
       const listKeys = new Set<string>();
       const recordEntries = new Map<EntityId, Set<string>>();
@@ -1702,7 +1915,7 @@ export class Store {
           }
         }
 
-        this.setList(key, {
+        const next: List = {
           acknowledgedInsertions: list.acknowledgedInsertions?.filter((id) => !targetIds.has(id)),
           afterCursor: list.afterCursor,
           backwardPageLimit: list.backwardPageLimit,
@@ -1720,7 +1933,12 @@ export class Store {
           stale: list.stale,
           unloaded: list.unloaded,
           windows: list.windows,
-        });
+        };
+        if (viewDataCache) {
+          this.setList(key, next);
+        } else {
+          this.writeList(key, next, undefined, false, false);
+        }
       }
 
       const ids = new Map<EntityId, Set<string>>();
@@ -1758,13 +1976,15 @@ export class Store {
           continue;
         }
 
-        viewDataCache.invalidate(id);
+        viewDataCache?.invalidate(id);
         this.mergeInternal(id, next, paths);
         ids.set(id, paths);
       }
 
-      for (const [id, paths] of ids) {
-        this.notify(id, paths, true, true);
+      if (viewDataCache) {
+        for (const [id, paths] of ids) {
+          this.notify(id, paths, true, true);
+        }
       }
     });
   }
