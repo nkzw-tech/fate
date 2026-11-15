@@ -286,6 +286,18 @@ const areListIdsEqual = (
   (left?.length === right?.length && !!left && left.every((id, index) => id === right?.[index]));
 
 export class Store {
+  private collectionRevision = 0;
+
+  /** @internal Changes on writes and on subscription changes that can pin field variants. */
+  get gcRevision() {
+    return this.collectionRevision;
+  }
+
+  /** @internal GC inside a transaction cannot cache an intermediate state. */
+  get isInTransaction() {
+    return this.transactionSnapshots !== undefined;
+  }
+
   private coverage = new Map<EntityId, FieldMask>();
   private readonly stalePaths = new Map<EntityId, ReadonlyArray<string>>();
   private readonly sharedCoverage = new WeakMap<FieldMask, ReadonlyArray<string>>();
@@ -723,6 +735,7 @@ export class Store {
   }
 
   private captureRecord(id: EntityId) {
+    this.collectionRevision++;
     this.captureTransactionRecord(id);
 
     if (!this.rebase) {
@@ -741,6 +754,7 @@ export class Store {
   }
 
   private captureList(key: string) {
+    this.collectionRevision++;
     if (this.transactionSnapshots && !this.transactionSnapshots.lists.has(key)) {
       this.transactionSnapshots.lists.set(key, this.lists.get(key));
     }
@@ -895,6 +909,7 @@ export class Store {
     mode: 'preserve-existing' | 'replace',
     options: { deferNotifications?: boolean; initialRecords?: WeakSet<AnyRecord> } = {},
   ) {
+    this.collectionRevision++;
     const previousCoverage = this.coverage;
     const previousLists = this.lists;
     const previousRecords = this.records;
@@ -1286,6 +1301,7 @@ export class Store {
 
     const subscription: Subscription = { fn, mask };
     subscribers.add(subscription);
+    this.collectionRevision++;
 
     return () => {
       const set = this.subscriptions.get(id);
@@ -1294,6 +1310,7 @@ export class Store {
       }
 
       set.delete(subscription);
+      this.collectionRevision++;
       if (set.size === 0) {
         this.subscriptions.delete(id);
         this.deletedRecords.delete(id);
@@ -1542,6 +1559,7 @@ export class Store {
 
   /** Eviction is a cache miss, so it must not be persisted as a server write. */
   collectRecordFields(id: EntityId, fields: ReadonlySet<string>) {
+    this.collectionRevision++;
     const previous = this.records.get(id)!;
     const record = { ...previous };
     const mask = this.coverage.get(id);
@@ -1572,7 +1590,9 @@ export class Store {
     markedRecords: ReadonlySet<EntityId>,
     markedLists: ReadonlySet<string>,
     options: { onRecordDeleted?: (id: EntityId, record: AnyRecord | undefined) => void } = {},
-  ): { lists: Set<string>; records: Set<EntityId> } {
+  ): { interrupted: boolean; lists: Set<string>; records: Set<EntityId> } {
+    this.collectionRevision++;
+    const revision = this.collectionRevision;
     const records = new Set<EntityId>();
     const lists = new Set<string>();
 
@@ -1607,7 +1627,9 @@ export class Store {
       this.update(() => this.writeList(key, undefined, undefined, false));
     }
 
-    return { lists, records };
+    // Each removed list captures once. Any additional mutation came from a
+    // callback during collection and may have added records after the mark pass.
+    return { interrupted: this.collectionRevision !== revision + lists.size, lists, records };
   }
 
   subscribeList(key: string, fn: () => void): () => void {
@@ -1618,6 +1640,7 @@ export class Store {
     }
 
     set.add(fn);
+    this.collectionRevision++;
 
     return () => {
       const subscribers = this.listSubscriptions.get(key);
@@ -1626,6 +1649,7 @@ export class Store {
       }
 
       subscribers.delete(fn);
+      this.collectionRevision++;
       if (subscribers.size === 0) {
         this.listSubscriptions.delete(key);
       }

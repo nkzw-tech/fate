@@ -160,6 +160,7 @@ async function optimistic() {
 }
 
 async function lifetimes() {
+  const observers: Array<WeakRef<object>> = [];
   const clients: Array<WeakRef<object>> = [];
   const run = async () => {
     const fixture = createClientStateFixture(1000);
@@ -167,6 +168,19 @@ async function lifetimes() {
     fixture.seed(client);
     await client.readView(fixture.graphView, client.ref('State', 'main', fixture.graphView));
     await client.readView(fixture.computedView, client.ref('State', 'main', fixture.computedView));
+    const subscriptions = Array.from({ length: 10 }, () => {
+      const observer = client.observeRequest(
+        { state: { view: fixture.graphView } },
+        { mode: 'cache-only' },
+      );
+      observers.push(new WeakRef(observer));
+      return observer.subscribe(() => observer.getSnapshot());
+    });
+    client.write('Item', { id: '0', title: 'Observed edit' }, new Set(['title']));
+    await setImmediate();
+    subscriptions.forEach((unsubscribe) => unsubscribe());
+    client.gc();
+    client.gc();
     clients.push(new WeakRef(client));
   };
   for (let i = 0; i < 20; i++) {
@@ -182,8 +196,10 @@ async function lifetimes() {
     checkpoints.push(await memory());
   }
   const liveClients = clients.filter((value) => value.deref()).length;
+  const liveObservers = observers.filter((value) => value.deref()).length;
   assert.equal(liveClients, 0);
-  return { checkpoints, liveClients, operations: clients.length };
+  assert.equal(liveObservers, 0);
+  return { checkpoints, liveClients, liveObservers, operations: clients.length };
 }
 const initial = await memory();
 const graphResult = await graph(10_000, false);

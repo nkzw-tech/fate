@@ -133,10 +133,47 @@ async function deletions() {
   return results;
 }
 
+async function garbageCollection() {
+  const results = [];
+  for (const rows of [1000, 10_000, 50_000]) {
+    const { make, seed } = createClientStateFixture(rows);
+    const client = make();
+    seed(client);
+    client.gc();
+    // Batch fast no-op calls so timing is not dominated by clock resolution.
+    const batchTimes: Array<number> = [];
+    const callsPerSample = 100;
+    for (let sample = 0; sample < 7; sample++) {
+      const start = performance.now();
+      for (let call = 0; call < callsPerSample; call++) {
+        client.gc();
+      }
+      if (sample >= 2) {
+        batchTimes.push(performance.now() - start);
+      }
+    }
+    batchTimes.sort((a, b) => a - b);
+    const unchanged = {
+      callsPerSample,
+      medianBatchMs: batchTimes[2],
+      medianMs: batchTimes[2] / callsPerSample,
+    };
+    let version = 0;
+    const afterWrite = await measure(() => {
+      client.write('Item', { id: '0', title: `GC ${++version}` }, new Set(['title']));
+      client.gc();
+    });
+    assert.ok(client.store.read(`Item:${rows - 1}`));
+    results.push({ afterWrite, rows, unchanged });
+  }
+  return results;
+}
+
 console.log(
   JSON.stringify({
     completeness: await completeness(),
     deletions: await deletions(),
+    garbageCollection: await garbageCollection(),
     observers: await observers(),
     samples,
   }),

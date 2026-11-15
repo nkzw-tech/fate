@@ -941,6 +941,8 @@ export class FateClient<
   >();
   private readonly stalledRequests = new Set<string>();
   private readonly renderReadErrors = new RenderReadErrors();
+  private collectionRootRevision = 0;
+  private lastCollection?: { requests: number; retained: number; roots: number; store: number };
   private gcPending = false;
   private gcScheduled = false;
   private pendingNetworkRequests = 0;
@@ -1128,6 +1130,7 @@ export class FateClient<
         throw new Error(`fate: Root '${name}' already exists.`);
       }
     }
+    this.collectionRootRevision++;
     this.clientState.install(schema, this.types);
     this.hydrationScope = `${this.hydrationScope}|client:${hashArgs({
       roots: Object.fromEntries(
@@ -1604,6 +1607,7 @@ export class FateClient<
 
   /** @internal */
   restoreClientState(state: ClientStateSnapshot, changes: ClientStateSnapshot) {
+    this.collectionRootRevision++;
     this.clientState.savedRecords = state.records;
     this.clientState.savedReferences = state.references;
     if (!changes.records.size && !changes.lists.size) {
@@ -2539,6 +2543,7 @@ export class FateClient<
     }
     const reference = new WeakRef(ref);
     refs.set(key, reference);
+    this.collectionRootRevision++;
     this.collectedRefs.register(ref, { entityId, key, reference });
     return ref;
   }
@@ -2856,6 +2861,7 @@ export class FateClient<
     if (!(plan.args.size || plan.deferred?.length)) {
       return plan;
     }
+    this.collectionRootRevision++;
     if (retentionKey !== undefined) {
       let evaluated = this.boundDeferredPlans.get(owner);
       if (!evaluated) {
@@ -4832,11 +4838,36 @@ export class FateClient<
         ? this.store.hasTransientOptimisticUpdates
         : this.hasActiveOptimisticUpdates()
     ) {
+      this.lastCollection = undefined;
       this.gcPending = true;
       return;
     }
 
     this.gcPending = false;
+    const reusable = () =>
+      !this.store.hasOptimisticUpdates &&
+      !this.store.isInTransaction &&
+      !this.store.isPreviewing &&
+      !this.mutationRecords.size &&
+      !this.mutationLists.size &&
+      !this.pendingNetworkRequests &&
+      !this.pendingRequestHandles &&
+      !this.optimisticEntityResolutions.size;
+    const previous = this.lastCollection;
+    if (
+      previous &&
+      reusable() &&
+      previous.store === this.store.gcRevision &&
+      previous.requests === this.requestRevision &&
+      previous.retained === this.operationLifetime.revision &&
+      previous.roots === this.collectionRootRevision
+    ) {
+      return;
+    }
+    this.lastCollection = undefined;
+    const requestsBefore = this.requestRevision;
+    const retainedBefore = this.operationLifetime.revision;
+    const rootsBefore = this.collectionRootRevision;
 
     const retainedRequests = new Map(
       this.operationLifetime.getDescriptors().map((descriptor) => [descriptor.key, descriptor]),
@@ -5205,6 +5236,22 @@ export class FateClient<
           this.rootLists.delete(type);
         }
       }
+    }
+    // Collection increments requestRevision once itself. A callback that writes,
+    // retains or creates refs during the sweep requires another complete pass.
+    if (
+      !swept.interrupted &&
+      reusable() &&
+      this.requestRevision === requestsBefore + 1 &&
+      this.operationLifetime.revision === retainedBefore &&
+      this.collectionRootRevision === rootsBefore
+    ) {
+      this.lastCollection = {
+        requests: this.requestRevision,
+        retained: this.operationLifetime.revision,
+        roots: this.collectionRootRevision,
+        store: this.store.gcRevision,
+      };
     }
   }
 

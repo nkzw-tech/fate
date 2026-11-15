@@ -19,6 +19,46 @@ const createGCClient = (
 
 const flushGarbageCollection = () => Promise.resolve();
 
+test('repeated GC observes new writes, silent hydration and changed retention roots', () => {
+  const selected = view<{
+    __typename: 'User';
+    friend: { __typename: 'User'; name: string };
+    name: string;
+  }>()({ friend: { name: true }, name: true });
+  const client = createClient({
+    gcReleaseBufferSize: 0,
+    roots: { user: clientRoot('User') },
+    types: [{ fields: { friend: { type: 'User' } }, type: 'User' }],
+  });
+  client.write(
+    'User',
+    { friend: { id: '2', name: 'Two' }, id: '1', name: 'One' },
+    new Set(['name', 'friend.name']),
+  );
+  const retained = client.retain({ user: { id: '1', view: selected } });
+  client.gc();
+  client.gc();
+  client.write('User', { friend: { id: '3', name: 'Three' }, id: '1' }, new Set(['friend.name']));
+  client.gc();
+  expect(client.store.read('User:2')).toBeUndefined();
+  expect(client.store.read('User:3')?.name).toBe('Three');
+  client.gc();
+  client.store.hydrate(
+    {
+      coverage: [['User:orphan', ['name']]],
+      lists: [],
+      records: [['User:orphan', { name: 'Orphan' }]],
+    },
+    'preserve-existing',
+    { deferNotifications: true },
+  );
+  client.gc();
+  expect(client.store.read('User:orphan')).toBeUndefined();
+  retained.dispose();
+  client.gc();
+  expect([...client.store.recordIds()]).toEqual([]);
+});
+
 test('gc collects released argument variants on a retained entity', async () => {
   type Post = { __typename: 'Post'; id: string; title: string };
   type User = {
@@ -755,3 +795,24 @@ for (const reuseId of [false, true]) {
     expect(fetchById).toHaveBeenCalledWith('User', [finalId], new Set(['name']), undefined);
   });
 }
+
+test('GC does not cache a sweep interrupted by silent hydration from a subscriber', () => {
+  const client = createClient({ types: [{ type: 'User' }] });
+  client.store.setList('unused', { ids: [] });
+  const stop = client.store.subscribeList('unused', () => {
+    client.store.hydrate(
+      {
+        coverage: [['User:orphan', ['name']]],
+        lists: [],
+        records: [['User:orphan', { name: 'Orphan' }]],
+      },
+      'preserve-existing',
+      { deferNotifications: true },
+    );
+  });
+  client.gc();
+  expect(client.store.read('User:orphan')).toBeDefined();
+  client.gc();
+  expect(client.store.read('User:orphan')).toBeUndefined();
+  stop();
+});

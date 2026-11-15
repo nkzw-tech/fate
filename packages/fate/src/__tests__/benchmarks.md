@@ -557,8 +557,8 @@ request (cache-only and the result observer used by React). Against `8bb7034`,
 cache-only observers took 87.79 → 3.17 ms median (27.70x faster).
 The result-observer variant took 55.225 → 0.004 ms.
 Dependency sets and revision-scoped completeness checks are shared only while
-readers are subscribed. Scalar edits preserve dependency topology; list changes,
-reference changes and rebases rebuild it. Snapshot reads are included; React
+readers are subscribed. Scalar edits preserve fixed-request dependency topology; list changes,
+reference changes, dynamic client queries and rebases rebuild it. Snapshot reads are included; React
 rendering is not.
 
 ## Batched client-record deletion
@@ -566,7 +566,7 @@ rendering is not.
 The core scaling runner measures a real client mutation deleting all records
 from a related list. Seeding is excluded; staging, committing, cleanup and
 completion are included. Seven fresh clients per size, discard the first two,
-report the median of five. Against `1048f21` on Node v26.13.1, 3,000 deletes
+report the median of five. Against `d9fa3bc` on Node v26.13.1, 3,000 deletes
 took 969.11 → 2.82 ms (343.38x faster). Consecutive staged deletions
 and persisted remote deletion batches share reference cleanup. An intervening
 write flushes the batch to preserve delete/recreate ordering. Individual
@@ -576,7 +576,7 @@ low-level `deleteRecord` calls retain their synchronous semantics.
 
 The browser cache runner now reports restore and subsequent flush separately,
 including node writes. Run `node scripts/benchmark-cache-performance.mjs chromium 7 /tmp/cache.json`
-with and without `FATE_BENCH_BASELINE=8b26975`. For 1,000 IDs, seven measured
+with and without `FATE_BENCH_BASELINE=4440084`. For 1,000 IDs, seven measured
 restores after a warmup: subsequent flush 297.50 → 2.30 ms median
 (129.35x faster), node writes 1,000 → 0. These are asynchronous elapsed
 times on real IndexedDB, not continuous main-thread blocking. The fast path
@@ -584,3 +584,59 @@ requires the exact fresh root, the same TTL, and no pending/recovery node update
 It refreshes LRU metadata even when the request was served directly from memory.
 Policy changes, legacy migration, overlapping new requests and cache misses
 retain the existing collection/save path.
+
+## Repeated garbage collection and final regression review
+
+The core scaling runner measures 100 unchanged GC calls per sample (two warmup
+batches, five measured batches) and reports both batch and per-call times.
+Against `272da84`, the 50,000-record graph took 2382.454 → 0.001333 ms
+per batch. The headline conservatively reports 23.82 → <0.001 ms per call
+and >23,000x faster; a hot, inlined no-op is too small to advertise the exact
+ratio as a general application speedup. A write still invalidates collection:
+write plus GC was 23.69 → 23.86 ms. This change does not time-slice
+the first full scan or change the synchronous public GC contract.
+
+The reuse token contains only four revision numbers. Writes, subscription
+changes, hydration, retained operations, client-state roots and deferred plans
+invalidate it. Transactions, pending requests and optimistic/mutation roots
+disable reuse. Reentrant writes during the sweep also invalidate it.
+
+Final control runs against `969a0b6`, Node v26.13.1 and Chromium 158.0.8127.18:
+
+| Control workload                                             |       Before |        After |
+| ------------------------------------------------------------ | -----------: | -----------: |
+| 10,000-row graph edit/read, Node median                      |      8.18 ms |      5.65 ms |
+| 10,000-row computed edit/read, Node median                   |      5.67 ms |      4.60 ms |
+| 1,000-record response with 50 optimistic layers, Node median |      1.16 ms |      1.12 ms |
+| 1,000-row React bulk update, Chromium median / p95           | 2.9 / 6.1 ms | 2.1 / 3.0 ms |
+| React parent update through commit, Chromium median          |       1.9 ms |       1.9 ms |
+
+The memory runner now exercises ten observers per client and repeated GC during
+120 client lifetimes. Run the same fixture against `969a0b6` and the new runtime
+with `scripts/benchmark-memory.mjs node` and `chromium`. No memory measurements
+are taken concurrently with timing measurements.
+
+| Memory checkpoint                                     |     Before |      After |
+| ----------------------------------------------------- | ---------: | ---------: |
+| Node graph heap, 10,000 live rows                     |  17.10 MiB |  17.10 MiB |
+| Node computed heap, 10,000 live rows                  |  16.54 MiB |  16.54 MiB |
+| Node heap after all clients released                  |   6.20 MiB |   6.22 MiB |
+| Node maximum sampled RSS, ordinary workloads          | 254.13 MiB | 240.68 MiB |
+| Node maximum sampled RSS, deliberate allocation burst | 630.88 MiB | 638.18 MiB |
+| Chromium live cross-tab heap                          |  11.52 MiB |  11.52 MiB |
+| Chromium heap after repeated remote-cache disposal    |   4.72 MiB |   3.77 MiB |
+
+Both versions released all 120 Node clients, 1,200 observers and 110 Chromium
+clients. Browser checkpoints plateaued. The small burst-RSS increase was not
+accompanied by retained-heap growth; RSS includes allocator reserves and these
+are checkpoint samples rather than continuous peak tracking. The intermittent
+one-client assertion from the investigation did not recur in these paired runs.
+
+Regression coverage includes dynamic client-query dependency switches, independent
+observer disposal, staged delete/recreate ordering, optimistic rollback, cursor
+metadata, bulk-delete persistence/restart, cache TTL changes, missing cache nodes,
+LRU touches on memory hits, silent hydration and writes during GC.
+
+Final verification: `vp check --fix` and `vp run test:all` passed (1,596 tests
+across 145 files). No unbounded retention or functional regression was observed
+in these checks; timing figures describe the named fixtures, not every application.

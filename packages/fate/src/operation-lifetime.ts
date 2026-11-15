@@ -10,6 +10,9 @@ export type RetainHandle = Readonly<{
 }>;
 
 export default class OperationLifetime {
+  /** Changes when the set of retained descriptors changes, including the release buffer. */
+  revision = 0;
+
   private readonly operations = new Map<string, RetainedOperation>();
   private readonly releaseBuffer: Array<string> = [];
 
@@ -20,6 +23,7 @@ export default class OperationLifetime {
     if (!operation) {
       operation = { descriptor, refCount: 0 };
       this.operations.set(descriptor.key, operation);
+      this.revision++;
     }
 
     operation.refCount += 1;
@@ -48,6 +52,7 @@ export default class OperationLifetime {
     for (const descriptor of descriptors.slice(-Math.max(1, this.releaseBufferSize))) {
       if (!this.operations.has(descriptor.key)) {
         this.operations.set(descriptor.key, { descriptor, refCount: 0 });
+        this.revision++;
         this.releaseBuffer.push(descriptor.key);
       }
     }
@@ -66,6 +71,7 @@ export default class OperationLifetime {
 
     if (this.releaseBufferSize <= 0) {
       this.operations.delete(key);
+      this.revision++;
       return true;
     }
 
@@ -81,6 +87,7 @@ export default class OperationLifetime {
       const releasedOperation = this.operations.get(releasedKey);
       if (releasedOperation && releasedOperation.refCount <= 0) {
         this.operations.delete(releasedKey);
+        this.revision++;
         released = true;
       }
     }
