@@ -70,6 +70,43 @@ const WorkspaceView = view<EntityOf<ReturnType<typeof app>, 'Workspace'>>()({
   tasks: { id: true, title: true },
 });
 
+test('broadcasts saved client records and relationship changes to an idle tab', async () => {
+  const name = crypto.randomUUID();
+  const writer = app(createIndexedDBStorage({ name }));
+  const reader = app(createIndexedDBStorage({ name }));
+  const request = { workspace: { view: WorkspaceView } };
+  const observer = reader.observeRequestResult(request);
+  const changed = vi.fn();
+  const unsubscribe = observer.subscribe(changed);
+  try {
+    await Promise.all([writer.persistence!.ready, reader.request(request)]);
+    changed.mockClear();
+    await writer.mutations.add();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(reader.peekView(WorkspaceView, observer.getSnapshot().workspace)?.data.tasks).toEqual([
+      { __typename: 'Task', id: 'seed', title: 'Seed' },
+      { __typename: 'Task', id: 'new', title: 'Saved' },
+    ]);
+
+    changed.mockClear();
+    await writer.mutations.removeSeed();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(reader.store.read('Task:seed')).toBeUndefined();
+    expect(reader.peekView(WorkspaceView, observer.getSnapshot().workspace)?.data.tasks).toEqual([
+      { __typename: 'Task', id: 'new', title: 'Saved' },
+    ]);
+
+    changed.mockClear();
+    await writer.mutations.increment();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(reader.store.read('Workspace:main')?.count).toBe(1);
+  } finally {
+    unsubscribe();
+    writer.persistence!.dispose();
+    reader.persistence!.dispose();
+  }
+});
+
 test('restores a client graph across reloads and keeps it independent of the read cache', async () => {
   const name = crypto.randomUUID();
   const first = app(createIndexedDBStorage({ name }));

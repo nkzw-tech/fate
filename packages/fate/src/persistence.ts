@@ -217,6 +217,7 @@ class Session implements PersistenceRuntime {
   private flushRequested = false;
   private flushing?: Promise<void>;
   private unsubscribe?: () => void;
+  private unsubscribeClientState?: () => void;
   private refreshRequested = false;
   private refreshing?: Promise<void>;
   private readonly cache: PersistenceCache;
@@ -246,6 +247,8 @@ class Session implements PersistenceRuntime {
       this.mutationError = error instanceof Error ? error : new Error(String(error));
     }
     this.ready = this.restore().catch((error: unknown) => {
+      this.unsubscribeClientState?.();
+      this.unsubscribeClientState = undefined;
       if (!this.disposed) {
         this.snapshot = { ...this.snapshot, status: 'error' };
       }
@@ -376,6 +379,13 @@ class Session implements PersistenceRuntime {
     }
     // registerClientSchema() seeds the roots during synchronous setup.
     if (this.client.hasClientState()) {
+      // Client writes update their own header, not the durable mutation journal.
+      // Subscribe before reading so a commit during restoration cannot be missed.
+      this.unsubscribeClientState = this.clientState.subscribe(() => {
+        if (!this.disposed) {
+          void this.clientState.restore().catch((error: unknown) => this.report(error));
+        }
+      });
       await this.clientState.restore();
     }
     for (const entry of data.mutations) {
@@ -1120,6 +1130,8 @@ class Session implements PersistenceRuntime {
     clearTimeout(this.timer);
     clearTimeout(this.saveTimer);
     this.unsubscribe?.();
+    this.unsubscribeClientState?.();
+    this.unsubscribeClientState = undefined;
     if (typeof globalThis.removeEventListener === 'function') {
       globalThis.removeEventListener('online', this.onOnline);
     }

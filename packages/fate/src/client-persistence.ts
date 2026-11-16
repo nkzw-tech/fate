@@ -222,6 +222,7 @@ export class ClientPersistence {
   private referenceCounts = new Map<EntityId, number>();
   private dirtyReferences = new Set<EntityId>();
   private saved = emptySnapshot();
+  private writing = false;
 
   constructor(
     private readonly client: FateClient<any, any, any>,
@@ -257,6 +258,16 @@ export class ClientPersistence {
 
   restore() {
     return this.storage.exclusive(this.storageKey, () => this.load());
+  }
+
+  subscribe(listener: () => void) {
+    return this.storage.subscribe?.(this.storageKey, () => {
+      // Our writes already run under the shared lock after loading the latest state.
+      // Ignore their local notification instead of rereading our own committed header.
+      if (!this.writing) {
+        listener();
+      }
+    });
   }
 
   private async loadLegacy() {
@@ -532,7 +543,12 @@ export class ClientPersistence {
       throw new Error('fate: Persisted client state exceeds the storage size limit.');
     }
     this.client.assertPersistenceActive();
-    await this.storage.writeBatch([...writes, [this.storageKey, header]]);
+    this.writing = true;
+    try {
+      await this.storage.writeBatch([...writes, [this.storageKey, header]]);
+    } finally {
+      this.writing = false;
+    }
     this.bytes = bytes;
     for (const [key, size] of sizes) {
       if (size) {
