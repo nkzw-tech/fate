@@ -182,6 +182,7 @@ import {
   viewNamesForType,
   getViewNames,
   getViewPayloadEntries,
+  hasMismatchedViewParameters,
   resolveView,
 } from './view.ts';
 import { isTypeBranch } from './viewFor.ts';
@@ -2838,6 +2839,12 @@ export class FateClient<
 
     if (!refViews || ![...viewNames].every((name) => refViews.has(name))) {
       const received = refViews ? [...refViews].join(', ') : JSON.stringify(ref);
+
+      if (refViews && hasMismatchedViewParameters(view, ref)) {
+        throw new Error(
+          `fate: View parameters do not match the reference. Expected '${[...viewNames].join("', '")}', received '${received}'. Bind parameters in the parent request or view, then read the existing binding with useView(ViewDefinition, ref) instead of useView(ViewDefinition(parameters), ref). If the reference carries multiple bindings of this view, use named fragment aliases or an explicitly matching binding.`,
+        );
+      }
 
       throw new Error(
         `fate: Invalid view reference. Expected the provided ref to include the view(s) '${[...viewNames].join("', '")}', received '${received}'. You can fix this issue by spreading the correct view into its parent so fate can create the correct view refs for you.`,

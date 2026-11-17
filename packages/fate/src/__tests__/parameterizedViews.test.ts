@@ -45,6 +45,32 @@ test('equivalent bindings preserve ref and snapshot identity without memoizing t
   expect(await client.readView(Name, second)).toBe(await client.readView(Name, first));
 });
 
+test('explains parameter mismatches without accepting a different binding', async () => {
+  const { client, fetchById } = setup();
+  const ref = client.ref('User', '1', Name({ locale: 'en' }));
+  expect(() => client.readView(Name({ locale: 'ja' }), ref)).toThrow(
+    /View parameters do not match the reference.*useView\(ViewDefinition, ref\)/,
+  );
+  expect(fetchById).not.toHaveBeenCalled();
+  expect((await client.readView(Name, ref)).data).toMatchObject({ name: 'en' });
+});
+
+test('distinguishes omitted defaults from explicit parameters and missing views', () => {
+  const { client } = setup();
+  const DefaultName = view<User>()(({ locale = 'en' }: { locale?: string }) => ({
+    name: { args: { locale } },
+  }));
+  const ref = client.ref('User', '1', DefaultName({}));
+  expect(() => client.readView(DefaultName({ locale: 'en' }), ref)).toThrow(
+    /View parameters do not match the reference/,
+  );
+  expect(() => client.readView(Name({ locale: 'en' }), ref)).toThrow(/Invalid view reference/);
+  const Missing = view<User>()({ id: true });
+  expect(() => client.readView({ ...DefaultName({ locale: 'en' }), ...Missing }, ref)).toThrow(
+    /Invalid view reference/,
+  );
+});
+
 test('bound parameters survive ordinary view spreads and nested entity refs', async () => {
   const { client } = setup();
   const Parent = view<User>()({ id: true, ...Name({ locale: 'ja' }) });

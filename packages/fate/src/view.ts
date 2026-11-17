@@ -72,6 +72,20 @@ export const getViewPayloadEntries = (view: View<any, any>) => {
   return payloads;
 };
 
+export const hasMismatchedViewParameters = (view: View<any, any>, ref: ViewRef<string>) => {
+  const names = ref[ViewsTag];
+  const received = namePayloads.get(names)?.values();
+  if (!received) {
+    return false;
+  }
+  const definitions = new Set([...received].map(({ definition }) => definition));
+  const missing = getViewPayloadEntries(view).filter(([name]) => !names.has(name));
+  return (
+    missing.length > 0 &&
+    missing.every(([, { definition }]) => definition !== undefined && definitions.has(definition))
+  );
+};
+
 /**
  * Collects all view payloads that apply to the given ref.
  */
