@@ -19,12 +19,12 @@
   "dependencies": {
     "@nkzw/fate": "latest",
     "@nkzw/fate-indexeddb": "latest",
-    "@void/react": "^1.7.0",
+    "@void/react": "^1.10.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-error-boundary": "^6.1.6",
     "react-fate": "latest",
-    "void": "^1.7.0",
+    "void": "^1.10.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -43,5 +43,5 @@
     "node": "^24.22.0 || >=26.12.0",
     "pnpm": ">=11.0.0"
   },
-  "packageManager": "pnpm@12.6.0"
+  "packageManager": "pnpm@12.21.0"
 }

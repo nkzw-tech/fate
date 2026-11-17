@@ -168,8 +168,8 @@ describe('create-fate templates', () => {
         readFileSync(join(frontend, 'package.json'), 'utf8'),
       );
       expect(scripts['dev:setup']).toContain('prepare:void');
-      expect(dependencies.void).toBe('^1.7.0');
-      expect(dependencies[`@void/${framework}`]).toBe('^1.7.0');
+      expect(dependencies.void).toBe('^1.10.0');
+      expect(dependencies[`@void/${framework}`]).toBe('^1.10.0');
       if (existsSync(join(frontend, 'pages/post'))) {
         const page = readFileSync(
           join(frontend, `pages/post/[id].${framework === 'react' ? 'tsx' : 'vue'}`),

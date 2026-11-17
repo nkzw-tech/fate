@@ -107,11 +107,10 @@ type RegisteredViewName<S extends ClientSchema, V> = {
 type LocalViewResult<S extends ClientSchema, V extends DataView<any>> = {
   [K in keyof RawDataViewResult<V>]: K extends keyof ViewFieldConfig<V>
     ? ViewFieldConfig<V>[K] extends infer Child extends DataView<any>
-      ?
-          | (NonNullable<RawDataViewResult<V>[K]> extends ReadonlyArray<unknown>
-              ? Array<LocalViewResult<S, Child> & { __typename: ViewName<S, Child> }>
-              : LocalViewResult<S, Child> & { __typename: ViewName<S, Child> })
-          | Extract<RawDataViewResult<V>[K], null | undefined>
+      ? | (NonNullable<RawDataViewResult<V>[K]> extends ReadonlyArray<unknown>
+            ? Array<LocalViewResult<S, Child> & { __typename: ViewName<S, Child> }>
+            : LocalViewResult<S, Child> & { __typename: ViewName<S, Child> })
+        | Extract<RawDataViewResult<V>[K], null | undefined>
       : RawDataViewResult<V>[K]
     : RawDataViewResult<V>[K];
 };
@@ -163,9 +162,8 @@ type FindEntities<T, Depth extends Array<unknown> = []> = 0 extends 1 & T
     : T extends ReadonlyArray<infer Item>
       ? FindEntities<Item, [...Depth, 0]>
       : T extends object
-        ?
-            | (T extends Entity ? T : never)
-            | { [K in keyof T]: FindEntities<T[K], [...Depth, 0]> }[keyof T]
+        ? | (T extends Entity ? T : never)
+          | { [K in keyof T]: FindEntities<T[K], [...Depth, 0]> }[keyof T]
         : never;
 
 type RemoteEntities<R extends FateRoots, M extends FateMutations> =

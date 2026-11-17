@@ -36,9 +36,9 @@
     "@nkzw/eslint-plugin": "^2.0.0",
     "@nkzw/fate-server": "workspace:*",
     "@nkzw/oxlint-config": "^2.0.1",
-    "@oxc-node/core": "^1.0.1",
+    "@oxc-node/core": "^1.0.2",
     "@paper-design/shaders": "^0.0.82",
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@swc/core": "^1.16.22",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "catalog:",
@@ -48,18 +48,18 @@
     "happy-dom": "^21.0.4",
     "mysql2": "^3.24.6",
     "npm-run-all2": "^9.0.4",
-    "oxc-minify": "^0.158.0",
+    "oxc-minify": "^0.159.0",
     "prisma": "^7.10.1",
     "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "vitepress": "2.0.0-alpha.15",
+    "vitepress": "2.0.0-alpha.21",
     "vitest": "catalog:"
   },
   "engines": {
     "node": "^24.22.0 || >=26.12.0",
     "pnpm": ">=11.0.0"
   },
-  "packageManager": "pnpm@12.18.0"
+  "packageManager": "pnpm@12.21.0"
 }

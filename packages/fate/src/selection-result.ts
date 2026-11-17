@@ -126,7 +126,6 @@ export type MergeSelectedResults<A, B> = unknown extends A
   ? A
   : unknown extends B
     ? B
-    :
-        | Extract<A | B, null>
-        | (undefined extends A ? (undefined extends B ? undefined : never) : never)
-        | MergeSelectedData<NonNullable<A>, NonNullable<B>>;
+    : | Extract<A | B, null>
+      | (undefined extends A ? (undefined extends B ? undefined : never) : never)
+      | MergeSelectedData<NonNullable<A>, NonNullable<B>>;

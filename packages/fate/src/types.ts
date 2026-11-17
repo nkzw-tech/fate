@@ -531,17 +531,16 @@ type ListResult<Item extends AnyRequestItem, Type extends TypeName, Result> = It
       : Item extends AnyQueryItem
         ? ViewRef<RootResultType<Type, Result>> | NullableRootResult<Result>
         : Item extends AnyListItem
-          ?
-              | (Item['list'] extends { items?: { node?: View<any, any> } }
-                  ? Readonly<{
-                      items: ReadonlyArray<{
-                        cursor?: string | undefined;
-                        node: ViewRef<ConnectionNodeType<Item['list']>>;
-                      }>;
-                      pagination?: Pagination;
-                    }>
-                  : Array<ViewRef<RootResultType<Type, NonNullable<Result>>>>)
-              | NullableRootResult<Result>
+          ? | (Item['list'] extends { items?: { node?: View<any, any> } }
+                ? Readonly<{
+                    items: ReadonlyArray<{
+                      cursor?: string | undefined;
+                      node: ViewRef<ConnectionNodeType<Item['list']>>;
+                    }>;
+                    pagination?: Pagination;
+                  }>
+                : Array<ViewRef<RootResultType<Type, NonNullable<Result>>>>)
+            | NullableRootResult<Result>
           : never;
 
 /**
