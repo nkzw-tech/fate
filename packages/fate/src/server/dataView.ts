@@ -58,7 +58,7 @@ const readPath = (value: unknown, segments: ReadonlyArray<string>): unknown => {
 type ComputedState = Record<string, Record<string, unknown>>;
 
 const getComputedState = (item: AnyRecord): ComputedState | undefined =>
-  item[computedStateKey as unknown as keyof typeof item] as ComputedState | undefined;
+  (item as typeof item & { [computedStateKey]?: ComputedState })[computedStateKey];
 
 export const attachComputedState = <Item extends AnyRecord>(
   item: Item,
@@ -85,9 +85,9 @@ const getComputedDeps = (
   item: AnyRecord,
   field: string,
   select?: Record<string, MemoSelection>,
-): Record<string, unknown> => {
+) => {
   const attached = getComputedState(item)?.[field] ?? {};
-  const deps: Record<string, unknown> = { ...attached };
+  const deps = { ...attached };
 
   if (!select) {
     return deps;

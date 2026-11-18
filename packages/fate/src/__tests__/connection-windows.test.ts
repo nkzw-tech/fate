@@ -324,7 +324,7 @@ test('refreshing the first page preserves explicitly loaded continuation pages',
   fetchList.mockResolvedValueOnce(page(['3', '4']));
   await client.loadConnection(
     ItemView,
-    (connection as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+    (connection as typeof connection & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
     { after: '2', first: 2 },
   );
   expect(ids(2)).toEqual(['1', '2', '3', '4']);
@@ -406,7 +406,7 @@ test('nested views keep separately requested cursor pages separate from the head
     id: true,
     items: {
       ...Selection,
-      args: { first: 2, ...(after ? { after } : {}) },
+      args: after ? { after, first: 2 } : { first: 2 },
       items: { node: { id: true, name: true } },
     },
   }));
@@ -482,7 +482,7 @@ test.each([false, true])(
     fetchList.mockResolvedValueOnce(withoutEdgeCursors(backwards ? ['1', '2'] : ['3', '4'], false));
     await client.loadConnection(
       ItemView,
-      (result as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+      (result as typeof result & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
       backwards ? { before: 'opaque-3', last: 2 } : { after: 'opaque-2', first: 2 },
       { direction: backwards ? 'backward' : 'forward' },
     );
@@ -498,7 +498,7 @@ test.each(['before', 'after'] as const)(
     const { client, fetchList, ids, read, subscribeConnection } = setup();
     fetchList.mockResolvedValue(page(['1', '2'], false));
     await client.request(request(2));
-    const metadata = (read(2) as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
+    const metadata = windowMetadata(read(2));
     const unsubscribe = client.subscribeLiveListView(ItemView, {
       ...metadata,
       live: { append: 'visible', prepend: 'visible' },
@@ -552,7 +552,9 @@ test.each([false, true])(
     fetchList.mockResolvedValueOnce(page(['1', '2', '3', '4', '5', '6'], false));
     await client.request(selection(6));
     const result = (await client.request(selection(2))).items;
-    const metadata = (result as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
+    const metadata = (result as typeof result & { [ConnectionTag]: ConnectionMetadata })[
+      ConnectionTag
+    ];
     fetchList.mockResolvedValueOnce({
       ...page(['3', '4'], false),
       pagination: {

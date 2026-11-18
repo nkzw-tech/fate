@@ -60,7 +60,7 @@ const Button = ({
   );
 };
 
-const AsyncButton = ({
+const AsyncButton = <Result,>({
   action,
   asChild = false,
   children,
@@ -71,7 +71,7 @@ const AsyncButton = ({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants> & {
-    action?: () => Promise<unknown> | unknown;
+    action?: () => Promise<Result> | Result;
     asChild?: boolean;
   }) => {
   const Component = asChild ? Slot : 'button';

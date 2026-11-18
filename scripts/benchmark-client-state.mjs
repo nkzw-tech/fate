@@ -32,11 +32,11 @@ try {
     build: {
       minify: true,
       outDir,
-      ...(memory ? { ssr: resolve(root, 'fixtures/client-state-memory.ts') } : {}),
       rollupOptions: {
-        ...(!memory ? { input: resolve(root, 'client-state-benchmark.html') } : {}),
+        input: memory ? undefined : resolve(root, 'client-state-benchmark.html'),
         output: { entryFileNames: memory ? 'benchmark.mjs' : 'assets/[name]-[hash].js' },
       },
+      ssr: memory ? resolve(root, 'fixtures/client-state-memory.ts') : undefined,
       target: 'esnext',
     },
     configFile: false,
@@ -64,7 +64,7 @@ try {
         ]
       : [],
     root,
-    ...(memory ? { ssr: { noExternal: true } } : {}),
+    ssr: memory ? { noExternal: true } : undefined,
   });
   let report;
   if (memory) {

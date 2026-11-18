@@ -1,3 +1,4 @@
+import type { FateRecord } from '@nkzw/fate';
 import {
   createFateServer,
   createSourcePlan,
@@ -32,7 +33,7 @@ type ResolverOptions<Input> = {
 };
 
 type ListResolverOptions = ResolverOptions<{
-  args?: Record<string, unknown>;
+  args?: FateRecord;
 }>;
 
 const source = createDrizzleSourceAdapter<AppContext>({
@@ -76,10 +77,7 @@ export const fateServer = createFateServer({
           cursor,
           direction: 'forward',
           extra: {
-            where: like(
-              comment.content,
-              `%${query.trim()}%`,
-            ) as unknown as DrizzleQueryExtra['where'],
+            where: like(comment.content, `%${query.trim()}%`) as DrizzleQueryExtra['where'],
           },
           input: { args: input.args, select },
           skip: cursor ? 1 : undefined,

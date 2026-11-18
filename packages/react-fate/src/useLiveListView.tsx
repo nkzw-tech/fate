@@ -1,4 +1,4 @@
-import { type Deferred } from '@nkzw/fate';
+import type { Deferred } from '@nkzw/fate';
 import { useEffect, useEffectEvent } from 'react';
 import { useFateClient } from './context.tsx';
 import {

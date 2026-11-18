@@ -171,7 +171,8 @@ export async function resolveConnection<TContext, TItem, TNode, TInput extends C
     : rawItems.slice(0, pageSize);
   const nodes = map
     ? await map({ ctx, input, items: limitedItems })
-    : (limitedItems as unknown as Array<TNode>);
+    : // oxlint-disable-next-line quality/no-chained-type-assertions -- Without a row mapper the connection returns the original items; the public overload defaults TNode to TItem.
+      (limitedItems as unknown as Array<TNode>);
 
   const items = nodes.map((node) => ({
     cursor: getCursor(node),
@@ -271,7 +272,7 @@ const assignIfChanged = <Value>(
   }
 
   if (!current) {
-    return { [key]: next } as AnyRecord;
+    return { [key]: next };
   }
 
   current[key] = next;

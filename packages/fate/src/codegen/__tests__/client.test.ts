@@ -1,4 +1,5 @@
 import { expect, test } from 'vite-plus/test';
+import { singleSource } from '../../__tests__/fixtures/single-source.ts';
 import { graphqlMutation, graphqlValueMutation, graphqlValueRoot } from '../../graphqlTransport.ts';
 import { dataView, list } from '../../server/dataView.ts';
 import { createSourceRegistry } from '../../server/executor.ts';
@@ -238,8 +239,7 @@ test('generates a native HTTP client source', () => {
       posts: list(postDataView),
     },
     sources: {
-      getSource: <Item extends Record<string, unknown>>() =>
-        source as unknown as SourceDefinition<Item>,
+      getSource: singleSource(source),
       registry: createSourceRegistry([[source, {}]]),
     },
   });
@@ -278,8 +278,7 @@ test('generates a native HTTP client source without react-fate for core clients'
       posts: list(postDataView),
     },
     sources: {
-      getSource: <Item extends Record<string, unknown>>() =>
-        source as unknown as SourceDefinition<Item>,
+      getSource: singleSource(source),
       registry: createSourceRegistry([[source, {}]]),
     },
   });
@@ -319,8 +318,7 @@ test.each(['native', 'void'] as const)(
               },
         roots: Root,
         sources: {
-          getSource: <Item extends Record<string, unknown>>() =>
-            source as unknown as SourceDefinition<Item>,
+          getSource: singleSource(source),
           registry: createSourceRegistry([[source, {}]]),
         },
       });
@@ -357,8 +355,7 @@ test.each(['native', 'void'] as const)(
       queries: { post: { resolve: () => ({ id: '1', title: 'Post' }) } },
       roots: Root,
       sources: {
-        getSource: <Item extends Record<string, unknown>>() =>
-          source as unknown as SourceDefinition<Item>,
+        getSource: singleSource(source),
         registry: createSourceRegistry([[source, {}]]),
       },
     });
@@ -388,8 +385,7 @@ test('generates a native HTTP client source for fateServer exports', () => {
       posts: list(postDataView),
     },
     sources: {
-      getSource: <Item extends Record<string, unknown>>() =>
-        source as unknown as SourceDefinition<Item>,
+      getSource: singleSource(source),
       registry: createSourceRegistry([[source, {}]]),
     },
   });
@@ -421,8 +417,7 @@ test('generates a native HTTP client with live enabled when the server supports 
       posts: list(postDataView),
     },
     sources: {
-      getSource: <Item extends Record<string, unknown>>() =>
-        source as unknown as SourceDefinition<Item>,
+      getSource: singleSource(source),
       registry: createSourceRegistry([[source, {}]]),
     },
   });
@@ -527,8 +522,7 @@ test.each(['react-fate', 'vue-fate'] as const)(
         posts: list(postDataView),
       },
       sources: {
-        getSource: <Item extends Record<string, unknown>>() =>
-          source as unknown as SourceDefinition<Item>,
+        getSource: singleSource(source),
         registry: createSourceRegistry([[source, {}]]),
       },
     });

@@ -3,6 +3,7 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { drizzle } from 'drizzle-orm/sqlite-proxy';
 import { expect, test } from 'vite-plus/test';
 import { z } from 'zod';
+import { singleSource } from '../../__tests__/fixtures/single-source.ts';
 import { FateRequestError } from '../../protocol.ts';
 import type { AnyRecord } from '../../types.ts';
 import { dataView, list } from '../dataView.ts';
@@ -1028,13 +1029,11 @@ test('creates fetch and Hono-compatible handlers', async () => {
     version: 1,
   });
 
-  await expect(fetchHandler(request.clone() as unknown as Request)).resolves.toHaveProperty(
+  await expect(fetchHandler(request.clone() as Request)).resolves.toHaveProperty('status', 200);
+  await expect(honoHandler({ req: { raw: request.clone() as Request } })).resolves.toHaveProperty(
     'status',
     200,
   );
-  await expect(
-    honoHandler({ req: { raw: request.clone() as unknown as Request } }),
-  ).resolves.toHaveProperty('status', 200);
 });
 
 test('exposes a manifest for code generation', () => {
@@ -1070,8 +1069,7 @@ test('registers self-referential data views and resolves finite recursive select
   const fate = createFateServer({
     roots: { categories: list(categoryView) },
     sources: {
-      getSource: <Item extends AnyRecord>(_target: DataView<Item> | SourceDefinition<Item>) =>
-        categorySource as unknown as SourceDefinition<Item>,
+      getSource: singleSource(categorySource),
       registry: createSourceRegistry([
         [
           categorySource,

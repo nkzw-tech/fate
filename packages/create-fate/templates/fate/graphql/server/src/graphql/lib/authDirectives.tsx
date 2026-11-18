@@ -1,3 +1,4 @@
+import { isRecord } from '@nkzw/fate/server';
 import SchemaBuilder, {
   BasePlugin,
   PothosOutputFieldConfig,
@@ -5,6 +6,8 @@ import SchemaBuilder, {
   SchemaTypes,
 } from '@pothos/core';
 import { FieldAuthScopes, TypeAuthScopes } from '@pothos/plugin-scope-auth';
+
+const directives = (value: unknown) => (isRecord(value) ? value : undefined);
 
 declare global {
   export namespace PothosSchemaTypes {
@@ -31,7 +34,7 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
       extensions: {
         ...fieldConfig.extensions,
         directives: {
-          ...(fieldConfig.extensions?.directives as Record<string, unknown>),
+          ...directives(fieldConfig.extensions?.directives),
           auth: scopes,
         },
       },
@@ -56,7 +59,7 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
       extensions: {
         ...typeConfig.extensions,
         directives: {
-          ...(typeConfig.extensions?.directives as Record<string, unknown>),
+          ...directives(typeConfig.extensions?.directives),
           auth: scopes,
         },
       },
@@ -65,7 +68,7 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
 
   #resolveScopes(
     authScopes:
-      | FieldAuthScopes<Types, object, Record<string, unknown>>
+      | FieldAuthScopes<Types, object, Record<string, never>>
       | TypeAuthScopes<SchemaTypes, object>,
   ) {
     if (typeof authScopes !== 'function') {

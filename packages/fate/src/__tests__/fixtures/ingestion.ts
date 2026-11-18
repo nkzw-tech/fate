@@ -112,6 +112,7 @@ const graphQLValue = (value: unknown): unknown => {
   }
   const record = value as AnyRecord;
   if (Array.isArray(record.items)) {
+    // oxlint-disable-next-line quality/no-known-value-widening -- This recursive wire fixture passes through unknown scalar values.
     return {
       edges: record.items.map(({ cursor, node }) => ({ cursor, node: graphQLValue(node) })),
       pageInfo: {

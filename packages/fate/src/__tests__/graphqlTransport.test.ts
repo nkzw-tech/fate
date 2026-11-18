@@ -1608,27 +1608,28 @@ test('preserves connection order and cursor validation while skipping absent nod
 test.each([false, true])(
   'ingests wire responses like canonical responses (custom identity: %s)',
   async (custom) => {
-    const types = [
-      {
-        fields: {
-          friend: { type: 'User' },
-          friends: { listOf: 'User' },
-          profile: { embedded: 'Profile' },
-          tags: 'scalar' as const,
-        },
-        ...(custom
-          ? {
-              getId: (record: unknown) => {
-                const user = record as { friend?: { id: string }; id: string };
-                if (user.friend) {
-                  expect(user.friend.id).toBe('2');
-                }
-                return String(user.id);
-              },
-            }
-          : {}),
-        type: 'User',
+    const userType = {
+      fields: {
+        friend: { type: 'User' },
+        friends: { listOf: 'User' },
+        profile: { embedded: 'Profile' },
+        tags: 'scalar' as const,
       },
+      type: 'User',
+    };
+    const types = [
+      custom
+        ? {
+            ...userType,
+            getId: (record: unknown) => {
+              const user = record as { friend?: { id: string }; id: string };
+              if (user.friend) {
+                expect(user.friend.id).toBe('2');
+              }
+              return String(user.id);
+            },
+          }
+        : userType,
       { type: 'Profile' },
     ];
     const tags = ['one'];
@@ -1753,7 +1754,7 @@ test.each([false, true])(
     ];
     const createTransport = () =>
       createGraphQLTransport({
-        ...(mapped ? { byId: { User: { field: 'user' } } } : {}),
+        byId: mapped ? { User: { field: 'user' } } : undefined,
         fetch: async () =>
           jsonResponse({ data: mapped ? { f1: rows[0], f2: rows[1] } : { f1: rows } }),
         live: false,

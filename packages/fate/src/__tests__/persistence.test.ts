@@ -139,19 +139,20 @@ test.each(['current', 'legacy'] as const)(
         clientSchema({
           typeExtensions: {
             Note: {
-              defaults: () => ({ annotation: '', ...(updated ? { newField: 'Default' } : {}) }),
-              view: dataView<Note & { annotation: string; newField?: string }>('Note')({
-                annotation: true,
-                ...(updated
+              defaults: () =>
+                updated ? { annotation: '', newField: 'Default' } : { annotation: '' },
+              view: dataView<Note & { annotation: string; newField?: string }>('Note')(
+                updated
                   ? {
+                      annotation: true,
                       label: memo({
                         resolve: (_note: Note, { title }) => `[${title}]`,
                         select: { title: true },
                       }),
                       newField: true as const,
                     }
-                  : {}),
-              }),
+                  : { annotation: true },
+              ),
             },
           },
         }),
@@ -216,7 +217,7 @@ test.each(['scope', 'mutation'] as const)(
     await completion;
     const deliver = vi.fn();
     const reopened = createClient({
-      ...(change === 'scope' ? { hydrationScope: 'different-backend' } : {}),
+      hydrationScope: change === 'scope' ? 'different-backend' : undefined,
       mutations:
         change === 'mutation'
           ? {}
@@ -273,7 +274,8 @@ test('invalid durable input rejects the local milestone before storage or delive
   await current.session.ready;
   const write = vi.spyOn(current.storage, 'writeBatch');
   const submission = current.client.mutations.edit({
-    input: { id: '1', title: (() => {}) as unknown as string },
+    // @ts-expect-error Exercise persistence validation with a non-serializable mutation input.
+    input: { id: '1', title: () => {} },
   });
   await Promise.all([
     expect(submission.locallyPersisted).rejects.toThrow(),
@@ -770,7 +772,8 @@ test('captures caller input before async restore and refuses unserializable comm
   input.title = 'Changed later';
   expect((await pending).result?.title).toBe('At invocation');
   await expect(
-    client.mutations.edit({ input: { id: '1', title: (() => {}) as unknown as string } }),
+    // @ts-expect-error Exercise persistence validation with a non-serializable mutation input.
+    client.mutations.edit({ input: { id: '1', title: () => {} } }),
   ).rejects.toThrow();
   expect(mutate).toHaveBeenCalledTimes(1);
   expect(session.getSnapshot().mutations).toHaveLength(0);

@@ -1099,8 +1099,9 @@ export class PersistenceCache {
           ...new Set(
             queue
               .slice(index, index + 32)
-              .filter(({ id }) => !this.client.isClientOwnedType(parseEntityId(id).type))
-              .map(({ id }) => recordKey(id)),
+              .flatMap(({ id }) =>
+                this.client.isClientOwnedType(parseEntityId(id).type) ? [] : [recordKey(id)],
+              ),
           ),
         ];
         const diskKeys = keys.map((key) => this.nodeKey(key));
@@ -1571,7 +1572,7 @@ export class PersistenceCache {
         ]),
       ),
       referenceChanges: new Set(
-        [...updates].filter(([, update]) => update.referencesChanged).map(([key]) => key),
+        Array.from(updates).flatMap(([key, update]) => (update.referencesChanged ? [key] : [])),
       ),
       values: new Map([...updates].map(([key, update]) => [key, update.value])),
     };

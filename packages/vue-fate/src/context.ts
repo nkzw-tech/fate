@@ -86,6 +86,7 @@ const createClientProxy = (source: FateClientSource): FateClientT<any, any> =>
         return source;
       }
 
+      // oxlint-disable-next-line quality/no-reflect-get -- Forward arbitrary string and symbol keys to the active client in this proxy trap.
       const value = Reflect.get(source.value, property);
       return typeof value === 'function' ? value.bind(source.value) : value;
     },

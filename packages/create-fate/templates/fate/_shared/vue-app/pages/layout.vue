@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import '../src/App.css';
+/* __TRANSPORT_IMPORT__ */
 import { computed } from 'vue';
 import { FateClient } from 'vue-fate';
 import { createFateClient } from 'vue-fate/client';
-/* __CLIENT_IMPORTS__ */
+/* __LOCAL_CLIENT_IMPORT__ */
 import ErrorBoundary from '../src/ui/ErrorBoundary.vue';
 import Header from '../src/ui/Header.vue';
 import Thinking from '../src/ui/Thinking.vue';
 
-const fate = computed(() => createFateClient(__CREATE_FATE_OPTIONS__));
+/* __SHARED_DATA__ */
+const fate = computed(() => {
+  return createFateClient(__CREATE_FATE_OPTIONS__);
+});
 </script>
 
 <template>

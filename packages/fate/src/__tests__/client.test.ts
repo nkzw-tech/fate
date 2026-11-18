@@ -1045,9 +1045,7 @@ test('derives empty nested connection types from the schema', () => {
   const post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  const metadata = (post.comments as unknown as AnyRecord)[
-    ConnectionTag as any
-  ] as ConnectionMetadata;
+  const metadata = (post.comments as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
 
   expect(metadata.type).toBe('Comment');
 
@@ -2412,7 +2410,7 @@ test(`delete mutations can select a view and update related entities`, async () 
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate,
     },
     types: [
@@ -2535,7 +2533,7 @@ test('mutations write their responses into the store', async () => {
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate: vi.fn(async (procedure: string, input: UpdateUserInput, select: Set<string>) => {
         expect(procedure).toBe('updateUser');
         expect(input).toEqual({ id: 'user-1', name: 'Banana' });
@@ -2584,7 +2582,7 @@ test('mutations apply optimistic updates before resolving', async () => {
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate: vi.fn(
         () =>
           new Promise<UpdateUserResult>((resolve) => {
@@ -2643,7 +2641,7 @@ test('optimistic updates stack when mutations resolve out of order', async () =>
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate: vi.fn((key) => {
         if (key === 'like') {
           const { promise, resolve } = Promise.withResolvers<UpdateLikesResult>();
@@ -3133,11 +3131,7 @@ test('mutations can control root list insertion order', async () => {
 
   const { posts: listBefore } = client.getRequestResult(request);
 
-  expect(
-    (listBefore as unknown as { items: Array<{ node: { id: string } }> }).items.map(
-      ({ node }) => node?.id,
-    ),
-  ).toEqual(['post-1', 'post-2']);
+  expect(listBefore.items.map(({ node }) => node?.id)).toEqual(['post-1', 'post-2']);
 
   const prependPromise = client.mutations.createPost({
     input: { title: 'Prepended' },
@@ -3402,7 +3396,7 @@ test('does not fetch missing fields for optimistic records', async () => {
     mutations,
     transport: {
       fetchById,
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate,
     },
     types: [{ fields: { author: { type: 'User' } }, type: 'Comment' }, { type: 'User' }],
@@ -3458,7 +3452,7 @@ test('waits for optimistic mutations before fetching missing fields', async () =
     mutations,
     transport: {
       fetchById,
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutation exercised by the test.
       mutate,
     },
     types: [{ fields: { content: 'scalar' }, type: 'Comment' }],
@@ -5167,7 +5161,7 @@ test(`'request' reuses the same handle after cache-first fulfillment`, async () 
   const secondRequest = client.request(request);
   expect(secondRequest).toBe(firstRequest);
 
-  const requests = (client as unknown as { requests: Map<string, Map<string, unknown>> }).requests;
+  const requests = client['requests'];
   expect(requests.size).toBe(1);
   expect([...requests.values()][0]?.get('cache-first')).toBe(firstRequest);
 
@@ -5534,7 +5528,7 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
   let post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  let comments = post.comments as unknown as CommentConnectionResult;
+  let comments = post.comments as CommentConnectionResult;
 
   expect(comments.items.map(({ node }) => node?.id)).toEqual([
     'comment-1',
@@ -5547,10 +5541,8 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
   post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  comments = post.comments as unknown as CommentConnectionResult;
-  const metadata = (comments as unknown as AnyRecord)[ConnectionTag as any] as
-    | ConnectionMetadata
-    | undefined;
+  comments = post.comments as CommentConnectionResult;
+  const metadata = (comments as AnyRecord)[ConnectionTag as any] as ConnectionMetadata | undefined;
 
   expect(comments.items.map(({ node }) => node?.id)).toEqual([
     'comment-1',
@@ -5563,7 +5555,7 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
   post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  comments = post.comments as unknown as CommentConnectionResult;
+  comments = post.comments as CommentConnectionResult;
   expect(comments.items.map(({ node }) => node?.id)).toEqual([
     'comment-1',
     'comment-2',
@@ -5577,7 +5569,7 @@ test('nested connection inserts stay attached to an unresolved trailing edge whi
   post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  comments = post.comments as unknown as CommentConnectionResult;
+  comments = post.comments as CommentConnectionResult;
   expect(comments.items.map(({ node }) => node?.id)).toEqual([
     'comment-1',
     'comment-2',
@@ -6041,11 +6033,6 @@ test('mutations do not reset previously loaded connection entries', async () => 
 });
 
 test('notifies parent subscribers when nested connection metadata changes', () => {
-  type CommentConnectionResult = {
-    items: Array<{ cursor?: string; node: Comment | null }>;
-    pagination?: { hasNext?: boolean; nextCursor?: string };
-  };
-
   const client = createClient({
     roots: {},
     transport: {
@@ -6106,7 +6093,7 @@ test('notifies parent subscribers when nested connection metadata changes', () =
   const post = unwrap(
     client.readView<Post, SelectionOf<typeof PostView>, typeof PostView>(PostView, postRef),
   );
-  const comments = post.comments as unknown as CommentConnectionResult;
+  const comments = post.comments;
 
   expect(comments.items[0]?.cursor).toBe('cursor-2');
   expect(comments.pagination).toEqual({
@@ -6293,7 +6280,7 @@ test.each([undefined, 'filter-id'])(
       types: [{ fields: { comments: { listOf: 'Comment' } }, type: 'Post' }, { type: 'Comment' }],
     });
     const CommentView = view<Comment>()({ content: true, id: true });
-    const args = { first: 2, ...(id ? { id } : {}) };
+    const args = id ? { first: 2, id } : { first: 2 };
 
     const PostView = view<Post>()({ comments: { args, items: { node: CommentView } }, id: true });
     const plan = getSelectionPlan(PostView, null);
@@ -6302,9 +6289,11 @@ test.each([undefined, 'filter-id'])(
       PostView,
       client.ref('Post', 'post-1', PostView),
     );
-    const metadata = (snapshot.data.comments as unknown as { [ConnectionTag]: ConnectionMetadata })[
-      ConnectionTag
-    ];
+    const metadata = (
+      snapshot.data.comments as typeof snapshot.data.comments & {
+        [ConnectionTag]: ConnectionMetadata;
+      }
+    )[ConnectionTag];
     expect(metadata.args).toEqual(args);
 
     await client.loadConnection(CommentView, metadata, { after: 'cursor-1' });

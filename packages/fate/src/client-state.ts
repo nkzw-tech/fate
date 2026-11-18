@@ -113,9 +113,11 @@ const dependencyPath = (
           );
         if (occupied(field) && (plan.args.get(`${parent}${field}`)?.hash ?? 'object:{}') !== hash) {
           const names = new Set(
-            [...plan.paths]
-              .filter((path) => path.startsWith(parent))
-              .map((path) => responseField(path.slice(parent.length).split('.')[0])),
+            Array.from(plan.paths).flatMap((path) =>
+              path.startsWith(parent)
+                ? [responseField(path.slice(parent.length).split('.')[0])]
+                : [],
+            ),
           );
           const base = `fate_dependency_${responseField(field)}`;
           let name = base;

@@ -373,7 +373,7 @@ test('stores rejected deferred list errors on the resource', async () => {
     client.readView(PostView, client.ref<PostWithComments>('Post', 'post-1', PostView)),
   );
   const comments = (
-    postSnapshot.data as unknown as {
+    postSnapshot.data as {
       comments: Deferred<{
         items: ReadonlyArray<{ node: ViewRef<'Comment'> }>;
       }>;

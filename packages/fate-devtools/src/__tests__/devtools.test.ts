@@ -162,10 +162,8 @@ test(`'connectFateDevtools' captures failed operations`, async () => {
   const { panel } = await connect(client);
   await panel.snapshot();
 
-  const transport = (
-    client as unknown as { transport: { mutate: (...args: Array<unknown>) => Promise<unknown> } }
-  ).transport;
-  await expect(transport.mutate('post.like', { id: '1' }, new Set(['id']))).rejects.toThrow(
+  const transport = client['transport'];
+  await expect(transport.mutate!('post.like', { id: '1' }, new Set(['id']))).rejects.toThrow(
     'Nope.',
   );
 
@@ -207,25 +205,21 @@ test(`'connectFateDevtools' runs panel actions against the client`, async () => 
 
 test(`'connectFateDevtools' restores the client when the last connection is disposed`, async () => {
   const { client } = createPostClient();
-  const internals = client as unknown as {
-    store: object;
-    transport: object;
-  };
-  const transport = internals.transport;
-  const hadOnChange = Object.hasOwn(internals.store, 'onChange');
+  const transport = client['transport'];
+  const hadOnChange = Object.hasOwn(client.store, 'onChange');
 
   const first = connectFateDevtools(client);
   const second = connectFateDevtools(client);
-  const instrumented = internals.transport;
+  const instrumented = client['transport'];
   expect(instrumented).not.toBe(transport);
 
   first();
   first();
-  expect(internals.transport).toBe(instrumented);
+  expect(client['transport']).toBe(instrumented);
 
   second();
-  expect(internals.transport).toBe(transport);
-  expect(Object.hasOwn(internals.store, 'onChange')).toBe(hadOnChange);
+  expect(client['transport']).toBe(transport);
+  expect(Object.hasOwn(client.store, 'onChange')).toBe(hadOnChange);
 });
 
 function load() {}
@@ -234,7 +228,8 @@ test(`'toJSONValue' turns fate values into plain JSON`, () => {
   const ref = Object.freeze(
     Object.defineProperty({}, Symbol('__fate__node-ref'), { value: 'User:1' }),
   );
-  const cycle: Record<string, unknown> = { name: 'cycle' };
+  type Cycle = { name: string; self?: Cycle };
+  const cycle: Cycle = { name: 'cycle' };
   cycle.self = cycle;
 
   expect(
@@ -298,10 +293,8 @@ test(`'connectFateDevtools' preserves transport calls with uninspectable inputs`
   await panel.snapshot();
   const { proxy, revoke } = Proxy.revocable({}, {});
   revoke();
-  const instrumented = (
-    client as unknown as { transport: { mutate: (...args: Array<unknown>) => Promise<unknown> } }
-  ).transport;
-  await expect(instrumented.mutate('post.like', proxy, new Set(['id']))).rejects.toThrow('Nope.');
+  const instrumented = client['transport'];
+  await expect(instrumented.mutate!('post.like', proxy, new Set(['id']))).rejects.toThrow('Nope.');
   expect(transport.mutate).toHaveBeenCalledTimes(1);
   expect((transport.mutate.mock.calls as Array<Array<unknown>>)[0][1] === proxy).toBe(true);
   const snapshot = await panel.snapshot(({ operations }) =>

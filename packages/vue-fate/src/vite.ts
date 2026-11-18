@@ -11,4 +11,4 @@ export const fate: (options: FateVitePluginOptions) => ReturnType<typeof coreFat
   coreFate({
     ...options,
     clientModule: 'vue-fate',
-  } as unknown as Parameters<typeof coreFate>[0]);
+  } as Parameters<typeof coreFate>[0]);

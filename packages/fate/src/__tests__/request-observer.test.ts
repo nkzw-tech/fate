@@ -77,7 +77,8 @@ test('publishes new value-query results by identity without inspecting their pro
 });
 
 test('keeps opaque cyclic values intact in cache-only snapshots', async () => {
-  const value: { self?: unknown } = {};
+  type Cycle = { self?: Cycle };
+  const value: Cycle = {};
   value.self = value;
   const client = createClient({
     roots: { value: clientValueRoot<object>() },
@@ -189,10 +190,7 @@ test('does not recheck unrelated request observers after an entity write', async
   for (const observer of observers) {
     expect(observer.getSnapshot().status).toBe('ready');
   }
-  const coverage = vi.spyOn(
-    client as unknown as { hasRequestData: () => boolean },
-    'hasRequestData',
-  );
+  const coverage = vi.spyOn(client, 'hasRequestData');
   client.write('User', { id: 'unrelated', name: 'Other' }, new Set(['id', 'name']));
   await Promise.resolve();
   expect(coverage).not.toHaveBeenCalled();
@@ -253,10 +251,7 @@ test('moves query observers to the new root entity when its result changes', asy
   await client.request(request, { mode: 'network-only' });
   await Promise.resolve();
   expect(observer.getSnapshot().data?.viewer).toMatchObject({ id: '2' });
-  const coverage = vi.spyOn(
-    client as unknown as { hasRequestData: () => boolean },
-    'hasRequestData',
-  );
+  const coverage = vi.spyOn(client, 'hasRequestData');
   client.write('User', { id: '1', name: 'Old' }, new Set(['id', 'name']));
   await Promise.resolve();
   expect(coverage).not.toHaveBeenCalled();

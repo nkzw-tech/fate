@@ -69,15 +69,6 @@ export default class FateRequestPromise<T, TDescriptor = unknown> implements Pro
   }
 
   finally(onfinally?: (() => void) | null): Promise<T> {
-    return this.then(
-      async (value) => {
-        await onfinally?.();
-        return value;
-      },
-      async (error) => {
-        await onfinally?.();
-        throw error;
-      },
-    );
+    return this.then().finally(onfinally);
   }
 }

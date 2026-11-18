@@ -30,7 +30,7 @@ const buttonVariants = cva(
   },
 );
 
-const Button = ({
+const Button = <Result,>({
   action,
   asChild = false,
   children,
@@ -43,7 +43,7 @@ const Button = ({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants> & {
-    action?: () => Promise<unknown> | unknown;
+    action?: () => Promise<Result> | Result;
     asChild?: boolean;
   }) => {
   const Component = asChild ? Slot : 'button';

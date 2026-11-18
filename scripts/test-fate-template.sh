@@ -113,7 +113,7 @@ if [[ "${template}" == "prisma" || "${template}" == "graphql" ]]; then
   vp run --filter '@app/server' prisma db push
   vp run --filter '@app/server' prisma db seed
 fi
-vp check --fix
+vp check
 vp test
 vp run build
 vp check

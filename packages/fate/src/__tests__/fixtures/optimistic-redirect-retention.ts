@@ -34,8 +34,7 @@ const client = createClient<[typeof roots, typeof mutations]>({
   },
   types: [{ fields: { tasks: { listOf: 'User' } }, type: 'User' }],
 });
-const redirects = (client as unknown as { optimisticEntityResolutions: Map<string, unknown> })
-  .optimisticEntityResolutions;
+const redirects = client['optimisticEntityResolutions'];
 const populate = async () => {
   const pending = client.mutations.create({
     input: {},

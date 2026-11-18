@@ -68,7 +68,7 @@ test('custom parse-only inputs keep their inferred caller and resolver types', a
   const client = createClient().registerClientSchema(schema, ({ mutation }) => ({
     increment: mutation('Counter', {
       input: {
-        parse: (value: unknown): { amount: number } => {
+        parse: (value: unknown) => {
           if (!value || typeof value !== 'object' || !('amount' in value)) {
             throw new Error('Missing amount');
           }

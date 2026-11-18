@@ -411,7 +411,6 @@ export function createHTTPTransport<
       );
       control?.signal.throwIfAborted();
       const response = await fetchImpl(endpoint, {
-        ...(control ? { signal: control.signal } : {}),
         body: JSON.stringify({
           operations: batch.map((entry) => entry.operation),
           version: batch.some((entry) => entry.operation.mutation?.id.startsWith('fate:'))
@@ -422,6 +421,7 @@ export function createHTTPTransport<
         } satisfies FateProtocolRequest),
         headers: requestHeadersValue,
         method: 'POST',
+        signal: control?.signal,
       });
       if (!response.ok) {
         throw await responseError(response);

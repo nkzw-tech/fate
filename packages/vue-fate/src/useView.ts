@@ -80,7 +80,10 @@ export function useView<V extends View<any, any>>(
   const pending = shallowRef(false);
   let disposed = false;
   let activeClient = clientSource.value;
-  let snapshot: ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']> | null = null;
+  type NullableSnapshot = Omit<ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']>, 'data'> & {
+    data: ViewSnapshot<ViewEntity<V>, V[ViewTag]['select']>['data'] | null;
+  };
+  let snapshot: NullableSnapshot | null = null;
   let token = 0;
   let currentPromise: Promise<
     ViewData<ViewEntityWithTypename<V>, ViewSelection<V>> | null | undefined
@@ -155,7 +158,7 @@ export function useView<V extends View<any, any>>(
     return Promise.resolve(viewSnapshot).then(mergeCoverage);
   };
 
-  const getSnapshot = () => {
+  const getSnapshot = (): PromiseLike<NullableSnapshot | null | undefined> => {
     const client = activeClient;
     const currentRef = toValue(ref);
     if (currentRef == null) {
@@ -174,7 +177,7 @@ export function useView<V extends View<any, any>>(
       if (resolvedRef === null) {
         return fulfilledThenable({
           coverage: deferredSnapshot.value.coverage,
-          data: null as unknown as ViewData<ViewEntity<V>, V[ViewTag]['select']>,
+          data: null,
         });
       }
 
@@ -189,12 +192,12 @@ export function useView<V extends View<any, any>>(
       );
     }
 
-    return Promise.resolve(deferredSnapshot).then((deferredValue) => {
+    return Promise.resolve(deferredSnapshot).then<NullableSnapshot>((deferredValue) => {
       const resolvedRef = deferredValue.data;
       if (resolvedRef === null) {
         return {
           coverage: deferredValue.coverage,
-          data: null as unknown as ViewData<ViewEntity<V>, V[ViewTag]['select']>,
+          data: null,
         };
       }
 
@@ -231,7 +234,11 @@ export function useView<V extends View<any, any>>(
       if (!disposed && currentToken === token) {
         snapshot = value ?? null;
         updateSubscriptions();
-        data.value = value ? (markRaw(value.data) as typeof data.value) : value;
+        data.value = value?.data
+          ? (markRaw(value.data) as typeof data.value)
+          : value == null
+            ? value
+            : null;
         if (currentToken === token) {
           pending.value = false;
         }

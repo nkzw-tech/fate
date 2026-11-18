@@ -19,6 +19,7 @@ export type VoidFateClientProps = {
 
 type CreateVoidFateClientOptions = Omit<VoidFateClientProps, 'children'>;
 
+// oxlint-disable-next-line quality/no-chained-type-assertions -- The Vite plugin replaces the uncallable placeholder with the generated client factory.
 const createVoidFateClient = createGeneratedFateClient as unknown as (
   options?: CreateVoidFateClientOptions,
 ) => FateClientType<any, any>;

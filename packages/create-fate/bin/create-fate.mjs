@@ -454,8 +454,7 @@ const replaceInFiles = (dir, replacements) => {
 
 const vueTransportConfigs = {
   drizzle: {
-    clientImports: `import { httpBatchLink } from '@trpc/client';
-import env from '../src/lib/env.ts';`,
+    clientImport: `import env from '../src/lib/env.ts';`,
     createOptions: `{
   fetch: (input, init) =>
     fetch(input, {
@@ -474,28 +473,21 @@ import env from '../src/lib/env.ts';`,
   ],
   liveUrl: \`\${env('SERVER_URL')}/fate\`,
 }`,
-    dotenvConfig: `dotenv.config({
-  path: join(root, '../server', process.env.NODE_ENV === 'development' || process.env.DEV ? '.env' : '.prod.env'),
-  quiet: true,
-})`,
     envKeys: `['SERVER_URL']`,
     envValues: `{
   SERVER_URL: import.meta.env.VITE_SERVER_URL,
 }`,
     fateModule: '@app/server/src/router.ts',
     fateTransport: `transport: 'trpc',`,
+    transportImport: `import { httpBatchLink } from '@trpc/client';`,
     typeModule: '@app/server/src/router.ts',
   },
   graphql: {
-    clientImports: `import env from '../src/lib/env.ts';`,
+    clientImport: `import env from '../src/lib/env.ts';`,
     createOptions: `{
   live: { url: \`\${env('SERVER_URL')}/graphql/stream\` },
   url: \`\${env('SERVER_URL')}/graphql\`,
 }`,
-    dotenvConfig: `dotenv.config({
-  path: join(root, '../server', process.env.NODE_ENV === 'development' || process.env.DEV ? '.env' : '.prod.env'),
-  quiet: true,
-})`,
     envKeys: `['SERVER_URL']`,
     envValues: `{
   SERVER_URL: import.meta.env.VITE_SERVER_URL,
@@ -505,14 +497,13 @@ import env from '../src/lib/env.ts';`,
     typeModule: './fate/graphql.ts',
   },
   'graphql-client': {
-    clientImports: ``,
+    clientImport: ``,
     createOptions: `{
   live: import.meta.env.VITE_GRAPHQL_LIVE_URL
     ? { url: import.meta.env.VITE_GRAPHQL_LIVE_URL }
     : false,
   url: import.meta.env.VITE_GRAPHQL_URL,
 }`,
-    dotenvConfig: '',
     envKeys: `[]`,
     envValues: `{}`,
     fateModule: './src/fate/graphql.ts',
@@ -520,7 +511,7 @@ import env from '../src/lib/env.ts';`,
     typeModule: './fate/graphql.ts',
   },
   http: {
-    clientImports: `import env from '../src/lib/env.ts';`,
+    clientImport: `import env from '../src/lib/env.ts';`,
     createOptions: `{
   fetch: (input, init) =>
     fetch(input, {
@@ -530,10 +521,6 @@ import env from '../src/lib/env.ts';`,
   liveUrl: \`\${env('SERVER_URL')}/fate\`,
   url: \`\${env('SERVER_URL')}/fate\`,
 }`,
-    dotenvConfig: `dotenv.config({
-  path: join(root, '../server', process.env.NODE_ENV === 'development' || process.env.DEV ? '.env' : '.prod.env'),
-  quiet: true,
-})`,
     envKeys: `['SERVER_URL']`,
     envValues: `{
   SERVER_URL: import.meta.env.VITE_SERVER_URL,
@@ -544,19 +531,16 @@ import env from '../src/lib/env.ts';`,
   },
   prisma: null,
   void: {
-    clientImports: `import { useShared } from '@void/vue';
-import type { SharedData } from '../src/lib/shared.ts';
-
-const shared = useShared<SharedData>();`,
+    clientImport: `import type { SharedData } from '../src/lib/shared.ts';`,
     createOptions: `{
   origin: shared.origin,
   userId: shared.auth.user?.id,
 }`,
-    dotenvConfig: '',
     envKeys: `[]`,
     envValues: `{}`,
     fateModule: './src/fate/server.ts',
     fateTransport: `transport: 'void',`,
+    transportImport: `import { useShared } from '@void/vue';`,
     typeModule: './fate/server.ts',
   },
 };
@@ -867,24 +851,17 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
   }
 
   const config = vueTransportConfigs[selectedVariant];
+  const standalone = selectedVariant === 'void' || selectedVariant === 'graphql-client';
+  const typeImport = `import type { Post, User } from '${config.typeModule}';`;
+  const viewImport = "import { view } from 'vue-fate';";
   replaceInFiles(frontendRoot, {
-    __CREATE_FATE_OPTIONS__: config.createOptions,
+    __CREATE_FATE_OPTIONS__: config.createOptions.replaceAll('\n', '\n  '),
     __ENV_KEYS__: config.envKeys,
     __ENV_VALUES__: config.envValues,
     __FATE_MODULE__: config.fateModule,
-    __FATE_TYPE_MODULE__: config.typeModule,
-    __FMT_IGNORE_PATTERNS__:
-      selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? "['**/.cloudflare/**', '.fate/', '.void/', '.void-wrangler.jsonc', 'dist/', 'node_modules/', 'pnpm-lock.yaml']"
-        : "['**/.cloudflare/**', '.fate/', '.void/', 'dist/', 'node_modules/', '../dist/', 'pnpm-lock.yaml']",
-    __LINT_IGNORE_PATTERNS__:
-      selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? "['**/.cloudflare/**', '.fate', '.void', '.void-wrangler.jsonc', 'dist', 'node_modules', 'vite.config.ts.timestamp-*']"
-        : "['**/.cloudflare/**', '.fate', '.void', 'dist', 'node_modules', '../dist', 'vite.config.ts.timestamp-*']",
-    '"__TSCONFIG_EXTENDS__"':
-      selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? '"./.void/tsconfig.json"'
-        : '["../tsconfig.json", "./.void/tsconfig.json"]',
+    '"__TSCONFIG_EXTENDS__"': standalone
+      ? '"./.void/tsconfig.json"'
+      : '["../tsconfig.json", "./.void/tsconfig.json"]',
     '"__TSCONFIG_INCLUDE__"':
       selectedVariant === 'void'
         ? `[
@@ -906,19 +883,35 @@ const configureVueTemplate = (targetPath, selectedVariant) => {
     "src/**/*.ts",
     "src/**/*.vue"
   ]`,
-    '/* __BUILD_CONFIG__ */':
-      selectedVariant === 'void' || selectedVariant === 'graphql-client'
-        ? 'build: {},'
-        : "build: { outDir: join(root, '../dist/client') },",
-    '/* __CLIENT_IMPORTS__ */': config.clientImports,
-    '/* __ENV_CONFIG__ */': config.dotenvConfig
-      ? `import { join } from 'node:path';
-import dotenv from 'dotenv';
+    '/* __BUILD_CONFIG__ */': standalone
+      ? 'build: {},'
+      : "build: { outDir: join(root, '../dist/client') },",
+    '/* __DOTENV_IMPORT__ */\n': standalone ? '' : "import dotenv from 'dotenv';\n",
+    '/* __ENV_CONFIG__ */\n\n': standalone
+      ? ''
+      : `const root = process.cwd();
+dotenv.config({
+  path: join(
+    root,
+    '../server',
+    process.env.NODE_ENV === 'development' || process.env.DEV ? '.env' : '.prod.env',
+  ),
+  quiet: true,
+});
 
-const root = process.cwd();
-${config.dotenvConfig};`
-      : '',
+`,
     '/* __FATE_TRANSPORT__ */': config.fateTransport,
+    '/* __LOCAL_CLIENT_IMPORT__ */\n': config.clientImport ? `${config.clientImport}\n` : '',
+    '      /* __PARENT_DIST_FMT__ */\n': standalone ? '' : "      '../dist/',\n",
+    '      /* __PARENT_DIST_LINT__ */\n': standalone ? '' : "      '../dist',\n",
+    '/* __PATH_IMPORT__ */\n': standalone ? '' : "import { join } from 'node:path';\n",
+    '/* __SHARED_DATA__ */\n':
+      selectedVariant === 'void' ? 'const shared = useShared<SharedData>();\n' : '',
+    '/* __TRANSPORT_IMPORT__ */\n': config.transportImport ? `${config.transportImport}\n` : '',
+    '/* __VIEW_IMPORTS__ */': config.typeModule.startsWith('.')
+      ? `${viewImport}\n${typeImport}`
+      : `${typeImport}\n${viewImport}`,
+    '      /* __WRANGLER_IGNORE__ */\n': standalone ? "      '.void-wrangler.jsonc',\n" : '',
   });
 };
 

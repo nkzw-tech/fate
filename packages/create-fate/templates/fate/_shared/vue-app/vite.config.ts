@@ -1,7 +1,9 @@
-import nkzw from '@nkzw/oxlint-config';
+/* __PATH_IMPORT__ */
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import { voidVue } from '@void/vue/plugin';
+/* __DOTENV_IMPORT__ */
 import { defineConfig, lazyPlugins } from 'vite-plus';
 import { voidPlugin } from 'void';
 import { fate } from 'vue-fate/vite';
@@ -20,9 +22,6 @@ export default defineConfig({
       },
     },
   },
-  optimizeDeps: {
-    exclude: ['@nkzw/fate/client', 'vue-fate/client'],
-  },
   fmt: {
     experimentalSortImports: {
       newlinesBetween: false,
@@ -33,13 +32,31 @@ export default defineConfig({
     experimentalTailwindcss: {
       stylesheet: 'src/App.css',
     },
-    ignorePatterns: __FMT_IGNORE_PATTERNS__,
+    ignorePatterns: [
+      '**/.cloudflare/**',
+      '.fate/',
+      '.void/',
+      /* __WRANGLER_IGNORE__ */
+      'dist/',
+      'node_modules/',
+      /* __PARENT_DIST_FMT__ */
+      'pnpm-lock.yaml',
+    ],
     singleQuote: true,
   },
   lint: {
     extends: [nkzw],
-    ignorePatterns: __LINT_IGNORE_PATTERNS__,
-    options: { typeAware: true, typeCheck: true },
+    ignorePatterns: [
+      '**/.cloudflare/**',
+      '.fate',
+      '.void',
+      /* __WRANGLER_IGNORE__ */
+      'dist',
+      'node_modules',
+      /* __PARENT_DIST_LINT__ */
+      'vite.config.ts.timestamp-*',
+    ],
+    options: { typeCheck: true },
     overrides: [
       {
         env: { browser: true },
@@ -64,6 +81,9 @@ export default defineConfig({
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },
+  },
+  optimizeDeps: {
+    exclude: ['@nkzw/fate/client', 'vue-fate/client'],
   },
   plugins: [
     ...(lazyPlugins(() => [tailwindcss(), ...(isTest ? [vue()] : [voidPlugin(), voidVue()])]) ??

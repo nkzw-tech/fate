@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import nkzw from '@nkzw/oxlint-config';
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
 
@@ -29,6 +29,7 @@ export default defineConfig({
       'client/dist/',
       'client/src/translations/',
       'server/dist/',
+      'server/src/drizzle/migrations/meta/*.json',
       'pnpm-lock.yaml',
     ],
     singleQuote: true,
@@ -47,7 +48,7 @@ export default defineConfig({
       'client/vite.config.ts.timestamp-*',
       'server/vite.config.ts.timestamp-*',
     ],
-    options: { typeAware: true, typeCheck: true },
+    options: { typeCheck: true },
     overrides: [
       {
         files: ['server/src/index.tsx', 'server/src/drizzle/seed.tsx', '**/__tests__/**'],

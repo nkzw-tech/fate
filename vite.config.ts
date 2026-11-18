@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import nkzw from '@nkzw/oxlint-config';
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
 import { configDefaults } from 'vite-plus';
@@ -56,8 +56,55 @@ export default defineConfig({
       'packages/**/lib',
     ],
     jsPlugins: ['eslint-plugin-workspaces'],
-    options: { typeAware: true, typeCheck: true },
+    options: { typeCheck: true },
     overrides: [
+      {
+        // These library paths read arbitrary entity, transport, or storage fields before narrowing their values.
+        files: [
+          'packages/fate-devtools/src/__tests__/devtools.test.ts',
+          'packages/fate-devtools/src/index.ts',
+          'packages/fate-devtools/src/serialize.ts',
+          'packages/fate/src/**',
+          'packages/react-fate/src/__tests__/deferred-hook-errors.test.tsx',
+          'packages/react-fate/src/__tests__/useViewLifecycle.test.tsx',
+          'packages/react-fate/src/listView.ts',
+          'packages/void-fate/src/server.ts',
+          'packages/vue-fate/src/__tests__/useView.test.ts',
+          'packages/vue-fate/src/listView.ts',
+        ],
+        rules: { 'quality/no-unsafe-dictionary-type': 'off' },
+      },
+      {
+        // Transport, storage, and instrumentation boundaries pass opaque results to their callers.
+        files: [
+          'packages/fate-devtools/src/__tests__/devtools.test.ts',
+          'packages/fate-devtools/src/index.ts',
+          'packages/fate-devtools/src/vite.ts',
+          'packages/fate-indexeddb/src/__tests__/client-persistence-benchmark.ts',
+          'packages/fate-indexeddb/src/__tests__/index.test.ts',
+          'packages/fate/src/**',
+          'packages/react-fate/src/__tests__/requestTimeout.test.tsx',
+          'packages/react-fate/src/__tests__/useRefetch.test.tsx',
+          'packages/react-fate/src/useViewSnapshots.ts',
+        ],
+        rules: { 'quality/no-unknown-returns': 'off' },
+      },
+      {
+        // These APIs use object identity for weak keys, scopes, and runtime inspection.
+        files: [
+          'packages/fate-devtools/src/index.ts',
+          'packages/fate-devtools/src/serialize.ts',
+          'packages/fate/src/__tests__/client-state.test.ts',
+          'packages/fate/src/__tests__/list-invalidation.test.ts',
+          'packages/fate/src/client.ts',
+          'packages/fate/src/codegen/__tests__/graphql.test.ts',
+          'packages/fate/src/hydration.ts',
+          'packages/fate/src/mutation.ts',
+          'packages/fate/src/normalization-input.ts',
+          'packages/fate/src/render-read-errors.ts',
+        ],
+        rules: { 'quality/no-object-parameters': 'off' },
+      },
       {
         env: { browser: true },
         files: ['.vitepress/**/*.vue'],

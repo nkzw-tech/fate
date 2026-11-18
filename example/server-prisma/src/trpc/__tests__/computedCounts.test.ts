@@ -29,7 +29,7 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
       },
     }),
   });
-  const groupBy = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+  const groupBy = vi.fn(async ({ where }: { where: { status?: string } }) => {
     if (where.status === 'GOING') {
       return [{ _count: { _all: 3 }, eventId: 'event-1' }];
     }
@@ -39,6 +39,7 @@ test('hydrates conflicting filtered counts for the same Prisma relation', async 
       { _count: { _all: 2 }, eventId: 'event-2' },
     ];
   });
+  // oxlint-disable-next-line quality/no-chained-type-assertions -- This fixture provides only the Prisma delegate exercised by the computed field.
   const ctx = {
     headers: {},
     prisma: {

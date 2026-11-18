@@ -123,6 +123,7 @@ test('accepts parameter interfaces and snapshots caller-owned argument objects',
 });
 
 test('unbound definitions cannot silently disappear in spreads or nested selections', () => {
+  // oxlint-disable-next-line typescript/no-misused-spread -- Exercise an invalid spread to verify the runtime diagnostic.
   expect(() => ({ ...Name })).toThrow(/bind|parameter/i);
   type Parent = { __typename: 'Parent'; child: User };
   const Parent = view<Parent>()({ child: Name });

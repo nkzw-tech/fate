@@ -190,7 +190,7 @@ test('identifies data views among mixed runtime exports', () => {
   };
 
   const { roots, types } = createSchema(
-    Object.values(moduleExports as Record<string, unknown>).filter(isDataView),
+    Object.values(moduleExports).flatMap((value) => (isDataView(value) ? [value] : [])),
     {
       viewer: userView,
     },

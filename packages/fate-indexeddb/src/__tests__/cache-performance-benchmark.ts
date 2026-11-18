@@ -14,7 +14,7 @@ let writeCalls = 0,
   active = 0,
   peak = 0,
   readEntries: Array<any> = [];
-const storage = {
+const storage: typeof disk = {
   ...disk,
   async writeBatch(entries: Parameters<typeof disk.writeBatch>[0]) {
     writeCalls++;
@@ -50,7 +50,7 @@ const storage = {
   subscribe: undefined,
 };
 if (!disk.readMany) {
-  delete (storage as { readMany?: unknown }).readMany;
+  delete storage.readMany;
 }
 const reset = () => {
   writeCalls = 0;
@@ -207,10 +207,11 @@ async function crossTab(n: number) {
 }
 
 try {
-  const results: {
+  type BenchmarkResults = {
     crossTab: Array<Awaited<ReturnType<typeof crossTab>>>;
     remote: Array<Awaited<ReturnType<typeof remote>>>;
-  } = { crossTab: [], remote: [] };
+  };
+  const results: BenchmarkResults = { crossTab: [], remote: [] };
   for (const n of [100, 1000]) {
     for (const mode of ['ids', 'graph'] as const) {
       results.remote.push(await remote(n, mode));

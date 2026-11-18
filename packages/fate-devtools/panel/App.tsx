@@ -4,6 +4,7 @@ import {
   type ChangeEntry,
   type ClientSnapshot,
   type DevtoolsAction,
+  type JSONValue,
   type ListEntry,
   type OperationEntry,
   type RecordEntry,
@@ -48,7 +49,15 @@ const useNow = (active: boolean) => {
   return now;
 };
 
-const labelFields = ['title', 'name', 'displayName', 'username', 'label', 'content', 'text'];
+const labelFields = [
+  'title',
+  'name',
+  'displayName',
+  'username',
+  'label',
+  'content',
+  'text',
+] as const;
 
 /** A short human-readable label for a record, so rows are not just IDs. */
 const recordLabel = (record: RecordEntry) => {
@@ -57,7 +66,7 @@ const recordLabel = (record: RecordEntry) => {
     return null;
   }
   for (const field of labelFields) {
-    const label = (value as Record<string, unknown>)[field];
+    const label = (value as Readonly<Record<string, JSONValue>>)[field];
     if (typeof label === 'string' && label.trim()) {
       return label.length > 80 ? `${label.slice(0, 80)}…` : label;
     }
@@ -475,7 +484,7 @@ const requestStatus = (request: RequestEntry) => {
         : 'inactive';
 };
 
-const statusTone: Record<string, string> = {
+const statusTone = {
   active: 'green',
   closed: 'neutral',
   error: 'red',

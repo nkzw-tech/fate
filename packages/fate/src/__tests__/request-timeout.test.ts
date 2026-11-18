@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { createClient } from '../client.ts';
 import { createPersistence } from '../persistence.ts';
 import { clientRoot, clientValueRoot } from '../root.ts';
-import { type Transport } from '../transport.ts';
+import type { Transport } from '../transport.ts';
 import { view } from '../view.ts';
 import { memoryStorage } from './persistenceStorage.ts';
 

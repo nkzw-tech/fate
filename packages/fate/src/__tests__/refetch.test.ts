@@ -328,7 +328,9 @@ test('includes locators in root connections and refetches multiple users in one 
   await client.request({ users: { ids: ['1', '2'], view: Profile } }, { mode: 'network-only' });
   expect(fetch).toHaveBeenCalledTimes(1);
   const body = JSON.parse(fetch.mock.calls[0][1].body);
-  expect(Object.values(body.variables).sort()).toEqual(['cpojer', 'friend']);
+  const variables = Object.values(body.variables);
+  expect(variables).toHaveLength(2);
+  expect(variables).toEqual(expect.arrayContaining(['cpojer', 'friend']));
   expect(body.query.match(/user\(/g)).toHaveLength(2);
 });
 
@@ -356,9 +358,9 @@ test('nested pagination fetches its owner through the locator query', async () =
     Friends,
     viewer!,
   );
-  const metadata = (snapshot.data.friends as unknown as { [ConnectionTag]: ConnectionMetadata })[
-    ConnectionTag
-  ];
+  const metadata = (
+    snapshot.data.friends as typeof snapshot.data.friends & { [ConnectionTag]: ConnectionMetadata }
+  )[ConnectionTag];
   fetch.mockClear();
   await client.loadConnection(Name, metadata, { after: 'friend', first: 1 });
   expect(fetch).toHaveBeenCalledTimes(1);
@@ -543,9 +545,9 @@ test('a pagination refresh cannot reuse an older shared response to restore its 
     Friends,
     viewer!,
   );
-  const metadata = (snapshot.data.friends as unknown as { [ConnectionTag]: ConnectionMetadata })[
-    ConnectionTag
-  ];
+  const metadata = (
+    snapshot.data.friends as typeof snapshot.data.friends & { [ConnectionTag]: ConnectionMetadata }
+  )[ConnectionTag];
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const execute = fetch.getMockImplementation()!;

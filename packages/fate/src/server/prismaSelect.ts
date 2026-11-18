@@ -45,7 +45,8 @@ const getConflictingCountRelations = <Context>(node: ViewPlanNode<Context>): Set
   }
 
   return new Set(
-    [...signaturesByRelation.entries()]
+    signaturesByRelation
+      .entries()
       .filter(([, signatures]) => signatures.size > 1)
       .map(([relation]) => relation),
   );
@@ -155,7 +156,7 @@ const collectResolverSelections = <Context>(
   }
 };
 
-const buildNodeSelect = <Context>(node: ViewPlanNode<Context>): AnyRecord => {
+const buildNodeSelect = <Context>(node: ViewPlanNode<Context>) => {
   const select: AnyRecord = {};
 
   for (const field of node.selectedFields) {

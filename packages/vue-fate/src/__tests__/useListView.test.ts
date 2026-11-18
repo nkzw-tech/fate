@@ -102,7 +102,8 @@ test('preserves absent connections and distinguishes them from empty lists in va
 test('preserves optional or missing items as potentially absent', async () => {
   const { client } = setup();
   const { app, resource } = mount(client, () => {
-    const optional: { items?: ReadonlyArray<Item> } = {};
+    type OptionalItems = { items?: ReadonlyArray<Item> };
+    const optional: OptionalItems = {};
     const missing = { pagination: { hasNext: false, hasPrevious: false } };
     const items = useListView(Selection, optional);
     const withoutItems = useListView(Selection, missing);

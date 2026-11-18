@@ -140,7 +140,7 @@ test('aliases share normalized identity with an ordinary selection and paginate 
   const data = await read();
   await client.loadConnection(
     view<Game>()({ id: true, name: true }),
-    (data.active as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+    (data.active as typeof data.active & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
     { after: '1', first: 1 },
   );
   expect(await read()).toMatchObject({
@@ -456,7 +456,7 @@ test('named fragments carry independent bindings on the same entity through a Gr
   expect(games).toHaveBeenCalledTimes(3);
   await client.loadConnection(
     GameDetails,
-    (active.games as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+    (active.games as typeof active.games & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
     { after: '1', first: 1 },
   );
   const paged = (

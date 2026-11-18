@@ -1,4 +1,4 @@
-import { memo, count, dataView, field, list, type Entity } from '@nkzw/fate/server';
+import { memo, count, dataView, field, list } from '@nkzw/fate/server';
 import type {
   Category as PrismaCategory,
   Comment as PrismaComment,

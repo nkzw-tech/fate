@@ -13,13 +13,13 @@ const postSelection = {
 
 const isDevelopment = process.env.NODE_ENV === 'development' || Boolean(process.env.DEV);
 
-const getCommentSelection = (select: Record<string, unknown>) => {
+const getCommentSelection = (select: CommentSelect) => {
   return {
     ...select,
     post: {
       select: {
         ...postSelection,
-        ...(select.post as { select?: Record<string, unknown> })?.select,
+        ...(typeof select.post === 'object' ? select.post.select : undefined),
       },
     },
   } as CommentSelect;

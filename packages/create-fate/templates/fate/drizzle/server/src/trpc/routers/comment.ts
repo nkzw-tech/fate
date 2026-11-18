@@ -136,7 +136,7 @@ export const commentRouter = router({
         cursor,
         direction,
         extra: {
-          where: commentSearchWhere(query) as unknown as DrizzleQueryExtra['where'],
+          where: commentSearchWhere(query) as DrizzleQueryExtra['where'],
         },
         input,
         skip,

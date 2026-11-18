@@ -15,6 +15,7 @@ export function withOptimisticSnapshot<T extends object>(
   record: T,
   snapshot: OptimisticSnapshot,
 ): T {
+  // oxlint-disable-next-line quality/no-known-value-widening -- Validate caller-supplied snapshot metadata even when the caller is typed.
   if (!isOptimisticSnapshot(snapshot)) {
     throw new Error('fate: Invalid optimistic snapshot.');
   }

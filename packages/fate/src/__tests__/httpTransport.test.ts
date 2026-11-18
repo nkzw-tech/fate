@@ -10,7 +10,7 @@ const jsonResponse = (data: unknown) =>
 const requestHeadersFor = async (
   headers: HeadersInit | (() => HeadersInit | Promise<HeadersInit>),
 ) => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [{ data: { id: '1' }, id: '1', ok: true }],
       version: 1,
@@ -24,8 +24,8 @@ const requestHeadersFor = async (
 
   await transport.fetchQuery?.('viewer', new Set(['id']));
 
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  return new Headers(calls[0]?.[1].headers);
+  const calls = fetch.mock.calls;
+  return new Headers(calls[0]?.[1]?.headers);
 };
 
 type TestLiveConnector = Exclude<
@@ -177,7 +177,7 @@ const openLiveStream = async () => {
 };
 
 test('batches native HTTP operations in the same microtask', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [
         { data: [{ id: '1' }], id: '1', ok: true },
@@ -204,8 +204,8 @@ test('batches native HTTP operations in the same microtask', async () => {
   ]);
 
   expect(fetch).toHaveBeenCalledTimes(1);
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  expect(JSON.parse((calls[0]?.[1].body as string) ?? '{}')).toEqual({
+  const calls = fetch.mock.calls;
+  expect(JSON.parse((calls[0]?.[1]?.body as string) ?? '{}')).toEqual({
     operations: [
       {
         id: '1',
@@ -246,7 +246,7 @@ test('normalizes tuple array headers for native HTTP requests', async () => {
 });
 
 test('raises protocol errors from failed operation results', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [
         {
@@ -276,7 +276,7 @@ test('omits native SSE live support when disabled', () => {
 });
 
 test('handles named native SSE live entity events emitted by the server', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [{ data: null, id: '1', ok: true }],
       version: 1,
@@ -297,9 +297,9 @@ test('handles named native SSE live entity events emitted by the server', async 
 
   const source = await openLiveStream();
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  const postCall = fetch.mock.calls[0];
   expect(postCall[0]).toBe('http://local/fate/live');
-  expect(JSON.parse(String(postCall[1].body ?? '{}'))).toEqual({
+  expect(JSON.parse(String(postCall[1]?.body ?? '{}'))).toEqual({
     connectionId: expect.any(String),
     operations: [
       {
@@ -366,7 +366,7 @@ test('subscribes after the native SSE stream recovers from an initial error', as
 });
 
 test('closes the native SSE stream without unsubscribing from a closed connection', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [{ data: null, id: '1', ok: true }],
       version: 1,
@@ -385,9 +385,7 @@ test('closes the native SSE stream without unsubscribing from a closed connectio
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
 
   const operations = () =>
-    (fetch.mock.calls as unknown as Array<[string, RequestInit]>).flatMap(
-      ([, init]) => JSON.parse(String(init.body)).operations,
-    );
+    fetch.mock.calls.flatMap(([, init]) => JSON.parse(String(init?.body)).operations);
 
   disposeA?.();
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
@@ -532,7 +530,7 @@ test.each([
 );
 
 test('handles named native SSE live connection events emitted by the server', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [{ data: null, id: '1', ok: true }],
       version: 1,
@@ -557,8 +555,8 @@ test('handles named native SSE live connection events emitted by the server', as
 
   const source = await openLiveStream();
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
-  expect(JSON.parse(String(postCall[1].body ?? '{}')).operations).toEqual([
+  const postCall = fetch.mock.calls[0];
+  expect(JSON.parse(String(postCall[1]?.body ?? '{}')).operations).toEqual([
     {
       args: { categoryId: 'fruit' },
       id: '1',
@@ -597,7 +595,7 @@ test('handles named native SSE live connection events emitted by the server', as
 });
 
 test('handles named native SSE protocol errors emitted by the server', async () => {
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     jsonResponse({
       results: [{ data: null, id: '1', ok: true }],
       version: 1,
@@ -658,8 +656,8 @@ test('subscribes to live connector entity topics', async () => {
 
   const source = await openLiveStream();
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
-  expect(JSON.parse(String(calls[0]?.[1].body ?? '{}')).operations).toEqual([
+  const calls = fetch.mock.calls;
+  expect(JSON.parse(String(calls[0]?.[1]?.body ?? '{}')).operations).toEqual([
     { id: '1', kind: 'subscribe', topic },
   ]);
 
@@ -704,8 +702,8 @@ test('subscribes to live connector connection topics', async () => {
 
   const source = await openLiveStream();
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  const postCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
-  expect(JSON.parse(String(postCall[1].body ?? '{}')).operations).toEqual([
+  const postCall = fetch.mock.calls[0];
+  expect(JSON.parse(String(postCall[1]?.body ?? '{}')).operations).toEqual([
     { id: '1', kind: 'subscribe', topic: specificTopic },
     { id: '1:global', kind: 'subscribe', topic: globalTopic },
   ]);
@@ -849,9 +847,9 @@ test('uses the live event node type to fetch connection records without data', a
   });
 
   await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  const calls = fetch.mock.calls;
   const byIdCall = calls.find(([input]) => input === 'http://local/fate');
-  const operation = JSON.parse(String(byIdCall?.[1].body ?? '{}')).operations[0];
+  const operation = JSON.parse(String(byIdCall?.[1]?.body ?? '{}')).operations[0];
 
   expect(operation.type).toBe('Comment');
   expect(onEvent).toHaveBeenCalledWith({
@@ -1082,9 +1080,9 @@ test('fetches only changed selected paths for live connector events', async () =
   await vi.waitFor(() =>
     expect(onData).toHaveBeenCalledWith({ id: '1', likes: 5, title: 'Fetched' }, ['likes', 'id']),
   );
-  const calls = fetch.mock.calls as unknown as Array<[string, RequestInit]>;
+  const calls = fetch.mock.calls;
   const byIdCall = calls.find(([input]) => input === 'http://local/fate');
-  expect(JSON.parse(String(byIdCall?.[1].body ?? '{}')).operations[0].select).toEqual([
+  expect(JSON.parse(String(byIdCall?.[1]?.body ?? '{}')).operations[0].select).toEqual([
     'likes',
     'id',
   ]);

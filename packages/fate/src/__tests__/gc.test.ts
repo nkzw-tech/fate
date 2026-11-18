@@ -167,7 +167,7 @@ test(`'gc' collects unretained root list records and list state`, async () => {
   const request = { posts: { args: { tag: 'A' }, list: PostConnectionView } };
   const retained = client.retain(request);
   const { posts } = await client.request(request);
-  const metadata = (posts as unknown as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
+  const metadata = (posts as AnyRecord)[ConnectionTag as any] as ConnectionMetadata;
 
   expect(client.store.read(toEntityId('Post', 'post-A'))).toMatchObject({ title: 'A' });
   expect(client.store.getListState(metadata.key)?.ids).toEqual([toEntityId('Post', 'post-A')]);
@@ -755,10 +755,7 @@ test('ordinary mutations do not accumulate identity redirects after garbage coll
   }
   client.gc();
   expect(client.store.dehydrate().records).toHaveLength(0);
-  expect(
-    (client as unknown as { optimisticEntityResolutions: Map<string, unknown> })
-      .optimisticEntityResolutions.size,
-  ).toBe(0);
+  expect(client['optimisticEntityResolutions'].size).toBe(0);
 });
 
 for (const kind of ['view', 'fragment', 'cache-only', 'deferred']) {

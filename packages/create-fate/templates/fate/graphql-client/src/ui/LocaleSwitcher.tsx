@@ -10,7 +10,7 @@ export default function LocaleSwitcher() {
         <fbt desc="Locale switcher button">Change Language</fbt>
       </span>
       <select
-        className="rounded-md border border-gray-300 bg-background px-2 py-1 text-foreground"
+        className="rounded-md border border-gray-300 px-2 py-1"
         disabled={localeChangeIsPending}
         onChange={(event) => {
           const nextLocale = event.target.value;

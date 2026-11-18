@@ -474,7 +474,7 @@ test('optimistic updates compose when mutations resolve out of order', async () 
       async fetchById() {
         return [];
       },
-      // @ts-expect-error
+      // @ts-expect-error This fixture implements only the mutations exercised by the view.
       mutate: vi.fn((key) => {
         if (key === 'like') {
           const { promise, resolve } = Promise.withResolvers<UpdateLikesResult>();

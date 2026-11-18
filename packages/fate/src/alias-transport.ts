@@ -59,6 +59,7 @@ const project = (value: unknown, tree: Tree): unknown => {
     return value;
   }
   if (Array.isArray(value.items)) {
+    // oxlint-disable-next-line quality/no-known-value-widening -- Alias projection also passes through arbitrary transport values.
     return {
       ...value,
       items: value.items.map((entry) =>
@@ -77,6 +78,7 @@ const project = (value: unknown, tree: Tree): unknown => {
       result[field] = project(value[schemaField(field)], child);
     }
   }
+  // oxlint-disable-next-line quality/no-known-value-widening -- Alias projection also passes through arbitrary transport values.
   return result;
 };
 
@@ -118,6 +120,7 @@ const merge = (left: unknown, right: unknown): unknown => {
     for (const [key, value] of Object.entries(right)) {
       result[key] = Object.hasOwn(left, key) ? merge(left[key], value) : value;
     }
+    // oxlint-disable-next-line quality/no-known-value-widening -- Alias projection also passes through arbitrary transport values.
     return result;
   }
   return right;

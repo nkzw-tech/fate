@@ -234,12 +234,11 @@ test('invalidation still fences a request whose transport has settled before its
   const pending = client.request(active);
   await client.mutations.add({ input: { title: 'Newer' }, invalidate: [posts] });
 
-  const runtime = client as unknown as { pendingNetworkRequests: number };
   older.resolve(page('older'));
-  for (let step = 0; step < 30 && runtime.pendingNetworkRequests; step++) {
+  for (let step = 0; step < 30 && client['pendingNetworkRequests']; step++) {
     await Promise.resolve();
   }
-  expect(runtime.pendingNetworkRequests).toBe(0);
+  expect(client['pendingNetworkRequests']).toBe(0);
   fetchList.mockResolvedValueOnce(page('newest'));
   expect((await client.request(active)).posts.items[0].node.id).toBe('newest');
   await pending;

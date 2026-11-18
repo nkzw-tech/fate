@@ -193,6 +193,7 @@ export function connectFateDevtools(
   }
 
   const connection: Connection = {
+    // oxlint-disable-next-line quality/no-chained-type-assertions -- Devtools instruments private members of the live client across the package boundary.
     dispose: attach(client as unknown as InspectableClient, options),
     refCount: 1,
   };
@@ -271,6 +272,7 @@ function attach(client: InspectableClient, options: FateDevtoolsOptions): () => 
     const wrapped = new Map<PropertyKey, AnyFn>();
     client.transport = new Proxy(originalTransport, {
       get(target, property, receiver) {
+        // oxlint-disable-next-line quality/no-reflect-get -- Forward the original receiver to transport getters in this proxy trap.
         const value = Reflect.get(target, property, receiver);
         if (typeof value !== 'function' || !operationKinds.has(property as OperationKind)) {
           return value;

@@ -19,6 +19,7 @@ const cloneValue = (entry: unknown, currentPath: string): unknown => {
   }
 
   if (isDate(entry)) {
+    // oxlint-disable-next-line quality/no-known-value-widening -- Recursive argument cloning preserves arbitrary scalar inputs.
     return new Date(entry.getTime());
   }
 

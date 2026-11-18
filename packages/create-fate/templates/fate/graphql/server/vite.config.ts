@@ -1,4 +1,4 @@
-import nkzw from '@nkzw/oxlint-config';
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
@@ -15,7 +15,7 @@ export default defineConfig({
   lint: {
     extends: [nkzw],
     ignorePatterns: ['dist/', 'src/prisma/pothos-types.ts', 'src/prisma/prisma-client/**'],
-    options: { typeAware: true, typeCheck: true },
+    options: { typeCheck: true },
     overrides: [
       {
         files: ['scripts/**/*.tsx', 'src/app.tsx', 'src/index.tsx', 'src/prisma/seed.tsx'],

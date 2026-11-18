@@ -140,9 +140,9 @@ test('paginates a nested connection through a mapped refetch without leaking the
     UserView,
     viewer,
   );
-  const metadata = (initial.data.games as unknown as { [ConnectionTag]: ConnectionMetadata })[
-    ConnectionTag
-  ];
+  const metadata = (
+    initial.data.games as typeof initial.data.games & { [ConnectionTag]: ConnectionMetadata }
+  )[ConnectionTag];
 
   await client.loadConnection(GameView, metadata, { after: 'one' });
 
@@ -160,7 +160,7 @@ test('paginates a nested connection through a mapped refetch without leaking the
 });
 
 test('retains the default nodes fallback for types without a mapping', async () => {
-  const fetch = vi.fn(
+  const fetch = vi.fn<typeof globalThis.fetch>(
     async () =>
       new Response(
         JSON.stringify({ data: { f1: [{ __typename: 'Game', id: 'Game-1', name: 'Game' }] } }),
@@ -171,8 +171,8 @@ test('retains the default nodes fallback for types without a mapping', async () 
     { __typename: 'Game', id: '1', name: 'Game' },
   ]);
   expect(fetch).toHaveBeenCalledTimes(1);
-  const init = fetch.mock.calls[0] as unknown as [unknown, RequestInit];
-  expect(JSON.parse(String(init[1].body)).query).toContain('nodes(ids: ["Game-1"])');
+  const init = fetch.mock.calls[0];
+  expect(JSON.parse(String(init[1]?.body)).query).toContain('nodes(ids: ["Game-1"])');
 });
 
 test('defaults the mapped ID argument to id', async () => {

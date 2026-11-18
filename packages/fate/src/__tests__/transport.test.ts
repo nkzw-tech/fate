@@ -194,7 +194,7 @@ test('throws when invoking missing mutation resolver', async () => {
   });
 
   await expect(
-    // @ts-expect-error
+    // @ts-expect-error Exercise the runtime error for an unregistered procedure.
     transport.mutate?.('post.create', { content: 'Kiwi' }, new Set(['id'])),
   ).rejects.toThrowError("fate(trpc): Missing mutation resolver for procedure 'post.create'.");
 });

@@ -63,7 +63,7 @@ const setup = async (nested: boolean) => {
   } else {
     connection = (await client.request(rootRequest)).users;
   }
-  const metadata = (connection as unknown as { [ConnectionTag]: ConnectionMetadata })[
+  const metadata = (connection as typeof connection & { [ConnectionTag]: ConnectionMetadata })[
     ConnectionTag
   ];
   const load = (args = { after: '1', first: 1 }) => client.loadConnection(Profile, metadata, args);

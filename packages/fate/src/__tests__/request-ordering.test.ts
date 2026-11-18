@@ -222,10 +222,8 @@ test('late requests do not overwrite optimistic mutations after they commit', as
 
 test('write-version history exists only while network responses can still arrive stale', async () => {
   const { client, pending, start } = setup();
-  const { fieldWriteVersions, writeVersions } = client as unknown as {
-    fieldWriteVersions: ReadonlyMap<string, ReadonlyMap<string, number>>;
-    writeVersions: ReadonlyMap<string, number>;
-  };
+  const fieldWriteVersions = client['fieldWriteVersions'];
+  const writeVersions = client['writeVersions'];
   const historySize = () => fieldWriteVersions.size + writeVersions.size;
   for (let index = 0; index < 1000; index++) {
     client.write('User', { id: String(index), name: 'Local' }, new Set(['name']));

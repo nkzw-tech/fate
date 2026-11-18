@@ -98,7 +98,7 @@ export function useListViewResource<
           cursor,
           node: activeClient.rootListRef(id, nodeView),
         })),
-      ) as unknown as ConnectionItems<ResolvedConnection<C>>;
+      ) as ConnectionItems<ResolvedConnection<C>>;
     } else {
       const currentItems = resolvedConnection.value?.items;
       items.value = (currentItems ? markRaw(currentItems) : undefined) as ConnectionItems<

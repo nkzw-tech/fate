@@ -283,7 +283,7 @@ export const encodeHydrationValue = (
 const invalidPayload = (path: string): Error =>
   new Error(`fate: Invalid hydration payload at '${path}'.`);
 
-const tagLengths: Readonly<Record<string, number>> = {
+const tagLengths = {
   array: 2,
   bigint: 2,
   boolean: 2,
@@ -304,7 +304,18 @@ export const decodeHydrationValue = (
   const resolvedLimits = resolveHydrationLimits(limits);
   let nodes = 0;
 
-  const decode = (entry: FateSerializedValue, path: string, depth: number): unknown => {
+  type DecodedValue =
+    | null
+    | undefined
+    | string
+    | boolean
+    | number
+    | bigint
+    | Date
+    | ReturnType<typeof createNodeRef>
+    | Array<DecodedValue>
+    | AnyRecord;
+  const decode = (entry: FateSerializedValue, path: string, depth: number): DecodedValue => {
     nodes += 1;
     if (
       nodes > resolvedLimits.maxNodes ||
@@ -316,7 +327,10 @@ export const decodeHydrationValue = (
     }
 
     const [tag, payload] = entry;
-    if (entry.length !== tagLengths[tag]) {
+    if (
+      !Object.hasOwn(tagLengths, tag) ||
+      entry.length !== tagLengths[tag as keyof typeof tagLengths]
+    ) {
       throw invalidPayload(path);
     }
 

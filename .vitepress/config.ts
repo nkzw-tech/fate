@@ -73,7 +73,7 @@ export default defineConfig({
   markdown: {
     theme: {
       dark: dunkel,
-      // @ts-expect-error
+      // @ts-expect-error The custom light theme is accepted by Shiki at runtime.
       light: licht,
     },
   },

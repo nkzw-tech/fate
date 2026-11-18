@@ -47,13 +47,15 @@ export type FateDevtoolsPlugin = Plugin & {
   devtools: { setup: (context: DevToolsSetupContext) => void };
 };
 
-const contentTypes: Record<string, string> = {
-  '.css': 'text/css; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-};
+const contentTypes = new Map(
+  Object.entries({
+    '.css': 'text/css; charset=utf-8',
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+  }),
+);
 
 // The fate app icon.
 const icon = `data:image/svg+xml,${encodeURIComponent(
@@ -124,7 +126,7 @@ export function fateDevtools({
           const body = await readFile(existsSync(file) ? file : join(directory, 'index.html'));
           response.setHeader(
             'Content-Type',
-            contentTypes[extname(file)] ?? 'application/octet-stream',
+            contentTypes.get(extname(file)) ?? 'application/octet-stream',
           );
           response.setHeader('Cache-Control', 'no-cache');
           response.end(body);

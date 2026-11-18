@@ -1,4 +1,4 @@
-import { type Deferred } from '@nkzw/fate';
+import type { Deferred } from '@nkzw/fate';
 import { computed, onScopeDispose, watch, type MaybeRefOrGetter } from 'vue';
 import { getFateClientSource, useFateClient } from './context.ts';
 import {

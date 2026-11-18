@@ -1,5 +1,4 @@
-import type { Post, User } from '__FATE_TYPE_MODULE__';
-import { view } from 'vue-fate';
+/* __VIEW_IMPORTS__ */
 
 export const UserView = view<User>()({
   id: true,

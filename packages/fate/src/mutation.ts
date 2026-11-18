@@ -473,6 +473,7 @@ const cachedOptimisticRecord = (client: FateClient<any, any>, id: EntityId) => {
       return Object.freeze(value.map(copy));
     }
     if (isDate(value)) {
+      // oxlint-disable-next-line quality/no-known-value-widening -- The recursive copy also returns opaque scalar values from the store.
       return new Date(value.getTime());
     }
     if (!isRecord(value)) {
@@ -520,6 +521,12 @@ const validateMutationCommand = (command: MutationCommand, config: TypeConfig | 
 };
 
 /** @internal Creates the same optimistic/confirmation machinery for live and restored calls. */
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  value !== null &&
+  typeof value === 'object' &&
+  'then' in value &&
+  typeof value.then === 'function';
+
 export function prepareMutation(
   client: FateClient<any, any>,
   command: MutationCommand,
@@ -885,9 +892,7 @@ export function wrapMutation<
             try {
               const execution = operation.execute();
               const result = (
-                execution && typeof execution === 'object' && 'then' in execution
-                  ? await execution
-                  : execution
+                isThenable(execution) ? await execution : execution
               ) as MutationResult<I>;
               client.assertPersistenceActive();
               const saved = commit(() => operation.commit(result));
@@ -923,7 +928,7 @@ export function wrapMutation<
     })) as MutationFunction<I>;
 }
 
-const handleMutationError = (key: string, error: unknown): { error: Error; result: undefined } => {
+const handleMutationError = (key: string, error: unknown) => {
   if (error instanceof Error) {
     const statusCode = getErrorStatusCode(error);
     const errorCategory = statusCode

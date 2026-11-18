@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",
-    "@nkzw/oxlint-config": "^2.0.1",
+    "@nkzw/oxlint-config": "^3.0.0",
     "@oxc-node/core": "^1.0.2",
     "@swc/core": "^1.16.22",
     "@types/node": "^26.6.6",
@@ -46,8 +46,10 @@
     "glob": "^14.0.6",
     "nodemon": "^3.1.14",
     "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
     "prisma": "^7.10.1",
     "prisma-json-types-generator": "^6.0.1",
+    "tsrs": "0.25.0-ts7.1.0-beta",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

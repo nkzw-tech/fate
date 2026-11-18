@@ -49,7 +49,7 @@ for (const method of ['byIds', 'byId', 'byIdFallback'] as const) {
     const adapter = createPrismaSourceAdapter({
       views: [
         {
-          delegate: () => ({ findMany, ...(method === 'byId' ? { findUnique } : {}) }),
+          delegate: () => (method === 'byId' ? { findMany, findUnique } : { findMany }),
           view: userView,
         },
       ],

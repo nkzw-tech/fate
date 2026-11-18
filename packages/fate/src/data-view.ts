@@ -238,6 +238,7 @@ export function list(
   view: DataView<any> | ListViews,
   options?: DataViewListOptions | PolymorphicListOptions<any, any>,
 ): (DataView<any> & DataViewInternals<any> & { kind: 'list' }) | PolymorphicList<any> {
+  // oxlint-disable-next-line quality/no-known-value-widening -- Validate the runtime view tag before handling a polymorphic list.
   if (isDataView(view)) {
     return {
       ...view,

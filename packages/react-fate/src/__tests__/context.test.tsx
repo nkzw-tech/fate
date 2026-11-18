@@ -21,11 +21,12 @@ test('fails when the context was not provided', () => {
 
   let caught: unknown;
 
+  type ErrorState = { error: unknown };
   class ErrorBoundary extends React.Component<
     React.PropsWithChildren<{ onError?: (error: unknown) => void }>,
-    { error: unknown }
+    ErrorState
   > {
-    override state = { error: null as unknown };
+    override state: ErrorState = { error: null };
     static getDerivedStateFromError(error: unknown) {
       return { error };
     }

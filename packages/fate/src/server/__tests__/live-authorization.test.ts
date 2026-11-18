@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vite-plus/test';
-import type { AnyRecord } from '../../types.ts';
-import { dataView, list, type DataView } from '../dataView.ts';
+import { singleSource } from '../../__tests__/fixtures/single-source.ts';
+import { dataView, list } from '../dataView.ts';
 import { createSourceRegistry } from '../executor.ts';
 import { createFateServer } from '../http.ts';
 import { createLiveEventBus } from '../live.ts';
@@ -26,8 +26,7 @@ for (const queued of [true, false]) {
           live: queued ? bus : { ...bus, listen: undefined, listenConnection: undefined },
           roots: { posts: list(postView) },
           sources: {
-            getSource: <Item extends AnyRecord>(_target: DataView<Item> | SourceDefinition<Item>) =>
-              source as unknown as SourceDefinition<Item>,
+            getSource: singleSource(source),
             registry: createSourceRegistry([[source, { byIds }]]),
           },
         });

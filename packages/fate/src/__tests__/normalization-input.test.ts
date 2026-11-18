@@ -29,22 +29,22 @@ const input: NormalizationInput = {
 test.each([false, true])(
   'shares normalization semantics with an input reader (custom identity: %s)',
   (custom) => {
-    const types = [
-      {
-        fields: {
-          child: { type: 'User' },
-          friends: { listOf: 'User' },
-          profile: { embedded: 'Profile' },
-          tags: 'scalar' as const,
-        },
-        ...(custom
-          ? {
-              getId: (record: unknown) =>
-                `${(record as AnyRecord).id}:${(record as AnyRecord).name}`,
-            }
-          : {}),
-        type: 'User',
+    const userType = {
+      fields: {
+        child: { type: 'User' },
+        friends: { listOf: 'User' },
+        profile: { embedded: 'Profile' },
+        tags: 'scalar' as const,
       },
+      type: 'User',
+    };
+    const types = [
+      custom
+        ? {
+            ...userType,
+            getId: (record: unknown) => `${(record as AnyRecord).id}:${(record as AnyRecord).name}`,
+          }
+        : userType,
     ];
     const create = () =>
       createClient({ roots: {}, transport: { fetchById: async () => [] }, types });

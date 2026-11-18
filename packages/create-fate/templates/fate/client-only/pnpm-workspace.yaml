@@ -11,7 +11,10 @@ catalog:
   vite-plus: 1.7.0
 
 minimumReleaseAgeExclude:
-  - '@voidzero-dev/vite-plus-core'
+  - '@nkzw/*'
+  - '@void/*'
+  - '@voidzero-dev/*'
+  - void
   - vite-plus
 
 overrides:

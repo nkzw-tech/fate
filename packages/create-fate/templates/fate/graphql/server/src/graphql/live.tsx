@@ -1,3 +1,4 @@
+import type { FateRecord } from '@nkzw/fate';
 import type { LiveConnectionSourceEvent, LiveSourceEvent } from '@nkzw/fate/server';
 import { isRecord } from '@nkzw/fate/server';
 import builder, { JSONScalar } from './builder.tsx';
@@ -23,8 +24,7 @@ type LiveConnectionPayload = {
   type: LiveConnectionSourceEvent['type'];
 };
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  isRecord(value) ? value : undefined;
+const asRecord = (value: unknown) => (isRecord(value) ? value : undefined);
 
 const decodeLiveId = (type: string, id: string) => {
   const decoded = decodeGlobalID(id);
@@ -47,7 +47,7 @@ async function* entityEvents(type: string, id: string) {
   }
 }
 
-async function* connectionEvents(procedure: string, args: Record<string, unknown> | undefined) {
+async function* connectionEvents(procedure: string, args: FateRecord | undefined) {
   for await (const [event] of live.subscribeConnection({ args, procedure })) {
     yield event;
   }
@@ -60,7 +60,7 @@ const resolveNodePayload = async ({
   select,
   type,
 }: {
-  args?: Record<string, unknown>;
+  args?: FateRecord;
   context: AppContext;
   event: LiveSourceEvent;
   select: Array<string>;
@@ -105,7 +105,7 @@ const resolveConnectionPayload = async ({
   context: AppContext;
   event: LiveConnectionSourceEvent;
   select: Array<string>;
-  selectionArgs?: Record<string, unknown>;
+  selectionArgs?: FateRecord;
   type: string;
 }): Promise<LiveConnectionPayload> => {
   if (event.type === 'invalidate') {

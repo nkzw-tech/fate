@@ -164,12 +164,11 @@ export type RequestDescriptor = Readonly<{
   key: string;
 }>;
 
-export const getPaginationArgsInfo = (
-  argsPayload: ResolvedArgsPayload | undefined,
-): { direction: 'backward' | 'forward'; hasCursorArg: boolean } => ({
-  direction: argsPayload?.before != null || argsPayload?.last != null ? 'backward' : 'forward',
-  hasCursorArg: hasCursorArgs(argsPayload),
-});
+export const getPaginationArgsInfo = (argsPayload: ResolvedArgsPayload | undefined) =>
+  ({
+    direction: argsPayload?.before != null || argsPayload?.last != null ? 'backward' : 'forward',
+    hasCursorArg: hasCursorArgs(argsPayload),
+  }) as const;
 
 const getRequestDescriptorKey = (items: ReadonlyArray<RequestItemDescriptor>): string => {
   const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
@@ -236,8 +235,7 @@ export const createRequestDescriptor = (
     if (node || isNodesItem(item)) {
       const plan = getSelectionPlan(item.view, null);
       const args = resolvedArgsFromPlan(plan);
-      items.push({
-        ...(args ? { argsKey: hashArgs(args) } : {}),
+      const descriptor: RequestItemDescriptor = {
         ids: node ? [item.id] : item.ids,
         kind: node ? 'node' : 'nodes',
         name,
@@ -245,7 +243,8 @@ export const createRequestDescriptor = (
         refViewNames: getViewNames(item.view),
         type,
         viewSignature: getViewSignature(item.view),
-      });
+      };
+      items.push(args ? { ...descriptor, argsKey: hashArgs(args) } : descriptor);
       continue;
     }
 
@@ -254,10 +253,10 @@ export const createRequestDescriptor = (
       const rootArgs = combineArgsPayload(item.args, plan.args.get('')?.value);
       const queryKey = getRootDescriptorKey(procedure, rootArgs, plan);
       const legacyQueryKey = getRootDescriptorKey(procedure, argsPayload, plan);
-      items.push({
+      const descriptor: RequestItemDescriptor = {
         argsPayload,
         kind: 'query',
-        ...(legacyQueryKey !== queryKey ? { legacyQueryKey } : {}),
+
         name,
         plan,
         procedure,
@@ -266,7 +265,8 @@ export const createRequestDescriptor = (
         rootArgs,
         type,
         viewSignature: getViewSignature(item.view),
-      });
+      };
+      items.push(legacyQueryKey !== queryKey ? { ...descriptor, legacyQueryKey } : descriptor);
       continue;
     }
 

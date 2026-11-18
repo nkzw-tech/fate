@@ -91,7 +91,8 @@ test('nullable list inputs retain absence in their result types and runtime valu
 
 test('optional or missing items are typed as potentially absent', async () => {
   const { client } = setup();
-  const optional: { items?: ReadonlyArray<Item> } = {};
+  type OptionalItems = { items?: ReadonlyArray<Item> };
+  const optional: OptionalItems = {};
   const missing = { pagination: { hasNext: false, hasPrevious: false } };
   const Component = () => {
     const [items] = useListView(Selection, optional);

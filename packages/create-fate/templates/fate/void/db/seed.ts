@@ -8,6 +8,7 @@ import { createSeedAuth } from './seed-auth.ts';
 
 export default defineSeed<typeof import('./schema.ts')>(async ({ db }) => {
   const auth = createSeedAuth(db);
+  // oxlint-disable-next-line quality/no-chained-type-assertions -- The SQLite seed and runtime drivers share insert operations but use different session types.
   const queryDb = db as unknown as Parameters<typeof createPostRecord>[1];
   const [existingPost] = await db.select({ id: post.id }).from(post).limit(1);
 

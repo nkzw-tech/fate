@@ -1,3 +1,4 @@
+import type { FateRecord } from '@nkzw/fate';
 import { createFateServer, createLiveEventBus } from '@nkzw/fate/server';
 import { createDrizzleFate } from '@nkzw/fate/server/drizzle';
 import { initTRPC } from '@trpc/server';
@@ -34,7 +35,7 @@ export const fateServer = createFateServer<AppContext>({
         input,
       }: {
         ctx: AppContext;
-        input: { args?: Record<string, unknown>; select: Array<string> };
+        input: { args?: FateRecord; select: Array<string> };
       }) =>
         ctx.sessionUser
           ? fate.resolveById({

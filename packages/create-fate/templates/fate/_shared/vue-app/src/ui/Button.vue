@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="Result">
 import { cva, type VariantProps } from 'class-variance-authority';
 import { computed, ref } from 'vue';
 import cx from '../lib/cx.ts';
@@ -29,7 +29,7 @@ type ButtonVariants = VariantProps<typeof buttonVariants>;
 
 const props = withDefaults(
   defineProps<{
-    action?: () => Promise<unknown> | unknown;
+    action?: () => Promise<Result> | Result;
     class?: string;
     disabled?: boolean;
     size?: ButtonVariants['size'];

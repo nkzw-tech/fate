@@ -251,7 +251,7 @@ const requestHeaders = async (
   return result;
 };
 
-const headersToRecord = (headers: Headers): Record<string, string> => {
+const headersToRecord = (headers: Headers) => {
   const result: Record<string, string> = {};
   headers.forEach((value, key) => {
     result[key] = value;
@@ -734,7 +734,7 @@ class GraphQLInput implements NormalizationInput {
     return child;
   }
 
-  connection(value: unknown, materialize = false): unknown {
+  connection(value: unknown, materialize = false) {
     if (
       this.shape !== 'connection' ||
       !isRecord(value) ||
@@ -790,6 +790,7 @@ class GraphQLInput implements NormalizationInput {
       result[key] =
         entry && typeof entry === 'object' ? this.child(value, key).materialize(entry) : entry;
     }
+    // oxlint-disable-next-line quality/no-known-value-widening -- The recursive materializer also returns opaque values from transport responses.
     return result;
   }
 
@@ -850,7 +851,6 @@ const graphQLRequest = async ({
   );
   signal?.throwIfAborted();
   const response = await fetchImpl(url, {
-    ...(signal ? { signal } : {}),
     body: JSON.stringify({
       ...(identity && { extensions: { fateMutation: identity } }),
       query,
@@ -858,6 +858,7 @@ const graphQLRequest = async ({
     }),
     headers: requestHeadersValue,
     method: 'POST',
+    signal,
   });
 
   if (!response.ok) {

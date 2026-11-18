@@ -1,4 +1,4 @@
-import nkzw from '@nkzw/oxlint-config';
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import fbtee from '@nkzw/vite-plugin-fbtee';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -10,9 +10,6 @@ import { voidPlugin } from 'void';
 const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
 
 export default defineConfig({
-  optimizeDeps: {
-    exclude: ['@nkzw/fate/client', 'react-fate/client', 'void-fate/react'],
-  },
   environments: {
     void_worker: {
       optimizeDeps: {
@@ -58,7 +55,7 @@ export default defineConfig({
       'node_modules',
       'vite.config.ts.timestamp-*',
     ],
-    options: { typeAware: true, typeCheck: true },
+    options: { typeCheck: true },
     overrides: [
       {
         files: ['db/seed.ts', 'src/fate/__tests__/**'],
@@ -70,6 +67,9 @@ export default defineConfig({
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },
+  },
+  optimizeDeps: {
+    exclude: ['@nkzw/fate/client', 'react-fate/client', 'void-fate/react'],
   },
   plugins: [
     ...(lazyPlugins(() => [

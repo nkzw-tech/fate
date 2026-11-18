@@ -50,7 +50,8 @@ const setup = ({
 };
 const request = (id: string) => ({ note: { id, view: Title } });
 const nestedScalar = () => {
-  let value: unknown = 'leaf';
+  type Nested = string | { child: Nested };
+  let value: Nested = 'leaf';
   for (let depth = 0; depth < 40; depth++) {
     value = { child: value };
   }

@@ -1,4 +1,4 @@
 declare module '*.vue' {
-  const component: Record<string, unknown>;
+  const component: import('vitepress').Theme['Layout'];
   export default component;
 }

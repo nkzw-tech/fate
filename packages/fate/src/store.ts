@@ -280,6 +280,7 @@ const mergeHydrationRecords = (
 
 /** Keep each field's snapshot metadata with the value selected by the merge. */
 export const mergePreservingExisting = (incoming: AnyRecord, existing: AnyRecord): AnyRecord =>
+  // oxlint-disable-next-line quality/no-known-value-widening -- Only recursively merge plain objects; other record-shaped instances must retain their identity.
   isPlainRecord(incoming) && isPlainRecord(existing)
     ? mergeHydrationRecords(incoming, existing, true)
     : existing;
@@ -1768,7 +1769,7 @@ export class Store {
     markedRecords: ReadonlySet<EntityId>,
     markedLists: ReadonlySet<string>,
     options: { onRecordDeleted?: (id: EntityId, record: AnyRecord | undefined) => void } = {},
-  ): { interrupted: boolean; lists: Set<string>; records: Set<EntityId> } {
+  ) {
     this.collectionRevision++;
     const revision = this.collectionRevision;
     const records = new Set<EntityId>();

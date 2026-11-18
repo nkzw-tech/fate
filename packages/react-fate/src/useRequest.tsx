@@ -126,5 +126,5 @@ export function useRequest<const R extends Request, O extends FateRoots = Roots>
   }, [active]);
 
   use(active.promise);
-  return result as unknown as RequestResult<O, R> | undefined;
+  return result as RequestResult<O, R> | undefined;
 }

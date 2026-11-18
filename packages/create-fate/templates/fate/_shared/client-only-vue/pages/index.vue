@@ -8,20 +8,20 @@ const request = useRequest({ workspace: { view: WorkspaceView } });
 const state = useView(WorkspaceView, () => request.data.value?.workspace);
 const title = ref('');
 const pending = ref(false);
-const error = ref('');
+const errorMessage = ref('');
 await request.ready();
 await state.ready();
 
 const run = async (mutate: () => Promise<{ error?: Error }>) => {
   pending.value = true;
-  error.value = '';
+  errorMessage.value = '';
   try {
     const result = await mutate();
     if (result.error) {
-      error.value = result.error.message;
+      errorMessage.value = result.error.message;
     }
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error);
   } finally {
     pending.value = false;
   }
@@ -47,7 +47,7 @@ const add = () => {
     <input v-model="title" aria-label="Task title" required />
     <button :disabled="pending" type="submit">Add task</button>
   </form>
-  <p v-if="error" role="alert">{{ error }}</p>
+  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <ul>
     <li v-for="task in state?.tasks" :key="task.id">
       <label>

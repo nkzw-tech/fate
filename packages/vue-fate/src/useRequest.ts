@@ -1,11 +1,5 @@
 import type { ClientDefinitionOf, RegisteredClient } from '@nkzw/fate';
-import {
-  type CheckedRequest,
-  type FateRoots,
-  type Request,
-  type RequestOptions,
-  type RequestResult,
-} from '@nkzw/fate';
+import type { CheckedRequest, FateRoots, Request, RequestOptions, RequestResult } from '@nkzw/fate';
 import {
   markRaw,
   onScopeDispose,

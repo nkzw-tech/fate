@@ -2054,7 +2054,7 @@ test('live connection events preserve client fields on existing nodes', async ()
   const { posts } = await client.request({
     posts: { list: { items: { node: PostView }, pagination: { hasNext: true } } },
   });
-  const metadata = (posts as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
+  const metadata = (posts as typeof posts & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
   await client.mutations.edit();
   const dispose = client.subscribeLiveListView(PostView, metadata);
   try {
@@ -2139,7 +2139,7 @@ test.each([false, true])(
             (await client.request({ group: { id: 'g', view: GroupView } })).group,
           )
         ).data.posts;
-    const metadata = (connection as unknown as { [ConnectionTag]: ConnectionMetadata })[
+    const metadata = (connection as typeof connection & { [ConnectionTag]: ConnectionMetadata })[
       ConnectionTag
     ];
 
@@ -2161,11 +2161,9 @@ test.each([false, true])(
     const page = () => ({
       items: ['p', 'next'].map((id) => ({
         cursor: id,
-        node: {
-          id,
-          title: 'Server title',
-          ...(injectClientFields ? { draft: 'Server draft', expanded: true } : {}),
-        },
+        node: injectClientFields
+          ? { draft: 'Server draft', expanded: true, id, title: 'Server title' }
+          : { id, title: 'Server title' },
       })),
       pagination: { hasNext: true, hasPrevious: false, nextCursor: 'next' },
     });
@@ -2200,7 +2198,7 @@ test.each([false, true])(
     const connection = root
       ? (await client.request({ posts: { list: selection } })).posts
       : (await client.readView(GroupView, client.ref('Group', 'g', GroupView))).data.posts;
-    const metadata = (connection as unknown as { [ConnectionTag]: ConnectionMetadata })[
+    const metadata = (connection as typeof connection & { [ConnectionTag]: ConnectionMetadata })[
       ConnectionTag
     ];
     const ref = client.ref('Post', 'p', PostView);

@@ -106,7 +106,7 @@ test('inline node data and bound child refs stay typed and masked after paginati
   });
   await client.loadConnection(
     Selection.items.node,
-    (initial as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
+    (initial as typeof initial & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag],
     { after: '1', first: 1 },
   );
   const next = await read();

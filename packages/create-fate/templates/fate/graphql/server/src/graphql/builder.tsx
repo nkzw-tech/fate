@@ -80,7 +80,14 @@ builder.mutationType();
 builder.queryType();
 builder.subscriptionType();
 
-const parseJSONLiteral = (ast: ValueNode): unknown => {
+type JSONLiteral =
+  | boolean
+  | number
+  | string
+  | null
+  | Array<JSONLiteral>
+  | { [key: string]: JSONLiteral };
+const parseJSONLiteral = (ast: ValueNode): JSONLiteral => {
   switch (ast.kind) {
     case Kind.BOOLEAN:
       return ast.value;

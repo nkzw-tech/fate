@@ -15,37 +15,30 @@ import {
   type UserRow,
 } from './schema.ts';
 
-type ItemRecord = Record<string, unknown>;
+export type CommentItem = CommentRow & {
+  author?: UserRow | null;
+  post?: PostItem | null;
+};
 
-export type CommentItem = CommentRow &
-  ItemRecord & {
-    author?: UserRow | null;
-    post?: PostItem | null;
-  };
+export type PostItem = PostRow & {
+  author?: UserRow | null;
+  category?: CategoryRow | null;
+  comments?: Array<CommentItem>;
+  tags?: Array<TagRow>;
+};
 
-export type PostItem = PostRow &
-  ItemRecord & {
-    author?: UserRow | null;
-    category?: CategoryRow | null;
-    comments?: Array<CommentItem>;
-    tags?: Array<TagRow>;
-  };
+export type CategoryItem = CategoryRow & {
+  posts?: Array<PostItem>;
+};
 
-export type CategoryItem = CategoryRow &
-  ItemRecord & {
-    posts?: Array<PostItem>;
-  };
+export type EventAttendeeItem = EventAttendeeRow & {
+  user?: UserRow | null;
+};
 
-export type EventAttendeeItem = EventAttendeeRow &
-  ItemRecord & {
-    user?: UserRow | null;
-  };
-
-export type EventItem = EventRow &
-  ItemRecord & {
-    attendees?: Array<EventAttendeeItem>;
-    host?: UserRow | null;
-  };
+export type EventItem = EventRow & {
+  attendees?: Array<EventAttendeeItem>;
+  host?: UserRow | null;
+};
 
 export const createPostRecord = async ({
   authorId,

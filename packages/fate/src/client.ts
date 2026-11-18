@@ -1168,26 +1168,30 @@ export class FateClient<
         ]),
       ),
       types: [...this.clientState.definitions].map(([name, definition]) => ({
-        fields: Object.entries(definition.view.fields).map(([field, config]) => ({
-          field,
-          kind: config === true ? 'stored' : config.kind,
-          ...(config !== true && 'select' in config
-            ? {
-                select:
-                  config.kind === 'computed'
-                    ? Object.fromEntries(
-                        Object.entries(config.select ?? {}).map(([name, selection]) => [
-                          name,
-                          isRecord(selection) && typeof selection.args === 'function'
-                            ? { ...selection, args: 'dynamic' }
-                            : selection,
-                        ]),
-                      )
-                    : config.select,
-              }
-            : {}),
-          ...(config !== true && 'typeName' in config ? { type: config.typeName } : {}),
-        })),
+        fields: Object.entries(definition.view.fields).map(([field, config]) => {
+          const descriptor = { field, kind: config === true ? 'stored' : config.kind };
+          if (config === true) {
+            return descriptor;
+          }
+          const typed =
+            'typeName' in config ? { ...descriptor, type: config.typeName } : descriptor;
+          if (!('select' in config)) {
+            return typed;
+          }
+          const select =
+            config.kind === 'computed'
+              ? Object.fromEntries(
+                  Object.entries(config.select ?? {}).map(([name, selection]) => [
+                    name,
+                    isRecord(selection) && typeof selection.args === 'function'
+                      ? { ...selection, args: 'dynamic' }
+                      : selection,
+                  ]),
+                )
+              : config.select;
+          return { ...typed, select };
+        }),
+
         name,
       })),
     })}` as HydrationScope;
@@ -1804,11 +1808,7 @@ export class FateClient<
     lists.add(key);
   }
 
-  private applyListInsert(
-    listState: List,
-    entityId: EntityId,
-    insert: InsertPosition,
-  ): { list: List; pending: boolean } {
+  private applyListInsert(listState: List, entityId: EntityId, insert: InsertPosition) {
     const pendingBeforeIds = listState.pendingBeforeIds ?? [];
     const pendingAfterIds = listState.pendingAfterIds ?? [];
     const hasEntity =
@@ -2761,6 +2761,7 @@ export class FateClient<
       snapshot = pending.work.then(() => resolve(joined));
       snapshots.set(ref, snapshot);
     }
+    // oxlint-disable-next-line quality/no-chained-type-assertions -- React instruments the cached pending promise when it suspends on this read.
     return snapshot as unknown as FateThenable<ViewSnapshot<T, S>>;
   }
 
@@ -4033,7 +4034,7 @@ export class FateClient<
     const trackedPromise = promise.catch(() => undefined);
     entries.add(trackedPromise);
 
-    trackedPromise.finally(() => {
+    void trackedPromise.then(() => {
       const current = this.pendingOptimisticMutations.get(entityId);
       if (!current) {
         return;
@@ -4785,17 +4786,19 @@ export class FateClient<
     return this.prepareRequestForRender(request, options).promise;
   }
 
-  prepareRequestForRender<R extends Request>(
-    request: R,
-    options: RequestOptions | undefined,
-  ): Readonly<{ promise: Promise<RequestResult<Roots, R>>; requestKey: string }> {
+  prepareRequestForRender<R extends Request>(request: R, options: RequestOptions | undefined) {
     const mode = options?.mode ?? 'cache-first';
     const descriptor = this.createRequestDescriptor(request);
 
     return {
-      promise: this.requestWithDescriptor(descriptor, mode, { revalidateExisting: false }, options),
+      promise: this.requestWithDescriptor<R>(
+        descriptor,
+        mode,
+        { revalidateExisting: false },
+        options,
+      ),
       requestKey: this.requestCacheKey(descriptor, options),
-    };
+    } as const;
   }
 
   private readonly readRequests = new SharedReads<void>();
@@ -4866,7 +4869,7 @@ export class FateClient<
         this.executeRequestHandle(existingRequest, mode, options);
       }
 
-      return existingRequest as unknown as Promise<RequestResult<Roots, R>>;
+      return existingRequest as Promise<RequestResult<Roots, R>>;
     }
 
     const handle = new FateRequestPromise<RequestResult<Roots, Request>, RequestDescriptor>(
@@ -4876,7 +4879,7 @@ export class FateClient<
 
     if (!cacheHandle) {
       this.executeRequestHandle(handle, mode, options);
-      return handle as unknown as Promise<RequestResult<Roots, R>>;
+      return handle as Promise<RequestResult<Roots, R>>;
     }
     if (controlled) {
       let keys = this.controlledRequestKeys.get(descriptor.key);
@@ -4895,7 +4898,7 @@ export class FateClient<
     requests.set(mode, handle);
     this.executeRequestHandle(handle, mode, options);
 
-    return handle as unknown as Promise<RequestResult<Roots, R>>;
+    return handle as Promise<RequestResult<Roots, R>>;
   }
 
   releaseRequest(request: Request, mode: RequestMode): void {
@@ -6053,7 +6056,7 @@ export class FateClient<
     return result as RequestResult<Roots, Request>;
   }
 
-  private getRequestItemResult(item: RequestItemDescriptor): unknown {
+  private getRequestItemResult(item: RequestItemDescriptor) {
     if (item.kind === 'node') {
       return this.stableRefWithViewNames(item.type, item.ids[0], item.refViewNames);
     }
@@ -6204,7 +6207,7 @@ export class FateClient<
                 requestArgs,
                 normalizationReadContext(this.transport, {
                   refetch: type,
-                  ...(signal ? { signal } : {}),
+                  signal,
                 }),
               ),
               signal,
@@ -6294,9 +6297,9 @@ export class FateClient<
           const childPlan: SelectionPlan = {
             ...plan,
             args: new Map(
-              [...(plan?.args ?? [])]
-                .filter(([key]) => key.startsWith(`${path}.`))
-                .map(([key, value]) => [key.slice(path.length + 1), value]),
+              Array.from(plan?.args ?? []).flatMap(([key, value]) =>
+                key.startsWith(`${path}.`) ? [[key.slice(path.length + 1), value] as const] : [],
+              ),
             ),
             live: new Map(),
             paths: new Set([tail.join('.')]),
@@ -7495,7 +7498,7 @@ export class FateClient<
 
       const defaultListKey = getListKey(parentId, parent.field);
       const defaultListState = this.store.getListState(defaultListKey);
-      let nextField = current;
+      let nextField: typeof current;
       if (defaultListState) {
         const { list: nextDefaultListState, pending } = this.applyListInsert(
           defaultListState,

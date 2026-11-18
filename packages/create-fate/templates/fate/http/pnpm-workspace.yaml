@@ -16,7 +16,10 @@ catalog:
   vitest: 5.1.0
 
 minimumReleaseAgeExclude:
-  - '@voidzero-dev/vite-plus-core'
+  - '@nkzw/*'
+  - '@void/*'
+  - '@voidzero-dev/*'
+  - void
   - vite-plus
 
 onlyBuiltDependencies:

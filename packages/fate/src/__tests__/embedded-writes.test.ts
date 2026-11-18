@@ -22,7 +22,7 @@ const Full = view<User>()({
 const Partial = view<User>()({ character: { color: true, detail: { name: true } }, id: true });
 const initial = { character: { color: 1, detail: { level: 3, name: 'Sam' }, unitId: 42 }, id: '1' };
 const setup = () => {
-  const fetchQuery = vi.fn(async () => initial as object);
+  const fetchQuery = vi.fn<() => Promise<object>>(async () => initial);
   const client = createClient({
     roots: { viewer: clientRoot<User, 'User'>('User') },
     transport: { fetchById: async () => [], fetchQuery },
@@ -103,7 +103,7 @@ test('nested pagination preserves embedded fields without client extensions', as
   });
   const { group } = await client.request({ group: { id: 'g', view: GroupView } });
   const { users } = (await client.readView(GroupView, group)).data;
-  const metadata = (users as unknown as { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
+  const metadata = (users as typeof users & { [ConnectionTag]: ConnectionMetadata })[ConnectionTag];
   await client.loadConnection(Full, metadata, { after: '1' });
   expect((await client.readView(Full, client.ref('User', '2', Full))).data.character).toEqual(
     initial.character,
@@ -371,15 +371,12 @@ test.each(
     });
     const Name = view<Profile>()({ name: true });
     const storage = memoryStorage();
-    const fetchQuery = vi.fn(
-      async () =>
-        ({
-          characters: [{ color: 1, unitId: 42 }],
-          friend: { id: '2' },
-          id: '1',
-          name: 'Sam',
-        }) as object,
-    );
+    const fetchQuery = vi.fn<() => Promise<object>>(async () => ({
+      characters: [{ color: 1, unitId: 42 }],
+      friend: { id: '2' },
+      id: '1',
+      name: 'Sam',
+    }));
     const setup = () =>
       createClient({
         persistence: createPersistence({ key: 'embedded-coverage', online: () => false, storage }),

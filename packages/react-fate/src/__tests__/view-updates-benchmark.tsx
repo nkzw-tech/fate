@@ -43,6 +43,7 @@ async function benchmark() {
   client.readViewForRender = new Proxy(client.readViewForRender, {
     apply(target, receiver, args) {
       reads++;
+      // oxlint-disable-next-line quality/no-reflect-apply -- Forward the original receiver and argument list in the benchmark proxy.
       return Reflect.apply(target, receiver, args);
     },
   });

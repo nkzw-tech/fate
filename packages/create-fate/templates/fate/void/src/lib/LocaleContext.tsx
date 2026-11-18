@@ -17,10 +17,12 @@ const Context = createLocaleContext({
   },
 });
 
-function RestoreLocale({ restored, onRestore }: { restored: boolean; onRestore: () => void }) {
+function RestoreLocale({ onRestore, restored }: { onRestore: () => void; restored: boolean }) {
   const { locale, setLocale } = useLocaleContext();
   useEffect(() => {
-    if (restored) return;
+    if (restored) {
+      return;
+    }
     onRestore();
     let savedLocale: string | null = null;
     try {
@@ -28,9 +30,9 @@ function RestoreLocale({ restored, onRestore }: { restored: boolean; onRestore: 
     } catch {
       // Browser storage can be unavailable.
     }
-    const preferred = [savedLocale, ...navigator.languages, navigator.language]
-      .filter((value): value is string => !!value)
-      .map((value) => value.replaceAll('_', '-'));
+    const preferred = [savedLocale, ...navigator.languages, navigator.language].flatMap((value) =>
+      value ? [value.replaceAll('_', '-')] : [],
+    );
     const nextLocale = preferred
       .map((value) =>
         AvailableLanguages.has(value)
@@ -54,7 +56,7 @@ export default function LocaleContext({ children }: { children: ReactNode }) {
   const [restored, setRestored] = useState(false);
   return (
     <Context>
-      <RestoreLocale restored={restored} onRestore={() => setRestored(true)} />
+      <RestoreLocale onRestore={() => setRestored(true)} restored={restored} />
       {children}
     </Context>
   );

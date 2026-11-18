@@ -572,23 +572,21 @@ test.each(['numeric', 'custom-id', 'id-refetch', 'username-refetch'] as const)(
         persistence: createPersistence({ key: 'relationships', maxAge: 0, storage }),
         transport: { fetchById, fetchQuery },
         types: [
-          {
-            ...(mode === 'custom-id'
-              ? { getId: (record: unknown) => (record as Person).username }
-              : {}),
-            ...(mode === 'numeric' || mode === 'custom-id'
-              ? {}
-              : {
-                  refetch: {
-                    args:
-                      mode === 'id-refetch'
-                        ? { id: { field: 'id' } }
-                        : { username: { field: 'username' } },
-                    root: 'person',
-                  },
-                }),
-            type: 'Person',
-          },
+          mode === 'custom-id'
+            ? { getId: (record: unknown) => (record as Person).username, type: 'Person' }
+            : {
+                refetch:
+                  mode === 'numeric'
+                    ? undefined
+                    : {
+                        args:
+                          mode === 'id-refetch'
+                            ? { id: { field: 'id' } }
+                            : { username: { field: 'username' } },
+                        root: 'person',
+                      },
+                type: 'Person',
+              },
         ],
       }).registerClientSchema(schema, ({ mutation }) => ({
         choose: mutation('Selection', {
@@ -662,15 +660,15 @@ test.each(['string', 'numeric', 'custom-id', 'username-refetch'] as const)(
         persistence: createPersistence({ key: 'relationships', storage }),
         transport: { fetchById, fetchQuery },
         types: [
-          {
-            ...(mode === 'custom-id'
-              ? { getId: (record: unknown) => (record as Person).username }
-              : {}),
-            ...(mode === 'username-refetch'
-              ? { refetch: { args: { username: { field: 'username' } }, root: 'person' } }
-              : {}),
-            type: 'Person',
-          },
+          mode === 'custom-id'
+            ? { getId: (record: unknown) => (record as Person).username, type: 'Person' }
+            : {
+                refetch:
+                  mode === 'username-refetch'
+                    ? { args: { username: { field: 'username' } }, root: 'person' }
+                    : undefined,
+                type: 'Person',
+              },
         ],
       }).registerClientSchema(schema, ({ mutation }) => ({
         append: mutation('Selection', {

@@ -1,4 +1,4 @@
-import { type Deferred } from '@nkzw/fate';
+import type { Deferred } from '@nkzw/fate';
 import { createConnectionReader, getListEntries, getListWindowKey } from '@nkzw/fate/list';
 import { useCallback, useDeferredValue, useMemo, useSyncExternalStore } from 'react';
 import { useFateClient, useHydrationReader } from './context.tsx';

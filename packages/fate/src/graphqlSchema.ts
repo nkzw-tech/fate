@@ -103,15 +103,14 @@ export const graphQLOutputRelations = (
       const array = outputType.replaceAll('!', '').startsWith('[');
       const possibleTypes = schema?.unions?.[childType] ?? schema?.possibleTypes?.[childType];
       if (isGraphQLEntity(schema, childType)) {
-        fields[field] = array
-          ? { array: true, listOf: childType, ...(possibleTypes ? { possibleTypes } : {}) }
-          : { type: childType, ...(possibleTypes ? { possibleTypes } : {}) };
+        const relation = array ? { array: true as const, listOf: childType } : { type: childType };
+        fields[field] = possibleTypes ? { ...relation, possibleTypes } : relation;
       } else {
         fields[field] = array ? { array: true, embedded: childType } : { embedded: childType };
       }
     }
     const possibleTypes = schema?.unions?.[type] ?? schema?.possibleTypes?.[type];
-    return { fields, ...(possibleTypes ? { possibleTypes } : {}), type };
+    return possibleTypes ? { fields, possibleTypes, type } : { fields, type };
   });
 };
 
@@ -175,7 +174,7 @@ export const validateGraphQLArguments = (
   definitions: GraphQLArguments,
   values: Readonly<Record<string, unknown>> | undefined,
   path: string,
-): Record<string, unknown> => {
+) => {
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(values ?? {})) {
     if (!Object.hasOwn(definitions, key)) {

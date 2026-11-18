@@ -9,7 +9,7 @@ import { createNodeRef, getNodeRefId } from '../node-ref.ts';
 import { toEntityId } from '../ref.ts';
 import { clientRoot } from '../root.ts';
 import { getListKey } from '../store.ts';
-import { type AnyRecord, type SelectionOf, type ViewSnapshot } from '../types.ts';
+import type { AnyRecord, SelectionOf, ViewSnapshot } from '../types.ts';
 import { view } from '../view.ts';
 
 type Post = {
@@ -111,7 +111,7 @@ test.each([true, false])(
     const roots = { page: clientRoot<Page, 'Page'>('Page') };
     const types = [
       {
-        ...(configuredFields ? { fields: { title: 'scalar', tz: 'scalar' } as const } : {}),
+        fields: configuredFields ? ({ title: 'scalar', tz: 'scalar' } as const) : undefined,
         type: 'Page',
       },
     ] as const;
@@ -198,7 +198,7 @@ test('hydrates root queries, nullable queries, and paginated root lists', async 
   });
   browser.hydrate(jsonRoundTrip(server.dehydrate()));
 
-  const result = (await browser.request(request)) as unknown as {
+  const result = (await browser.request(request)) as {
     posts: {
       items: ReadonlyArray<{ node: { id: string } }>;
       pagination?: { hasNext: boolean };
@@ -489,14 +489,12 @@ test('preserves browser root query results by default and replaces them explicit
   await browser.request(request);
 
   browser.hydrate(server.dehydrate());
-  expect(
-    ((await browser.request(request)) as unknown as { viewer: { id: string } }).viewer.id,
-  ).toBe('browser');
+  expect(((await browser.request(request)) as { viewer: { id: string } }).viewer.id).toBe(
+    'browser',
+  );
 
   browser.hydrate(server.dehydrate(), { merge: 'replace' });
-  expect(
-    ((await browser.request(request)) as unknown as { viewer: { id: string } }).viewer.id,
-  ).toBe('server');
+  expect(((await browser.request(request)) as { viewer: { id: string } }).viewer.id).toBe('server');
 });
 
 test('notifies subscribers after replacement root queries are fully hydrated', async () => {

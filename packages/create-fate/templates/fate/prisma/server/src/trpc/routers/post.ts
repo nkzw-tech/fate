@@ -1,10 +1,14 @@
 import { byIdInput, connectionArgs, createResolver } from '@nkzw/fate/server';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import type { PostFindManyArgs } from '../../prisma/prisma-client/models.ts';
+import type {
+  PostFindManyArgs,
+  PostFindUniqueArgs,
+  PostUpdateArgs,
+} from '../../prisma/prisma-client/models.ts';
 import { createConnectionProcedure } from '../connection.ts';
 import { procedure, router } from '../init.ts';
-import { postDataView, type PostItem } from '../views.ts';
+import { postDataView } from '../views.ts';
 
 export const postRouter = router({
   byId: procedure.input(byIdInput).query(async ({ ctx, input }) => {
@@ -67,7 +71,7 @@ export const postRouter = router({
         view: postDataView,
       });
 
-      const updated = await ctx.prisma.post.update({
+      const updated = await ctx.prisma.post.update<PostUpdateArgs>({
         data: {
           likes: {
             increment: 1,
@@ -76,7 +80,7 @@ export const postRouter = router({
         select,
         where: { id: input.id },
       });
-      return resolve(updated as unknown as PostItem);
+      return resolve(updated);
     }),
   list: createConnectionProcedure({
     query: async ({ ctx, cursor, direction, input, skip, take }) => {
@@ -132,14 +136,14 @@ export const postRouter = router({
         }
 
         if (existing.likes <= 0) {
-          const result = await tx.post.findUniqueOrThrow({
+          const result = await tx.post.findUniqueOrThrow<PostFindUniqueArgs>({
             select,
             where: { id: input.id },
           });
-          return resolve(result as unknown as PostItem);
+          return resolve(result);
         }
 
-        const updated = await tx.post.update({
+        const updated = await tx.post.update<PostUpdateArgs>({
           data: {
             likes: {
               decrement: 1,
@@ -148,7 +152,7 @@ export const postRouter = router({
           select,
           where: { id: input.id },
         });
-        return resolve(updated as unknown as PostItem);
+        return resolve(updated);
       }),
     ),
 });
