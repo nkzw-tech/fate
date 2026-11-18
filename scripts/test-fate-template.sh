@@ -77,14 +77,15 @@ node --input-type=module <<'EOF'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = `${process.env.TEMPLATE_DIR}/pnpm-workspace.yaml`;
+const quoteYaml = (value) => `'${value.replaceAll("'", "''")}'`;
 const overrides = [
-  `  '@nkzw/fate': ${JSON.stringify(process.env.FATE_PACKAGE)}`,
-  `  react-fate: ${JSON.stringify(process.env.REACT_FATE_PACKAGE)}`,
+  `  '@nkzw/fate': ${quoteYaml(process.env.FATE_PACKAGE)}`,
+  `  react-fate: ${quoteYaml(process.env.REACT_FATE_PACKAGE)}`,
   ...(process.env.FRAMEWORK === 'vue'
-    ? [`  vue-fate: ${JSON.stringify(process.env.VUE_FATE_PACKAGE)}`]
+    ? [`  vue-fate: ${quoteYaml(process.env.VUE_FATE_PACKAGE)}`]
     : []),
   ...(process.env.TEMPLATE === 'void'
-    ? [`  void-fate: ${JSON.stringify(process.env.VOID_FATE_PACKAGE)}`]
+    ? [`  void-fate: ${quoteYaml(process.env.VOID_FATE_PACKAGE)}`]
     : []),
 ].join('\n');
 
