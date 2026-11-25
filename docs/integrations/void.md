@@ -120,6 +120,8 @@ Pass `changed` to refresh only those fields, or omit it to refresh the whole sel
 
 Void sends IDs and change metadata with live events. Each subscriber fetches the selected fields using its own credentials.
 
+To restrict which rows a viewer can read through the template's Drizzle adapter, see [Row-Level Read Access](/integrations/server#row-level-read-access).
+
 ## Routes
 
 Define a live stream once in a server-only module:

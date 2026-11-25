@@ -3082,6 +3082,29 @@ Calls made together are batched into one HTTP request. The `/fate/live` route is
 
 The `viewer` query above needs a resolver because only your app knows which user is signed in. Use `sources.resolveById` to return that user's selected fields.
 
+#### Row-Level Read Access
+
+Suppose only the author of a post should be able to read it. A post should appear in the author's `posts` list, in a direct `byId` lookup, and under `Category.posts`. All three reads need the same database filter. A custom list resolver only applies to requests for that list.
+
+In the Void template, replace the `source` declaration in `src/fate/server.ts` with a Drizzle adapter that scopes its reads to the signed-in user. Import `sql` alongside `db` from `void/db`.
+
+```ts
+const source = createDrizzleSourceAdapter<AppContext>({
+  db: ({ sessionUser }) => {
+    const visiblePosts = db
+      .$with('Post', {})
+      .as(sql`select * from main."Post" where "authorId" = ${sessionUser?.id ?? null}`);
+    return db.with(visiblePosts);
+  },
+  schema,
+  views: Root,
+});
+```
+
+The SQLite `WITH` clause gives each adapter query a filtered set of rows named `Post`. Inside that clause, `main."Post"` refers to the underlying table. The adapter reads the filtered rows for ID lookups, pagination, nested relations, and counts like `Category.postCount`. When the viewer is signed out, the comparison with `NULL` matches no posts.
+
+If a custom resolver reads directly from `db`, apply the ownership filter in that query too. To restrict a field on a row the viewer can already read, such as a user's email, use [`memo.authorize`](#data-view-resolvers).
+
 #### Custom Mutations
 
 Mutations declare the entity type they return and receive the selected fields requested by the client. Resolve the updated record through the source adapter so the response has the same masking and relation behavior as regular view requests:
@@ -3647,6 +3670,8 @@ live.connection('Post.comments', { id: postId }).appendNode('Comment', commentId
 Pass `changed` to refresh only those fields, or omit it to refresh the whole selected view.
 
 Void sends IDs and change metadata with live events. Each subscriber fetches the selected fields using its own credentials.
+
+To restrict which rows a viewer can read through the template's Drizzle adapter, see [Row-Level Read Access](/docs/integrations/server.md#row-level-read-access).
 
 ### Routes
 
