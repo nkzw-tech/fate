@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "vite-plus": "catalog:",
-    "vue": "^3.5.45"
+    "vue": "^3.5.46"
   },
   "peerDependencies": {
     "vue": "^3.5.0"

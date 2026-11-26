@@ -1,4 +1,4 @@
-import nkzw from '@nkzw/oxlint-config/with-sorting';
+import nkzw from '@nkzw/oxlint-config/vite-plus/with-sorting';
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({

@@ -31,6 +31,7 @@ export default defineConfig({
     ],
     name: 'nkzw-fate-void-example',
   },
+  database: { readReplication: false },
   head: {
     htmlAttrs: {
       lang: 'en',

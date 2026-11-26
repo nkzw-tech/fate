@@ -17,12 +17,12 @@ allowBuilds:
 catalog:
   react: 19.3.1
   react-dom: 19.3.1
-  '@types/react': 19.3.0
+  '@types/react': 19.3.1
   '@types/react-dom': 19.3.0
-  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
-  vite-plus: 1.7.0
-  vitest: 5.1.0
-  '@vitest/coverage-v8': 5.1.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
+  vite-plus: 1.8.0
+  vitest: 5.1.1
+  '@vitest/coverage-v8': 5.1.1
 
 onlyBuiltDependencies:
   - '@prisma/client'
@@ -55,7 +55,7 @@ minimumReleaseAgeExclude:
   - '@voidzero-dev/*'
   - 'void'
   - vite-plus
-  - '@cloudflare/workers-types@5.20261117.1'
+  - '@cloudflare/workers-types@5.20261117.1 || 5.20261125.1'
   - '@hono/node-server@2.1.9'
   - '@lucide/vue@1.74.0'
   - cf@1.0.0-rc.0

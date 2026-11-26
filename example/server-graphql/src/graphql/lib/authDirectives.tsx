@@ -5,7 +5,6 @@ import SchemaBuilder, {
   PothosTypeConfig,
   SchemaTypes,
 } from '@pothos/core';
-import { FieldAuthScopes, TypeAuthScopes } from '@pothos/plugin-scope-auth';
 
 const directives = (value: unknown) => (isRecord(value) ? value : undefined);
 
@@ -23,11 +22,10 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
   ): PothosOutputFieldConfig<Types> | null {
     const { authScopes } = fieldConfig.pothosOptions;
 
-    if (!authScopes) {
+    // Request-dependent scopes declare their directive alongside the resolver.
+    if (!authScopes || typeof authScopes === 'function') {
       return fieldConfig;
     }
-
-    const scopes = this.#resolveScopes(authScopes);
 
     return {
       ...fieldConfig,
@@ -35,7 +33,7 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
         ...fieldConfig.extensions,
         directives: {
           ...directives(fieldConfig.extensions?.directives),
-          auth: scopes,
+          auth: authScopes,
         },
       },
     };
@@ -47,12 +45,11 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
       typeConfig.kind === 'Scalar' ||
       typeConfig.kind === 'InputObject' ||
       typeConfig.kind === 'Union' ||
-      !typeConfig.pothosOptions.authScopes
+      !typeConfig.pothosOptions.authScopes ||
+      typeof typeConfig.pothosOptions.authScopes === 'function'
     ) {
       return typeConfig;
     }
-
-    const scopes = this.#resolveScopes(typeConfig.pothosOptions.authScopes);
 
     return {
       ...typeConfig,
@@ -60,34 +57,10 @@ export class AuthDirectivesPlugin<Types extends SchemaTypes> extends BasePlugin<
         ...typeConfig.extensions,
         directives: {
           ...directives(typeConfig.extensions?.directives),
-          auth: scopes,
+          auth: typeConfig.pothosOptions.authScopes,
         },
       },
     };
-  }
-
-  #resolveScopes(
-    authScopes:
-      | FieldAuthScopes<Types, object, Record<string, never>>
-      | TypeAuthScopes<SchemaTypes, object>,
-  ) {
-    if (typeof authScopes !== 'function') {
-      return authScopes;
-    }
-
-    try {
-      const resolved = authScopes({}, {}, {}, {} as never);
-
-      if (typeof resolved !== 'object' || !resolved) {
-        return {};
-      }
-
-      return Object.fromEntries(
-        Object.entries(resolved).map(([key, value]) => [key, value === undefined ? true : value]),
-      );
-    } catch {
-      return {};
-    }
   }
 }
 

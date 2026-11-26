@@ -33,26 +33,27 @@
     "test:selective-hydration": "node node_modules/@playwright/test/cli.js test --config example/client/__tests__/selective-hydration/playwright.config.ts"
   },
   "devDependencies": {
-    "@nkzw/eslint-plugin": "^2.0.0",
+    "@nkzw/eslint-plugin": "^3.0.0",
     "@nkzw/fate-server": "workspace:*",
-    "@nkzw/oxlint-config": "^3.0.0",
+    "@nkzw/oxlint-config": "^4.1.0",
     "@oxc-node/core": "^1.0.2",
     "@paper-design/shaders": "^0.0.82",
     "@playwright/test": "^1.65.1",
     "@swc/core": "^1.16.22",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.7",
     "@vitest/coverage-v8": "catalog:",
     "dotenv": "^18.0.10",
+    "eslint-plugin-perfectionist": "^5.14.0",
     "eslint-plugin-workspaces": "^0.12.1",
     "graphql": "^17.1.0",
     "happy-dom": "^21.0.4",
     "mysql2": "^3.24.6",
-    "npm-run-all2": "^9.0.4",
-    "oxc-minify": "^0.159.0",
-    "oxlint": "^1.94.0",
+    "npm-run-all2": "^9.1.0",
+    "oxc-minify": "^0.160.0",
+    "oxlint": "^1.95.0",
     "prisma": "^7.10.1",
     "tailwindcss": "^4.3.5",
-    "tsrs": "0.25.0-ts7.1.0-beta",
+    "tsrs": "7.1.0-beta.tsrs5",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
@@ -63,5 +64,5 @@
     "node": "^24.22.0 || >=26.12.0",
     "pnpm": ">=11.0.0"
   },
-  "packageManager": "pnpm@12.21.0"
+  "packageManager": "pnpm@12.23.0"
 }

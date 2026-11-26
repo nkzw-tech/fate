@@ -5,6 +5,7 @@ const User = builder.prismaNode('User', {
   fields: (t) => ({
     email: t.exposeString('email', {
       authScopes: (user) => ({ self: user.id }),
+      directives: { auth: { self: true } },
     }),
     name: t.exposeString('name', { nullable: false }),
     username: t.exposeString('username'),

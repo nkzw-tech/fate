@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import nkzw from '@nkzw/oxlint-config/with-sorting';
+import nkzw from '@nkzw/oxlint-config/vite-plus/with-sorting';
 import dotenv from 'dotenv';
 import { defineConfig } from 'vite-plus';
 import { configDefaults } from 'vite-plus';

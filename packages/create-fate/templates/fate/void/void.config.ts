@@ -20,6 +20,7 @@ export default defineConfig({
       },
     ],
   },
+  database: { readReplication: false },
   head: {
     htmlAttrs: {
       lang: 'en',

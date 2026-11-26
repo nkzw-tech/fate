@@ -17,6 +17,8 @@ export default defineConfig({
   environments: {
     void_worker: {
       optimizeDeps: {
+        // Discover page and API dependencies before the first request triggers hydration.
+        entries: ['pages/**/*.vue', 'routes/**/*.ts'],
         // Keep SSR and component dependencies on the same Vue runtime from the first request.
         include: ['vue', 'vue/server-renderer'],
       },
